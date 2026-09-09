@@ -44,15 +44,12 @@ pub(super) fn record_syntax_flags(
         .split_off(file_flags_start)
         .into_iter()
         .filter(|record| {
-            // Java platform environment calls require AST receiver resolution;
-            // retaining a lexical fallback would resurrect rejected shadowed calls.
-            !(input.language.id == "java" && record.source_kind == "env_var")
-                && !covered.contains(&(
-                    record.source_kind.clone(),
-                    record.source_key.clone(),
-                    record.edge_kind.clone(),
-                    record.line_range.start,
-                ))
+            !covered.contains(&(
+                record.source_kind.clone(),
+                record.source_key.clone(),
+                record.edge_kind.clone(),
+                record.line_range.start,
+            ))
         });
     let records = lexical
         .chain(records)
@@ -88,7 +85,13 @@ pub(super) fn record_feature_flags(
         config_facts,
     })
     .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
-    build.feature_flags.extend(records);
+    // Every Java path, including text-only/failed syntax fallback, requires AST
+    // receiver proof for environment facts. Other lexical SDK facts remain intact.
+    build.feature_flags.extend(
+        records
+            .into_iter()
+            .filter(|record| !(language_id == "java" && record.source_kind == "env_var")),
+    );
 
     Ok(())
 }

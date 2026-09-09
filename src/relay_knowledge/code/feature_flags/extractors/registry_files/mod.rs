@@ -6,6 +6,7 @@ use crate::code::config_files::ConfigRange;
 use crate::code::feature_flags::{FeatureFlagFileInput, feature_flag_record_from_range};
 pub(in crate::code) mod shell;
 mod shell_bindings;
+mod template_commands;
 mod template_literals;
 mod template_reads;
 
@@ -28,6 +29,12 @@ pub(in crate::code::feature_flags) fn extract(
         return Ok(Vec::new());
     }
     let mut records = Vec::new();
+    let outside = if format == "ctmpl" {
+        Some(template_reads::collect(input, &mut records)?)
+    } else {
+        None
+    };
+    let declaration_content = outside.as_deref().unwrap_or(input.content);
     let mut facts_by_line = std::collections::BTreeMap::<usize, Vec<_>>::new();
     for fact in input
         .config_facts
@@ -41,7 +48,7 @@ pub(in crate::code::feature_flags) fn extract(
     }
     let mut offset = 0;
     let mut declaration = CodeFeatureFlagMetadata::default();
-    for (index, segment) in input.content.split_inclusive('\n').enumerate() {
+    for (index, segment) in declaration_content.split_inclusive('\n').enumerate() {
         let line = segment.trim_end_matches(['\r', '\n']);
         let trimmed = line.trim();
         let range = ConfigRange {
@@ -50,6 +57,7 @@ pub(in crate::code::feature_flags) fn extract(
             line_start: index + 1,
             line_end: index + 1,
         };
+        let original = &input.content[range.byte_start..range.byte_end];
         offset += segment.len();
         if let Some(annotation) = trimmed
             .strip_prefix("# @config ")
@@ -88,11 +96,12 @@ pub(in crate::code::feature_flags) fn extract(
                 key,
                 "defines_config",
                 range,
-                trimmed,
+                original.trim(),
             )?;
             record.metadata = declaration.clone();
             record.metadata.source_format = format.to_owned();
             if !value.is_empty()
+                && original == line
                 && !value.contains("{{")
                 && !value.contains('$')
                 && !value.contains('\\')
@@ -103,9 +112,6 @@ pub(in crate::code::feature_flags) fn extract(
             records.push(record);
         }
         declaration = CodeFeatureFlagMetadata::default();
-    }
-    if format == "ctmpl" {
-        template_reads::collect(input, &mut records)?;
     }
     Ok(records)
 }

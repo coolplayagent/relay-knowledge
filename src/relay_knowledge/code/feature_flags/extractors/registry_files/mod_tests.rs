@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn template_actions_never_supply_static_assignments_or_annotation_metadata() {
+    let source = "REAL=true\n{{/*\n# @config domain=leaked hot-reload=true\nFAKE_COMMENT=true\n*/}}\n{{ printf `%s` `\nFAKE_RAW=true\n` }}\nAFTER=false\nOUTPUT={{ key \"read_key\" }}suffix\n";
+    let records = facts("config.ctmpl", source);
+    let definitions = records
+        .iter()
+        .filter(|r| r.edge_kind == "defines_config")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        definitions
+            .iter()
+            .map(|r| r.source_key.as_str())
+            .collect::<Vec<_>>(),
+        ["REAL", "AFTER", "OUTPUT"]
+    );
+    let after = definitions
+        .iter()
+        .find(|r| r.source_key == "AFTER")
+        .unwrap();
+    assert_eq!(after.metadata.default_value.as_deref(), Some("false"));
+    assert!(after.metadata.domain.is_none());
+    assert!(after.metadata.hot_reload.is_none());
+    assert!(
+        definitions
+            .iter()
+            .find(|r| r.source_key == "OUTPUT")
+            .unwrap()
+            .metadata
+            .default_value
+            .is_none()
+    );
+    assert!(facts("config.ctmpl", "{{/*\nFAKE_UNTERMINATED=true\n").is_empty());
+}
+
+#[test]
 fn template_key_or_default_preserves_only_static_literal_fallbacks() {
     let records = facts(
         "config.ctmpl",

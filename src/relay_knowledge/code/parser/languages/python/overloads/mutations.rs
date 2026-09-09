@@ -4,15 +4,20 @@ use tree_sitter::Node;
 const MAX_BINDING_STATEMENTS: usize = 1024;
 pub(super) fn expression_rebinds(content: &str, node: Node<'_>, name: &str, module: bool) -> bool {
     let mut remaining = MAX_BINDING_STATEMENTS;
-    let mut cursor = node.walk();
-    loop {
+    let mut stack = vec![node];
+    while let Some(current) = stack.pop() {
         if remaining == 0 {
             return true;
         }
         remaining -= 1;
-        let current = cursor.node();
         let target = match current.kind() {
-            "assignment" | "augmented_assignment" => current.child_by_field_name("left"),
+            "assignment"
+                if current.child_by_field_name("right").is_some()
+                    || super::expressions::annotation_binds_local(current, &mut remaining) =>
+            {
+                current.child_by_field_name("left")
+            }
+            "augmented_assignment" => current.child_by_field_name("left"),
             "named_expression" => current.child_by_field_name("name"),
             _ => None,
         };
@@ -21,16 +26,11 @@ pub(super) fn expression_rebinds(content: &str, node: Node<'_>, name: &str, modu
         {
             return true;
         }
-        // A lambda body executes later and its named bindings belong to the lambda.
-        if current.kind() != "lambda" && cursor.goto_first_child() {
-            continue;
-        }
-        while !cursor.goto_next_sibling() {
-            if !cursor.goto_parent() {
-                return false;
-            }
+        if !super::expressions::eager_children(current, &mut stack, &mut remaining) {
+            return true;
         }
     }
+    false
 }
 
 fn assignment_binds(
@@ -134,25 +134,23 @@ pub(super) fn expression_mutates_module(
     expression: Node<'_>,
     binding: &str,
 ) -> bool {
-    let mut cursor = expression.walk();
     let mut remaining = MAX_BINDING_STATEMENTS;
-    while remaining > 0 {
+    let mut stack = vec![expression];
+    while let Some(node) = stack.pop() {
+        if remaining == 0 {
+            return true;
+        }
         remaining -= 1;
-        let node = cursor.node();
         if node.kind() == "call" && mutator_targets_module(content, node, binding, &mut remaining) {
             return true;
         }
-        if node.kind() != "lambda" && cursor.goto_first_child() {
-            continue;
-        }
-        while !cursor.goto_next_sibling() {
-            if !cursor.goto_parent() {
-                return false;
-            }
+        if !super::expressions::eager_children(node, &mut stack, &mut remaining) {
+            return true;
         }
     }
-    true
+    false
 }
+
 fn mutator_targets_module(
     content: &str,
     node: Node<'_>,

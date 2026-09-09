@@ -122,3 +122,26 @@ class FieldShadow { Fake System; void read() { System.getenv("FIELD_ENV"); } }
     assert!(reads.iter().any(|flag| flag.source_key == "Shadow.KEY"));
     assert!(reads.iter().any(|flag| flag.source_key == "VISIBLE_ENV"));
 }
+
+#[test]
+fn java_text_only_paths_never_reintroduce_unproven_environment_facts() {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+            .unwrap();
+    let mut build = SnapshotBuild::new(&registration, "commit".into(), "tree".into(), true, 2, 0);
+    let read = "class Fake { void run() { if(System.getenv(\"FALSE_ENV\")!=null) {} } }\n";
+    let oversized = format!("{read}/*{}*/", "x".repeat(512 * 1024 + 1));
+    let mut invalid = read.as_bytes().to_vec();
+    invalid.extend_from_slice(b"//\xff\n");
+    super::super::parse_indexed_file(&mut build, "Large.java", oversized.as_bytes()).unwrap();
+    super::super::parse_indexed_file(&mut build, "Invalid.java", &invalid).unwrap();
+    assert!(
+        build
+            .feature_flags
+            .iter()
+            .all(|r| r.source_kind != "env_var")
+    );
+    // The shared text projection is also used when syntax initialization fails.
+    record_feature_flags(&mut build, "Failure.java", "failure", "java", read, None).unwrap();
+    assert!(build.feature_flags.is_empty());
+}

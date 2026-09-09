@@ -1,5 +1,4 @@
 //! Whole-file, linear template action scanning with bounded literal decoding.
-use super::template_literals::string as template_string;
 use crate::code::config_files::ConfigRange;
 use crate::code::feature_flags::{FeatureFlagFileInput, feature_flag_record_from_range};
 use crate::domain::{CodeFeatureFlagRecord, DomainError};
@@ -9,7 +8,8 @@ const MAX_ACTION_BYTES: usize = 65_536;
 pub(super) fn collect(
     input: &FeatureFlagFileInput<'_>,
     records: &mut Vec<CodeFeatureFlagRecord>,
-) -> Result<(), DomainError> {
+) -> Result<String, DomainError> {
+    let mut outside = input.content.as_bytes().to_vec();
     let mut offset = 0;
     let mut line = 1;
     while let Some(relative) = input.content[offset..].find("{{") {
@@ -18,7 +18,13 @@ pub(super) fn collect(
             .bytes()
             .filter(|b| *b == b'\n')
             .count();
-        let Some(end) = action_end(input.content, start) else {
+        let end = action_end(input.content, start);
+        for byte in &mut outside[start..end.unwrap_or(input.content.len())] {
+            if !matches!(*byte, b'\r' | b'\n') {
+                *byte = b' ';
+            }
+        }
+        let Some(end) = end else {
             break;
         };
         let excerpt = &input.content[start..end];
@@ -45,7 +51,7 @@ pub(super) fn collect(
         offset = end;
         line = end_line;
     }
-    Ok(())
+    Ok(String::from_utf8(outside).expect("complete UTF-8 action spans are replaced with ASCII"))
 }
 
 // Delimiters inside Go quoted/raw strings or template comments are data.
@@ -92,30 +98,26 @@ fn collect_action(
     records: &mut Vec<CodeFeatureFlagRecord>,
 ) -> Result<(), DomainError> {
     let action = action.trim().trim_start_matches('-').trim();
-    let (function, arguments) = action
-        .split_once(char::is_whitespace)
-        .unwrap_or((action, ""));
-    let kind = match function {
-        "key" | "keyOrDefault" => "config_key",
-        "env" => "env_var",
-        _ => return Ok(()),
-    };
-    let Some((key, arguments)) = template_string(arguments) else {
-        return Ok(());
-    };
-    if !super::valid_key(&key) {
-        return Ok(());
-    }
-    let mut record =
-        feature_flag_record_from_range(input, kind, &key, "reads_config", range, excerpt)?;
-    record.metadata.source_format = "ctmpl".to_owned();
-    if function == "keyOrDefault" {
-        if let Some((value, _)) = template_string(arguments) {
+    for read in super::template_commands::reads(action) {
+        let mut record = feature_flag_record_from_range(
+            input,
+            read.kind,
+            &read.key,
+            "reads_config",
+            range,
+            excerpt,
+        )?;
+        record.usage_id = crate::code::stable_id(
+            "feature_flag_template_read",
+            [record.usage_id.as_str(), &read.offset.to_string()],
+        );
+        record.metadata.source_format = "ctmpl".to_owned();
+        if let Some(value) = read.default {
             record.metadata.value_type = Some(super::value_type(&value).to_owned());
             record.metadata.default_value = Some(value);
         }
+        records.push(record);
     }
-    records.push(record);
     Ok(())
 }
 

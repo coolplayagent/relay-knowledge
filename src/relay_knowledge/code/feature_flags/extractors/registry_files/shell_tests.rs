@@ -155,3 +155,45 @@ fn excludes_unexported_local_data_flow_and_preserves_external_and_exported_reads
     assert!(records.iter().any(|record| record.source_key == "EXTERNAL"
         && record.metadata.default_value.as_deref() == Some("false")));
 }
+
+#[test]
+fn static_shell_fallback_quotes_follow_the_enclosing_parameter_context() {
+    for (source, expected, kind) in [
+        (r#"echo ${FLAG:-"true"}"#, "true", "boolean"),
+        ("echo ${FLAG:-''}", "", "string"),
+        (r#"echo "${FLAG:-''}""#, "''", "string"),
+        (r#"echo ${FLAG:-tr"u"'e'}"#, "true", "boolean"),
+        (r#"echo ${FLAG:="12"}"#, "12", "integer"),
+        (r#"echo "${FLAG:-"true"}""#, "true", "boolean"),
+    ] {
+        let records = facts(source);
+        let record = records
+            .iter()
+            .find(|record| record.source_key == "FLAG")
+            .unwrap();
+        assert_eq!(
+            record.metadata.default_value.as_deref(),
+            Some(expected),
+            "{source}"
+        );
+        assert_eq!(
+            record.metadata.value_type.as_deref(),
+            Some(kind),
+            "{source}"
+        );
+    }
+    for source in [r#"echo ${FLAG:-"$OTHER"}"#, r#"echo ${FLAG:-$(command)}"#] {
+        let records = facts(source);
+        let record = records
+            .iter()
+            .find(|record| record.source_key == "FLAG")
+            .unwrap();
+        assert!(record.metadata.default_value.is_none());
+    }
+}
+#[test]
+fn unsupported_or_oversized_static_operands_remain_unknown() {
+    assert!(static_fallback("'unterminated", false).is_none());
+    assert!(static_fallback(&"x".repeat(65_537), false).is_none());
+    assert_eq!(static_fallback("", false).as_deref(), Some(""));
+}

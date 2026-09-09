@@ -469,36 +469,5 @@ fn local_flags_reach_nested_ternary_conditions_without_crossing_callable_or_writ
     );
 }
 
-#[test]
-fn escaped_keys_decode_once_and_constants_keep_runtime_identity() {
-    let records = facts(
-        r#"class Keys {
- static final String KEY="\146lag";
- void run() {
-  System.getProperty("\u0066lag", "true");
-  System.getProperty(KEY, "true");
-  System.getProperty("\\u0066lag", "distinct");
- }
-}"#,
-    );
-    assert!(
-        records
-            .iter()
-            .any(|r| r.source_key == "flag" && r.edge_kind == "reads_config")
-    );
-    assert!(
-        records
-            .iter()
-            .any(|r| r.source_key == "flag" && r.edge_kind == "binds_config_symbol")
-    );
-    assert!(
-        records
-            .iter()
-            .any(|r| r.source_key == r"\u0066lag" && r.edge_kind == "reads_config")
-    );
-    assert!(
-        records
-            .iter()
-            .any(|r| r.source_key == "Keys.KEY" && r.source_kind == "config_symbol")
-    );
-}
+#[path = "receiver_proof_tests.rs"]
+mod receiver_proof;

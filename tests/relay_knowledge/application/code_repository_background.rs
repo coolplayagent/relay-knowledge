@@ -916,3 +916,6 @@ mod java_inheritance_defaults;
 
 #[path = "code_repository_multiline_templates.rs"]
 mod multiline_templates;
+
+#[path = "code_repository_java_proof_boundaries.rs"]
+mod java_proof_boundaries;

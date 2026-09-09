@@ -962,3 +962,9 @@ mod unresolved_call_names;
 
 #[path = "code_repository_python_chains.rs"]
 mod python_chains;
+
+#[path = "code_repository_python_evaluation.rs"]
+mod python_evaluation;
+
+#[path = "code_repository_shell_fallbacks.rs"]
+mod shell_fallbacks;

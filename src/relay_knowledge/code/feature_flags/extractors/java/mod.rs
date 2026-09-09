@@ -6,9 +6,11 @@ use crate::domain::{CodeConfigurationReadKind, CodeFeatureFlagRecord, DomainErro
 
 use crate::code::config_files::ConfigRange;
 use crate::code::feature_flags::{FeatureFlagFileInput, feature_flag_record_from_range};
+mod inherited_constants;
 mod platform_imports;
 mod string_defaults;
 mod symbols;
+mod type_resolution;
 use symbols as java_symbols;
 
 /// Uses the already parsed syntax tree; source strings and comments never become calls.
@@ -84,8 +86,16 @@ fn config_read(node: Node<'_>, content: &str) -> Option<(&'static str, String)> 
         Some(object) => text(object, content),
         None => platform_imports::receiver(node, name, content)?,
     };
-    if matches!(object, "System" | "Boolean")
-        && java_symbols::platform_receiver_shadowed(node, object, content)
+    let shadow_root = match object {
+        "System" | "Boolean" => Some(object),
+        "java.lang.System" | "java.lang.Boolean"
+            if node.child_by_field_name("object").is_some() =>
+        {
+            Some("java")
+        }
+        _ => None,
+    };
+    if shadow_root.is_some_and(|root| java_symbols::platform_receiver_shadowed(node, root, content))
     {
         return None;
     }

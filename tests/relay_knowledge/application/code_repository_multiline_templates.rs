@@ -2,6 +2,67 @@
 use super::*;
 
 #[tokio::test]
+async fn template_action_boundaries_and_pipeline_reads_survive_real_git_indexing() {
+    let repo = FixtureRepo::create("template-pipelines");
+    repo.write("src/pipes.ctmpl", "{{ \"piped_key\" | key }}\n{{ \"PIPED_ENV\" | env }}\n{{ \"true\" | keyOrDefault \"piped_default\" }}\n");
+    repo.write("src/config.ctmpl", "REAL=true\n{{/*\nFAKE_COMMENT=true\nkey \"COMMENT_CALL\"\n*/}}\n{{ printf `%s` `\nFAKE_RAW=true\nkey \"RAW_CALL\"\n` }}\n{{ with key \"feature_x\" }}ok{{ end }}\n{{ if env \"FEATURE_X\" }}yes{{ end }}\n{{ printf `%s` (keyOrDefault \"nested\" \"true\") }}\n{{ $name := \"dynamic\" }}{{ key $name }}\n{{ printf `%s/%s` (key \"same\") (key \"same\") }}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Template pipelines and action masking"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-template-pipeline"),
+        )
+        .await
+        .unwrap();
+    let response = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                selector("fixture", "HEAD"),
+                20,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap(),
+            context("template-pipeline"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.flags.len(), 8, "{:?}", response.flags);
+    for (key, kind, edge, count) in [
+        ("REAL", "config_key", "defines_config", 1),
+        ("feature_x", "config_key", "reads_config", 1),
+        ("FEATURE_X", "env_var", "reads_config", 1),
+        ("nested", "config_key", "reads_config", 1),
+        ("same", "config_key", "reads_config", 2),
+        ("piped_key", "config_key", "reads_config", 1),
+        ("PIPED_ENV", "env_var", "reads_config", 1),
+        ("piped_default", "config_key", "reads_config", 1),
+    ] {
+        let flag = response.flags.iter().find(|f| f.source_key == key).unwrap();
+        assert_eq!(flag.source_kind, kind);
+        assert_eq!(
+            flag.usages.iter().filter(|u| u.edge_kind == edge).count(),
+            count
+        );
+        if matches!(key, "nested" | "piped_default") {
+            assert_eq!(
+                flag.usages[0].metadata.default_value.as_deref(),
+                Some("true")
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn multiline_template_reads_round_trip_through_git_indexing_with_exact_ranges() {
     let repo = FixtureRepo::create("multiline-template");
     repo.git(["config", "core.autocrlf", "false"]);

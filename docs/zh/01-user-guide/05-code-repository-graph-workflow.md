@@ -344,7 +344,7 @@ relay-knowledge repo status repo --format json
 
 Java getter binding 要求读取位于 getter 自己的 callable scope 的 return 中；返回 expression/block lambda 时，其中的读取仍作为事实保留，但不绑定到返回回调对象的 getter。interface constant declaration 使用 Java 隐式 static/final 语义及完整 enclosing type 身份。局部 flag 数据流包含 return 或变量初始化中嵌套的 ternary condition，但写入、嵌套 block 与 callable 边界仍阻止越界追踪。已证明存在多个不同 key 实现的配置 getter 保留 ambiguous read/guard 引用，一致性为 unknown、`analysis_complete=false`，不猜测具体 destination。
 
-Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v8 同时使此前版本已索引 scope 重建。`python-overload-declarations-v8` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
+Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v9` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
 
 配置 getter 绑定只接受零参数方法，与支持的零参数 getter 调用保持一致。平台 receiver 遮蔽检查包含接口字段，普通 for 循环条件中的直接读取会生成 guard 关系。Shell 提取排除词法可见的未导出赋值和函数局部绑定，保留显式 export 与未被遮蔽的外部环境读取；绑定扫描最多检查 1,024 个祖先或前序节点，耗尽时不猜测环境来源。模板 `keyOrDefault` 读取保留静态字符串默认值（包含空格）及其推断标量类型，动态默认值表达式保持 unknown。配置查询的 SQLite 执行预算覆盖候选排序、alias 补取和符号附加，耗尽时返回 timeout/incomplete，并提示收窄查询词或 path/language 过滤。
 
@@ -363,3 +363,13 @@ Java 配置键字面量与已引用的字符串常量也使用相同的有界运
 `.ctmpl` 的 `key`、`keyOrDefault` 与 `env` 读取按完整模板 action 识别，允许函数和字面量参数跨行；保留原始 UTF-8 字节范围、起止行及静态默认值。扫描单向前进，模板注释及引号/原始字符串内的 `}}` 不终止 action；每个 action 的字面量解码上限为 65,536 字节，超限显式报告提取错误，不返回截断事实。字符串字面值遵循 Go 转义及原始字符串去除回车的规则；字节转义若产生无效 UTF-8，默认值保持未知，不进行有损替换。
 
 表达式写入证明包括当前检查表达式内嵌套的赋值表达式，排除延迟执行的 lambda 主体。装饰器与修改目标接收者共享有界透明括号规范化。纯注释语句不构成延迟执行屏障；调用、return 和未知控制流仍构成屏障。
+
+表达式预算遵循求值时机：lambda 默认值与生成器最外层可迭代对象立即求值，lambda 主体及未消费生成器主体延迟执行。模块/类的仅注解语句不替换值，函数内注解仍建立局部绑定。已证明身份未变的零参数直接调用固定该次调用的装饰器绑定，后续命名空间写入不追溯改变它；其他调用、已变的可调用身份及参数求值保持保守边界。
+
+`config-registry-v2` 抽取组件独立于 Python 与查询索引版本，使采用旧配置语义的 completed scope 失效。对相同提交执行普通 `repo index <alias> --ref <ref>` 即可经持久化租约流水线刷新事实，无需 `--reset`。Java 接收者与常量证明、模板动作边界及静态 Shell 默认值一起刷新；此变化不新增 SQL schema 迁移。升级时保留 runtime database、WAL 和 task checkpoint；精确回滚须用匹配的旧 binary 恢复升级前 database/shard。
+
+Shell 参数回退元数据在类型推断前解码受支持的静态引号及拼接的引号/非引号片段，空引号操作数保留为空。外层双引号参数展开中的单引号按 Bash 语义保留为字面字符。动态替换、静态子集外的转义、不匹配引号或超过 64 KiB 的操作数保持未知默认值；引号上下文检查受 1,024 个祖先节点预算约束。读取原始范围和环境绑定检查保持完整；等价引号/非引号默认值不再产生错误的一致性冲突。
+
+`.ctmpl` 只从模板动作外的静态 `KEY=value` 文本建立配置声明；动作、模板注释和字符串内部的文本不建立声明，即使原始字符串执行后会输出相同文本。动作被同长掩蔽，原始字节/行范围仍用于证据；包含动作的赋值行不推断静态默认值。读取识别覆盖 `if`、`with`、`range` 等控制动作中的管道命令，以及变量赋值、括号嵌套和管道位置的 `key`、`keyOrDefault`、`env` 调用。直接前序字面量命令可提供末实参，例如 `"flag" | key` 或 `"true" | keyOrDefault "flag"`；经过其他函数或动态值的输入保持未知。字符串、注释、字段、变量名和动态键参数不作为静态读取证明；同一动作内的重复调用保持独立使用身份。扫描与 token 化仍受现有每动作 65,536 字节解码上限约束，不改变现有解析诊断或新鲜度规则。
+
+Java 显式 `java.lang.System` / `java.lang.Boolean` 接收者也要求前导 `java` 名称未被可见值或类型遮蔽；无接收者的静态导入方法不受同名普通值影响。Java 文本回退（包括超出大小预算、无效 UTF-8 或语法初始化失败）不保留无法经 AST 证明的词法环境读取，原始文件诊断仍保留。未限定常量可沿同一语法树内已证明的父类型解析；继承解析与类型查找共享 1,024 节点预算和 visited 集合，保留声明类型身份、菱形继承去重及本地/参数遮蔽；private、非 static/final、冲突接口、未知父类型或预算耗尽不猜测具体键。

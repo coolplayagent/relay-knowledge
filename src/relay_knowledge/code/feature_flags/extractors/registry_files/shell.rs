@@ -106,10 +106,50 @@ fn node_record(
         source,
     )?;
     record.metadata.source_format = "shell".to_owned();
-    let default = default.filter(|value| !value.contains(['$', '`', '\\', '{', '}']));
-    record.metadata.default_value = default.map(str::to_owned);
-    record.metadata.value_type = default.map(|value| value_type(value).to_owned());
+    let default = if edge == "reads_config" {
+        default.and_then(|value| static_fallback(value, quoted_context(node)?))
+    } else {
+        default
+            .filter(|value| !value.contains(['$', '`', '\\', '{', '}']))
+            .map(str::to_owned)
+    };
+    record.metadata.value_type = default.as_deref().map(|value| value_type(value).to_owned());
+    record.metadata.default_value = default;
     Ok(Some(record))
+}
+
+// Single quotes inside a double-quoted parameter expansion are literal data.
+fn quoted_context(mut node: Node<'_>) -> Option<bool> {
+    for _ in 0..1024 {
+        let Some(parent) = node.parent() else {
+            return Some(false);
+        };
+        match parent.kind() {
+            "string" => return Some(true),
+            "command" | "variable_assignment" | "declaration_command" | "program" => {
+                return Some(false);
+            }
+            _ => node = parent,
+        }
+    }
+    None
+}
+
+fn static_fallback(source: &str, outer_double: bool) -> Option<String> {
+    if source.len() > 65_536 || source.contains(['$', '`', '\\', '{', '}']) {
+        return None;
+    }
+    let mut quote = None;
+    let mut value = String::with_capacity(source.len());
+    for ch in source.chars() {
+        match (quote, ch) {
+            (Some(active), current) if active == current => quote = None,
+            (None, '"') => quote = Some('"'),
+            (None, '\'') if !outer_double => quote = Some('\''),
+            _ => value.push(ch),
+        }
+    }
+    quote.is_none().then_some(value)
 }
 
 #[cfg(test)]

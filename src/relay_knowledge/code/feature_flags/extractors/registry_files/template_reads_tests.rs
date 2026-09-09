@@ -1,5 +1,21 @@
 use super::*;
 
+#[test]
+fn multiple_calls_in_one_action_preserve_distinct_read_occurrences_and_source_spans() {
+    let content = "{{ printf `%s/%s` (key \"same\") (key \"same\") }}";
+    let records = reads(content).unwrap();
+    assert_eq!(records.len(), 2);
+    assert_ne!(records[0].usage_id, records[1].usage_id);
+    for record in records {
+        assert_eq!(record.byte_range.start, 0);
+        assert_eq!(
+            usize::try_from(record.byte_range.end).unwrap(),
+            content.len()
+        );
+        assert_eq!(record.source_key, "same");
+    }
+}
+
 fn reads(content: &str) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     let mut records = Vec::new();
     collect(
@@ -72,13 +88,13 @@ fn malformed_actions_and_dynamic_arguments_do_not_invent_static_reads_or_default
     assert!(reads("{{ key `unterminated }}").unwrap().is_empty());
     assert!(reads("{{ key \"bad/key\" }}").unwrap().is_empty());
     let records = reads("{{ keyOrDefault \"dynamic\" (env \"OTHER\") }}").unwrap();
-    assert_eq!(records.len(), 1);
+    assert_eq!(records.len(), 2);
     assert!(records[0].metadata.default_value.is_none());
     assert_eq!(
-        template_string("`raw literal` rest"),
+        super::super::template_literals::string("`raw literal` rest"),
         Some(("raw literal".to_owned(), " rest"))
     );
-    assert!(template_string("\"unterminated").is_none());
+    assert!(super::super::template_literals::string("\"unterminated").is_none());
 }
 
 #[test]

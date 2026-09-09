@@ -1,10 +1,7 @@
 //! Snapshot-stable Java symbol names for configuration constant/getter bindings.
 
+use super::type_resolution::{is_type, text};
 use tree_sitter::Node;
-
-pub(super) fn text<'a>(node: Node<'_>, content: &'a str) -> &'a str {
-    content.get(node.byte_range()).unwrap_or_default()
-}
 
 pub(super) fn root(mut node: Node<'_>) -> Node<'_> {
     while let Some(parent) = node.parent() {
@@ -108,7 +105,7 @@ pub(super) fn constant_symbol(node: Node<'_>, content: &str) -> Option<String> {
                 })
             });
             if !declared {
-                return None;
+                return super::inherited_constants::symbol(class, value, content);
             }
             let owner = type_owner(class, content);
             Some(qualify(node, &format!("{owner}.{value}"), content))
@@ -330,17 +327,6 @@ pub(super) fn getter_bindings(node: Node<'_>, content: &str) -> Vec<String> {
         }
     }
     bindings
-}
-
-pub(super) fn is_type(node: Node<'_>) -> bool {
-    matches!(
-        node.kind(),
-        "class_declaration"
-            | "interface_declaration"
-            | "enum_declaration"
-            | "record_declaration"
-            | "annotation_type_declaration"
-    )
 }
 
 fn type_owner(mut node: Node<'_>, content: &str) -> String {
