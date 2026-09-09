@@ -14,7 +14,7 @@
 Windows 新安装的 SQLite 默认位置为
 `D:\relay-knowledge\users\<user-sid>\data\relay-knowledge.sqlite`。
 目录以 Windows 账户 SID 标识并使用受保护 ACL，迁移用户配置目录不会改变默认库；
-固定该 SID 路径的服务在启动时重新校验目录、已有 SQLite 及恢复文件权限，并拒绝后代链接。升级时会继续使用已有的 LocalAppData 数据目录。
+固定该 SID 路径的服务在启动时重新校验目录、已有 SQLite 及恢复文件权限，并拒绝后代链接。升级时会继续使用已有的 LocalAppData 数据目录。共享 D: 父目录需要管理员首次配置，后续用户自行创建私有 SID 目录。Windows 服务预检和启动会拒绝旧目录、自定义数据路径及恢复文件中的链接。
 设置环境变量 `RELAY_KNOWLEDGE_DATA_DIR` 可指定主库和仓库分片的存储目录，
 优先于 `RELAY_KNOWLEDGE_HOME` 和平台默认值；Linux、macOS 仍使用各自的平台数据目录。
 

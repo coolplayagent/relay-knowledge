@@ -108,6 +108,11 @@ SID 来自 Windows 进程令牌，迁移用户配置目录或修改 LocalAppData
 已有目录 ACL 不安全、存在重解析点，或父目录允许其他账户删除或修改权限时会报错。
 已有数据库、恢复文件和分片也会检查 ACL 与链接，不能仅依靠私有父目录保护搬入的文件。
 已有受管理目录和文件必须保留账户、SYSTEM、Administrators 完整权限，拒绝 deny 规则。
+缺失的共享 D: 父目录需管理员首次配置稳定的 Administrators owner 和受限共享 ACL，
+后续用户无需提权即可创建私有 SID 目录；拒绝有歧义的 Win32 路径写法。旧目录和自定义
+路径继续由操作者管理 ACL，但服务预检、启动及 LocalSystem 新建打开会检查父目录、
+SQLite 和恢复文件的重解析点。同步存储入口使用有界的独立校验线程，异步调用者使用工厂；
+校验线程繁忙时返回 `Busy`，不再启动额外线程。
 旧目录发现使用原生 Windows API，不依赖 PowerShell。自动默认路径需要 Windows PowerShell 5.1 和支持 ACL 的本地卷；D: 不满足条件时，
 请显式指定已配置私有权限的数据目录。
 `status --format json` 会显示实际目录。配置、日志等其他目录仍使用 AppData/TEMP 默认值，

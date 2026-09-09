@@ -137,9 +137,20 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 及父目录。仓库导入 ATTACH 和完整诊断连接使用同一 worker 校验边界；工厂的冷 topology 读取保留
 可取消的异步预检，之后直接进入只读打开 worker，避免在 worker 内再次启动权限子进程。
 路径解析最多 4096 字节，权限检查仍由有界子进程执行。保留连接不授权后续路径重开，
-健康检查继续只使用缓存句柄。只读检查不创建目录，也不自动修复 ACL。缺少或不安全的 D: 会明确报错，管理员可预建管理员拥有且写入/删除
-权限受限的共享父目录，或通过环境变量显式选择私有目录。自动路径要求 Windows PowerShell 5.1
-及支持 ACL 的本地卷。保留的旧库及保留 SID 布局之外的显式 HOME/DATA 继续由操作者管理权限。
+健康检查继续只使用缓存句柄。同步入口无需外部 Tokio runtime：有作用域的安全校验线程
+拥有独立的 current-thread runtime，并在返回前 join；最多允许一个此类线程/子进程，
+并发时返回可见的 `Busy`，不增加无界排队。这些入口仍是阻塞 API，异步应用使用工厂和
+SQLite worker 边界；冷 topology 诊断保留可取消的异步预检，健康检查不用同步校验线程预热分片。只读检查不创建目录，也不自动修复 ACL。缺少或不安全的 D: 会明确报错，缺失的共享 `relay-knowledge`、`users` 目录需要管理员首次配置：创建时原子设置
+Administrators owner 和受保护 DACL，SYSTEM/Administrators 完全控制，Authenticated Users
+仅在共享目录本身具有读取、遍历和创建子目录权限。已有共享根若由第一个普通用户拥有则拒绝，
+不自动修复；后续用户无需提权即可创建各自私有 SID 目录，卷根和其他父目录也必须满足共享信任策略。
+也可通过环境变量显式选择私有目录。自动路径要求 Windows PowerShell 5.1
+及支持 ACL 的本地卷。保留的旧库及保留 SID 布局之外的显式 HOME/DATA 继续由操作者管理 ACL，
+但 Windows 服务预检仍检查这些路径、所有父目录及 SQLite 恢复文件的重解析点，不改写 ACL。
+LocalSystem 在启动以及新建 catalog/import/diagnostic 打开前重复检查，防止安装后将旧目录
+替换成 junction 绕过服务准入。用户态旧目录发现仍可保留目录链接；服务检查需要 Windows
+PowerShell 5.1，使用同一有界子进程超时。SID 策略恢复前拒绝 Win32 尾部点/空格、父路径遍历、
+设备命名空间以及保留 D: 根的短文件名别名。
 `D:\relay-knowledge\users\<user-sid>\data` 布局始终恢复目录中原账户的 SID 策略，
 包括服务定义固定的显式路径。每个新服务进程在打开 SQLite 前重新检查 ACL 和重解析点，
 生命周期预检不能代替启动校验。该存储边界仅允许原账户或 LocalSystem；LocalSystem
@@ -154,7 +165,8 @@ Windows 升级或显式回滚停止现有服务前，还会读取旧安装定义
 解析其固定路径并只读校验。即使当前运行时选择另一目录，旧库缺失、SID ACL 不安全
 或存在 junction 都会在修改服务之前失败。旧定义必须固定存储路径；预检不补建回滚库，
 数据库路径必须是普通文件，目录及 reparse/symlink 条目在预检时拒绝；启动时仍会重新校验。原生 Windows CI 同时执行旧定义解析和检查点存储预检回归，
-实际验证 Windows 盘符与 SID 策略恢复。公开的 `KnowledgeStoreFactory::validate_lifecycle_storage` 为不含
+实际验证 Windows 盘符、SID 策略恢复、跨主体共享 owner 稳定性、路径别名拒绝、
+同步入口不依赖外部 runtime，以及安装后旧目录被替换成链接的拒绝行为。公开的 `KnowledgeStoreFactory::validate_lifecycle_storage` 为不含
 catalog 的工厂提供默认空实现，保持源码兼容；SQLite 覆盖该方法执行权限和 catalog 检查。
 生命周期计划及执行会只读检查已有 control catalog，不初始化图存储或 schema。
 已有 active partitioned catalog 却选择 single_sqlite 时，在渲染计划或执行服务步骤前报错，

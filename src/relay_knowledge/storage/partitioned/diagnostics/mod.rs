@@ -44,6 +44,7 @@ impl SqliteTopologyReader {
 }
 
 impl PartitionedSqliteKnowledgeStore {
+    /// Blocking probe; the async factory runs it on its SQLite worker.
     pub fn has_active_catalog(control_path: impl AsRef<Path>) -> Result<bool, StorageError> {
         catalog_has_active_repositories(control_path.as_ref())
     }

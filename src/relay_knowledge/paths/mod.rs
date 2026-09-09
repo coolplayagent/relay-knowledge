@@ -138,7 +138,7 @@ impl RuntimePaths {
         {
             let local_base = windows_local_base(environment)?;
             let legacy = local_base.join(APP_DIR_NAME).join("data");
-            let sid = windows_storage::current_sid().await?;
+            let sid = windows_storage::current_sid()?;
             let current = windows_data_directory(&sid)?;
             effective.data_dir = Some(select_windows_data_directory(&current, &legacy).await?);
         }
@@ -153,6 +153,10 @@ impl RuntimePaths {
         access: StorageDirectoryAccess,
     ) -> Result<(), PathError> {
         let Some(sid) = self.validated_windows_data_sid()? else {
+            #[cfg(windows)]
+            if windows_storage::current_sid()? == "S-1-5-18" {
+                return self.ensure_privileged_service_storage(access).await;
+            }
             return Ok(());
         };
         windows_storage::prepare_private_directory(&self.data_dir, sid, access, None).await
@@ -167,6 +171,11 @@ impl RuntimePaths {
         access: StorageDirectoryAccess,
     ) -> Result<(), PathError> {
         let Some(sid) = self.validated_windows_data_sid()? else {
+            #[cfg(windows)]
+            if windows_storage::current_sid()? == "S-1-5-18" {
+                return windows_storage::validate_service_database_path(database_path, access)
+                    .await;
+            }
             return Ok(());
         };
         validate_path(PathPurpose::Data, database_path)?;
@@ -624,6 +633,27 @@ fn windows_data_sid_from_path(path: &Path) -> Result<Option<String>, PathError> 
     let Some(path) = path.to_str() else {
         return Ok(None);
     };
+    // Win32 strips trailing periods/spaces and accepts traversal and device
+    // spellings that can otherwise disguise the reserved SID layout.
+    let native = path.strip_prefix(r"\\?\").unwrap_or(path);
+    let windows_spelling = native.as_bytes().get(1) == Some(&b':') || native.starts_with(r"\\");
+    let short_root_alias = native
+        .get(..2)
+        .is_some_and(|drive| drive.eq_ignore_ascii_case(WINDOWS_DATA_VOLUME.trim_end_matches('/')))
+        && native
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty())
+            .nth(1)
+            .is_some_and(|part| part.contains('~'));
+    if windows_spelling
+        && (short_root_alias
+            || native.starts_with(r"\\.\")
+            || native
+                .split(['/', '\\'])
+                .any(|part| part == ".." || (part != "." && (part.ends_with(['.', ' '])))))
+    {
+        return Err(PathError { purpose: PathPurpose::Data, kind: PathErrorKind::WindowsStorageSecurity { reason: "Windows storage paths must not use trailing-period/space, parent-traversal, short-name, or device aliases".to_owned() } });
+    }
     let path = path.strip_prefix(r"\\?\").unwrap_or(path);
     let components: Vec<_> = path
         .split(['/', '\\'])

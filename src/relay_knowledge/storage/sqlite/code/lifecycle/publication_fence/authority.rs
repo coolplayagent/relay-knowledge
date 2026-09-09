@@ -39,7 +39,7 @@ pub(super) fn attach_authority(
             attached
         )));
     }
-    if authority.paths.windows_data_sid.is_some() {
+    if authority.paths.windows_data_sid.is_some() || cfg!(windows) {
         // Every caller executes fenced mutations on the explicit SQLite worker.
         // Validate only for a new ATTACH; an attached handle needs no path reopen.
         tokio::runtime::Handle::try_current()

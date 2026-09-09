@@ -5,6 +5,23 @@ use crate::env::{EnvironmentConfig, RELAY_KNOWLEDGE_HOME};
 use quick_xml::{Reader, events::Event};
 
 impl RuntimePaths {
+    /// Checks a path before privileged service registration/startup without
+    /// following links or changing operator-managed ACLs.
+    pub(crate) async fn ensure_privileged_service_storage(
+        &self,
+        access: StorageDirectoryAccess,
+    ) -> Result<(), PathError> {
+        #[cfg(windows)]
+        {
+            windows_storage::validate_service_database_path(&self.database_file(), access).await
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = access;
+            Ok(())
+        }
+    }
+
     /// Resolves only the storage roots pinned by a restored service definition.
     /// Other runtime roots remain owned by the current lifecycle process.
     pub(crate) fn with_service_storage_overrides(
@@ -38,6 +55,10 @@ impl RuntimePaths {
             .map_err(|error| error.to_string())?;
         restored
             .ensure_storage_access(StorageDirectoryAccess::ExistingOnly)
+            .await
+            .map_err(|error| error.to_string())?;
+        restored
+            .ensure_privileged_service_storage(StorageDirectoryAccess::ExistingOnly)
             .await
             .map_err(|error| error.to_string())?;
         if !restored

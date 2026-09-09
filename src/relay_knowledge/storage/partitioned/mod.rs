@@ -44,11 +44,11 @@ pub struct PartitionedSqliteKnowledgeStore {
 }
 
 impl PartitionedSqliteKnowledgeStore {
+    /// Blocking open; async applications should use `SqliteKnowledgeStoreFactory`.
     pub fn open(control_path: impl AsRef<Path>, paths: RuntimePaths) -> Result<Self, StorageError> {
         let control_path = control_path.as_ref().to_path_buf();
         let control = Arc::new(SqliteGraphStore::open(&control_path)?);
         initialize_catalog_schema(&control_path)?;
-
         Ok(Self {
             control: Arc::clone(&control),
             catalog: Arc::new(SqliteShardCatalog::new(control_path, paths, control)),

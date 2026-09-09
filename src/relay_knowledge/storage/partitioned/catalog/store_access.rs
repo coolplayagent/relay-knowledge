@@ -30,7 +30,7 @@ pub(super) fn open_cached_repository_store(
     // This function runs only in explicit blocking workers. Re-enter the async
     // process boundary here so validation stays adjacent to the first SQLite
     // open, while cached handles do not launch repeated security processes.
-    if paths.windows_data_sid.is_some() {
+    if paths.windows_data_sid.is_some() || cfg!(windows) {
         tokio::runtime::Handle::current()
             .block_on(
                 paths

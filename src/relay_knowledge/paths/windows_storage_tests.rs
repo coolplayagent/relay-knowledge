@@ -283,7 +283,7 @@ async fn runtime_data_and_home_overrides_bypass_legacy_discovery() {
 async fn windows_runtime_only_records_policy_without_provisioning_storage() {
     let fixture = Fixture::new();
     let env = fixture.environment();
-    let sid = windows_storage::current_sid().await.unwrap();
+    let sid = windows_storage::current_sid().unwrap();
     let current = windows_data_directory(&sid).unwrap();
     let existed = current.exists();
     let paths = RuntimePaths::resolve_for_runtime(&env.platform, &env.paths)

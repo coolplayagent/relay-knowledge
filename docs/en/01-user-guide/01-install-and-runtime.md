@@ -108,6 +108,13 @@ and reparse points on every new service startup. Install/upgrade/rollback execut
 also provisions or validates these directories before service-manager steps;
 plans and uninstall do not provision storage. Existing managed ACLs must retain
 full access for the account, SYSTEM, and Administrators; deny rules are rejected.
+An administrator provisions missing shared D: ancestors with an Administrators
+owner and restricted shared ACL; later accounts create their private SID folders
+without elevation. Ambiguous Win32 path spellings are rejected. Legacy/custom
+paths keep operator-managed ACLs, but service preflight/startup and LocalSystem
+fresh opens reject reparse points in ancestors and SQLite/recovery files.
+Synchronous storage APIs use a bounded owned security worker; async callers use
+the factory. A busy security worker reports `Busy` without starting another worker.
 Legacy directory discovery uses native Windows APIs and does not require PowerShell. This layout requires Windows PowerShell 5.1 and an ACL-capable local volume;
 use an explicitly configured private directory if D: cannot meet these conditions. `status --format json`
 shows the resolved directory. Config, logs, and other runtime directories retain

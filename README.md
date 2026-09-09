@@ -18,7 +18,7 @@ New Windows installations default to
 account SID and a protected directory ACL. Profile relocation retains the same
 store. Services pinned to this SID path revalidate directory and existing SQLite
 payload ACLs on startup, including descendant links and recovery files. Existing
-LocalAppData data directories remain selected automatically during upgrades.
+LocalAppData data directories remain selected automatically during upgrades. An administrator must first provision the shared D: ancestors; later users create their own private SID directories. Windows services reject linked legacy/custom data paths and recovery files at preflight and startup.
 Set `RELAY_KNOWLEDGE_DATA_DIR` to an absolute directory to select the main
 database and repository shards together. This overrides `RELAY_KNOWLEDGE_HOME`
 and platform defaults; Linux and macOS retain their platform data directories.

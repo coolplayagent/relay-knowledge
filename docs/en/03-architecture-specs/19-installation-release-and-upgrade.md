@@ -141,12 +141,31 @@ cancellable async validation immediately before the read-only worker open; they
 do not launch a second security process inside that worker. Path decoding is capped at 4096
 bytes; security checks remain bounded child processes. Retained connections do
 not authorize later pathname opens, and health continues to use cached handles.
+Synchronous entry points do not require an ambient Tokio runtime: a scoped
+security thread owns its current-thread runtime and joins before return. Only
+one such worker/child is admitted; contention returns observable `Busy` rather
+than creating an unbounded queue. These APIs remain blocking; async applications
+use the factory/SQLite worker boundaries. Cold topology diagnostics retain
+cancellable async admission; health never uses this synchronous worker to warm shards.
 Read-only checks never provision directories or repair existing ACLs.
 A missing or insecure D: volume fails visibly when storage is opened;
-an administrator can provision the shared ancestors with an administrator owner
-and restricted write/delete rights, or users can explicitly choose a private
-location. HOME/DATA overrides outside the reserved SID layout and retained legacy
-storage keep their operator-managed ACL policy. The reserved
+an administrator must initially provision missing shared `relay-knowledge` and
+`users` ancestors. Creation atomically assigns an Administrators owner and a
+protected DACL: SYSTEM/Administrators have full control; Authenticated Users have
+read/traverse and create-directory rights on that shared directory only. Existing
+shared roots owned by the first ordinary user are rejected without repair.
+Subsequent users create their own private SID directories without elevation;
+the volume and other ancestors must also meet the shared trust policy. Users may
+instead explicitly choose a private location. HOME/DATA overrides outside the reserved SID layout and retained legacy
+storage keep their operator-managed ACL policy. Windows service preflight also
+checks those paths, all ancestors, and SQLite recovery files for reparse points
+without rewriting their ACLs. LocalSystem repeats this check at startup and
+before fresh catalog/import/diagnostic opens, so replacing a legacy directory
+with a junction after installation cannot bypass service admission. User-mode
+legacy discovery still accepts retained directory links. Service checks require
+Windows PowerShell 5.1 and use the same bounded process deadline.
+Win32 trailing-period/space, parent traversal, device, and short aliases of the
+reserved D: root are rejected before SID policy recovery. The reserved
 `D:\relay-knowledge\users\<user-sid>\data` layout always restores the original SID
 policy, including explicit overrides pinned in service definitions. Each new
 service process therefore checks existing ACLs and reparse points again before
@@ -168,7 +187,9 @@ current runtime selects another directory. The old definition must pin storage;
 preflight never provisions a missing rollback database. The database pathname must
 identify a regular file; directories and reparse/symlink entries fail preflight. Startup repeats validation.
 The native Windows CI gate also runs restored-definition parsing and old/checkpointed
-storage preflight regressions, including Windows drive paths and SID recovery.
+storage preflight regressions, including Windows drive paths, SID recovery, shared-owner
+stability across principals, alias rejection, synchronous runtime independence,
+and replacement of a retained legacy directory by a link.
 The public `KnowledgeStoreFactory::validate_lifecycle_storage` hook defaults to a
 no-op for catalog-free factories, retaining source compatibility; SQLite overrides
 it to enforce its catalog and permission checks.

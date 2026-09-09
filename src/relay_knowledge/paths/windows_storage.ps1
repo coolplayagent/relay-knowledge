@@ -30,6 +30,50 @@ function Get-RelayStorageCreationOwner {
     return $ActorSid
 }
 
+function New-RelaySharedStorageSecurity {
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $principal = [System.Security.Principal.WindowsPrincipal]::new($identity)
+        if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw 'An administrator must provision shared storage ancestors before ordinary accounts initialize their SID directories'
+        }
+    } finally { $identity.Dispose() }
+    $security = [System.Security.AccessControl.DirectorySecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $security.SetOwner([System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $security.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new($sid), 'FullControl',
+            'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+    }
+    $security.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+        [System.Security.Principal.SecurityIdentifier]::new('S-1-5-11'),
+        [System.Security.AccessControl.FileSystemRights]'ReadAndExecute,CreateDirectories',
+        'None', 'None', 'Allow'))
+    return $security
+}
+
+function Assert-RelayServiceDatabasePath {
+    param([string]$DatabasePath, [switch]$ExistingOnly)
+    $database = [System.IO.FileInfo]::new($DatabasePath)
+    $depth = 0
+    for ($directory = $database.Directory; $null -ne $directory; $directory = $directory.Parent) {
+        if (++$depth -gt 32) { throw 'Service storage ancestor limit exceeded' }
+        $kind = Get-RelayStoragePathKind $directory.FullName
+        if ($kind -eq 'missing' -and $null -ne $directory.Parent) { continue }
+        if ($kind -ne 'directory') { throw "Service storage requires directories without reparse points: $($directory.FullName)" }
+    }
+    foreach ($suffix in @('', '-wal', '-shm', '-journal')) {
+        $path = $database.FullName + $suffix
+        $kind = Get-RelayStoragePathKind $path
+        if ($kind -eq 'missing') {
+            if ($ExistingOnly -and $suffix -eq '') { throw "checkpointed service database is missing: $path" }
+            continue
+        }
+        if ($kind -ne 'file') { throw "Service database path is not a regular file (reparse points are forbidden): $path" }
+    }
+}
+
 function Assert-RelayStorageGrants {
     param([System.Security.AccessControl.FileSystemSecurity]$Acl, [string]$Sid, [string]$Path, [bool]$Directory)
     # Reserved storage has a deliberately narrow allow-only ACL contract. Reject
@@ -168,8 +212,14 @@ function Initialize-RelayPrivateStorage {
     }
     for ($index = $ancestors.Count - 1; $index -ge 0; $index--) {
         $directory = $ancestors[$index]
-        if (-not $ExistingOnly -and -not $directory.Exists -and $null -ne $directory.Parent) { $directory.Create() }
+        if (-not $ExistingOnly -and -not $directory.Exists -and $null -ne $directory.Parent) {
+            $directory.Create((New-RelaySharedStorageSecurity))
+        }
         Assert-RelayDirectorySecurity $directory $ExpectedSid $false
+        if ($directory.FullName -eq $profile.Parent.FullName -or $directory.FullName -eq $profile.Parent.Parent.FullName) {
+            $owner = $directory.GetAccessControl().GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+            if (@('S-1-5-18', 'S-1-5-32-544') -notcontains $owner) { throw "Shared storage ancestor requires a SYSTEM or Administrators owner: $($directory.FullName)" }
+        }
     }
     $security = [System.Security.AccessControl.DirectorySecurity]::new()
     $security.SetAccessRuleProtection($true, $false)

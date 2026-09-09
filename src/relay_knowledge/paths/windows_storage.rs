@@ -27,7 +27,7 @@ pub fn initialize_windows_probe_executable(
     Ok(())
 }
 
-pub(super) async fn current_sid() -> Result<String, PathError> {
+pub(super) fn current_sid() -> Result<String, PathError> {
     #[cfg(windows)]
     {
         use winsafe::{co, prelude::*};
@@ -121,6 +121,34 @@ pub(super) async fn prepare_private_directory(
     if run_security_script(&command, SECURITY_COMMAND_TIMEOUT).await? != "secured" {
         return Err(security_error(
             "unexpected Windows storage security response",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) async fn validate_service_database_path(
+    path: &Path,
+    access: StorageDirectoryAccess,
+) -> Result<(), PathError> {
+    let path = path
+        .to_str()
+        .filter(|value| !value.contains('\0') && value.len() <= 4096)
+        .ok_or_else(|| {
+            security_error("Windows database path must be Unicode and at most 4096 bytes")
+        })?;
+    let existing_only = if access == StorageDirectoryAccess::ExistingOnly {
+        " -ExistingOnly"
+    } else {
+        ""
+    };
+    let command = format!(
+        "Assert-RelayServiceDatabasePath -DatabasePath '{}'{}; 'secured'",
+        path.replace('\'', "''"),
+        existing_only
+    );
+    if run_security_script(&command, SECURITY_COMMAND_TIMEOUT).await? != "secured" {
+        return Err(security_error(
+            "unexpected service storage validation response",
         ));
     }
     Ok(())

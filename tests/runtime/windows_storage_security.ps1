@@ -17,12 +17,7 @@ if ((Get-RelayStorageCreationOwner $sid $sid) -ne $sid) { throw 'Account must ow
 if ((Get-RelayStorageCreationOwner 'S-1-5-18' $sid) -ne 'S-1-5-18') { throw 'LocalSystem must own service-created storage' }
 Assert-Rejected { Get-RelayStorageCreationOwner 'S-1-5-21-1-2-3-9999' $sid } 'owning account'
 $root = Join-Path ([System.IO.Path]::GetTempPath()) ("relay-storage-acl-" + [guid]::NewGuid())
-$rootSecurity = [System.Security.AccessControl.DirectorySecurity]::new()
-$rootSecurity.SetAccessRuleProtection($true, $false)
-$rootSecurity.SetOwner([System.Security.Principal.SecurityIdentifier]::new($sid))
-$rootSecurity.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
-    [System.Security.Principal.SecurityIdentifier]::new($sid), 'FullControl',
-    'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+$rootSecurity = New-RelaySharedStorageSecurity
 [System.IO.DirectoryInfo]::new($root).Create($rootSecurity)
 # A disposable drive alias gives the test a private root without editing any
 # real volume's ACL. Production has no drive-alias creation or test bypass.
@@ -39,6 +34,7 @@ try {
     Initialize-RelayPrivateStorage $data $sid
     Initialize-RelayPrivateStorage $data $sid
     Initialize-RelayPrivateStorage $data $sid -ExistingOnly
+    Assert-RelayServiceDatabasePath "$data\not-yet-created.sqlite"
     if ((Get-RelayStoragePathKind $data) -ne 'directory') { throw 'Directory probe lost its type' }
     if ((Get-RelayStoragePathKind "$data\absent") -ne 'missing') { throw 'Missing probe must stay missing' }
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath "$data\absent.sqlite" -ExistingOnly } 'SQLite database is missing'
@@ -59,6 +55,37 @@ try {
                 throw 'Private directory permits another account'
             }
         }
+    }
+    # Both shared ancestors have an owner independent of the first account.
+    foreach ($shared in @($base, "$base\users")) {
+        $acl = [System.IO.DirectoryInfo]::new($shared).GetAccessControl()
+        if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne 'S-1-5-32-544') { throw 'Shared storage must have a stable Administrators owner' }
+        Assert-RelayDirectorySecurity ([System.IO.DirectoryInfo]::new($shared)) 'S-1-5-21-1-2-3-1002' $false
+    }
+    $secondSid = 'S-1-5-21-1-2-3-1002'
+    $secondSecurity = [System.Security.AccessControl.DirectorySecurity]::new()
+    $secondSecurity.SetAccessRuleProtection($true, $false)
+    $secondSecurity.SetOwner([System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
+    foreach ($principal in @($secondSid, 'S-1-5-18', 'S-1-5-32-544')) {
+        $secondSecurity.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new($principal), 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+    }
+    $secondProfile = "$base\users\$secondSid"
+    [System.IO.DirectoryInfo]::new($secondProfile).Create($secondSecurity)
+    [System.IO.DirectoryInfo]::new("$secondProfile\data").Create($secondSecurity)
+    try {
+        function Get-RelayStorageSid { return $secondSid }
+        Initialize-RelayPrivateStorage "$secondProfile\data" $secondSid -ExistingOnly
+    } finally { Set-Item Function:Get-RelayStorageSid $originalSidFunction }
+    $sharedInfo = [System.IO.DirectoryInfo]::new($base)
+    $changedOwner = $sharedInfo.GetAccessControl()
+    $changedOwner.SetOwner([System.Security.Principal.SecurityIdentifier]::new($sid))
+    $sharedInfo.SetAccessControl($changedOwner)
+    try { Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -ExistingOnly } 'Shared storage ancestor requires' }
+    finally {
+        $restoredOwner = $sharedInfo.GetAccessControl()
+        $restoredOwner.SetOwner([System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
+        $sharedInfo.SetAccessControl($restoredOwner)
     }
     # Newly created SQLite files inherit only the approved principals.
     $database = Join-Path $data 'test.sqlite'
@@ -111,6 +138,7 @@ try {
     $fileLink = "$data\linked.sqlite"
     New-Item -ItemType SymbolicLink -Path $fileLink -Target $database | Out-Null
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'reparse points'
+    Assert-Rejected { Assert-RelayServiceDatabasePath $fileLink } 'regular file'
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath $fileLink } 'regular file'
     [System.IO.File]::Delete($fileLink)
     $removed = "$data\removed.sqlite"
@@ -122,6 +150,7 @@ try {
     New-Item -ItemType Junction -Path $shardLink -Target "$data\stores\repositories\fixture" | Out-Null
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'reparse points'
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath "$shardLink\code.sqlite" } 'reparse points'
+    Assert-Rejected { Assert-RelayServiceDatabasePath "$shardLink\code.sqlite" } 'reparse points'
     [System.IO.Directory]::Delete($shardLink)
     $deep = "$data\deep"
     $leaf = $deep + ('\d' * 32)

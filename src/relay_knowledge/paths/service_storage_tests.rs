@@ -113,3 +113,55 @@ fn service_definition_rejects_elements_and_content_outside_its_root() {
         .is_ok()
     );
 }
+
+#[test]
+fn windows_storage_aliases_cannot_hide_the_reserved_sid_tree() {
+    for path in [
+        "D:/relay-knowledge./users/S-1-5-18/data",
+        "D:/relay-knowledge /users/S-1-5-18/data",
+        "D:/relay-knowledge/users/S-1-5-18/data.",
+        "D:/elsewhere/../relay-knowledge/users/S-1-5-18/data",
+        "D:/RELAY-~1/users/S-1-5-18/data",
+        r"\\.\D:\relay-knowledge\users\S-1-5-18\data",
+    ] {
+        assert!(
+            windows_data_sid_from_path(Path::new(path)).is_err(),
+            "{path}"
+        );
+    }
+    assert!(
+        windows_data_sid_from_path(Path::new("/tmp/ordinary./data"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        windows_data_sid_from_path(Path::new("C:/Users/RUNNER~1/AppData/Local/custom/data"))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn privileged_storage_rejects_a_legacy_directory_replaced_by_a_link() {
+    let (root, paths, _) = fixture();
+    std::fs::create_dir_all(&paths.data_dir).unwrap();
+    std::fs::write(paths.database_file(), "legacy graph").unwrap();
+    paths
+        .ensure_privileged_service_storage(StorageDirectoryAccess::ExistingOnly)
+        .await
+        .unwrap();
+    let moved = root.join("moved-legacy-data");
+    std::fs::rename(&paths.data_dir, &moved).unwrap();
+    std::os::windows::fs::symlink_dir(&moved, &paths.data_dir).unwrap();
+    assert!(
+        paths
+            .ensure_privileged_service_storage(StorageDirectoryAccess::ExistingOnly)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("reparse")
+    );
+    std::fs::remove_dir(&paths.data_dir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}

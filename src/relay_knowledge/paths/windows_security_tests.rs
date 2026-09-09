@@ -56,7 +56,6 @@ async fn windows_security_rejects_invalid_inputs_before_launching_a_process() {
 async fn windows_identity_requires_a_native_host_without_an_environment_fallback() {
     assert!(
         current_sid()
-            .await
             .unwrap_err()
             .to_string()
             .contains("Windows host")
@@ -180,8 +179,8 @@ fn windows_probe_timeout_does_not_delay_runtime_shutdown() {
 #[cfg(windows)]
 #[tokio::test]
 async fn windows_native_sid_is_stable_across_repeated_token_reads() {
-    let first = current_sid().await.unwrap();
-    assert_eq!(first, current_sid().await.unwrap());
+    let first = current_sid().unwrap();
+    assert_eq!(first, current_sid().unwrap());
     validate_sid(&first).unwrap();
 }
 
@@ -227,7 +226,7 @@ fn windows_native_probe_worker() {
 #[tokio::test]
 async fn windows_native_security_shell_matches_native_token_sid() {
     assert_eq!(
-        current_sid().await.unwrap(),
+        current_sid().unwrap(),
         run_security_script("Get-RelayStorageSid", SECURITY_COMMAND_TIMEOUT)
             .await
             .unwrap()

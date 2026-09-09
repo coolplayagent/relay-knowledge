@@ -15,20 +15,36 @@ pub(crate) fn managed_database_validation(
             },
         });
     }
-    // At most 4096 bytes of ancestors, with no filesystem traversal here. SID
-    // recovery uses the same reserved-layout parser as service-pinned overrides.
+    // At most 4096 bytes of ancestors, with no filesystem traversal here.
+    let mut managed = None;
     for data_dir in database_path.ancestors().skip(1) {
         if let Some(sid) = windows_data_sid_from_path(data_dir)? {
-            return Ok(Some(async move {
-                windows_storage::prepare_private_directory(
-                    data_dir,
-                    &sid,
-                    StorageDirectoryAccess::ExistingOnly,
-                    Some(database_path),
-                )
-                .await
-            }));
+            managed = Some((data_dir, sid));
+            break;
         }
     }
-    Ok(None)
+    #[cfg(windows)]
+    let privileged = managed.is_none() && windows_storage::current_sid()? == "S-1-5-18";
+    #[cfg(not(windows))]
+    let privileged = false;
+    if managed.is_none() && !privileged {
+        return Ok(None);
+    }
+    Ok(Some(async move {
+        if let Some((data_dir, sid)) = managed {
+            windows_storage::prepare_private_directory(
+                data_dir,
+                &sid,
+                StorageDirectoryAccess::ExistingOnly,
+                Some(database_path),
+            )
+            .await
+        } else {
+            windows_storage::validate_service_database_path(
+                database_path,
+                StorageDirectoryAccess::ExistingOnly,
+            )
+            .await
+        }
+    }))
 }
