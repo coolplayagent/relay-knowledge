@@ -98,3 +98,37 @@ fn rejects_malformed_templates_and_invalid_metadata() {
     assert!(records[0].metadata.hot_reload.is_none());
     assert_eq!(records[0].metadata.value_type.as_deref(), Some("number"));
 }
+
+#[test]
+fn detected_ini_aliases_and_annotation_adjacency_preserve_metadata_contract() {
+    for path in ["application.conf", "settings.cfg", "settings.INI"] {
+        let content = "key=hello\n";
+        let structured = crate::code::config_files::structured_facts(path, "ini", content).0;
+        let records = extract(&FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path,
+            language_id: "ini",
+            content,
+            config_facts: &structured,
+        })
+        .unwrap();
+        assert_eq!(records.len(), 1, "{path}");
+        assert_eq!(records[0].metadata.source_format, "ini");
+        assert_eq!(records[0].metadata.default_value.as_deref(), Some("hello"));
+    }
+    for separator in ["\n", "# unrelated\n", "; unrelated\n", "! unrelated\n"] {
+        let records = facts(
+            "config.properties",
+            &format!("# @config domain=leaked hot-reload=true\n{separator}key=hello\n"),
+        );
+        assert!(records[0].metadata.domain.is_none());
+        assert!(records[0].metadata.hot_reload.is_none());
+    }
+    let records = facts(
+        "config.ini",
+        "# @config domain=leaked hot-reload=true\n[section]\nkey=hello\n",
+    );
+    assert!(records[0].metadata.domain.is_none());
+}

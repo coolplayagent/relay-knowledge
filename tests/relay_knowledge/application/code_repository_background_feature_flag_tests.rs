@@ -383,3 +383,144 @@ async fn java_constant_reads_preserve_environment_and_property_namespaces_end_to
             .any(|usage| usage.edge_kind == "declares_config_key")
     );
 }
+
+#[tokio::test]
+async fn config_extractor_review_boundaries_survive_real_git_index_and_query() {
+    let repo = FixtureRepo::create("config-extractor-review-boundaries");
+    for path in [
+        "src/application.conf",
+        "src/settings.cfg",
+        "src/settings.INI",
+    ] {
+        repo.write(path, "extension_key=hello\n");
+    }
+    repo.write("src/config.properties", "# @config domain=leaked hot-reload=true\n\nblank_key=hello\n# @config domain=leaked hot-reload=true\n# unrelated\ncomment_key=hello\n# @config domain=direct hot-reload=true\nadjacent_key=hello\n");
+    repo.write("src/config.sh", "echo \"${BASH_MINUS-default}\" \"${BASH_PLUS:+enabled}\" \"${BASH_ERROR:?required}\" \"${#BASH_LENGTH}\"\n");
+    repo.write(
+        "src/App.java",
+        r#"
+package demo;
+class OuterA { static class Keys { static final String X = "nested_a"; } }
+class OuterB { static class Keys { static final String X = "nested_b"; } }
+interface Config<T> { String getValue(); }
+class DefaultConfig implements Config<java.util.Map<String, Integer>> {
+ public String getValue() { return System.getProperty("generic_key"); }
+}
+class App { void run(Config<java.util.Map<String, Integer>> config, Settings settings) {
+ System.getProperty(OuterA.Keys.X); System.getProperty(OuterB.Keys.X);
+ if (config.getValue() != null) {}
+ boolean enabled = Boolean.getBoolean("copy_key");
+ boolean copy = enabled; copy = enabled; this.enabled = false;
+ if (settings.enabled) {} if (settings.enabled()) {} if (enabled) {}
+ enabled = false; if (enabled) {}
+} }
+class Settings { boolean enabled; }
+class Shadow { static class System {} void run() { System.getProperty("nested_false"); } }
+"#,
+    );
+    for (path, declaration) in [
+        ("EnumShadow.java", "enum System { A }"),
+        ("InterfaceShadow.java", "interface System {}"),
+        ("RecordShadow.java", "record System(String name) {}"),
+    ] {
+        repo.write(&format!("src/{path}"), &format!("package shadows; {declaration} class Caller {{ void read() {{ System.getProperty(\"type_false\"); java.lang.System.getProperty(\"qualified_true\"); }} }}"));
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "configuration extractor boundaries"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-extractor-boundaries").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-extractor-boundaries"),
+        )
+        .await
+        .unwrap();
+    let response = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                filtered_selector("fixture", "HEAD", "src"),
+                100,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap(),
+            context("query-extractor-boundaries"),
+        )
+        .await
+        .unwrap();
+    let flag = |key: &str| {
+        response
+            .flags
+            .iter()
+            .find(|flag| flag.source_key == key)
+            .unwrap()
+    };
+    assert_eq!(flag("extension_key").usages.len(), 3);
+    assert!(
+        flag("extension_key")
+            .usages
+            .iter()
+            .all(|u| u.metadata.source_format == "ini")
+    );
+    for key in ["blank_key", "comment_key"] {
+        assert!(
+            flag(key)
+                .usages
+                .iter()
+                .all(|u| u.metadata.domain.is_none() && u.metadata.hot_reload.is_none())
+        );
+    }
+    assert!(
+        flag("adjacent_key")
+            .usages
+            .iter()
+            .any(|u| u.metadata.domain.as_deref() == Some("direct"))
+    );
+    for key in ["nested_a", "nested_b"] {
+        assert!(
+            flag(key)
+                .usages
+                .iter()
+                .any(|u| u.edge_kind == "reads_config")
+        );
+    }
+    for key in ["generic_key", "copy_key"] {
+        assert_eq!(
+            flag(key)
+                .usages
+                .iter()
+                .filter(|u| u.edge_kind == "guards_code")
+                .count(),
+            1
+        );
+    }
+    assert!(
+        !response
+            .flags
+            .iter()
+            .any(|f| matches!(f.source_key.as_str(), "nested_false" | "type_false"))
+    );
+    assert!(
+        response
+            .flags
+            .iter()
+            .any(|f| f.source_key == "qualified_true")
+    );
+    assert_eq!(
+        flag("BASH_MINUS").usages[0]
+            .metadata
+            .default_value
+            .as_deref(),
+        Some("default")
+    );
+    for key in ["BASH_PLUS", "BASH_ERROR", "BASH_LENGTH"] {
+        assert!(flag(key).usages[0].metadata.default_value.is_none());
+    }
+}

@@ -117,3 +117,7 @@ mod type_reference_tests;
 #[cfg(test)]
 #[path = "tests/route_fallback.rs"]
 mod route_fallback_tests;
+
+#[cfg(test)]
+#[path = "tests/cpp_declarations.rs"]
+mod cpp_declaration_tests;

@@ -2,6 +2,10 @@ use super::*;
 
 #[test]
 fn storage_errors_preserve_boundary_messages() {
+    assert_eq!(
+        StorageError::AmbiguousCodeSymbol("multiple definitions".to_owned()).to_string(),
+        "ambiguous code symbol: multiple definitions"
+    );
     let io = StorageError::from(std::io::Error::new(
         std::io::ErrorKind::PermissionDenied,
         "readonly",

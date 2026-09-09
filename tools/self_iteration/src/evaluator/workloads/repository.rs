@@ -488,6 +488,32 @@ fn evaluate_repository_in_runtime(
         let repo_name = repo_name.to_owned();
         move |case| {
             let query_alias = string_or(&case, "repository_alias", &alias).to_owned();
+            let (mut query_commands, selected) = if case
+                .get("canonical_from_definition")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                super::canonical_calls::prepare(&runtime, &query_alias, &ref_selector, &case)
+            } else {
+                (Vec::new(), Ok(case.clone()))
+            };
+            let case = match selected {
+                Ok(case) => case,
+                Err(error) => {
+                    let failure = CommandResult {
+                        name: "canonical_selector_validation".into(),
+                        command: Vec::new(),
+                        exit_code: 1,
+                        duration_ms: 0,
+                        stdout: String::new(),
+                        stderr: error,
+                    };
+                    let observation = score_query_case(&repo_name, &case, &failure);
+                    let gate = guardrail_gate_from_case(&observation, 0);
+                    query_commands.push(failure);
+                    return (query_commands, observation, gate);
+                }
+            };
             let surface = string_or(&case, "surface", "query");
             let command = match surface {
                 "feature-flags" => super::feature_flags::query_command(
@@ -518,15 +544,21 @@ fn evaluate_repository_in_runtime(
                 _ => score_query_case(&repo_name, &case, &query),
             };
             let guardrail_gate = guardrail_gate_from_case(&observation, duration_ms);
-            (query, observation, guardrail_gate)
+            query_commands.push(query);
+            (query_commands, observation, guardrail_gate)
         }
     });
     let query_durations = query_results
         .iter()
-        .map(|(command, _, _)| command.duration_ms)
+        .map(|(commands, _, _)| {
+            commands
+                .last()
+                .expect("query or validation command")
+                .duration_ms
+        })
         .collect::<Vec<_>>();
-    for (command, observation, guardrail_gate) in query_results {
-        commands.push(command);
+    for (query_commands, observation, guardrail_gate) in query_results {
+        commands.extend(query_commands);
         cases.push(observation);
         if let Some(gate) = guardrail_gate {
             guardrail_gates.push(gate);

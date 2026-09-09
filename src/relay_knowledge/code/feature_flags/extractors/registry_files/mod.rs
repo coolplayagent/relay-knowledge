@@ -9,7 +9,18 @@ pub(in crate::code) mod shell;
 pub(in crate::code::feature_flags) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
-    let format = input.path.rsplit('.').next().unwrap_or_default();
+    let format = match input.language_id {
+        "properties" | "ini" => input.language_id,
+        _ if input
+            .path
+            .rsplit('.')
+            .next()
+            .is_some_and(|suffix| suffix.eq_ignore_ascii_case("ctmpl")) =>
+        {
+            "ctmpl"
+        }
+        _ => "",
+    };
     if !matches!(format, "properties" | "ini" | "ctmpl") {
         return Ok(Vec::new());
     }
@@ -45,6 +56,7 @@ pub(in crate::code::feature_flags) fn extract(
             continue;
         }
         if trimmed.is_empty() || trimmed.starts_with(['#', ';', '!']) {
+            declaration = CodeFeatureFlagMetadata::default();
             continue;
         }
         let definitions = if format == "ctmpl" {

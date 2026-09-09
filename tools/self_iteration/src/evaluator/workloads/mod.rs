@@ -1,4 +1,5 @@
 mod agent_workflow;
+mod canonical_calls;
 mod case_scoring;
 mod cli_cases;
 mod feature_flags;

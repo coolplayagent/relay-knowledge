@@ -265,7 +265,7 @@ async fn partitioned_reference_build_page_and_repair_token_survive_full_reopen()
         .expect("wrapper should preserve a canonical reference-search cursor");
     assert_eq!(
         wrapper_state,
-        "finalizing:query_index_repair:v3:16:resume:reference_search:v2:build:1"
+        "finalizing:query_index_repair:v5:16:resume:reference_search:v2:build:1"
     );
     assert_eq!(
         repair.reference_search.stage,

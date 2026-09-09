@@ -1,5 +1,6 @@
 use super::{
-    CODE_SNAPSHOT_FACT_VERSION, clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
+    CODE_SNAPSHOT_FACT_VERSION, append_hash_list, append_hash_part,
+    clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
     code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,
     code_snapshot_scope_matches_identity, code_snapshot_scope_workspace_semantic,
 };
@@ -154,5 +155,72 @@ fn workspace_scope_semantics_are_canonical_and_backward_compatible() {
     assert_eq!(
         code_snapshot_scope_workspace_semantic("repo", "tree", &[], &[], &empty_scope),
         Some(Some(0))
+    );
+}
+
+#[test]
+fn canonical_call_read_model_upgrade_invalidates_pre_index_scope_identity() {
+    // Persisted scope before canonical-call-selectors-v1 for these same inputs.
+    let old_scope = "git_snapshot:a9cee41bf143c3e1";
+    assert!(CODE_SNAPSHOT_FACT_VERSION.contains("canonical-call-selectors-v1"));
+    assert!(!code_snapshot_scope_matches_identity(
+        "repo-upgrade",
+        "tree-unchanged",
+        &[],
+        &[],
+        old_scope
+    ));
+    let current = code_snapshot_scope_id("repo-upgrade", "tree-unchanged", &[], &[]);
+    assert_ne!(old_scope, current);
+    assert!(code_snapshot_scope_matches_identity(
+        "repo-upgrade",
+        "tree-unchanged",
+        &[],
+        &[],
+        &current
+    ));
+}
+
+#[test]
+fn cpp_declaration_upgrade_invalidates_scopes_with_canonical_call_indexes() {
+    assert!(CODE_SNAPSHOT_FACT_VERSION.contains("cpp-callable-declarations-v1"));
+    // Same inputs indexed with canonical-call-selectors-v1 before C++ declaration repair.
+    let old_scope = "git_snapshot:1747c22227b6262c";
+    assert!(!code_snapshot_scope_matches_identity(
+        "repo-upgrade",
+        "tree-unchanged",
+        &[],
+        &[],
+        old_scope
+    ));
+}
+
+#[test]
+fn feature_flag_key_index_upgrade_changes_scope_for_the_same_tree() {
+    assert!(CODE_SNAPSHOT_FACT_VERSION.contains("feature-flag-key-index-v1"));
+    let previous = CODE_SNAPSHOT_FACT_VERSION
+        .strip_suffix("-feature-flag-key-index-v1")
+        .unwrap();
+    let mut bytes = Vec::new();
+    append_hash_part(&mut bytes, "git_snapshot");
+    append_hash_part(&mut bytes, "repo-upgrade");
+    append_hash_part(&mut bytes, "tree-unchanged");
+    append_hash_list(&mut bytes, &[]);
+    append_hash_list(&mut bytes, &[]);
+    append_hash_part(&mut bytes, previous);
+    let old_scope = format!(
+        "git_snapshot:{:016x}",
+        crate::identity::stable_hash64(&bytes)
+    );
+    assert!(!code_snapshot_scope_matches_identity(
+        "repo-upgrade",
+        "tree-unchanged",
+        &[],
+        &[],
+        &old_scope
+    ));
+    assert_ne!(
+        old_scope,
+        code_snapshot_scope_id("repo-upgrade", "tree-unchanged", &[], &[])
     );
 }

@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn admission_requires_metadata_key_index_and_all_existing_migration_markers() {
+fn admission_requires_metadata_and_markers_but_not_deferred_query_index() {
     let connection = Connection::open_in_memory().unwrap();
     assert!(!code_schema_capability_markers_are_current(&connection).unwrap());
     connection.execute_batch("CREATE TABLE code_repository_schema_migrations(name TEXT PRIMARY KEY);
@@ -19,7 +19,6 @@ fn admission_requires_metadata_key_index_and_all_existing_migration_markers() {
             .unwrap();
     }
     assert!(!code_schema_capability_markers_are_current(&connection).unwrap());
-    connection.execute_batch("CREATE INDEX code_repository_feature_flags_source_key ON code_repository_feature_flags(source_scope, source_kind, source_key)").unwrap();
     assert!(!code_schema_capability_markers_are_current(&connection).unwrap());
     connection
         .execute(

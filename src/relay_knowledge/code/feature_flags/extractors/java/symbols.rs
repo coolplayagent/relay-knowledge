@@ -17,6 +17,9 @@ pub(super) fn qualify(node: Node<'_>, name: &str, content: &str) -> String {
     let mut parts = name.splitn(2, '.');
     let owner = parts.next().unwrap_or_default();
     let suffix = parts.next();
+    let visible = visible_type(node, owner, content).map(|ty| type_owner(ty, content));
+    let lexical_name =
+        visible.map(|owner| suffix.map_or(owner.clone(), |suffix| format!("{owner}.{suffix}")));
     let root = root(node);
     let mut package = "";
     let mut cursor = root.walk();
@@ -28,7 +31,7 @@ pub(super) fn qualify(node: Node<'_>, name: &str, content: &str) -> String {
                 .trim_end_matches(';')
                 .trim();
         }
-        if child.kind() == "import_declaration" {
+        if lexical_name.is_none() && child.kind() == "import_declaration" {
             let import = text(child, content)
                 .trim_start_matches("import")
                 .trim()
@@ -41,7 +44,10 @@ pub(super) fn qualify(node: Node<'_>, name: &str, content: &str) -> String {
             }
         }
     }
-    if package.is_empty() || owner.chars().next().is_some_and(char::is_lowercase) {
+    let name = lexical_name.as_deref().unwrap_or(name);
+    if package.is_empty()
+        || (lexical_name.is_none() && owner.chars().next().is_some_and(char::is_lowercase))
+    {
         name.to_owned()
     } else {
         format!("{package}.{name}")
@@ -101,7 +107,7 @@ pub(super) fn constant_symbol(node: Node<'_>, content: &str) -> Option<String> {
             if !declared {
                 return None;
             }
-            let owner = text(class.child_by_field_name("name")?, content);
+            let owner = type_owner(class, content);
             Some(qualify(node, &format!("{owner}.{value}"), content))
         }
         _ => None,
@@ -125,7 +131,7 @@ pub(super) fn getter_symbol(node: Node<'_>, content: &str) -> Option<String> {
             .child_by_field_name("name")
             .map(|name| text(name, content));
         if name == Some(receiver) {
-            let owner = text(parameter.child_by_field_name("type")?, content);
+            let owner = erased_type(parameter.child_by_field_name("type")?, content)?;
             return Some(qualify(node, &format!("{owner}.{method}"), content));
         }
     }
@@ -133,19 +139,14 @@ pub(super) fn getter_symbol(node: Node<'_>, content: &str) -> Option<String> {
 }
 
 pub(super) fn platform_receiver_shadowed(node: Node<'_>, receiver: &str, content: &str) -> bool {
-    if value_shadowed(node, receiver, content, true) {
+    if value_shadowed(node, receiver, content, true)
+        || visible_type(node, receiver, content).is_some()
+    {
         return true;
     }
     let root = root(node);
     let mut cursor = root.walk();
     for child in root.named_children(&mut cursor) {
-        if child.kind() == "class_declaration"
-            && child
-                .child_by_field_name("name")
-                .is_some_and(|name| text(name, content) == receiver)
-        {
-            return true;
-        }
         if child.kind() == "import_declaration" {
             let import = text(child, content)
                 .trim_start_matches("import")
@@ -283,29 +284,96 @@ pub(super) fn getter_bindings(node: Node<'_>, content: &str) -> Vec<String> {
     let Some(class) = enclosing(node, "class_declaration") else {
         return Vec::new();
     };
-    let Some(owner) = class.child_by_field_name("name") else {
-        return Vec::new();
-    };
-    let mut bindings = vec![qualify(
-        node,
-        &format!("{}.{name}", text(owner, content)),
-        content,
-    )];
+    let owner = type_owner(class, content);
+    let mut bindings = vec![qualify(node, &format!("{owner}.{name}"), content)];
     if let Some(interfaces) = class.child_by_field_name("interfaces") {
-        let interfaces = text(interfaces, content)
-            .trim_start_matches("implements")
-            .trim();
-        for interface in interfaces.split(',') {
-            let interface = interface.trim();
-            if interface
-                .chars()
-                .all(|ch| ch.is_alphanumeric() || matches!(ch, '.' | '_' | '$'))
+        let mut cursor = interfaces.walk();
+        for list in interfaces.named_children(&mut cursor) {
+            let mut types = list.walk();
+            for interface in list
+                .named_children(&mut types)
+                .filter_map(|ty| erased_type(ty, content))
             {
                 bindings.push(qualify(node, &format!("{interface}.{name}"), content));
             }
         }
     }
     bindings
+}
+
+fn is_type(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "class_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "record_declaration"
+            | "annotation_type_declaration"
+    )
+}
+
+fn type_owner(mut node: Node<'_>, content: &str) -> String {
+    let mut owners = Vec::new();
+    loop {
+        if is_type(node) {
+            if let Some(name) = node.child_by_field_name("name") {
+                owners.push(text(name, content));
+            }
+        }
+        let Some(parent) = node.parent() else {
+            break;
+        };
+        node = parent;
+    }
+    owners.reverse();
+    owners.join(".")
+}
+
+fn visible_type<'a>(mut scope: Node<'a>, name: &str, content: &str) -> Option<Node<'a>> {
+    let position = scope.start_byte();
+    loop {
+        if is_type(scope) && named(scope, name, content) {
+            return Some(scope);
+        }
+        if matches!(
+            scope.kind(),
+            "program"
+                | "class_body"
+                | "interface_body"
+                | "enum_body"
+                | "enum_body_declarations"
+                | "block"
+        ) {
+            let mut cursor = scope.walk();
+            if let Some(found) = scope.named_children(&mut cursor).find(|child| {
+                is_type(*child)
+                    && named(*child, name, content)
+                    && (scope.kind() != "block" || child.start_byte() <= position)
+            }) {
+                return Some(found);
+            }
+        }
+        scope = scope.parent()?;
+    }
+}
+
+// Erase only structured type arguments; commas inside nested generics never
+// become interface separators and both declaration/read identities agree.
+fn erased_type(node: Node<'_>, content: &str) -> Option<String> {
+    match node.kind() {
+        "type_identifier" | "identifier" => Some(text(node, content).to_owned()),
+        "generic_type" => erased_type(node.named_child(0)?, content),
+        "scoped_type_identifier" => {
+            let mut cursor = node.walk();
+            let names = node
+                .named_children(&mut cursor)
+                .filter(|child| child.kind() != "type_arguments")
+                .map(|child| erased_type(child, content))
+                .collect::<Option<Vec<_>>>()?;
+            (!names.is_empty()).then(|| names.join("."))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

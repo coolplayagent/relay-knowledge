@@ -1,5 +1,5 @@
 //! Additive code-schema capability checks used by warm-open admission.
-use super::introspection::{index_has_columns, table_exists, table_has_columns};
+use super::introspection::{table_exists, table_has_columns};
 use crate::storage::StorageError;
 use rusqlite::{Connection, params};
 
@@ -19,11 +19,6 @@ pub(super) fn code_schema_capability_markers_are_current(
             connection,
             "code_repository_feature_flags",
             &["metadata_json"],
-        )?
-        || !index_has_columns(
-            connection,
-            "code_repository_feature_flags_source_key",
-            &["source_scope", "source_kind", "source_key"],
         )?
     {
         return Ok(false);

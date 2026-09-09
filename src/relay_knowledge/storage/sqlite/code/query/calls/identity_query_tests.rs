@@ -94,3 +94,82 @@ fn fast_path_requires_bounded_exact_target_hits() {
         false
     ));
 }
+
+#[test]
+fn canonical_selectors_keep_full_case_sensitive_identity_and_direction() {
+    for (kind, column) in [
+        (CodeQueryKind::Callers, "c.callee_symbol_snapshot_id"),
+        (CodeQueryKind::Callees, "c.caller_symbol_snapshot_id"),
+    ] {
+        let id = "repo://repo:123/module::Class::Class.process";
+        let request = CodeRetrievalRequest::new(
+            id,
+            CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new()).unwrap(),
+            kind,
+            10,
+            FreshnessPolicy::AllowStale,
+        )
+        .unwrap();
+        let identity = call_identity_query(&request).unwrap();
+        assert_eq!(identity.canonical_id.as_deref(), Some(id));
+        assert_eq!(identity.match_column(), column);
+        assert!(identity.is_scoped());
+        let mut row = CallRow {
+            file_id: String::new(),
+            path: String::new(),
+            language_id: "java".to_owned(),
+            caller_symbol_snapshot_id: None,
+            caller_name: Some("process".to_owned()),
+            callee_symbol_snapshot_id: None,
+            callee_name: "process".to_owned(),
+            line_range: crate::domain::RepositoryCodeRange { start: 1, end: 1 },
+            caller_line_range: None,
+            target_hint: None,
+            resolution_state: "resolved".to_owned(),
+            confidence_basis_points: 8000,
+            confidence_tier: "inferred".to_owned(),
+            caller_canonical_symbol_id: Some(id.to_owned()),
+            callee_canonical_symbol_id: Some(id.to_owned()),
+            caller_signature: None,
+            callee_signature: None,
+            caller_excerpt: None,
+            callee_excerpt: None,
+            is_generated: false,
+        };
+        assert!(identity.matches_row(&row));
+        for mismatch in [
+            id.replace("repo:123", "repo:456"),
+            id.replace("module", "other"),
+            id.replace("Class", "class"),
+            id.replace("process", "other_method"),
+        ] {
+            row.caller_canonical_symbol_id = Some(mismatch.clone());
+            row.callee_canonical_symbol_id = Some(mismatch);
+            assert!(!identity.matches_row(&row));
+        }
+        row.caller_canonical_symbol_id = None;
+        row.callee_canonical_symbol_id = None;
+        assert!(!identity.matches_row(&row));
+        let mut snapshot_request = request;
+        snapshot_request.query = "symbol:unique-definition".to_owned();
+        let snapshot = call_identity_query(&snapshot_request).unwrap();
+        assert_eq!(
+            snapshot.snapshot_id.as_deref(),
+            Some("symbol:unique-definition")
+        );
+        assert!(snapshot.canonical_id.is_none());
+        assert_eq!(
+            snapshot.match_column(),
+            match kind {
+                CodeQueryKind::Callers => "c.callee_symbol_snapshot_id",
+                _ => "c.caller_symbol_snapshot_id",
+            }
+        );
+        row.caller_symbol_snapshot_id = Some("symbol:unique-definition".to_owned());
+        row.callee_symbol_snapshot_id = Some("symbol:unique-definition".to_owned());
+        assert!(snapshot.matches_row(&row));
+        row.caller_symbol_snapshot_id = Some("symbol:other-definition".to_owned());
+        row.callee_symbol_snapshot_id = Some("symbol:other-definition".to_owned());
+        assert!(!snapshot.matches_row(&row));
+    }
+}

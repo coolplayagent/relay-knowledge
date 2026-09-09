@@ -23,7 +23,7 @@ pub(super) fn load(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     request: &CodeFeatureFlagRequest,
-) -> Result<Vec<CodeFeatureFlagRecord>, StorageError> {
+) -> Result<(Vec<CodeFeatureFlagRecord>, bool), StorageError> {
     let (scope_predicate, scope_params) = authorized_scope(status, request)?;
     let mut records = Vec::new();
     let mut analyzed_bytes = 0usize;
@@ -35,11 +35,11 @@ pub(super) fn load(
             &mut records,
             &mut analyzed_bytes,
         )?;
-        return Ok(records);
+        return Ok((records, true));
     }
-    let keys = ranked_keys(connection, &scope_predicate, &scope_params, request)?;
+    let (keys, exhausted) = ranked_keys(connection, &scope_predicate, &scope_params, request)?;
     if keys.is_empty() {
-        return Ok(records);
+        return Ok((records, exhausted));
     }
     let mut values = scope_params.clone();
     let keys_clause = key_clause(&keys, &mut values);
@@ -72,7 +72,7 @@ pub(super) fn load(
             }
         }
         if symbols.is_empty() {
-            return Ok(records);
+            return Ok((records, exhausted));
         }
         if symbols.len() + keys.len() > MAX_BINDING_IDENTITIES {
             return Err(incomplete("binding identity budget exhausted"));
@@ -97,7 +97,7 @@ pub(super) fn load(
             &mut analyzed_bytes,
         )?;
         if before == records.len() {
-            return Ok(records);
+            return Ok((records, exhausted));
         }
     }
     Err(incomplete("binding closure exceeded four bounded rounds"))
@@ -128,7 +128,7 @@ fn ranked_keys(
     scope_predicate: &str,
     scope_params: &[Value],
     request: &CodeFeatureFlagRequest,
-) -> Result<BTreeSet<(String, String)>, StorageError> {
+) -> Result<(BTreeSet<(String, String)>, bool), StorageError> {
     let reference_scope = scope_predicate.replace("flag.", "reference.");
     let evidence = format!("(flag.edge_kind <> 'binds_config_symbol' OR EXISTS (
         SELECT 1 FROM json_each(flag.metadata_json, '$.bindings') binding
@@ -146,6 +146,7 @@ fn ranked_keys(
     let mut values = scope_params.to_vec();
     values.extend_from_slice(scope_params);
     values.extend_from_slice(scope_params);
+    let mut query_clauses = Vec::new();
     if let Some(query) = &request.query {
         for term in query
             .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
@@ -160,7 +161,7 @@ fn ranked_keys(
                 "excerpt",
                 "metadata_json",
             ];
-            clauses.push(format!(
+            query_clauses.push(format!(
                 "({})",
                 fields
                     .iter()
@@ -178,20 +179,26 @@ fn ranked_keys(
             values.extend(fields.iter().map(|_| Value::Text(pattern.clone())));
         }
     }
-    for (field, value) in [
-        ("domain", &request.domain),
-        ("source_format", &request.source),
-    ] {
-        if let Some(value) = value {
-            clauses.push(format!("json_extract(flag.metadata_json, '$.{field}') = ?"));
-            values.push(Value::Text(value.clone()));
+    // Any term may seed an alias whose other terms and metadata live on a
+    // different usage. Exact assembled-group predicates run after closure.
+    if !query_clauses.is_empty() {
+        clauses.push(format!("({})", query_clauses.join(" OR ")));
+    } else {
+        for (field, value) in [
+            ("domain", &request.domain),
+            ("source_format", &request.source),
+        ] {
+            if let Some(value) = value {
+                clauses.push(format!("json_extract(flag.metadata_json, '$.{field}') = ?"));
+                values.push(Value::Text(value.clone()));
+            }
+        }
+        if let Some(value) = request.hot_reload {
+            clauses.push("json_extract(flag.metadata_json, '$.hot_reload') = ?".to_owned());
+            values.push(Value::Integer(i64::from(value)));
         }
     }
-    if let Some(value) = request.hot_reload {
-        clauses.push("json_extract(flag.metadata_json, '$.hot_reload') = ?".to_owned());
-        values.push(Value::Integer(i64::from(value)));
-    }
-    values.push(Value::Integer(request.limit as i64));
+    values.push(Value::Integer((request.limit + 1) as i64));
     let sql = format!("SELECT flag.source_kind, flag.source_key FROM code_repository_feature_flags flag WHERE {}
         GROUP BY flag.source_kind, flag.source_key ORDER BY MAX(CASE flag.edge_kind WHEN 'guards_code' THEN 20.0 WHEN 'defines_config' THEN 16.0 ELSE 12.0 END
         + CAST(flag.confidence_basis_points AS REAL) / 1000.0) DESC, MIN(flag.name), MIN(flag.source_key) LIMIT ?", clauses.join(" AND "));
@@ -199,8 +206,10 @@ fn ranked_keys(
     let rows = statement.query_map(params_from_iter(values), |row| {
         Ok((row.get(0)?, row.get(1)?))
     })?;
-    rows.collect::<Result<BTreeSet<_>, _>>()
-        .map_err(StorageError::from)
+    let mut rows = rows.collect::<Result<Vec<_>, _>>()?;
+    let exhausted = rows.len() <= request.limit;
+    rows.truncate(request.limit);
+    Ok((rows.into_iter().collect(), exhausted))
 }
 
 fn key_clause(keys: &BTreeSet<(String, String)>, values: &mut Vec<Value>) -> String {
@@ -281,7 +290,7 @@ fn append_records(
     Ok(())
 }
 
-fn incomplete(reason: &str) -> StorageError {
+pub(super) fn incomplete(reason: &str) -> StorageError {
     StorageError::InvalidInput(format!(
         "configuration analysis incomplete: {reason}; narrow --path/--language; consistency absence is unknown"
     ))

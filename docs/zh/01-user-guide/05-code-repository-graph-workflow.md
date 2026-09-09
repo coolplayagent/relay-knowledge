@@ -124,6 +124,19 @@ relay-knowledge repo query repo --query crate::retry_policy --kind imports --for
 relay-knowledge repo query repo --query serde --kind sbom --format json
 ```
 
+`callers` 和 `callees` 支持将 definition 结果的完整 `canonical_symbol_id`（`repo://...`）或 `symbol_snapshot_id`（`symbol:...`）作为 `--query`。canonical 查询区分大小写并保留仓库、模块身份；若所服务 scope 中该 ID 对应多个定义（例如 Java/C++ 重载），返回歧义错误，不混合不同方法的调用链。请选择 `retrieval_layers` 含 `symbol` 的所需结构化定义，复制其 `symbol_snapshot_id` 并使用相同已索引 ref；snapshot 查询不会跨 source scope。未知精确 ID 返回空结果，不回退同名方法或文本检索。类 ID 不聚合全部方法。内联 `path:`、`name:` 过滤先于有界调用候选截断。 升级到 `canonical-call-selectors-v1` 读模型后旧 scope 失效；运行 `repo index <alias> --ref <ref>` 通过持久索引流程重建。完成前精确查询拒绝缺失索引。请从重建后的 scope 重新复制 snapshot ID；canonical ID 不作改写。`repo index --reset` 只重置未完成任务状态，不会强制重建已完成 scope。
+
+Canonical 调用查询按既有调用目标规则优先选择可调用定义，不将 C/C++ 原型及只有签名的声明计为额外实现。没有定义时，唯一可调用声明仍可查询，多个声明则明确报告歧义。同一 canonical ID 最多检查 1024 个符号；超过预算会明确报错并指引使用定义的 `symbol_snapshot_id`，不会伪装为空结果或唯一匹配。
+
+`cpp-callable-declarations-v1` 提取版本要求通过普通 `repo index <alias> --ref <ref>` 重建旧 scope，包括已经具备 canonical 调用索引的 scope。它将 C++ 原型声明与可执行定义正确区分；重建后需重新复制 snapshot ID。
+
+```sh
+relay-knowledge repo query repo --query dispatch --kind definition --ref HEAD --format json
+# 将所需重载定义返回的完整 symbol_snapshot_id 填入下一条查询。
+relay-knowledge repo query repo --query "<symbol_snapshot_id>" --kind callees --ref HEAD --format json
+```
+
+
 Agent 也可以把结构化过滤标签直接写进 `--query`，例如
 `--query "kind:function,method lang:rust path:storage name:query search_code"`。
 已识别标签包括 `kind:`、`lang:` 或 `language:`、`path:` 和 `name:`；未知
@@ -322,3 +335,7 @@ relay-knowledge repo status repo --format json
 6. 文件是否被诊断为 unsupported、binary、oversized、invalid UTF-8 或 parser failed。
 
 `repo impact` 需要 `--head` 对应已索引 snapshot。先运行 `repo index repo --ref <head>` 或 `repo update repo --base <base> --head <head>`，再运行 impact。
+
+配置提取按检测到的 INI language 分派，包含 `.conf`、`.cfg` 及大小写扩展名。`@config` 只作用于紧邻的下一条定义，空行、普通注释、section header 都打断邻接。Java binding 保留全部 enclosing type 名称，并在声明和读取两侧统一擦除结构化 generic type argument。guard 数据流只关联真实局部变量：复制值不视为覆盖，同名 member 不产生依赖；可见 class/interface/enum/record 遮蔽阻止平台 API 推断。Bash parameter operator 保留参数读取，仅 `-`、`:-`、`=`、`:=` 的明确静态 operand 作为默认值，替代值、报错、长度、删除、替换及转换不作为默认值。
+
+一致性只在相同 `source_kind` 命名空间比较已观察格式。query 的多个词可以分布于解析后 group 的不同 usage，组合 metadata 条件仍必须由同一 usage 满足。普通 SQL seed 是有界候选超集，alias 合并导致结果不足时以倍增窗口扩至最多 1,000 个原始身份；最终 `--limit` 在 alias 解析后生效。预算耗尽且仍有候选时返回显式 incomplete-analysis 错误，既有 10,000 usage 与 16 MiB 分析上限继续有效。

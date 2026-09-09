@@ -226,3 +226,86 @@ fn same_line_reads_and_guard_dependencies_keep_distinct_occurrence_identities() 
         2
     );
 }
+
+#[test]
+fn copied_local_values_keep_guards_but_member_names_and_real_writes_do_not() {
+    let records = facts(
+        r#"class App { void run(Settings settings) {
+        boolean enabled = Boolean.getBoolean("copy");
+        boolean copy = enabled; copy = enabled; this.enabled = false;
+        if (settings.enabled) {} if (settings.enabled()) {} if (enabled) {}
+        enabled = false; if (enabled) {}
+    } }"#,
+    );
+    assert_eq!(
+        records
+            .iter()
+            .filter(|r| r.edge_kind == "guards_code")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn nested_type_owners_and_generic_getters_preserve_structured_identity() {
+    let records = facts(
+        r#"package demo;
+        class OuterA { static class Keys { static final String X = "a"; } }
+        class OuterB { static class Keys { static final String X = "b"; } }
+        interface Config<T> { String getValue(); }
+        class DefaultConfig implements Config<java.util.Map<String, Integer>> {
+          public String getValue() { return System.getProperty("generic"); }
+        }
+        class App { void run(Config<java.util.Map<String, Integer>> config) {
+          System.getProperty(OuterA.Keys.X); System.getProperty(OuterB.Keys.X); config.getValue();
+        } }"#,
+    );
+    for (key, binding) in [("a", "demo.OuterA.Keys.X"), ("b", "demo.OuterB.Keys.X")] {
+        assert!(
+            records
+                .iter()
+                .any(|r| r.source_key == key && r.metadata.bindings.contains(&binding.to_owned())),
+            "{records:#?}"
+        );
+    }
+    assert!(records.iter().any(|r| {
+        r.source_key == "generic"
+            && r.metadata
+                .bindings
+                .contains(&"demo.Config.getValue".to_owned())
+    }));
+    assert!(
+        records
+            .iter()
+            .any(|r| r.source_key == "demo.Config.getValue")
+    );
+}
+
+#[test]
+fn visible_java_type_kinds_shadow_platform_but_unrelated_nested_types_do_not() {
+    let enum_records = facts(
+        "enum Holder {; static class System {} void run() { System.getProperty(\"enum_nested_false\"); } } class Outside { void run() { System.getProperty(\"outside_true\"); } }",
+    );
+    assert!(
+        !enum_records
+            .iter()
+            .any(|r| r.source_key == "enum_nested_false")
+    );
+    assert!(enum_records.iter().any(|r| r.source_key == "outside_true"));
+    for declaration in [
+        "class System {}",
+        "interface System {}",
+        "enum System { A }",
+        "record System(String name) {}",
+    ] {
+        let records = facts(&format!(
+            "class Outer {{ {declaration} void run() {{ System.getProperty(\"false_key\"); java.lang.System.getProperty(\"true_key\"); }} }} class Other {{ void run() {{ System.getProperty(\"unrelated\"); }} }}"
+        ));
+        assert!(
+            !records.iter().any(|r| r.source_key == "false_key"),
+            "{declaration}"
+        );
+        assert!(records.iter().any(|r| r.source_key == "true_key"));
+        assert!(records.iter().any(|r| r.source_key == "unrelated"));
+    }
+}

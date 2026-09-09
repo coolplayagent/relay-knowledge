@@ -52,15 +52,34 @@ fn node_record(
             (key, Some(value.trim_matches(['\'', '"'])), "defines_config")
         }
         "expansion" => {
-            let Some(expression) = source
-                .strip_prefix("${")
-                .and_then(|text| text.strip_suffix('}'))
-            else {
+            let mut cursor = node.walk();
+            let Some(parameter) = node.named_children(&mut cursor).find_map(|child| {
+                if child.kind() == "variable_name" {
+                    Some(child)
+                } else if child.kind() == "subscript" {
+                    child.child_by_field_name("name")
+                } else {
+                    None
+                }
+            }) else {
                 return Ok(None);
             };
-            let (key, default) = expression
-                .split_once(":-")
-                .map_or((expression, None), |(key, value)| (key, Some(value)));
+            let key = input
+                .content
+                .get(parameter.byte_range())
+                .unwrap_or_default();
+            let default = node.child_by_field_name("operator").and_then(|operator| {
+                let op = input.content.get(operator.byte_range())?;
+                if operator.start_byte() >= parameter.end_byte()
+                    && matches!(op, "-" | ":-" | "=" | ":=")
+                {
+                    input
+                        .content
+                        .get(operator.end_byte()..node.end_byte().checked_sub(1)?)
+                } else {
+                    None
+                }
+            });
             (key, default, "reads_config")
         }
         "simple_expansion" => (source.trim_start_matches('$'), None, "reads_config"),

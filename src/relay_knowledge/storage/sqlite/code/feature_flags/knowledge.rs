@@ -16,14 +16,42 @@ pub(super) fn search(
     status: &CodeRepositoryStatus,
     request: &CodeFeatureFlagRequest,
 ) -> Result<Vec<CodeFeatureFlagGraph>, StorageError> {
-    let mut records = load(connection, status, request)?;
+    const MAX_SEED_IDENTITIES: usize = 1000;
+    let mut seeds = request.clone();
+    seeds.limit = seeds.limit.min(MAX_SEED_IDENTITIES);
+    loop {
+        let (records, exhausted) = load(connection, status, &seeds)?;
+        let mut result = assemble(records, status, request);
+        if exhausted || result.len() >= request.limit {
+            result.truncate(request.limit);
+            attach_symbols(connection, status, &mut result)?;
+            return Ok(result);
+        }
+        if seeds.limit == MAX_SEED_IDENTITIES {
+            return Err(super::candidates::incomplete(
+                "resolved result groups exhausted the 1000-seed budget",
+            ));
+        }
+        seeds.limit = seeds.limit.saturating_mul(2).min(MAX_SEED_IDENTITIES);
+    }
+}
+
+fn assemble(
+    mut records: Vec<CodeFeatureFlagRecord>,
+    status: &CodeRepositoryStatus,
+    request: &CodeFeatureFlagRequest,
+) -> Vec<CodeFeatureFlagGraph> {
     let states = resolve(&mut records);
     let records = promote_bound_declarations(records, states);
-    let formats = records
-        .iter()
-        .map(|(r, _)| r.metadata.source_format.clone())
-        .filter(|s| !s.is_empty())
-        .collect::<BTreeSet<_>>();
+    let mut formats = BTreeMap::<String, BTreeSet<String>>::new();
+    for (record, _) in &records {
+        if !record.metadata.source_format.is_empty() {
+            formats
+                .entry(record.source_kind.clone())
+                .or_default()
+                .insert(record.metadata.source_format.clone());
+        }
+    }
     let mut groups = BTreeMap::<(String, String), CodeFeatureFlagGraph>::new();
     for (record, resolution_state) in records {
         let key = (record.source_kind.clone(), record.source_key.clone());
@@ -66,7 +94,8 @@ pub(super) fn search(
             continue;
         }
         if request.consistency {
-            diagnose(&mut group, &formats, status);
+            let namespace_formats = formats.get(&group.source_kind).cloned().unwrap_or_default();
+            diagnose(&mut group, &namespace_formats, status);
         }
         group.usages.sort_by(|a, b| {
             edge_priority(&a.edge_kind)
@@ -82,9 +111,7 @@ pub(super) fn search(
             .then_with(|| a.name.cmp(&b.name))
             .then_with(|| a.source_key.cmp(&b.source_key))
     });
-    result.truncate(request.limit);
-    attach_symbols(connection, status, &mut result)?;
-    Ok(result)
+    result
 }
 
 fn resolve(records: &mut [CodeFeatureFlagRecord]) -> Vec<String> {
@@ -417,3 +444,7 @@ fn attach_symbols(
 #[cfg(test)]
 #[path = "knowledge_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "knowledge_contract_tests.rs"]
+mod contract_tests;

@@ -28,6 +28,21 @@ pub(super) fn search_call_identity_rows(
     request: &CodeRetrievalRequest,
     identity: &CallIdentityQuery,
 ) -> Result<CallIdentityRows, StorageError> {
+    if identity.canonical_id.is_some() || identity.snapshot_id.is_some() {
+        crate::storage::sqlite::code::schema::require_canonical_call_query_indexes(connection)?;
+    }
+    let exact_snapshot_id = if let Some(canonical_id) = &identity.canonical_id {
+        let first = canonical_callable_snapshot(connection, required_scope(status)?, canonical_id)?;
+        let Some(snapshot_id) = first else {
+            return Ok(CallIdentityRows {
+                rows: Vec::new(),
+                saturated: false,
+            });
+        };
+        Some(snapshot_id)
+    } else {
+        identity.snapshot_id.clone()
+    };
     let path_filter = path_filter_sql_for_column("c.path", status, request);
     let language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
@@ -36,11 +51,32 @@ pub(super) fn search_call_identity_rows(
     } else {
         ""
     };
+    let mut inline_filters = Vec::new();
+    push_query_path_substring_filter_sql(
+        &mut inline_filters,
+        "c.path",
+        &request.query_path_substrings,
+    );
+    let result_identity_column = match request.code_query_kind {
+        crate::domain::CodeQueryKind::Callees => "callee.canonical_symbol_id",
+        _ => "caller.canonical_symbol_id",
+    };
+    push_query_path_substring_filter_sql(
+        &mut inline_filters,
+        result_identity_column,
+        &request.query_name_substrings,
+    );
+    let inline_filters = if inline_filters.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", inline_filters.join(" AND "))
+    };
     let direct_limit = call_identity_candidate_limit(request);
     let sql = call_rows_sql(&format!(
         "
           AND {} = ?
           {path_filter}
+          {inline_filters}
           {language_filter}
           {generated_filter}
         ",
@@ -48,10 +84,17 @@ pub(super) fn search_call_identity_rows(
     ));
     let mut values = vec![
         Value::Text(required_scope(status)?.to_owned()),
-        Value::Text(identity.leaf_name().to_owned()),
+        Value::Text(
+            exact_snapshot_id
+                .as_deref()
+                .unwrap_or_else(|| identity.leaf_name())
+                .to_owned(),
+        ),
     ];
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_query_path_substring_filter_values(&mut values, &request.query_path_substrings);
+    push_query_path_substring_filter_values(&mut values, &request.query_name_substrings);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
     push_language_filter_values(&mut values, &request.query_language_filters);
@@ -66,6 +109,62 @@ pub(super) fn search_call_identity_rows(
     rows.truncate(direct_limit);
 
     Ok(CallIdentityRows { rows, saturated })
+}
+
+// Bound canonical collisions without allowing declarations to hide later definitions.
+const MAX_CANONICAL_SYMBOL_CANDIDATES: usize = 1024;
+
+fn canonical_callable_snapshot(
+    connection: &Connection,
+    scope: &str,
+    canonical_id: &str,
+) -> Result<Option<String>, StorageError> {
+    let mut statement = prepare_code_search_statement(
+        connection,
+        "SELECT symbol_snapshot_id, kind, signature FROM code_repository_symbols
+         WHERE source_scope = ?1 AND canonical_symbol_id = ?2 LIMIT ?3",
+    )?;
+    let mut symbols = statement.query(rusqlite::params![
+        scope,
+        canonical_id,
+        (MAX_CANONICAL_SYMBOL_CANDIDATES + 1) as i64,
+    ])?;
+    let mut selected = None;
+    let mut declaration = None;
+    let mut multiple_declarations = false;
+    let mut count = 0;
+    while let Some(row) = symbols.next()? {
+        count += 1;
+        if count > MAX_CANONICAL_SYMBOL_CANDIDATES {
+            return Err(StorageError::AmbiguousCodeSymbol(
+                "canonical symbol exceeds the 1024-candidate definition budget; use the desired definition's symbol_snapshot_id (symbol:...) as --query".to_owned(),
+            ));
+        }
+        let kind: String = row.get(1)?;
+        let signature: String = row.get(2)?;
+        if !crate::domain::code_call_targets::callable_definition_symbol(&kind, &signature) {
+            if crate::domain::code_call_targets::callable_target_symbol_kind(&kind) {
+                if declaration.is_some() {
+                    multiple_declarations = true;
+                } else {
+                    declaration = Some(row.get::<_, String>(0)?);
+                }
+            }
+            continue;
+        }
+        if selected.is_some() {
+            return Err(StorageError::AmbiguousCodeSymbol(
+                "canonical symbol matches multiple definitions in this scope; use the desired definition's symbol_snapshot_id (symbol:...) as --query".to_owned(),
+            ));
+        }
+        selected = Some(row.get::<_, String>(0)?);
+    }
+    if selected.is_none() && multiple_declarations {
+        return Err(StorageError::AmbiguousCodeSymbol(
+            "canonical symbol matches multiple callable declarations without a definition; use the desired declaration's symbol_snapshot_id (symbol:...) as --query".to_owned(),
+        ));
+    }
+    Ok(selected.or(declaration))
 }
 
 pub(super) fn search_call_fts_rows(

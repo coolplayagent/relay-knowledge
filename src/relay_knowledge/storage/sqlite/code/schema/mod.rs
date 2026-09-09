@@ -25,7 +25,8 @@ pub(in crate::storage::sqlite) use self::search_schema::validate_existing_query_
 pub(in crate::storage::sqlite::code) use self::search_schema::{
     SearchQueryIndexAdvance, advance_search_query_index_repair, advance_search_query_indexes,
     prepare_query_indexes_for_empty_owners, prepare_restart_query_indexes,
-    query_indexes_ready_for_fact_publication,
+    query_indexes_ready_for_fact_publication, require_canonical_call_query_indexes,
+    require_feature_flag_query_index,
 };
 use self::search_schema::{initialize_search_schema, require_query_indexes_for_fact_publication};
 use super::super::schema::marker::{
@@ -45,10 +46,6 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "code_repository_feature_flags",
         "metadata_json",
         "TEXT NOT NULL DEFAULT '{}'",
-    )?;
-    connection.execute_batch(
-        "CREATE INDEX IF NOT EXISTS code_repository_feature_flags_source_key
-        ON code_repository_feature_flags(source_scope, source_kind, source_key)",
     )?;
     super::super::schema::columns::ensure_column(
         connection,

@@ -238,7 +238,7 @@ async fn staged_reference_search_advances_set_based_pages_without_becoming_query
             "finalizing:rebuild_reference_search:v2:discover:3",
             "finalizing:rebuild_reference_search:v2:build:0",
             "finalizing:rebuild_reference_search:v2:build:1",
-            "finalizing:query_index_repair:v3:16:resume:reference_search:v2:build:1",
+            "finalizing:query_index_repair:v5:16:resume:reference_search:v2:build:1",
             "finalizing:rebuild_reference_search:v2:build:1",
             "finalizing:rebuild_reference_search:v2:build:2",
             "finalizing:rebuild_reference_search:v2:build:3",

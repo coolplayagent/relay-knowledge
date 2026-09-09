@@ -64,6 +64,9 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
     if fixture == "feature_flags_wide_v1" {
         return super::feature_flags::write(root);
     }
+    if fixture == "canonical_calls_wide_v1" {
+        return super::canonical_calls::write(root);
+    }
     if fixture == "index_performance_many_files_v1" {
         return write_index_performance_many_files_fixture(root);
     }

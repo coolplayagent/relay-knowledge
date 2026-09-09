@@ -31,12 +31,12 @@ fn exact_key_ignores_more_than_ten_thousand_unrelated_usages() {
     let mut query = request();
     query.query = Some("feature_wanted".to_owned());
     query.limit = 1;
-    let rows = load(&connection, &status(), &query).unwrap();
+    let rows = load(&connection, &status(), &query).unwrap().0;
     assert_eq!(rows.len(), 3);
     assert!(rows.iter().any(|r| r.usage_id == "read"));
     query.query = None;
     query.domain = Some("task".to_owned());
-    assert_eq!(load(&connection, &status(), &query).unwrap().len(), 3);
+    assert_eq!(load(&connection, &status(), &query).unwrap().0.len(), 3);
     query.consistency = true;
     assert!(
         load(&connection, &status(), &query)
@@ -68,12 +68,12 @@ fn closure_loads_both_directions_and_never_crosses_snapshot_or_path_scope() {
         let mut query = request();
         query.query = Some(text.to_owned());
         query.limit = 1;
-        assert_eq!(load(&connection, &status(), &query).unwrap().len(), 3);
+        assert_eq!(load(&connection, &status(), &query).unwrap().0.len(), 3);
     }
     let mut query = request();
     query.query = Some("demo.Config.getToggle".to_owned());
     query.repository.path_filters = vec!["src/usage.java".to_owned()];
-    let rows = load(&connection, &status(), &query).unwrap();
+    let rows = load(&connection, &status(), &query).unwrap().0;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].source_kind, "config_symbol");
 }

@@ -124,6 +124,19 @@ relay-knowledge repo query repo --query crate::retry_policy --kind imports --for
 relay-knowledge repo query repo --query serde --kind sbom --format json
 ```
 
+For `callers` and `callees`, pass a definition result’s complete `canonical_symbol_id` (`repo://...`) or `symbol_snapshot_id` (`symbol:...`) as `--query`. Canonical selectors are case-sensitive and retain repository/module identity. If a canonical ID has multiple definitions in the served scope, such as Java/C++ overloads, the query returns an ambiguity error instead of combining their call chains. Select the desired structured definition (its `retrieval_layers` includes `symbol`), copy its `symbol_snapshot_id`, and reuse the same indexed ref. Snapshot selectors never cross source scopes. An unknown exact selector returns no hits and never falls back to same-name methods or text search. Class IDs do not aggregate all methods. Inline `path:` and `name:` filters apply before bounded call candidate selection. Upgrading to the `canonical-call-selectors-v1` read model makes earlier scopes stale; run `repo index <alias> --ref <ref>` to rebuild through the durable indexing workflow. Exact selectors reject missing indexes until that work completes. Copy snapshot IDs again from the rebuilt scope; canonical IDs are not rewritten. `repo index --reset` resets unfinished task state and does not force a completed scope to rebuild.
+
+Canonical call selectors prefer callable definitions over C/C++ prototypes and signature-only declarations according to the indexed call-target policy. If no definition exists, a unique callable declaration remains queryable; multiple declarations are explicitly ambiguous. They inspect at most 1024 symbols sharing that canonical ID; exceeding this budget returns an explicit error directing you to a definition `symbol_snapshot_id`, rather than reporting an empty or falsely unique result.
+
+The `cpp-callable-declarations-v1` extraction version also requires ordinary `repo index <alias> --ref <ref>` to rebuild older scopes, including scopes that already have canonical-call indexes. It preserves C++ prototype declarations separately from executable definitions; snapshot IDs must be copied again after rebuilding.
+
+```sh
+relay-knowledge repo query repo --query dispatch --kind definition --ref HEAD --format json
+# Copy symbol_snapshot_id from the desired overload definition into the next query.
+relay-knowledge repo query repo --query "<symbol_snapshot_id>" --kind callees --ref HEAD --format json
+```
+
+
 Agents can also put structured filters inside `--query`, for example
 `--query "kind:function,method lang:rust path:storage name:query search_code"`.
 Recognized labels are `kind:`, `lang:` or `language:`, `path:`, and `name:`.
@@ -324,3 +337,7 @@ When `repo query` returns no results, check in order:
 6. Whether files were diagnosed as unsupported, binary, oversized, invalid UTF-8, or parser failed.
 
 `repo impact` requires an indexed snapshot for `--head`. Run `repo index repo --ref <head>` or `repo update repo --base <base> --head <head>` before impact analysis.
+
+Configuration extraction follows detected INI languages, including `.conf`, `.cfg`, and case-insensitive suffixes. An `@config` annotation applies only to the immediately following definition; blank lines, other comments, and section headers break adjacency. Java bindings preserve all enclosing type names and erase structured generic type arguments consistently. Guard flow tracks unqualified locals: copying a value does not overwrite it, and unrelated member names do not create dependencies. Visible class/interface/enum/record shadows suppress platform-API inference. Bash parameter operators retain the parameter read; only static operands of `-`, `:-`, `=`, and `:=` supply defaults, while alternatives, errors, lengths, removals, replacements, and transformations do not.
+
+Consistency compares observed formats only within the same `source_kind` namespace. Query terms may be distributed across a resolved group's usage records; combined metadata predicates must match the same usage. Ordinary SQL seeds remain a bounded superset, expanding geometrically up to 1,000 raw identities when alias collapse leaves fewer than the requested result groups. The final `--limit` applies after alias resolution; remaining candidates at an exhausted budget produce an explicit incomplete-analysis error. The existing 10,000-usage and 16 MiB analysis limits still apply.

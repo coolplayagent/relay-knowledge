@@ -20,6 +20,8 @@ pub enum StorageError {
         checkpoint_state: String,
     },
     InvalidInput(String),
+    /// An exact canonical code selector identifies multiple definition snapshots.
+    AmbiguousCodeSymbol(String),
     Invariant(String),
 }
 
@@ -48,6 +50,9 @@ impl fmt::Display for StorageError {
                 formatter,
                 "durable incremental delta committed; finalization must resume from '{checkpoint_state}'"
             ),
+            Self::AmbiguousCodeSymbol(message) => {
+                write!(formatter, "ambiguous code symbol: {message}")
+            }
             Self::InvalidInput(message) => write!(formatter, "invalid storage input: {message}"),
             Self::Invariant(message) => write!(formatter, "storage invariant failed: {message}"),
         }

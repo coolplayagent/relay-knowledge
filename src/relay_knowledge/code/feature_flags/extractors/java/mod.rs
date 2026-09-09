@@ -231,7 +231,15 @@ fn collect_variable_guards(
 fn contains_identifier(node: Node<'_>, name: &str, content: &str) -> bool {
     let mut cursor = node.walk();
     loop {
-        if cursor.node().kind() == "identifier" && text(cursor.node(), content) == name {
+        let current = cursor.node();
+        if current.kind() == "identifier"
+            && text(current, content) == name
+            && !current.parent().is_some_and(|parent| {
+                matches!(parent.kind(), "field_access" | "method_invocation")
+                    && (parent.child_by_field_name("field") == Some(current)
+                        || parent.child_by_field_name("name") == Some(current))
+            })
+        {
             return true;
         }
         if cursor.goto_first_child() {
@@ -249,10 +257,14 @@ fn writes_name(node: Node<'_>, name: &str, content: &str) -> bool {
     let mut cursor = node.walk();
     loop {
         let current = cursor.node();
-        if matches!(
-            current.kind(),
-            "assignment_expression" | "update_expression" | "variable_declarator"
-        ) && contains_identifier(current, name, content)
+        let target = match current.kind() {
+            "assignment_expression" => current.child_by_field_name("left"),
+            "variable_declarator" => current.child_by_field_name("name"),
+            "update_expression" => current.named_child(0),
+            _ => None,
+        };
+        if target
+            .is_some_and(|target| target.kind() == "identifier" && text(target, content) == name)
         {
             return true;
         }

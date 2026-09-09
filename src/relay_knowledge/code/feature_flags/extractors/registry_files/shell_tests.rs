@@ -49,3 +49,48 @@ fn excludes_comments_single_quotes_heredocs_and_nonliteral_defaults() {
             .all(|r| r.metadata.default_value.is_none())
     );
 }
+
+#[test]
+fn all_standard_parameter_operators_keep_the_parameter_and_only_real_defaults() {
+    for operator in ["-", ":-", "=", ":="] {
+        let records = facts(&format!("echo \"${{FLAG{operator}value}}\"\n"));
+        assert_eq!(records.len(), 1, "{operator}: {records:?}");
+        assert_eq!(records[0].source_key, "FLAG");
+        assert_eq!(records[0].metadata.default_value.as_deref(), Some("value"));
+    }
+    for expression in [
+        "FLAG+enabled",
+        "FLAG:+enabled",
+        "FLAG?required",
+        "FLAG:?required",
+        "#FLAG",
+        "FLAG#pat",
+        "FLAG##pat",
+        "FLAG%pat",
+        "FLAG%%pat",
+        "FLAG/foo/bar",
+        "FLAG//foo/bar",
+        "FLAG:1:2",
+        "FLAG^",
+        "FLAG^^",
+        "FLAG,",
+        "FLAG,,",
+        "FLAG@Q",
+        "!FLAG",
+    ] {
+        let records = facts(&format!("echo \"${{{expression}}}\"\n"));
+        assert_eq!(records.len(), 1, "{expression}: {records:?}");
+        assert_eq!(records[0].source_key, "FLAG", "{expression}");
+        assert!(records[0].metadata.default_value.is_none(), "{expression}");
+    }
+    let records = facts("echo \"${FLAG:-$OTHER}\"\n");
+    assert!(
+        records
+            .iter()
+            .find(|r| r.source_key == "FLAG")
+            .unwrap()
+            .metadata
+            .default_value
+            .is_none()
+    );
+}

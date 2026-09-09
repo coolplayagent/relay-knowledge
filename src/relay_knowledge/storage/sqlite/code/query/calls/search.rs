@@ -34,6 +34,13 @@ pub(in super::super) fn search_calls(
             .into_iter()
             .filter(|row| identity.matches_row(row))
             .collect::<Vec<_>>();
+        // Canonical IDs are exact selectors, including an empty answer. Do not
+        // broaden them into indirect bindings, implementation guesses or FTS.
+        if identity.canonical_id.is_some() || identity.snapshot_id.is_some() {
+            let mut hits = call_rows_to_hits(status, request, rows);
+            filter_dedupe_sort_truncate(&mut hits, request);
+            return Ok(hits);
+        }
         let direct_hit_count = rows.len();
         let implementation_hits =
             search_ambiguous_callee_implementation_hits(connection, status, request, &rows)?;

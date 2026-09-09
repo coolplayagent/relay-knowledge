@@ -6,6 +6,8 @@
 
 `feature_flags_wide` guardrail 纳入 `fast` 和 performance 类别评估。生成仓库包含 11,000 个无关 properties 键、一个目标键及其 Java 读取；`surface: "feature-flags"` 查询必须在 fresh 索引上返回目标键的真实定义 usage，不能因整个 scope 超过配置分析行数预算而失败。复用 repository query 延迟指标，p95 预算为 2,000 ms。该 surface 支持 CLI 元数据和 scope 过滤，评分保留 usage 来源证据并拒绝空结果或错误响应结构。这个精确查询用例不请求全 scope 一致性分析。
 
+`canonical_calls_wide` 纳入 fast/performance guardrail，索引 2,048 个无关 Java 调用及一个唯一目标。case 可用 `canonical_from_definition: true` 先通过真实 definition CLI 解析配置的符号查询，再测 callers/callees；报告保留两个命令，仅调用查询计入延迟指标（该 fixture 的 p95 预算 2,000 ms）。定义身份缺失或有歧义时 guardrail 失败，也能检测缺失精确调用索引时产品的拒绝行为，防止恢复为 scope 全扫描。
+
 ## 快速路径
 
 ### 5 分钟上手

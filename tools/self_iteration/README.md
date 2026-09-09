@@ -6,6 +6,8 @@
 
 The `feature_flags_wide` guardrail runs in `fast` and performance-focused evaluation. Its generated repository contains 11,000 unrelated property keys, one selected key and a Java read. A `surface: "feature-flags"` query must return that key's real definition usage with a fresh index, even though a full-scope analysis would exceed the configuration-analysis row budget. The shared repository query metrics record its latency with a 2,000 ms p95 budget. Feature-flag cases support the CLI metadata and scope filters; scoring preserves source usage evidence and rejects empty or malformed responses. This narrow-query workload deliberately does not request whole-scope consistency analysis.
 
+The `canonical_calls_wide` fast/performance guardrail indexes 2,048 unrelated Java calls plus one unique target. Cases can set `canonical_from_definition: true` to resolve the configured symbol query through the real definition CLI before measuring callers/callees. Both commands are retained in the report; only the call query enters latency metrics (2,000 ms p95 for this fixture). Missing or ambiguous definition identities fail the guardrail. This also detects absent exact-call query indexes, which the product refuses to replace with a scope scan.
+
 ## Quick Path
 
 ### Five-Minute Start

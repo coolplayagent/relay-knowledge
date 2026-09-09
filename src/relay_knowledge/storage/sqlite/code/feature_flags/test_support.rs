@@ -3,7 +3,11 @@ use crate::domain::{
     CodeRepositoryStatus, FreshnessPolicy, RepositoryCodeRange,
 };
 
-pub(super) fn record(id: &str, key: &str, kind: &str) -> CodeFeatureFlagRecord {
+pub(in crate::storage::sqlite::code) fn record(
+    id: &str,
+    key: &str,
+    kind: &str,
+) -> CodeFeatureFlagRecord {
     CodeFeatureFlagRecord {
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),

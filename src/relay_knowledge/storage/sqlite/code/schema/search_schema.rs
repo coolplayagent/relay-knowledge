@@ -194,13 +194,102 @@ const SEARCH_QUERY_INDEXES: &[SearchQueryIndexDescriptor] = &[
         required_table: None,
         required_table_columns: &[],
     },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_symbols_canonical_lookup",
+        table: "code_repository_symbols",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_symbols_canonical_lookup ON code_repository_symbols(source_scope, canonical_symbol_id, symbol_snapshot_id)",
+        columns: &["source_scope", "canonical_symbol_id", "symbol_snapshot_id"],
+        mode: SearchQueryIndexMode::Required,
+        required_table: None,
+        required_table_columns: &[],
+    },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_calls_caller_snapshot_lookup",
+        table: "code_repository_calls",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_calls_caller_snapshot_lookup ON code_repository_calls(source_scope, caller_symbol_snapshot_id, path, line_start)",
+        columns: &[
+            "source_scope",
+            "caller_symbol_snapshot_id",
+            "path",
+            "line_start",
+        ],
+        mode: SearchQueryIndexMode::Required,
+        required_table: Some("code_repository_calls"),
+        required_table_columns: &[
+            "source_scope",
+            "caller_symbol_snapshot_id",
+            "path",
+            "line_start",
+        ],
+    },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_calls_callee_snapshot_lookup",
+        table: "code_repository_calls",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_calls_callee_snapshot_lookup ON code_repository_calls(source_scope, callee_symbol_snapshot_id, path, line_start)",
+        columns: &[
+            "source_scope",
+            "callee_symbol_snapshot_id",
+            "path",
+            "line_start",
+        ],
+        mode: SearchQueryIndexMode::Required,
+        required_table: Some("code_repository_calls"),
+        required_table_columns: &[
+            "source_scope",
+            "callee_symbol_snapshot_id",
+            "path",
+            "line_start",
+        ],
+    },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_feature_flags_source_key",
+        table: "code_repository_feature_flags",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_feature_flags_source_key ON code_repository_feature_flags(source_scope, source_kind, source_key)",
+        columns: &["source_scope", "source_kind", "source_key"],
+        mode: SearchQueryIndexMode::Required,
+        required_table: None,
+        required_table_columns: &[],
+    },
 ];
 
 const _: [(); crate::domain::CODE_QUERY_INDEX_PLAN_UNIT_COUNT] = [(); SEARCH_QUERY_INDEXES.len()];
 
+/// Exact selectors never scan legacy scopes awaiting durable index repair.
+pub(in crate::storage::sqlite::code) fn require_canonical_call_query_indexes(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    for descriptor in &SEARCH_QUERY_INDEXES[17..20] {
+        require_persisted_query_index(connection, descriptor).map_err(|error| {
+            StorageError::InvalidInput(format!(
+                "exact call selector indexes are unavailable; run repo index with the current binary before querying: {error}"
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+/// Configuration queries fail closed until the durable key-index unit is complete.
+pub(in crate::storage::sqlite::code) fn require_feature_flag_query_index(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    require_persisted_query_index(connection, &SEARCH_QUERY_INDEXES[20]).map_err(|error| {
+        StorageError::InvalidInput(format!(
+            "configuration key index is unavailable; run repo index with the current binary before querying feature flags: {error}"
+        ))
+    })
+}
+
+#[cfg(test)]
+#[path = "search_schema_feature_flag_tests.rs"]
+mod feature_flag_tests;
+
 #[cfg(test)]
 #[path = "search_schema_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "search_schema_call_tests.rs"]
+mod call_tests;
 
 pub(super) fn initialize_search_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
