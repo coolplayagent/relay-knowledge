@@ -55,3 +55,13 @@ fn assert_recovery_status(source: &str, expected: CodeParseStatus) {
     parse_indexed_file(&mut build, "config.ctmpl", source.as_bytes()).unwrap();
     assert_eq!(build.finish().files[0].parse_status, expected, "{source}");
 }
+
+#[test]
+fn malformed_numeric_go_action_keeps_native_syntax_diagnostic() {
+    for word in ["123abc", "18446744073709551616", "0x10000000000000000"] {
+        assert_recovery_status(
+            &format!("{COMPLEX_TEMPLATE}{{{{ {word} }}}}"),
+            CodeParseStatus::Partial,
+        );
+    }
+}

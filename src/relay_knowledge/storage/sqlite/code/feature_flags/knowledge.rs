@@ -21,7 +21,7 @@ pub(super) fn search(
         .as_deref()
         .is_some_and(|query| super::filters::query_terms(query).next().is_none())
     {
-        return Err(StorageError::InvalidInput(
+        return Err(StorageError::InvalidQueryArgument(
             "configuration query contains no searchable Unicode letters, numbers or underscores"
                 .to_owned(),
         ));

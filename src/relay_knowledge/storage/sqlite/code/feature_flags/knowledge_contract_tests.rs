@@ -35,7 +35,7 @@ fn unicode_terms_filter_candidates_before_limits_and_complete_groups_afterward()
     }
     query.query = Some("!!!".into());
     assert!(
-        matches!(search(&connection, &status(), &query), Err(StorageError::InvalidInput(message)) if message.contains("searchable"))
+        matches!(search(&connection, &status(), &query), Err(StorageError::InvalidQueryArgument(message)) if message.contains("searchable"))
     );
     query.query = None;
     query.limit = 100;

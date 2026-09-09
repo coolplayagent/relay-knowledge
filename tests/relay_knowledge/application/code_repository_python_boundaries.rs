@@ -383,7 +383,18 @@ def class_typing_decorator(x): return leaf()
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Python binding target and syntax cases"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".into(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-full-origin-inventory"),
+        )
+        .await
+        .unwrap();
     service
         .index_code_repository(
             CodeIndexRequest {

@@ -20,6 +20,8 @@ pub enum StorageError {
         checkpoint_state: String,
     },
     InvalidInput(String),
+    /// A query argument fails explicit validation before query execution.
+    InvalidQueryArgument(String),
     /// An exact canonical code selector identifies multiple definition snapshots.
     AmbiguousCodeSymbol(String),
     /// A read query exhausted its bounded execution budget.
@@ -59,6 +61,9 @@ impl fmt::Display for StorageError {
                 write!(formatter, "query budget exceeded: {message}")
             }
             Self::InvalidInput(message) => write!(formatter, "invalid storage input: {message}"),
+            Self::InvalidQueryArgument(message) => {
+                write!(formatter, "invalid query argument: {message}")
+            }
             Self::Invariant(message) => write!(formatter, "storage invariant failed: {message}"),
         }
     }

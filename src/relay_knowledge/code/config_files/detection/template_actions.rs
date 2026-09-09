@@ -261,11 +261,7 @@ fn valid_action(tokens: &[Token<'_>], blocks: &mut Vec<(String, bool)>) -> bool 
             }
             Kind::Word(word) => {
                 // Recovery does not prove variable declarations or their lexical scope.
-                if word.contains('$')
-                    || !word
-                        .chars()
-                        .all(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '.' | '$'))
-                {
+                if word.contains('$') || !super::template_words::valid(word) {
                     return false;
                 }
                 need_operand = false;

@@ -3,13 +3,21 @@ use std::collections::BTreeMap;
 use tree_sitter::Node;
 
 use crate::code::parser::nodes::{SyntaxRange, node_text, syntax_range};
+use crate::code::python_imports::{PythonModuleOrigin, PythonModuleOrigins};
 
 const MAX_BINDING_STATEMENTS: usize = 1024;
 
 mod bindings;
 mod expressions;
 use bindings::{contains_identifier, statement_binding};
+mod aliases;
+mod class_creation;
 mod mutations;
+
+struct Proof {
+    origins: PythonModuleOrigins,
+    decorators: BTreeMap<usize, bool>,
+}
 
 pub(in crate::code::parser) fn manual_definitions(
     content: &str,
@@ -30,6 +38,22 @@ pub(in crate::code::parser) fn manual_definitions(
 }
 
 pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: Node<'_>) -> bool {
+    is_overload_declaration_with_origins(
+        content,
+        function,
+        PythonModuleOrigins {
+            typing: PythonModuleOrigin::StandardCandidate,
+            typing_extensions: PythonModuleOrigin::StandardCandidate,
+        },
+    )
+}
+
+/// Indexed files additionally require authorized inventory evidence for imports.
+pub(in crate::code::parser) fn is_overload_declaration_with_origins(
+    content: &str,
+    function: Node<'_>,
+    origins: PythonModuleOrigins,
+) -> bool {
     let Some(decorated) = function
         .parent()
         .filter(|node| node.kind() == "decorated_definition")
@@ -37,7 +61,10 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
         return false;
     };
     let mut remaining = MAX_BINDING_STATEMENTS;
-    let mut proven = BTreeMap::new();
+    let mut proven = Proof {
+        origins,
+        decorators: BTreeMap::new(),
+    };
     let mut cursor = decorated.walk();
     decorated
         .named_children(&mut cursor)
@@ -52,7 +79,7 @@ fn evaluate_decorator(
     decorated: Node<'_>,
     decorator: Node<'_>,
     remaining: &mut usize,
-    proven: &mut BTreeMap<usize, bool>,
+    proven: &mut Proof,
 ) -> bool {
     let Some(expression) = decorator
         .named_child(0)
@@ -85,7 +112,7 @@ fn prove_eager_decorators(
     content: &str,
     statement: Node<'_>,
     remaining: &mut usize,
-    proven: &mut BTreeMap<usize, bool>,
+    proven: &mut Proof,
 ) {
     let mut stack = vec![statement];
     while let Some(node) = stack.pop() {
@@ -143,7 +170,7 @@ fn visible_import(
     binding: &str,
     module: bool,
     remaining: &mut usize,
-    proven: &mut BTreeMap<usize, bool>,
+    proven: &mut Proof,
 ) -> bool {
     let mut crossed_scope = false;
     let mut delayed_lookup = false;
@@ -158,7 +185,8 @@ fn visible_import(
                     && (!crossed_scope || !class_namespace(parent))
             })
         {
-            if let Some(imported) = later_import_binding(content, node, binding, module, remaining)
+            if let Some(imported) =
+                later_import_binding(content, node, binding, module, remaining, proven.origins)
             {
                 return imported;
             }
@@ -207,12 +235,21 @@ fn visible_import(
                 delayed_lookup = true;
                 continue 'lookup;
             }
-            if let Some(imported) = statement_binding(content, statement, binding, module) {
+            if let Some(imported) =
+                statement_binding(content, statement, binding, module, proven.origins)
+            {
                 return imported;
             }
             prove_eager_decorators(content, statement, remaining, proven);
-            if mutations::unknown_eager_call(content, statement, binding, module, proven, remaining)
-            {
+            if mutations::unknown_eager_call(
+                content,
+                statement,
+                binding,
+                module,
+                &proven.decorators,
+                remaining,
+                proven.origins,
+            ) {
                 return false;
             }
             previous = statement.prev_named_sibling();
@@ -247,6 +284,7 @@ fn later_import_binding(
     binding: &str,
     module: bool,
     remaining: &mut usize,
+    origins: PythonModuleOrigins,
 ) -> Option<bool> {
     let mut next = node.next_named_sibling();
     let mut proven = None;
@@ -274,15 +312,14 @@ fn later_import_binding(
         if expressions::has_eager_call(content, statement, remaining) {
             return Some(false);
         }
-        if callable_name
-            .as_deref()
-            .is_some_and(|name| statement_binding(content, statement, name, false).is_some())
-        {
+        if callable_name.as_deref().is_some_and(|name| {
+            statement_binding(content, statement, name, false, origins).is_some()
+        }) {
             callable_unchanged = false;
         }
         if !matches!(statement.kind(), "global_statement" | "nonlocal_statement") {
             let linear = linear_binding_statement(statement);
-            if let Some(value) = statement_binding(content, statement, binding, module) {
+            if let Some(value) = statement_binding(content, statement, binding, module, origins) {
                 if execution_boundary || !linear {
                     return Some(false);
                 }
@@ -401,16 +438,16 @@ fn decorator_proven(
     decorated: Node<'_>,
     decorator: Node<'_>,
     remaining: &mut usize,
-    proven: &mut BTreeMap<usize, bool>,
+    proven: &mut Proof,
 ) -> bool {
     let Some(left) = remaining.checked_sub(1) else {
         return false;
     };
     *remaining = left;
-    if let Some(value) = proven.get(&decorator.start_byte()) {
+    if let Some(value) = proven.decorators.get(&decorator.start_byte()) {
         return *value;
     }
     let value = evaluate_decorator(content, decorated, decorator, remaining, proven);
-    proven.insert(decorator.start_byte(), value);
+    proven.decorators.insert(decorator.start_byte(), value);
     value
 }

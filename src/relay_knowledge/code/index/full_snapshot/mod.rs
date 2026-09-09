@@ -133,6 +133,12 @@ fn build_full_snapshot_from_scoped_source(
         0,
     );
     build.base_resolved_commit_sha = identity.base_resolved_commit_sha;
+    build.python_module_origins =
+        crate::code::python_imports::PythonModuleOrigins::from_authorized_paths(
+            snapshot.entries.iter().map(|entry| entry.path.as_str()),
+            &snapshot.path_filters,
+            &snapshot.language_filters,
+        );
 
     #[cfg(test)]
     apply_filesystem_full_snapshot_read_mutation(&snapshot)?;

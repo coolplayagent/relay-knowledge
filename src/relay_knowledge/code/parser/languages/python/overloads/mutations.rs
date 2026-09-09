@@ -98,7 +98,7 @@ fn module_receiver(content: &str, mut node: Node<'_>, name: &str, remaining: &mu
             return *remaining == 0;
         };
         if receiver.kind() == "identifier" {
-            if node_text(content, receiver) != name {
+            if !super::aliases::refers_to(content, receiver, name, remaining) {
                 return false;
             }
             if node.kind() != "attribute" {
@@ -202,7 +202,7 @@ fn mutator_member_effect(
     if !may_select {
         return Some(false);
     }
-    (node_text(content, receiver) == binding).then_some(true)
+    super::aliases::refers_to(content, receiver, binding, remaining).then_some(true)
 }
 
 #[cfg(test)]
@@ -218,6 +218,7 @@ pub(super) fn unknown_eager_call(
     module: bool,
     proven_decorators: &std::collections::BTreeMap<usize, bool>,
     remaining: &mut usize,
+    origins: crate::code::python_imports::PythonModuleOrigins,
 ) -> bool {
     let deferred = super::expressions::future_annotations(content, statement, remaining);
     let mut stack = vec![statement];
@@ -230,6 +231,9 @@ pub(super) fn unknown_eager_call(
             return true;
         }
         if node.kind() == "class_definition" {
+            if !super::class_creation::plain(content, node, remaining, origins) {
+                return true;
+            }
             if let Some(body) = node.child_by_field_name("body") {
                 stack.push(body);
             }

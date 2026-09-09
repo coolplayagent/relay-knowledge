@@ -65,3 +65,9 @@ fn recovery_work_and_nesting_bounds_fail_closed() {
         ")".repeat(129)
     )));
 }
+
+#[test]
+fn numeric_syntax_errors_are_not_promoted_to_valid_go_actions() {
+    assert!(!balanced("{{ key \"flag\" }}{{ 123abc }}"));
+    assert!(balanced("{{ key \"flag\" }}{{ 123 }}{{ .Values.enabled }}"));
+}

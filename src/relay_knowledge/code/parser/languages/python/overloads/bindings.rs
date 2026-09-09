@@ -1,5 +1,6 @@
 //! Bounded statement binding proofs and completing-branch merges.
 use crate::code::parser::nodes::node_text;
+use crate::code::python_imports::PythonModuleOrigins;
 use tree_sitter::Node;
 const MAX_BINDING_STATEMENTS: usize = 1024;
 
@@ -8,14 +9,21 @@ pub(super) fn statement_binding(
     statement: Node<'_>,
     binding: &str,
     module: bool,
+    origins: PythonModuleOrigins,
 ) -> Option<bool> {
     if statement.kind() == "try_statement" {
-        return try_import_binding(content, statement, binding, module);
+        return try_import_binding(content, statement, binding, module, origins);
     }
-    simple_binding(content, statement, binding, module)
+    simple_binding(content, statement, binding, module, origins)
 }
 
-fn simple_binding(content: &str, statement: Node<'_>, binding: &str, module: bool) -> Option<bool> {
+fn simple_binding(
+    content: &str,
+    statement: Node<'_>,
+    binding: &str,
+    module: bool,
+    origins: PythonModuleOrigins,
+) -> Option<bool> {
     if matches!(
         statement.kind(),
         "import_statement" | "import_from_statement"
@@ -41,12 +49,12 @@ fn simple_binding(content: &str, statement: Node<'_>, binding: &str, module: boo
                 .unwrap_or_else(|| imported.split('.').next().unwrap_or_default().to_owned());
             if local == binding {
                 imported_binding = Some(if module {
-                    from.is_none() && matches!(imported.as_str(), "typing" | "typing_extensions")
+                    from.is_none() && origins.permits_standard_module(&imported)
                 } else {
                     imported == "overload"
                         && from
                             .as_deref()
-                            .is_some_and(|name| matches!(name, "typing" | "typing_extensions"))
+                            .is_some_and(|name| origins.permits_standard_module(name))
                 });
             }
         }
@@ -81,7 +89,13 @@ fn simple_binding(content: &str, statement: Node<'_>, binding: &str, module: boo
     super::mutations::expression_rebinds(content, statement, binding, module).then_some(false)
 }
 
-fn try_import_binding(content: &str, node: Node<'_>, binding: &str, module: bool) -> Option<bool> {
+fn try_import_binding(
+    content: &str,
+    node: Node<'_>,
+    binding: &str,
+    module: bool,
+    origins: PythonModuleOrigins,
+) -> Option<bool> {
     if !contains_identifier(content, node, binding) {
         return None;
     }
@@ -121,7 +135,7 @@ fn try_import_binding(content: &str, node: Node<'_>, binding: &str, module: bool
             remaining -= 1;
             // Nested control flow is intentionally unknown; this merge accepts
             // only independently proven imports on every completing path.
-            if let Some(value) = simple_binding(content, statement, binding, module) {
+            if let Some(value) = simple_binding(content, statement, binding, module, origins) {
                 last_binding = Some(value);
             } else if super::expressions::has_eager_call(content, statement, &mut remaining) {
                 last_binding = Some(false);
@@ -183,7 +197,16 @@ pub(super) fn function_local(
         {
             return false;
         }
-        if node.kind() != "block" && simple_binding(content, node, binding, false).is_some() {
+        if node.kind() != "block"
+            && simple_binding(
+                content,
+                node,
+                binding,
+                false,
+                PythonModuleOrigins::default(),
+            )
+            .is_some()
+        {
             bound = true;
         }
         if matches!(
@@ -219,7 +242,15 @@ fn nested_declaration(content: &str, node: Node<'_>, binding: &str) -> bool {
         };
         remaining = left;
         if matches!(current.kind(), "import_statement" | "import_from_statement") {
-            if simple_binding(content, current, binding, false).is_some() {
+            if simple_binding(
+                content,
+                current,
+                binding,
+                false,
+                PythonModuleOrigins::default(),
+            )
+            .is_some()
+            {
                 return true;
             }
             continue;

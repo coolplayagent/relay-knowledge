@@ -291,7 +291,13 @@ pub(crate) fn historical_reuse_diff_fits_budget(
     paths.sort();
     paths.dedup();
 
-    Ok(paths.len() <= MAX_HISTORICAL_REUSE_CHANGED_PATHS)
+    // A local overload-provider change can invalidate otherwise unchanged Python
+    // symbols. Reuse admission runs on the existing blocking boundary; route it
+    // through the checkpointed full planner instead of growing an incremental batch.
+    Ok(paths.len() <= MAX_HISTORICAL_REUSE_CHANGED_PATHS
+        && !paths
+            .iter()
+            .any(|path| crate::code::python_imports::PythonModuleOrigins::is_provider_path(path)))
 }
 
 pub(in crate::code) fn impacted_path_count(changes: &[GitChange]) -> usize {

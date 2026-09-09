@@ -17,6 +17,11 @@ class Outer { static class Base { protected static final String FLAG = "nested.k
 class Nested extends Outer.Base {
  String read() { return System.getProperty(FLAG, "nested-default"); }
 }
+class RelativeOwner {
+ static class Inner { static class Base { protected static final String KEY="nested.key"; } }
+ static class App extends Inner.Base { String read() { return System.getProperty(KEY); } }
+ static class Absolute extends RelativeOwner.Inner.Base { String read() { return System.getProperty(KEY); } }
+}
 abstract class BaseConfig { abstract String getValue(); }
 class DefaultConfig extends BaseConfig {
  @Override String getValue() { return System.getProperty("feature_x", "true"); }
@@ -75,7 +80,7 @@ class Main {
             .iter()
             .filter(|u| u.edge_kind == "reads_config")
             .count(),
-        1
+        3
     );
     assert_eq!(
         nested
@@ -83,7 +88,7 @@ class Main {
             .iter()
             .filter(|u| u.edge_kind == "declares_config_key")
             .count(),
-        1
+        2
     );
     let flag = result
         .flags

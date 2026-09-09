@@ -4,7 +4,7 @@ use crate::{api::ApiError, storage::StorageError};
 
 pub(super) fn storage_api_error(error: StorageError) -> ApiError {
     match error {
-        StorageError::InvalidInput(message) => ApiError::invalid_argument(message),
+        StorageError::InvalidQueryArgument(message) => ApiError::invalid_argument(message),
         StorageError::AmbiguousCodeSymbol(message) => ApiError::invalid_argument(message),
         StorageError::QueryBudgetExceeded(message) => ApiError::timeout(message),
         StorageError::CapacityExceeded(message) => ApiError::qos_rejected(message),

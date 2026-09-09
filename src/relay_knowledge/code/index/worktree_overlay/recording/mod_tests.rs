@@ -9,6 +9,35 @@ use std::{
 use super::*;
 
 #[test]
+fn unchanged_recording_tracks_only_python_paths_for_origin_reparse() {
+    let source = crate::code::test_fixtures::TempSourceDir::create("overlay-python-skips");
+    let bytes = b"unchanged\n";
+    source.write("app.py", "unchanged\n");
+    source.write("README.md", "unchanged\n");
+    let hashes = ["app.py", "README.md"]
+        .map(|path| (path.to_owned(), stable_content_hash(bytes)))
+        .into();
+    let mut hash_input = Vec::new();
+    let mut deleted = Vec::new();
+    let mut files = Vec::new();
+    let mut skipped = 0;
+    let mut python_paths = Default::default();
+    let mut outputs = WorktreeFileOutputs {
+        overlay_hash_input: &mut hash_input,
+        deleted_paths: &mut deleted,
+        files_to_parse: &mut files,
+        skipped_unchanged_count: &mut skipped,
+        skipped_python_paths: &mut python_paths,
+    };
+    for path in ["app.py", "README.md"] {
+        record_file_as(&source.path, path, path, &hashes, &mut outputs).unwrap();
+    }
+    assert_eq!(skipped, 2);
+    assert_eq!(python_paths, ["app.py".to_owned()].into());
+    assert!(files.is_empty());
+}
+
+#[test]
 fn status_and_deletion_markers_have_stable_binary_framing() {
     let mut hash_input = Vec::new();
     let mut deleted_paths = Vec::new();
@@ -42,11 +71,13 @@ fn file_recording_replaces_deletion_even_when_content_is_known() {
     let mut deleted_paths = vec!["src/lib.rs".to_owned()];
     let mut files_to_parse = Vec::new();
     let mut skipped_unchanged_count = 0;
+    let mut skipped_python_paths = std::collections::BTreeSet::new();
     let mut outputs = WorktreeFileOutputs {
         overlay_hash_input: &mut hash_input,
         deleted_paths: &mut deleted_paths,
         files_to_parse: &mut files_to_parse,
         skipped_unchanged_count: &mut skipped_unchanged_count,
+        skipped_python_paths: &mut skipped_python_paths,
     };
 
     record_file_as(

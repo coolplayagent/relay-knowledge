@@ -111,8 +111,18 @@ pub(super) fn visible_parent<'a>(
 ) -> Option<Node<'a>> {
     let position = scope.start_byte();
     let leaf = name.rsplit('.').next()?;
+    let relative = name.split_once('.');
     loop {
         *remaining = remaining.checked_sub(1)?;
+        if let Some((head, tail)) = relative {
+            if is_type(scope)
+                && scope
+                    .child_by_field_name("name")
+                    .is_some_and(|node| text(node, content) == head)
+            {
+                return member_type_path(scope, tail, content, remaining);
+            }
+        }
         if is_type(scope)
             && scope
                 .child_by_field_name("name")
@@ -132,6 +142,18 @@ pub(super) fn visible_parent<'a>(
             let mut cursor = scope.walk();
             for child in scope.named_children(&mut cursor) {
                 *remaining = remaining.checked_sub(1)?;
+                if let Some((head, tail)) = relative {
+                    if is_type(child)
+                        && child
+                            .child_by_field_name("name")
+                            .is_some_and(|node| text(node, content) == head)
+                        && (scope.kind() != "block" || child.start_byte() <= position)
+                    {
+                        // Resolve from the nearest visible first segment. A local
+                        // type hiding that segment must not fall back to another owner.
+                        return member_type_path(child, tail, content, remaining);
+                    }
+                }
                 if is_type(child)
                     && child
                         .child_by_field_name("name")
@@ -154,6 +176,37 @@ pub(super) fn visible_parent<'a>(
         }
         scope = scope.parent()?;
     }
+}
+
+fn member_type_path<'a>(
+    mut owner: Node<'a>,
+    path: &str,
+    content: &str,
+    remaining: &mut usize,
+) -> Option<Node<'a>> {
+    for segment in path.split('.') {
+        *remaining = remaining.checked_sub(1)?;
+        let mut bodies = vec![owner.child_by_field_name("body")?];
+        let mut matched = None;
+        while let Some(body) = bodies.pop() {
+            let mut cursor = body.walk();
+            for child in body.named_children(&mut cursor) {
+                *remaining = remaining.checked_sub(1)?;
+                if child.kind() == "enum_body_declarations" {
+                    bodies.push(child);
+                } else if is_type(child)
+                    && child
+                        .child_by_field_name("name")
+                        .is_some_and(|node| text(node, content) == segment)
+                    && matched.replace(child).is_some()
+                {
+                    return None;
+                }
+            }
+        }
+        owner = matched?;
+    }
+    Some(owner)
 }
 
 // Descend only through type bodies, never through methods or local classes.

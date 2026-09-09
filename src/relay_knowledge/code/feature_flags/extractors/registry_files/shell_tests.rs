@@ -219,3 +219,14 @@ fn unsupported_or_oversized_static_operands_remain_unknown() {
     assert!(static_fallback(&"x".repeat(65_537), false).is_none());
     assert_eq!(static_fallback("", false).as_deref(), Some(""));
 }
+
+#[test]
+fn unquoted_tilde_defaults_remain_unknown_but_quoted_tildes_are_literal() {
+    for source in ["~", "~/path", "~user/path"] {
+        assert_eq!(super::static_fallback(source, false), None);
+    }
+    for source in ["\"~\"", "'~'", "x~", "\"\"~"] {
+        assert!(super::static_fallback(source, false).is_some(), "{source}");
+    }
+    assert_eq!(super::static_fallback("~", true).as_deref(), Some("~"));
+}

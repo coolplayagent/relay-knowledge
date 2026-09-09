@@ -2,6 +2,10 @@
 
 use std::path::Path;
 
+pub(in crate::code) mod template_actions;
+pub(in crate::code) mod template_literals;
+mod template_words;
+
 use tree_sitter::Language;
 
 use super::super::languages::LanguageSpec;
@@ -38,7 +42,7 @@ pub(in crate::code) fn recoverable_parse_error(language_id: &str, content: &str)
 
 pub(in crate::code) fn manual_parse_status(language_id: &str, content: &str) -> bool {
     match language_id {
-        "gotemplate" => super::template_actions::balanced(content),
+        "gotemplate" => template_actions::balanced(content),
         "ninja" => ninja_manifest_shape(content),
         _ => false,
     }

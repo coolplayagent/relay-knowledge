@@ -62,3 +62,6 @@ fn relative_source_path(path: &Path, source_root: &Path) -> String {
         .to_string_lossy()
         .replace('\\', "/")
 }
+
+#[path = "architecture_boundaries/configuration_layout.rs"]
+mod configuration_layout;

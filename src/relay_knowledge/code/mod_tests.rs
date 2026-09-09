@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn historical_reuse_provider_changes_choose_existing_full_planner() {
+    let repo = test_fixtures::TempGitRepo::create("reuse-python-provider");
+    repo.write("app.py", "import typing\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Before provider"]);
+    let before = repo.git_text(["rev-parse", "HEAD"]);
+    repo.write("typing.py", "def overload(f): return f\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Add provider"]);
+    let local = repo.git_text(["rev-parse", "HEAD"]);
+    assert!(
+        !index::historical_reuse_diff_fits_budget(&repo.path, &before, &local, &[], &[]).unwrap()
+    );
+    repo.git(["rm", "typing.py"]);
+    repo.git(["commit", "-m", "Remove provider"]);
+    assert!(
+        !index::historical_reuse_diff_fits_budget(&repo.path, &local, "HEAD", &[], &[]).unwrap()
+    );
+}
+
+#[test]
 fn historical_reuse_budget_counts_both_rename_and_copy_paths() {
     let changes = vec![
         source::change_status::GitChange::Renamed {

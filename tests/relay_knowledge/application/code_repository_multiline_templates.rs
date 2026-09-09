@@ -213,3 +213,69 @@ async fn parenthesized_template_literals_and_export_defaults_survive_git_indexin
         }
     }
 }
+
+#[tokio::test]
+async fn numeric_template_diagnostics_and_tilde_defaults_survive_git_indexing() {
+    let repo = FixtureRepo::create("numeric-template-tilde");
+    repo.git(["config", "core.autocrlf", "false"]);
+    repo.write("src/bad.ctmpl", "{{/* ignored {{ key \"fake\" }}\r\n */}}\r\n{{ keyOrDefault\r\n \"quoted\" \"a}}b\\\"c\" }}\r\n{{ keyOrDefault\r\n \"raw\" `x}}y\r\nz` }}\r\n{{ 123abc }}\r\n{{ 18446744073709551616 }}\r\n{{ 0x10000000000000000 }}\r\n");
+    repo.write(
+        "src/defaults.sh",
+        "export FLAG=~\nexport PATH_FLAG=~/path\nexport QUOTED=\"~\"\n",
+    );
+    repo.git(["add", "."]);
+    repo.git([
+        "commit",
+        "-m",
+        "Malformed numeric action and tilde defaults",
+    ]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-numeric-tilde"),
+        )
+        .await
+        .unwrap();
+    let response = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                selector("fixture", "HEAD"),
+                20,
+                FreshnessPolicy::AllowStale,
+            )
+            .unwrap(),
+            context("query-numeric-tilde"),
+        )
+        .await
+        .unwrap();
+    assert!(
+        response.degraded_reason.is_some(),
+        "malformed numeric template retains diagnostic"
+    );
+    for (key, expected) in [("FLAG", None), ("PATH_FLAG", None), ("QUOTED", Some("~"))] {
+        let flag = response
+            .flags
+            .iter()
+            .find(|flag| flag.source_key == key)
+            .unwrap();
+        let definition = flag
+            .usages
+            .iter()
+            .find(|usage| usage.edge_kind == "defines_config")
+            .unwrap();
+        assert_eq!(definition.metadata.default_value.as_deref(), expected);
+        assert_eq!(
+            definition.metadata.value_type.as_deref(),
+            expected.map(|_| "string")
+        );
+    }
+}

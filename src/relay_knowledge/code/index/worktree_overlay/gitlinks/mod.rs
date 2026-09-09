@@ -270,6 +270,7 @@ fn record_dirty_submodule_path(
             deleted_paths: &mut *recorder.deleted_paths,
             files_to_parse: &mut *recorder.files_to_parse,
             skipped_unchanged_count: &mut *recorder.skipped_unchanged_count,
+            skipped_python_paths: &mut *recorder.skipped_python_paths,
         };
         return record_file_as(
             submodule_root,
@@ -300,6 +301,7 @@ fn record_dirty_submodule_path(
                     deleted_paths: &mut *recorder.deleted_paths,
                     files_to_parse: &mut *recorder.files_to_parse,
                     skipped_unchanged_count: &mut *recorder.skipped_unchanged_count,
+                    skipped_python_paths: &mut *recorder.skipped_python_paths,
                 };
                 record_file_as(
                     submodule_root,

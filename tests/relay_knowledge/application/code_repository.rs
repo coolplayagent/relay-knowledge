@@ -955,6 +955,8 @@ mod historical_reuse_tests;
 #[path = "code_repository_canonical_calls.rs"]
 mod canonical_calls;
 
+#[path = "code_repository_python_import_origins.rs"]
+mod python_import_origins;
 #[path = "code_repository_python_rebinding.rs"]
 mod python_rebinding;
 #[path = "code_repository_unresolved_call_names.rs"]
@@ -974,3 +976,6 @@ mod python_boundaries;
 
 #[path = "code_repository_unicode_config_query.rs"]
 mod unicode_config_query;
+
+#[path = "code_repository_python_alias_creation.rs"]
+mod python_alias_creation;

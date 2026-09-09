@@ -139,7 +139,10 @@ fn static_fallback(source: &str, outer_double: bool) -> Option<String> {
     }
     let mut quote = None;
     let mut value = String::with_capacity(source.len());
-    for ch in source.chars() {
+    for (index, ch) in source.char_indices() {
+        if index == 0 && ch == '~' && !outer_double {
+            return None;
+        }
         match (quote, ch) {
             (Some(active), current) if active == current => quote = None,
             (None, '"') => quote = Some('"'),

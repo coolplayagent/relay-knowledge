@@ -3,6 +3,10 @@ use super::*;
 #[test]
 fn storage_errors_preserve_boundary_messages() {
     assert_eq!(
+        StorageError::InvalidQueryArgument("no searchable terms".to_owned()).to_string(),
+        "invalid query argument: no searchable terms"
+    );
+    assert_eq!(
         StorageError::QueryBudgetExceeded("narrow the query".to_owned()).to_string(),
         "query budget exceeded: narrow the query"
     );

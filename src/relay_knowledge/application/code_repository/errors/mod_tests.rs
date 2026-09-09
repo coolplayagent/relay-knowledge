@@ -3,7 +3,7 @@ use crate::{api::ErrorKind, storage::StorageError};
 
 #[test]
 fn rejected_query_input_does_not_report_a_retryable_storage_outage() {
-    let error = storage_api_error(StorageError::InvalidInput(
+    let error = storage_api_error(StorageError::InvalidQueryArgument(
         "configuration query contains no searchable terms".to_owned(),
     ));
     assert_eq!(error.error_kind, ErrorKind::InvalidArgument);
@@ -11,6 +11,15 @@ fn rejected_query_input_does_not_report_a_retryable_storage_outage() {
         error.message,
         "configuration query contains no searchable terms"
     );
+}
+
+#[test]
+fn legacy_storage_conditions_preserve_their_backend_error_mapping() {
+    for message in ["file query timed out", "repository shard is missing"] {
+        let error = storage_api_error(StorageError::InvalidInput(message.to_owned()));
+        assert_eq!(error.error_kind, ErrorKind::StorageUnavailable);
+        assert_eq!(error.message, format!("invalid storage input: {message}"));
+    }
 }
 
 #[test]
