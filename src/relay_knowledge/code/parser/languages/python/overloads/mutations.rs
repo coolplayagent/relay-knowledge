@@ -2,35 +2,34 @@
 use crate::code::parser::nodes::node_text;
 use tree_sitter::Node;
 const MAX_BINDING_STATEMENTS: usize = 1024;
-pub(super) fn expression_rebinds(
-    content: &str,
-    mut node: Node<'_>,
-    name: &str,
-    module: bool,
-) -> bool {
-    if !matches!(node.kind(), "assignment" | "augmented_assignment") {
-        return false;
-    }
+pub(super) fn expression_rebinds(content: &str, node: Node<'_>, name: &str, module: bool) -> bool {
     let mut remaining = MAX_BINDING_STATEMENTS;
+    let mut cursor = node.walk();
     loop {
         if remaining == 0 {
             return true;
         }
         remaining -= 1;
-        let Some(left) = node.child_by_field_name("left") else {
-            return false;
+        let current = cursor.node();
+        let target = match current.kind() {
+            "assignment" | "augmented_assignment" => current.child_by_field_name("left"),
+            "named_expression" => current.child_by_field_name("name"),
+            _ => None,
         };
-        if assignment_binds(content, left, name, module, &mut remaining) {
+        if target
+            .is_some_and(|target| assignment_binds(content, target, name, module, &mut remaining))
+        {
             return true;
         }
-        // Chained assignments nest on the right; ordinary RHS reads are not targets.
-        let Some(right) = node
-            .child_by_field_name("right")
-            .filter(|right| right.kind() == "assignment")
-        else {
-            return false;
-        };
-        node = right;
+        // A lambda body executes later and its named bindings belong to the lambda.
+        if current.kind() != "lambda" && cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return false;
+            }
+        }
     }
 }
 
@@ -75,8 +74,9 @@ fn module_receiver(content: &str, mut node: Node<'_>, name: &str, remaining: &mu
         let Some(receiver) = node
             .child_by_field_name("object")
             .or_else(|| node.child_by_field_name("value"))
+            .and_then(|receiver| super::expressions::transparent(receiver, remaining))
         else {
-            return false;
+            return *remaining == 0;
         };
         if receiver.kind() == "identifier" {
             if node_text(content, receiver) != name {
@@ -135,9 +135,11 @@ pub(super) fn expression_mutates_module(
     binding: &str,
 ) -> bool {
     let mut cursor = expression.walk();
-    for _ in 0..MAX_BINDING_STATEMENTS {
+    let mut remaining = MAX_BINDING_STATEMENTS;
+    while remaining > 0 {
+        remaining -= 1;
         let node = cursor.node();
-        if node.kind() == "call" && mutator_targets_module(content, node, binding) {
+        if node.kind() == "call" && mutator_targets_module(content, node, binding, &mut remaining) {
             return true;
         }
         if node.kind() != "lambda" && cursor.goto_first_child() {
@@ -151,7 +153,12 @@ pub(super) fn expression_mutates_module(
     }
     true
 }
-fn mutator_targets_module(content: &str, node: Node<'_>, binding: &str) -> bool {
+fn mutator_targets_module(
+    content: &str,
+    node: Node<'_>,
+    binding: &str,
+    remaining: &mut usize,
+) -> bool {
     let Some(function) = node
         .child_by_field_name("function")
         .filter(|function| function.kind() == "identifier")
@@ -166,9 +173,10 @@ fn mutator_targets_module(content: &str, node: Node<'_>, binding: &str) -> bool 
     };
     let Some(receiver) = arguments
         .named_child(0)
+        .and_then(|receiver| super::expressions::transparent(receiver, remaining))
         .filter(|receiver| receiver.kind() == "identifier")
     else {
-        return false;
+        return *remaining == 0;
     };
     node_text(content, receiver) == binding
         && arguments

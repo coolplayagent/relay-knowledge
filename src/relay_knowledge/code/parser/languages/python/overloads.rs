@@ -5,6 +5,7 @@ use crate::code::parser::nodes::{SyntaxRange, node_text, syntax_range};
 
 const MAX_BINDING_STATEMENTS: usize = 1024;
 
+mod expressions;
 mod mutations;
 
 pub(in crate::code::parser) fn manual_definitions(
@@ -37,7 +38,11 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
         .named_children(&mut cursor)
         .filter(|node| node.kind() == "decorator")
         .any(|decorator| {
-            let Some(expression) = decorator.named_child(0).and_then(transparent_expression) else {
+            let mut remaining = MAX_BINDING_STATEMENTS;
+            let Some(expression) = decorator
+                .named_child(0)
+                .and_then(|node| expressions::transparent(node, &mut remaining))
+            else {
                 return false;
             };
             let (binding, module) = match expression.kind() {
@@ -49,7 +54,7 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
                 {
                     let Some(object) = expression
                         .child_by_field_name("object")
-                        .and_then(transparent_expression)
+                        .and_then(|node| expressions::transparent(node, &mut remaining))
                         .filter(|node| node.kind() == "identifier")
                     else {
                         return false;
@@ -60,28 +65,6 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
             };
             visible_import(content, decorated, &binding, module)
         })
-}
-
-fn transparent_expression(mut node: Node<'_>) -> Option<Node<'_>> {
-    let mut remaining = MAX_BINDING_STATEMENTS;
-    loop {
-        remaining = remaining.checked_sub(1)?;
-        if node.kind() != "parenthesized_expression" {
-            return Some(node);
-        }
-        let mut expression = None;
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            remaining = remaining.checked_sub(1)?;
-            if child.kind() == "comment" {
-                continue;
-            }
-            if expression.replace(child).is_some() {
-                return None;
-            }
-        }
-        node = expression?;
-    }
 }
 
 fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool) -> bool {
@@ -206,7 +189,7 @@ fn later_import_binding(
 
 fn linear_binding_statement(statement: Node<'_>) -> bool {
     match statement.kind() {
-        "import_statement" | "import_from_statement" | "pass_statement" => true,
+        "import_statement" | "import_from_statement" | "pass_statement" | "comment" => true,
         "expression_statement" => statement
             .named_child(0)
             .filter(|expression| expression.kind() == "assignment")
