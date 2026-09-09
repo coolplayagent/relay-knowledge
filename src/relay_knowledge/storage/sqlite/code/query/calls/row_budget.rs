@@ -31,7 +31,7 @@ pub(super) fn run<T>(
     #[cfg(test)]
     LAST_STEPS.set(callbacks.load(Ordering::Relaxed) * PROGRESS_INTERVAL as usize);
     match result {
-        Err(StorageError::Sqlite(rusqlite::Error::SqliteFailure(error, _))) if error.code == ErrorCode::OperationInterrupted => Err(StorageError::InvalidInput("call query incomplete: SQLite execution budget exhausted; narrow repository path/language filters or select a more specific symbol_snapshot_id".to_owned())),
+        Err(StorageError::Sqlite(rusqlite::Error::SqliteFailure(error, _))) if error.code == ErrorCode::OperationInterrupted => Err(StorageError::QueryBudgetExceeded("call query incomplete: SQLite execution budget exhausted; narrow repository path/language filters or select a more specific symbol_snapshot_id".to_owned())),
         result => result,
     }
 }

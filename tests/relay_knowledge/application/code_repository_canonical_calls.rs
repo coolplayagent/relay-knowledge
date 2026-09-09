@@ -2,6 +2,53 @@
 use super::*;
 
 #[tokio::test]
+async fn python_overload_stubs_select_the_runtime_implementation() {
+    let repo = FixtureRepo::create("python-overload-calls");
+    repo.write("src/sample.py", "import typing\n@typing.overload\ndef choose(value: int): ...\n@typing.overload\ndef choose(value: str): ...\ndef choose(value): return leaf(value)\ndef leaf(value): return value\ndef caller(): return choose(1)\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Python overload declarations"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-python-overloads"),
+        )
+        .await
+        .unwrap();
+    let definitions = query(&service, "choose", CodeQueryKind::Definition).await;
+    let canonical = definitions
+        .results
+        .iter()
+        .find_map(|hit| {
+            hit.canonical_symbol_id
+                .as_deref()
+                .filter(|id| id.ends_with("::choose"))
+        })
+        .unwrap();
+    for (kind, expected) in [
+        (CodeQueryKind::Callers, "::caller"),
+        (CodeQueryKind::Callees, "::leaf"),
+    ] {
+        let response = query(&service, canonical, kind).await;
+        assert_eq!(response.results.len(), 1);
+        assert!(
+            response.results[0]
+                .canonical_symbol_id
+                .as_deref()
+                .unwrap()
+                .ends_with(expected)
+        );
+    }
+}
+
+#[tokio::test]
 async fn java_canonical_call_queries_preserve_exact_repository_and_class_identity() {
     let repo = FixtureRepo::create("java-canonical-calls");
     repo.write(

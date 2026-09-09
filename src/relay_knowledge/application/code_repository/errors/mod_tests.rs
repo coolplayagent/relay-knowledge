@@ -2,6 +2,15 @@ use super::storage_api_error;
 use crate::{api::ErrorKind, storage::StorageError};
 
 #[test]
+fn query_work_budget_exhaustion_is_a_timeout_not_a_storage_outage() {
+    let error = storage_api_error(StorageError::QueryBudgetExceeded(
+        "call query incomplete; narrow path filters".to_owned(),
+    ));
+    assert_eq!(error.error_kind, ErrorKind::Timeout);
+    assert!(error.message.contains("narrow path filters"));
+}
+
+#[test]
 fn code_index_task_queue_capacity_maps_to_retryable_qos_rejection() {
     let error = storage_api_error(StorageError::CapacityExceeded(
         "code index task queue is full; retry after queued work completes".to_owned(),

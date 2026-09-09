@@ -1,7 +1,8 @@
 use super::{
-    CODE_SNAPSHOT_FACT_VERSION, clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
+    CODE_SNAPSHOT_FACT_VERSION, append_hash_list, append_hash_part,
+    clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
     code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,
-    code_snapshot_scope_matches_identity, code_snapshot_scope_workspace_semantic,
+    code_snapshot_scope_matches_identity, code_snapshot_scope_workspace_semantic, stable_hash64,
 };
 use crate::domain::{CodeMonorepoWorkspaceFormat, CodeWorkspaceDetectionConfig};
 
@@ -182,7 +183,7 @@ fn canonical_call_read_model_upgrade_invalidates_pre_index_scope_identity() {
 
 #[test]
 fn cpp_declaration_upgrade_invalidates_scopes_with_canonical_call_indexes() {
-    assert!(CODE_SNAPSHOT_FACT_VERSION.ends_with("cpp-callable-declarations-v1"));
+    assert!(CODE_SNAPSHOT_FACT_VERSION.contains("cpp-callable-declarations-v1"));
     // Same inputs indexed with canonical-call-selectors-v1 before C++ declaration repair.
     let old_scope = "git_snapshot:1747c22227b6262c";
     assert!(!code_snapshot_scope_matches_identity(
@@ -191,5 +192,26 @@ fn cpp_declaration_upgrade_invalidates_scopes_with_canonical_call_indexes() {
         &[],
         &[],
         old_scope
+    ));
+}
+
+#[test]
+fn python_overload_upgrade_invalidates_the_previous_completed_scope() {
+    let previous = CODE_SNAPSHOT_FACT_VERSION.replace("-python-overload-declarations-v1", "");
+    assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
+    let mut input = Vec::new();
+    for value in ["git_snapshot", "repo-upgrade", "tree-unchanged"] {
+        append_hash_part(&mut input, value);
+    }
+    append_hash_list(&mut input, &[]);
+    append_hash_list(&mut input, &[]);
+    append_hash_part(&mut input, &previous);
+    let old_scope = format!("git_snapshot:{:016x}", stable_hash64(&input));
+    assert!(!code_snapshot_scope_matches_identity(
+        "repo-upgrade",
+        "tree-unchanged",
+        &[],
+        &[],
+        &old_scope
     ));
 }

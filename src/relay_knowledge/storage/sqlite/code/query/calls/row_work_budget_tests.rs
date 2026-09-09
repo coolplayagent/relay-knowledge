@@ -113,7 +113,7 @@ fn canonical_call_query_work_budget() {
             search_call_identity_rows_with_budget(&connection, &status, &filtered, &identity)
         });
         assert!(
-            matches!(exhausted, Err(StorageError::InvalidInput(ref message)) if message.contains("call query incomplete"))
+            matches!(exhausted, Err(StorageError::QueryBudgetExceeded(ref message)) if message.contains("call query incomplete"))
         );
     }
 }

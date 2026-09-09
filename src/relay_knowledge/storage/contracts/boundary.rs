@@ -22,6 +22,8 @@ pub enum StorageError {
     InvalidInput(String),
     /// An exact canonical code selector identifies multiple definition snapshots.
     AmbiguousCodeSymbol(String),
+    /// A read query exhausted its bounded execution budget.
+    QueryBudgetExceeded(String),
     Invariant(String),
 }
 
@@ -52,6 +54,9 @@ impl fmt::Display for StorageError {
             ),
             Self::AmbiguousCodeSymbol(message) => {
                 write!(formatter, "ambiguous code symbol: {message}")
+            }
+            Self::QueryBudgetExceeded(message) => {
+                write!(formatter, "query budget exceeded: {message}")
             }
             Self::InvalidInput(message) => write!(formatter, "invalid storage input: {message}"),
             Self::Invariant(message) => write!(formatter, "storage invariant failed: {message}"),

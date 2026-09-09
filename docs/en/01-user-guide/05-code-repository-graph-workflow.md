@@ -128,7 +128,7 @@ For `callers` and `callees`, pass a definition result’s complete `canonical_sy
 
 Canonical call selectors prefer callable definitions over C/C++ prototypes and signature-only declarations according to the indexed call-target policy. If no definition exists, a unique callable declaration remains queryable; multiple declarations are explicitly ambiguous. They inspect at most 1024 symbols sharing that canonical ID; exceeding this budget returns an explicit error directing you to a definition `symbol_snapshot_id`, rather than reporting an empty or falsely unique result.
 
-Direct call queries scan non-generated and generated candidates separately in path/line order, retaining non-generated priority without sorting every matching edge before the candidate limit. Selector resolution, both scans, and excerpt hydration share a roughly 4.1-million SQLite instruction budget. Exhaustion reports `call query incomplete` and does not fall back to empty or partial success; narrow path/language filters or select a more specific snapshot. This query-only change reuses the existing durable directional indexes and requires no schema migration or repository rebuild.
+Direct call queries scan non-generated and generated candidates separately in path/line order, retaining non-generated priority without sorting every matching edge before the candidate limit. Selector resolution, both scans, and excerpt hydration share a roughly 4.1-million SQLite instruction budget. Exhaustion reports `call query incomplete` with `error_kind=timeout` (HTTP 408 through the repository API) and does not fall back to empty or partial success; narrow path/language filters or select a more specific snapshot. This query-only change reuses the existing durable directional indexes and requires no schema migration or repository rebuild.
 
 The `cpp-callable-declarations-v1` extraction version also requires ordinary `repo index <alias> --ref <ref>` to rebuild older scopes, including scopes that already have canonical-call indexes. It preserves C++ prototype declarations separately from executable definitions; snapshot IDs must be copied again after rebuilding.
 
@@ -326,3 +326,5 @@ When `repo query` returns no results, check in order:
 6. Whether files were diagnosed as unsupported, binary, oversized, invalid UTF-8, or parser failed.
 
 `repo impact` requires an indexed snapshot for `--head`. Run `repo index repo --ref <head>` or `repo update repo --base <base> --head <head>` before impact analysis.
+
+Python overload declarations proven through visible `typing` or `typing_extensions` imports (including aliases) are distinguished from the runtime implementation. Custom or shadowed decorators are not assumed to be typing declarations. The `python-overload-declarations-v1` fact component invalidates old completed scopes; run ordinary `repo index <alias> --ref <ref>` and copy snapshot selectors again after rebuilding.

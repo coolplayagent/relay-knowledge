@@ -8,6 +8,7 @@ mod hit_projection;
 mod identity;
 mod identity_query;
 mod indirect;
+mod row_budget;
 mod row_store;
 mod search;
 pub(super) mod site_scoring;

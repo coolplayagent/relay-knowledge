@@ -1,7 +1,6 @@
 use rusqlite::{Connection, Row, params_from_iter, types::Value};
 
-#[path = "row_budget.rs"]
-mod row_budget;
+use super::row_budget;
 
 use crate::storage::sqlite::code::search::EXACT_SEARCH_OWNER_PREDICATE_SQL;
 use crate::{
