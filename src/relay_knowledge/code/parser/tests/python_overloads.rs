@@ -174,3 +174,53 @@ class Conditional:
         assert_eq!(kinds, ["function_declaration", "function"], "{name}");
     }
 }
+
+#[test]
+fn python_binding_directives_resolve_the_declared_namespace() {
+    let registration = crate::domain::CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec![],
+        vec![],
+    )
+    .unwrap();
+    let mut build = SnapshotBuild::new(&registration, "commit".into(), "tree".into(), true, 1, 0);
+    parse_indexed_file(
+        &mut build,
+        "sample.py",
+        br#"from typing import overload, get_overloads
+global overload
+def leaf(): return 1
+def outer():
+    overload = lambda fn: fn
+    def inner():
+        global overload
+        @overload
+        def global_choice(x: int): ...
+        def global_choice(x): return leaf()
+        return global_choice
+    return inner()
+def enclosing():
+    from typing import overload
+    def inner():
+        nonlocal overload
+        @overload
+        def nonlocal_choice(x: int): ...
+        def nonlocal_choice(x): return leaf()
+        return nonlocal_choice
+    return inner()
+"#,
+    )
+    .unwrap();
+    let snapshot = build.finish();
+    for name in ["global_choice", "nonlocal_choice"] {
+        let kinds = snapshot
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.name == name)
+            .map(|symbol| symbol.kind.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(kinds, ["function_declaration", "function"], "{name}");
+    }
+}

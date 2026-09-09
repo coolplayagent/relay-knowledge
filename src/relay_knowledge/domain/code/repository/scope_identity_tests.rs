@@ -198,8 +198,8 @@ fn cpp_declaration_upgrade_invalidates_scopes_with_canonical_call_indexes() {
 #[test]
 fn python_overload_upgrade_invalidates_the_previous_completed_scope() {
     let previous = CODE_SNAPSHOT_FACT_VERSION.replace(
+        "python-overload-declarations-v3",
         "python-overload-declarations-v2",
-        "python-overload-declarations-v1",
     );
     assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
     let mut input = Vec::new();

@@ -69,6 +69,30 @@ async fn python_method_nested_functions_do_not_capture_class_overload_imports() 
 async fn python_overload_stubs_select_the_runtime_implementation() {
     let repo = FixtureRepo::create("python-overload-calls");
     repo.write("src/sample.py", "import typing\n@typing.overload\ndef choose(value: int): ...\n@typing.overload\ndef choose(value: str): ...\ndef choose(value): return leaf(value)\ndef leaf(value): return value\ndef caller(): return choose(1)\n");
+    repo.write(
+        "src/directives.py",
+        r#"from typing import overload, get_overloads
+def leaf(): return 1
+def outer():
+    overload = lambda fn: fn
+    def inner():
+        global overload
+        @overload
+        def global_choice(x: int): ...
+        def global_choice(x): return leaf()
+        return global_choice
+    return inner()
+def enclosing():
+    from typing import overload
+    def inner():
+        nonlocal overload
+        @overload
+        def nonlocal_choice(x: int): ...
+        def nonlocal_choice(x): return leaf()
+        return nonlocal_choice
+    return inner()
+"#,
+    );
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Python overload declarations"]);
     let service = service_with_memory_store().await;
@@ -108,6 +132,27 @@ async fn python_overload_stubs_select_the_runtime_implementation() {
                 .as_deref()
                 .unwrap()
                 .ends_with(expected)
+        );
+    }
+    for name in ["global_choice", "nonlocal_choice"] {
+        let definitions = query(&service, name, CodeQueryKind::Definition).await;
+        let canonical = definitions
+            .results
+            .iter()
+            .find_map(|hit| {
+                hit.canonical_symbol_id
+                    .as_deref()
+                    .filter(|id| id.ends_with(name))
+            })
+            .unwrap();
+        let response = query(&service, canonical, CodeQueryKind::Callees).await;
+        assert_eq!(response.results.len(), 1, "{name}");
+        assert!(
+            response.results[0]
+                .canonical_symbol_id
+                .as_deref()
+                .unwrap()
+                .ends_with("::leaf")
         );
     }
 }
