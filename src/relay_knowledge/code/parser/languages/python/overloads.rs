@@ -1,11 +1,14 @@
 //! Recognize overload declarations only through a visible typing import binding.
+use std::collections::BTreeMap;
 use tree_sitter::Node;
 
 use crate::code::parser::nodes::{SyntaxRange, node_text, syntax_range};
 
 const MAX_BINDING_STATEMENTS: usize = 1024;
 
+mod bindings;
 mod expressions;
+use bindings::{contains_identifier, statement_binding};
 mod mutations;
 
 pub(in crate::code::parser) fn manual_definitions(
@@ -33,57 +36,129 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
     else {
         return false;
     };
+    let mut remaining = MAX_BINDING_STATEMENTS;
+    let mut proven = BTreeMap::new();
     let mut cursor = decorated.walk();
     decorated
         .named_children(&mut cursor)
-        .filter(|node| node.kind() == "decorator")
+        .filter(|n| n.kind() == "decorator")
         .any(|decorator| {
-            let mut remaining = MAX_BINDING_STATEMENTS;
-            let Some(expression) = decorator
-                .named_child(0)
-                .and_then(|node| expressions::transparent(node, &mut remaining))
-            else {
-                return false;
-            };
-            let (binding, module) = match expression.kind() {
-                "identifier" => (node_text(content, expression), false),
-                "attribute"
-                    if expression
-                        .child_by_field_name("attribute")
-                        .is_some_and(|name| node_text(content, name) == "overload") =>
-                {
-                    let Some(object) = expression
-                        .child_by_field_name("object")
-                        .and_then(|node| expressions::transparent(node, &mut remaining))
-                        .filter(|node| node.kind() == "identifier")
-                    else {
-                        return false;
-                    };
-                    (node_text(content, object), true)
-                }
-                _ => return false,
-            };
-            visible_import(content, decorated, &binding, module)
+            decorator_proven(content, decorated, decorator, &mut remaining, &mut proven)
         })
 }
 
-fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool) -> bool {
-    let mut remaining = MAX_BINDING_STATEMENTS;
+fn evaluate_decorator(
+    content: &str,
+    decorated: Node<'_>,
+    decorator: Node<'_>,
+    remaining: &mut usize,
+    proven: &mut BTreeMap<usize, bool>,
+) -> bool {
+    let Some(expression) = decorator
+        .named_child(0)
+        .and_then(|node| expressions::transparent(node, remaining))
+    else {
+        return false;
+    };
+    let (binding, module) = match expression.kind() {
+        "identifier" => (node_text(content, expression), false),
+        "attribute"
+            if expression
+                .child_by_field_name("attribute")
+                .is_some_and(|name| node_text(content, name) == "overload") =>
+        {
+            let Some(object) = expression
+                .child_by_field_name("object")
+                .and_then(|node| expressions::transparent(node, remaining))
+                .filter(|node| node.kind() == "identifier")
+            else {
+                return false;
+            };
+            (node_text(content, object), true)
+        }
+        _ => return false,
+    };
+    visible_import(content, decorated, &binding, module, remaining, proven)
+}
+
+fn prove_eager_decorators(
+    content: &str,
+    statement: Node<'_>,
+    remaining: &mut usize,
+    proven: &mut BTreeMap<usize, bool>,
+) {
+    let mut stack = vec![statement];
+    while let Some(node) = stack.pop() {
+        let Some(left) = remaining.checked_sub(1) else {
+            return;
+        };
+        *remaining = left;
+        match node.kind() {
+            "decorator" => {
+                if let Some(owner) = node.parent() {
+                    decorator_proven(content, owner, node, remaining, proven);
+                }
+                continue;
+            }
+            "class_definition" => {
+                if let Some(body) = node.child_by_field_name("body") {
+                    let Some(left) = remaining.checked_sub(1) else {
+                        return;
+                    };
+                    *remaining = left;
+                    stack.push(body);
+                }
+                continue;
+            }
+            "decorated_definition"
+            | "block"
+            | "if_statement"
+            | "for_statement"
+            | "while_statement"
+            | "with_statement"
+            | "try_statement"
+            | "except_clause"
+            | "else_clause"
+            | "finally_clause"
+            | "match_statement"
+            | "case_clause" => {}
+            // Expressions cannot contain a statement decorator. Undecorated
+            // function bodies run later, so neither needs a recursive proof.
+            _ => continue,
+        }
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            let Some(left) = remaining.checked_sub(1) else {
+                return;
+            };
+            *remaining = left;
+            stack.push(child);
+        }
+    }
+}
+
+fn visible_import(
+    content: &str,
+    mut node: Node<'_>,
+    binding: &str,
+    module: bool,
+    remaining: &mut usize,
+    proven: &mut BTreeMap<usize, bool>,
+) -> bool {
     let mut crossed_scope = false;
     let mut delayed_lookup = false;
     'lookup: loop {
-        if remaining == 0 {
+        if *remaining == 0 {
             return false;
         }
-        remaining -= 1;
+        *remaining -= 1;
         if delayed_lookup
             && node.parent().is_some_and(|parent| {
                 matches!(parent.kind(), "module" | "block")
                     && (!crossed_scope || !class_namespace(parent))
             })
         {
-            if let Some(imported) =
-                later_import_binding(content, node, binding, module, &mut remaining)
+            if let Some(imported) = later_import_binding(content, node, binding, module, remaining)
             {
                 return imported;
             }
@@ -96,10 +171,10 @@ fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool
             .filter(|parent| !crossed_scope || !class_namespace(*parent))
             .and_then(|_| node.prev_named_sibling());
         while let Some(statement) = previous {
-            if remaining == 0 {
+            if *remaining == 0 {
                 return false;
             }
-            remaining -= 1;
+            *remaining -= 1;
             if matches!(statement.kind(), "global_statement" | "nonlocal_statement")
                 && contains_identifier(content, statement, binding)
             {
@@ -115,10 +190,10 @@ fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool
                 // Directives redirect lookup; unlike assignment/deletion they
                 // do not establish a new value for the decorator binding.
                 while let Some(parent) = node.parent() {
-                    if remaining == 0 {
+                    if *remaining == 0 {
                         return false;
                     }
-                    remaining -= 1;
+                    *remaining -= 1;
                     if global && parent.kind() == "module" {
                         break;
                     }
@@ -135,11 +210,22 @@ fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool
             if let Some(imported) = statement_binding(content, statement, binding, module) {
                 return imported;
             }
+            prove_eager_decorators(content, statement, remaining, proven);
+            if mutations::unknown_eager_call(content, statement, binding, module, proven, remaining)
+            {
+                return false;
+            }
             previous = statement.prev_named_sibling();
         }
         let Some(parent) = node.parent() else {
             return false;
         };
+        if parent.kind() == "function_definition"
+            && node.kind() == "block"
+            && bindings::function_local(content, node, binding, remaining)
+        {
+            return false;
+        }
         if parent.kind() == "function_definition"
             && parent
                 .child_by_field_name("parameters")
@@ -185,7 +271,7 @@ fn later_import_binding(
             // namespace writes cannot retroactively change that invocation.
             return proven;
         }
-        if expressions::has_eager_call(statement, remaining) {
+        if expressions::has_eager_call(content, statement, remaining) {
             return Some(false);
         }
         if callable_name
@@ -217,7 +303,10 @@ fn direct_function_call(
     name: &str,
     remaining: &mut usize,
 ) -> bool {
-    if statement.kind() != "expression_statement" {
+    if !matches!(
+        statement.kind(),
+        "expression_statement" | "return_statement"
+    ) {
         return false;
     }
     let Some(mut expression) = statement.named_child(0) else {
@@ -304,153 +393,24 @@ fn parameter_binds(content: &str, parameters: Node<'_>, binding: &str) -> bool {
     })
 }
 
-fn statement_binding(
+/// Reuse already-proven earlier decorators within this one bounded lookup.
+/// Each new cache entry consumed the shared budget, so recursive alias proofs
+/// cannot multiply work or allocate beyond the statement budget.
+fn decorator_proven(
     content: &str,
-    statement: Node<'_>,
-    binding: &str,
-    module: bool,
-) -> Option<bool> {
-    if statement.kind() == "try_statement" {
-        return try_import_binding(content, statement, binding, module);
-    }
-    simple_binding(content, statement, binding, module)
-}
-
-fn simple_binding(content: &str, statement: Node<'_>, binding: &str, module: bool) -> Option<bool> {
-    if matches!(
-        statement.kind(),
-        "import_statement" | "import_from_statement"
-    ) {
-        let mut wildcard_cursor = statement.walk();
-        if statement
-            .named_children(&mut wildcard_cursor)
-            .any(|node| node.kind() == "wildcard_import")
-        {
-            return Some(false);
-        }
-        let from = statement
-            .child_by_field_name("module_name")
-            .map(|name| node_text(content, name));
-        let mut cursor = statement.walk();
-        let mut imported_binding = None;
-        for import in statement.children_by_field_name("name", &mut cursor) {
-            let name = import.child_by_field_name("name").unwrap_or(import);
-            let imported = node_text(content, name);
-            let local = import
-                .child_by_field_name("alias")
-                .map(|alias| node_text(content, alias))
-                .unwrap_or_else(|| imported.split('.').next().unwrap_or_default().to_owned());
-            if local == binding {
-                imported_binding = Some(if module {
-                    from.is_none() && matches!(imported.as_str(), "typing" | "typing_extensions")
-                } else {
-                    imported == "overload"
-                        && from
-                            .as_deref()
-                            .is_some_and(|name| matches!(name, "typing" | "typing_extensions"))
-                });
-            }
-        }
-        return imported_binding;
-    }
-    let statement = if statement.kind() == "decorated_definition" {
-        statement
-            .child_by_field_name("definition")
-            .unwrap_or(statement)
-    } else {
-        statement
+    decorated: Node<'_>,
+    decorator: Node<'_>,
+    remaining: &mut usize,
+    proven: &mut BTreeMap<usize, bool>,
+) -> bool {
+    let Some(left) = remaining.checked_sub(1) else {
+        return false;
     };
-    if matches!(statement.kind(), "function_definition" | "class_definition") {
-        return statement
-            .child_by_field_name("name")
-            .filter(|name| node_text(content, *name) == binding)
-            .map(|_| false);
+    *remaining = left;
+    if let Some(value) = proven.get(&decorator.start_byte()) {
+        return *value;
     }
-    if statement.kind() == "expression_statement" {
-        let expression = statement.named_child(0)?;
-        if module && mutations::expression_mutates_module(content, expression, binding) {
-            return Some(false);
-        }
-        return mutations::expression_rebinds(content, expression, binding, module)
-            .then_some(false);
-    }
-    // Control-flow and deletion can change a binding. Do not guess its value.
-    contains_identifier(content, statement, binding).then_some(false)
-}
-
-fn try_import_binding(content: &str, node: Node<'_>, binding: &str, module: bool) -> Option<bool> {
-    if !contains_identifier(content, node, binding) {
-        return None;
-    }
-    let mut remaining = MAX_BINDING_STATEMENTS;
-    let mut cursor = node.walk();
-    for branch in node.named_children(&mut cursor) {
-        if branch
-            .child_by_field_name("alias")
-            .or_else(|| {
-                branch
-                    .child_by_field_name("value")
-                    .filter(|value| value.kind() == "as_pattern")
-                    .and_then(|value| value.child_by_field_name("alias"))
-            })
-            .is_some_and(|alias| contains_identifier(content, alias, binding))
-        {
-            return Some(false);
-        }
-        let body = if branch.kind() == "block" {
-            Some(branch)
-        } else {
-            let mut cursor = branch.walk();
-            branch
-                .named_children(&mut cursor)
-                .find(|child| child.kind() == "block")
-        };
-        let Some(body) = body else {
-            return Some(false);
-        };
-        let mut last_binding = None;
-        let mut cursor = body.walk();
-        for statement in body.named_children(&mut cursor) {
-            if remaining == 0 {
-                return Some(false);
-            }
-            remaining -= 1;
-            // Nested control flow is intentionally unknown; this merge accepts
-            // only independently proven imports on every completing path.
-            if let Some(value) = simple_binding(content, statement, binding, module) {
-                last_binding = Some(value);
-            }
-        }
-        if matches!(branch.kind(), "block" | "except_clause") {
-            if last_binding != Some(true) {
-                return Some(false);
-            }
-        } else if last_binding == Some(false) {
-            return Some(false);
-        }
-    }
-    Some(true)
-}
-
-fn contains_identifier(content: &str, node: Node<'_>, name: &str) -> bool {
-    let mut cursor = node.walk();
-    let mut remaining = MAX_BINDING_STATEMENTS;
-    loop {
-        if remaining == 0 {
-            return true;
-        }
-        remaining -= 1;
-        let current = cursor.node();
-        if current.kind() == "identifier" && node_text(content, current) == name {
-            return true;
-        }
-        if cursor.goto_first_child() {
-            continue;
-        }
-        while !cursor.goto_next_sibling() {
-            if !cursor.goto_parent() {
-                return false;
-            }
-        }
-    }
+    let value = evaluate_decorator(content, decorated, decorator, remaining, proven);
+    proven.insert(decorator.start_byte(), value);
+    value
 }

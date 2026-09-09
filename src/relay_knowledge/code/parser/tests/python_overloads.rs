@@ -270,13 +270,13 @@ fn python_redirected_later_writes_and_attribute_targets_preserve_runtime_bodies(
     parse_indexed_file(
         &mut build,
         "sample.py",
-        br#"from typing import overload, get_overloads
+        br#"from types import SimpleNamespace
+registry=SimpleNamespace()
+from typing import overload, get_overloads
 from typing import overload as global_ov
-from types import SimpleNamespace
 events=[]
 def custom(fn): events.append(fn.__qualname__); return fn
 def leaf(): return 1
-registry=SimpleNamespace()
 registry.overload=custom
 @overload
 def attribute_choice(x:int): ...
@@ -314,13 +314,13 @@ def implicit_nonlocal_outer():
 global_ov=custom
 global_outer()
 nonlocal_outer()
+registry=SimpleNamespace()
 import typing as property_module
 import typing as subscript_module
 import typing as mutation_module
 from typing import get_overloads
 from types import SimpleNamespace
 events=[]
-registry=SimpleNamespace()
 registry.property_module=custom
 @property_module.overload
 def module_property_choice(x:int): ...
