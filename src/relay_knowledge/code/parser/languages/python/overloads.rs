@@ -165,11 +165,35 @@ fn later_import_binding(
     let mut next = node.next_named_sibling();
     let mut proven = None;
     let mut execution_boundary = false;
+    let callable_name = (node.kind() == "function_definition")
+        .then(|| node.child_by_field_name("name"))
+        .flatten()
+        .map(|name| node_text(content, name));
+    let mut callable_unchanged = true;
     while let Some(statement) = next {
         if *remaining == 0 {
             return Some(false);
         }
         *remaining -= 1;
+        if !execution_boundary
+            && callable_unchanged
+            && callable_name
+                .as_deref()
+                .is_some_and(|name| direct_function_call(content, statement, name, remaining))
+        {
+            // This proven direct invocation evaluates the decorators now; later
+            // namespace writes cannot retroactively change that invocation.
+            return proven;
+        }
+        if expressions::has_eager_call(statement, remaining) {
+            return Some(false);
+        }
+        if callable_name
+            .as_deref()
+            .is_some_and(|name| statement_binding(content, statement, name, false).is_some())
+        {
+            callable_unchanged = false;
+        }
         if !matches!(statement.kind(), "global_statement" | "nonlocal_statement") {
             let linear = linear_binding_statement(statement);
             if let Some(value) = statement_binding(content, statement, binding, module) {
@@ -185,6 +209,42 @@ fn later_import_binding(
         next = statement.next_named_sibling();
     }
     proven
+}
+
+fn direct_function_call(
+    content: &str,
+    statement: Node<'_>,
+    name: &str,
+    remaining: &mut usize,
+) -> bool {
+    if statement.kind() != "expression_statement" {
+        return false;
+    }
+    let Some(mut expression) = statement.named_child(0) else {
+        return false;
+    };
+    if expression.kind() == "assignment" {
+        let Some(value) = expression.child_by_field_name("right") else {
+            return false;
+        };
+        expression = value;
+    }
+    let Some(call) =
+        expressions::transparent(expression, remaining).filter(|node| node.kind() == "call")
+    else {
+        return false;
+    };
+    let Some(function) = call
+        .child_by_field_name("function")
+        .and_then(|node| expressions::transparent(node, remaining))
+        .filter(|node| node.kind() == "identifier")
+    else {
+        return false;
+    };
+    node_text(content, function) == name
+        && call
+            .child_by_field_name("arguments")
+            .is_some_and(|arguments| arguments.named_child_count() == 0)
 }
 
 fn linear_binding_statement(statement: Node<'_>) -> bool {
