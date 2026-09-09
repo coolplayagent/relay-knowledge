@@ -99,6 +99,7 @@ pub(super) fn search_scope(
 mod candidates;
 mod filters;
 mod knowledge;
+mod query_budget;
 
 #[cfg(test)]
 mod mod_tests;

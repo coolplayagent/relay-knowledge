@@ -239,12 +239,17 @@ fn value_shadowed(mut node: Node<'_>, name: &str, content: &str, fields: bool) -
         {
             return true;
         }
-        if fields && parent.kind() == "class_body" {
+        if fields
+            && matches!(
+                parent.kind(),
+                "class_body" | "interface_body" | "enum_body" | "enum_body_declarations"
+            )
+        {
             let mut cursor = parent.walk();
-            if parent
-                .named_children(&mut cursor)
-                .any(|field| field.kind() == "field_declaration" && declares(field, name, content))
-            {
+            if parent.named_children(&mut cursor).any(|field| {
+                matches!(field.kind(), "field_declaration" | "constant_declaration")
+                    && declares(field, name, content)
+            }) {
                 return true;
             }
         }
@@ -272,6 +277,12 @@ pub(super) fn getter_bindings(node: Node<'_>, content: &str) -> Vec<String> {
     let Some(method) = enclosing(node, "method_declaration") else {
         return Vec::new();
     };
+    if method
+        .child_by_field_name("parameters")
+        .is_none_or(|parameters| parameters.named_child_count() != 0)
+    {
+        return Vec::new();
+    }
     let Some(name) = method.child_by_field_name("name") else {
         return Vec::new();
     };

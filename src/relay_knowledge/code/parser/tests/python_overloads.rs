@@ -103,3 +103,124 @@ def wildcard_shadowed(): return 1
         );
     }
 }
+
+#[test]
+fn python_nested_scopes_skip_outer_class_imports_but_keep_immediate_class_decorators() {
+    let registration = crate::domain::CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec![],
+        vec![],
+    )
+    .unwrap();
+    let mut build = SnapshotBuild::new(&registration, "commit".into(), "tree".into(), true, 1, 0);
+    parse_indexed_file(
+        &mut build,
+        "scope.py",
+        br#"
+def overload(fn): return fn
+class Worker:
+    from typing import overload
+    @overload
+    def direct(self, value: int): ...
+    def direct(self, value): return value
+    def method(self):
+        @overload
+        def nested(): return 1
+        def nested(): return 2
+class Outer:
+    from typing import overload
+    class Inner:
+        @overload
+        def inner(self): return 1
+        def inner(self): return 2
+def factory():
+    class Local:
+        from typing import overload
+        @overload
+        def local(self, value: int): ...
+        def local(self, value): return value
+class Conditional:
+    if True:
+        from typing import overload
+        @overload
+        def conditional_direct(self, value: int): ...
+        def conditional_direct(self, value): return value
+        def method(self):
+            @overload
+            def flow(): return 1
+            def flow(): return 2
+"#,
+    )
+    .unwrap();
+    let snapshot = build.finish();
+    for name in ["nested", "inner", "flow"] {
+        let kinds = snapshot
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.name == name)
+            .map(|symbol| symbol.kind.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(kinds, ["function", "function"], "{name}");
+    }
+    for name in ["direct", "local", "conditional_direct"] {
+        let kinds = snapshot
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.name == name)
+            .map(|symbol| symbol.kind.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(kinds, ["function_declaration", "function"], "{name}");
+    }
+}
+
+#[test]
+fn python_binding_directives_resolve_the_declared_namespace() {
+    let registration = crate::domain::CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec![],
+        vec![],
+    )
+    .unwrap();
+    let mut build = SnapshotBuild::new(&registration, "commit".into(), "tree".into(), true, 1, 0);
+    parse_indexed_file(
+        &mut build,
+        "sample.py",
+        br#"from typing import overload, get_overloads
+global overload
+def leaf(): return 1
+def outer():
+    overload = lambda fn: fn
+    def inner():
+        global overload
+        @overload
+        def global_choice(x: int): ...
+        def global_choice(x): return leaf()
+        return global_choice
+    return inner()
+def enclosing():
+    from typing import overload
+    def inner():
+        nonlocal overload
+        @overload
+        def nonlocal_choice(x: int): ...
+        def nonlocal_choice(x): return leaf()
+        return nonlocal_choice
+    return inner()
+"#,
+    )
+    .unwrap();
+    let snapshot = build.finish();
+    for name in ["global_choice", "nonlocal_choice"] {
+        let kinds = snapshot
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.name == name)
+            .map(|symbol| symbol.kind.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(kinds, ["function_declaration", "function"], "{name}");
+    }
+}

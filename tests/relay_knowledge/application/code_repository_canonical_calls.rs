@@ -2,9 +2,97 @@
 use super::*;
 
 #[tokio::test]
+async fn python_method_nested_functions_do_not_capture_class_overload_imports() {
+    let repo = FixtureRepo::create("python-class-overload-scope");
+    repo.write("src/scope.py", "def overload(fn): return fn\ndef first(): return 1\ndef second(): return 2\nclass Worker:\n    from typing import overload\n    def method(self):\n        @overload\n        def choose(): return first()\n        def choose(): return second()\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Python function skips class scope"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-python-class-scope"),
+        )
+        .await
+        .unwrap();
+    let definitions = query(&service, "choose", CodeQueryKind::Definition).await;
+    let symbols = definitions
+        .results
+        .iter()
+        .filter(|hit| hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol))
+        .filter(|hit| {
+            hit.canonical_symbol_id
+                .as_deref()
+                .is_some_and(|id| id.ends_with(".choose"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(symbols.len(), 2);
+    let canonical = symbols[0].canonical_symbol_id.as_ref().unwrap();
+    let error = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                canonical,
+                selector("fixture", "HEAD"),
+                CodeQueryKind::Callees,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .unwrap(),
+            context("ambiguous-custom-decorator"),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.error_kind, ErrorKind::InvalidArgument);
+    let mut targets = std::collections::BTreeSet::new();
+    for symbol in symbols {
+        let response = query(
+            &service,
+            symbol.symbol_snapshot_id.as_deref().unwrap(),
+            CodeQueryKind::Callees,
+        )
+        .await;
+        assert_eq!(response.results.len(), 1);
+        targets.insert(response.results[0].canonical_symbol_id.clone().unwrap());
+    }
+    assert!(targets.iter().any(|id| id.ends_with("::first")));
+    assert!(targets.iter().any(|id| id.ends_with("::second")));
+}
+
+#[tokio::test]
 async fn python_overload_stubs_select_the_runtime_implementation() {
     let repo = FixtureRepo::create("python-overload-calls");
     repo.write("src/sample.py", "import typing\n@typing.overload\ndef choose(value: int): ...\n@typing.overload\ndef choose(value: str): ...\ndef choose(value): return leaf(value)\ndef leaf(value): return value\ndef caller(): return choose(1)\n");
+    repo.write(
+        "src/directives.py",
+        r#"from typing import overload, get_overloads
+def leaf(): return 1
+def outer():
+    overload = lambda fn: fn
+    def inner():
+        global overload
+        @overload
+        def global_choice(x: int): ...
+        def global_choice(x): return leaf()
+        return global_choice
+    return inner()
+def enclosing():
+    from typing import overload
+    def inner():
+        nonlocal overload
+        @overload
+        def nonlocal_choice(x: int): ...
+        def nonlocal_choice(x): return leaf()
+        return nonlocal_choice
+    return inner()
+"#,
+    );
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Python overload declarations"]);
     let service = service_with_memory_store().await;
@@ -44,6 +132,27 @@ async fn python_overload_stubs_select_the_runtime_implementation() {
                 .as_deref()
                 .unwrap()
                 .ends_with(expected)
+        );
+    }
+    for name in ["global_choice", "nonlocal_choice"] {
+        let definitions = query(&service, name, CodeQueryKind::Definition).await;
+        let canonical = definitions
+            .results
+            .iter()
+            .find_map(|hit| {
+                hit.canonical_symbol_id
+                    .as_deref()
+                    .filter(|id| id.ends_with(name))
+            })
+            .unwrap();
+        let response = query(&service, canonical, CodeQueryKind::Callees).await;
+        assert_eq!(response.results.len(), 1, "{name}");
+        assert!(
+            response.results[0]
+                .canonical_symbol_id
+                .as_deref()
+                .unwrap()
+                .ends_with("::leaf")
         );
     }
 }

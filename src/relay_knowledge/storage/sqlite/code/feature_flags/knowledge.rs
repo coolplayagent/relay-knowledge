@@ -16,6 +16,16 @@ pub(super) fn search(
     status: &CodeRepositoryStatus,
     request: &CodeFeatureFlagRequest,
 ) -> Result<Vec<CodeFeatureFlagGraph>, StorageError> {
+    super::query_budget::run(connection, || {
+        search_with_budget(connection, status, request)
+    })
+}
+
+fn search_with_budget(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeFeatureFlagRequest,
+) -> Result<Vec<CodeFeatureFlagGraph>, StorageError> {
     const MAX_SEED_IDENTITIES: usize = 1000;
     let mut seeds = request.clone();
     seeds.limit = seeds.limit.min(MAX_SEED_IDENTITIES);

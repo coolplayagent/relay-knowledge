@@ -1,5 +1,76 @@
 use super::*;
 
+#[test]
+fn parameterized_getters_do_not_bind_zero_argument_calls() {
+    let records = facts(
+        r#"class Config {
+        String getValue(int other) { return System.getProperty("parameter"); }
+        String getValue() { return "ordinary"; }
+        String getDirect() { return System.getProperty("direct"); }
+    }"#,
+    );
+    assert!(
+        records
+            .iter()
+            .find(|r| r.source_key == "parameter")
+            .unwrap()
+            .metadata
+            .bindings
+            .is_empty()
+    );
+    assert!(
+        !records
+            .iter()
+            .find(|r| r.source_key == "direct")
+            .unwrap()
+            .metadata
+            .bindings
+            .is_empty()
+    );
+}
+
+#[test]
+fn interface_fields_shadow_platform_receivers_but_qualified_reads_remain() {
+    let records = facts(
+        r#"interface Config {
+        Fake System = new Fake(); Fake Boolean = new Fake();
+        default void run() {
+            System.getProperty("false_system"); Boolean.getBoolean("false_boolean");
+            java.lang.System.getProperty("real");
+        }
+    }"#,
+    );
+    assert!(
+        !records
+            .iter()
+            .any(|r| matches!(r.source_key.as_str(), "false_system" | "false_boolean"))
+    );
+    assert!(
+        records
+            .iter()
+            .any(|r| r.source_key == "real" && r.edge_kind == "reads_config")
+    );
+}
+
+#[test]
+fn direct_for_conditions_guard_but_initializer_and_update_reads_do_not() {
+    let records = facts(
+        r#"class App { void run() {
+        for (String s = System.getProperty("init"); Boolean.getBoolean("condition"); System.getProperty("update")) {}
+    }}"#,
+    );
+    assert_eq!(
+        records
+            .iter()
+            .filter(|r| r.source_key == "condition" && r.edge_kind == "guards_code")
+            .count(),
+        1
+    );
+    assert!(!records.iter().any(
+        |r| matches!(r.source_key.as_str(), "init" | "update") && r.edge_kind == "guards_code"
+    ));
+}
+
 fn facts(content: &str) -> Vec<CodeFeatureFlagRecord> {
     let mut parser = tree_sitter::Parser::new();
     parser

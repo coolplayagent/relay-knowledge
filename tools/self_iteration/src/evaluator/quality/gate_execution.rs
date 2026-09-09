@@ -15,6 +15,15 @@ use super::{
     gate_policy::{quality_budget_ms, quality_gate_stages},
 };
 
+const CANONICAL_WORK_METRICS: &[(&str, u64)] = &[
+    ("canonical_call_callers_vm_steps", 150_000),
+    ("canonical_call_callees_vm_steps", 150_000),
+];
+const FEATURE_FLAG_WORK_METRICS: &[(&str, u64)] = &[
+    ("feature_flag_narrow_vm_steps", 2_000_000),
+    ("feature_flag_exhausted_vm_steps", 4_097_000),
+];
+
 pub(in crate::evaluator) fn run_quality_gate_stages(
     config: &Config,
     workspace: &Path,
@@ -67,16 +76,20 @@ fn run_quality_gate_plan(
                 ),
             });
             let mut observation = GateObservation::from_command(&result);
-            if result.name == "canonical_call_query_work_budget" {
-                match canonical_work_metrics(&result.stdout) {
+            let work_contract = match result.name.as_str() {
+                "canonical_call_query_work_budget" => Some(CANONICAL_WORK_METRICS),
+                "feature_flag_query_work_budget" => Some(FEATURE_FLAG_WORK_METRICS),
+                _ => None,
+            };
+            if let Some(contract) = work_contract {
+                match query_work_metrics(&result.stdout, contract) {
                     Ok(work_metrics) => {
                         let in_budget = work_metrics
                             .iter()
                             .all(|metric| metric.value <= metric.budget.unwrap_or_default());
                         observation.passed &= in_budget;
                         if !in_budget {
-                            observation.message =
-                                "Canonical call SQL VM-step budget exceeded".to_owned();
+                            observation.message = "SQL VM-step budget exceeded".to_owned();
                         }
                         metrics.extend(work_metrics);
                     }
@@ -106,12 +119,10 @@ fn run_quality_gate_plan(
     true
 }
 
-fn canonical_work_metrics(stdout: &str) -> Result<Vec<MetricObservation>, String> {
-    const NAMES: [&str; 2] = [
-        "canonical_call_callers_vm_steps",
-        "canonical_call_callees_vm_steps",
-    ];
-    const MAX_VM_STEPS: u64 = 150_000;
+fn query_work_metrics(
+    stdout: &str,
+    contract: &[(&str, u64)],
+) -> Result<Vec<MetricObservation>, String> {
     let mut observations = std::collections::BTreeMap::new();
     for line in stdout.lines() {
         let Some((_, json)) = line.split_once("SELF_ITERATION_METRIC ") else {
@@ -122,14 +133,18 @@ fn canonical_work_metrics(stdout: &str) -> Result<Vec<MetricObservation>, String
         let name = metric
             .get("name")
             .and_then(serde_json::Value::as_str)
-            .filter(|name| NAMES.contains(name))
+            .ok_or("Missing SQL work metric name")?;
+        let budget = contract
+            .iter()
+            .find(|(expected, _)| *expected == name)
+            .map(|(_, budget)| *budget)
             .ok_or("Unexpected SQL work metric name")?;
         let value = metric
             .get("value")
             .and_then(serde_json::Value::as_u64)
             .filter(|value| *value > 0)
             .ok_or("SQL work metric must be a positive integer")?;
-        if metric.get("budget").and_then(serde_json::Value::as_u64) != Some(MAX_VM_STEPS) {
+        if metric.get("budget").and_then(serde_json::Value::as_u64) != Some(budget) {
             return Err("SQL work metric budget does not match the harness contract".to_owned());
         }
         if observations
@@ -138,7 +153,7 @@ fn canonical_work_metrics(stdout: &str) -> Result<Vec<MetricObservation>, String
                 MetricObservation {
                     name: name.to_owned(),
                     value: value as f64,
-                    budget: Some(MAX_VM_STEPS as f64),
+                    budget: Some(budget as f64),
                     lower_is_better: true,
                     key: true,
                 },
@@ -148,10 +163,9 @@ fn canonical_work_metrics(stdout: &str) -> Result<Vec<MetricObservation>, String
             return Err(format!("Duplicate SQL work metric: {name}"));
         }
     }
-    if observations.len() != NAMES.len() {
+    if observations.len() != contract.len() {
         return Err(
-            "Missing callers/callees SQL work metrics; the performance test must execute"
-                .to_owned(),
+            "Missing required SQL work metrics; the performance test must execute".to_owned(),
         );
     }
     Ok(observations.into_values().collect())

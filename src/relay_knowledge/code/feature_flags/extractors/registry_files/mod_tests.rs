@@ -1,5 +1,40 @@
 use super::*;
 
+#[test]
+fn template_key_or_default_preserves_only_static_literal_fallbacks() {
+    let records = facts(
+        "config.ctmpl",
+        "{{ keyOrDefault \"flag\" \"true\" }}\n{{ keyOrDefault \"label\" \"hello world\" }}\n{{ keyOrDefault \"dynamic\" (env \"OTHER\") }}\n{{ key \"plain\" }}\n",
+    );
+    let flag = records
+        .iter()
+        .find(|record| record.source_key == "flag")
+        .unwrap();
+    assert_eq!(flag.metadata.default_value.as_deref(), Some("true"));
+    assert_eq!(flag.metadata.value_type.as_deref(), Some("boolean"));
+    assert_eq!(
+        records
+            .iter()
+            .find(|record| record.source_key == "label")
+            .unwrap()
+            .metadata
+            .default_value
+            .as_deref(),
+        Some("hello world")
+    );
+    assert!(
+        records
+            .iter()
+            .filter(|record| matches!(record.source_key.as_str(), "dynamic" | "plain"))
+            .all(|record| record.metadata.default_value.is_none())
+    );
+    assert_eq!(
+        template_string("`raw literal` rest"),
+        Some(("raw literal".to_owned(), " rest"))
+    );
+    assert!(template_string("\"unterminated").is_none());
+}
+
 fn facts(path: &str, content: &str) -> Vec<CodeFeatureFlagRecord> {
     let language_id = path.rsplit('.').next().unwrap_or_default();
     let config_facts = crate::code::config_files::structured_facts(path, language_id, content).0;

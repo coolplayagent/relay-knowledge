@@ -128,7 +128,7 @@ relay-knowledge repo query repo --query serde --kind sbom --format json
 
 Canonical 调用查询按既有调用目标规则优先选择可调用定义，不将 C/C++ 原型及只有签名的声明计为额外实现。没有定义时，唯一可调用声明仍可查询，多个声明则明确报告歧义。同一 canonical ID 最多检查 1024 个符号；超过预算会明确报错并指引使用定义的 `symbol_snapshot_id`，不会伪装为空结果或唯一匹配。
 
-直接调用查询分别按路径、行号扫描非生成和生成候选，保持非生成文件优先，避免在候选截断前排序全部匹配边。标识解析、两路扫描和代码片段读取共享约 410 万条 SQLite 指令预算。耗尽时明确报告 `call query incomplete`，错误类型为 `timeout`（仓库 API 返回 HTTP 408），不回退为空结果或部分成功；可缩小路径、语言过滤或选择更具体的 snapshot。此查询调整复用现有持久化方向索引，不需要迁移数据库或重建仓库。
+直接调用查询分别按路径、行号扫描非生成和生成候选，保持非生成文件优先，避免在候选截断前排序全部匹配边。标识解析、两路扫描和代码片段读取共享约 410 万条 SQLite 指令预算。耗尽时明确报告 `call query incomplete`，错误类型为 `timeout`（仓库 API 返回 HTTP 408），不回退为空结果或部分成功；可缩小路径、语言过滤或选择更具体的 snapshot。有界查询算法使用持久化方向索引。升级到此版本仍须按上文执行普通持久化重建，以创建必需索引并刷新带版本的事实；不能跳过该升级步骤。
 
 `cpp-callable-declarations-v1` 提取版本要求通过普通 `repo index <alias> --ref <ref>` 重建旧 scope，包括已经具备 canonical 调用索引的 scope。它将 C++ 原型声明与可执行定义正确区分；重建后需重新复制 snapshot ID。
 
@@ -344,4 +344,6 @@ relay-knowledge repo status repo --format json
 
 Java getter binding 要求读取位于 getter 自己的 callable scope 的 return 中；返回 expression/block lambda 时，其中的读取仍作为事实保留，但不绑定到返回回调对象的 getter。interface constant declaration 使用 Java 隐式 static/final 语义及完整 enclosing type 身份。局部 flag 数据流包含 return 或变量初始化中嵌套的 ternary condition，但写入、嵌套 block 与 callable 边界仍阻止越界追踪。已证明存在多个不同 key 实现的配置 getter 保留 ambiguous read/guard 引用，一致性为 unknown、`analysis_complete=false`，不猜测具体 destination。
 
-Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。`python-overload-declarations-v1` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
+Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；v3 同时使此前版本已索引 scope 重建。`python-overload-declarations-v3` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
+
+配置 getter 绑定只接受零参数方法，与支持的零参数 getter 调用保持一致。平台 receiver 遮蔽检查包含接口字段，普通 for 循环条件中的直接读取会生成 guard 关系。Shell 提取排除词法可见的未导出赋值和函数局部绑定，保留显式 export 与未被遮蔽的外部环境读取；绑定扫描最多检查 1,024 个祖先或前序节点，耗尽时不猜测环境来源。模板 `keyOrDefault` 读取保留静态字符串默认值（包含空格）及其推断标量类型，动态默认值表达式保持 unknown。配置查询的 SQLite 执行预算覆盖候选排序、alias 补取和符号附加，耗尽时返回 timeout/incomplete，并提示收窄查询词或 path/language 过滤。

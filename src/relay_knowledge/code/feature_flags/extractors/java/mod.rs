@@ -170,7 +170,11 @@ fn containing_guard(mut node: Node<'_>) -> Option<Node<'_>> {
     while let Some(parent) = node.parent() {
         if matches!(
             parent.kind(),
-            "if_statement" | "while_statement" | "do_statement" | "ternary_expression"
+            "if_statement"
+                | "while_statement"
+                | "do_statement"
+                | "ternary_expression"
+                | "for_statement"
         ) {
             let condition = parent.child_by_field_name("condition")?;
             return (condition.start_byte() <= node.start_byte()

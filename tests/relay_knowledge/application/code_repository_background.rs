@@ -904,3 +904,6 @@ use support::*;
 
 #[path = "code_repository_ambiguous_config_getters.rs"]
 mod ambiguous_config_getters;
+
+#[path = "code_repository_config_binding_boundaries.rs"]
+mod config_binding_boundaries;

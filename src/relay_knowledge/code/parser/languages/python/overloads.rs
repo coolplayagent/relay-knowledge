@@ -61,18 +61,55 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
 
 fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool) -> bool {
     let mut remaining = MAX_BINDING_STATEMENTS;
-    loop {
+    let mut crossed_scope = false;
+    'lookup: loop {
+        if remaining == 0 {
+            return false;
+        }
+        remaining -= 1;
         // Only module/block children are lexical statements. Parameter and
         // annotation siblings of a body are not preceding assignments.
         let mut previous = node
             .parent()
             .filter(|parent| matches!(parent.kind(), "module" | "block"))
+            .filter(|parent| !crossed_scope || !class_namespace(*parent))
             .and_then(|_| node.prev_named_sibling());
         while let Some(statement) = previous {
             if remaining == 0 {
                 return false;
             }
             remaining -= 1;
+            if matches!(statement.kind(), "global_statement" | "nonlocal_statement")
+                && contains_identifier(content, statement, binding)
+            {
+                let global = statement.kind() == "global_statement";
+                if global
+                    && statement
+                        .parent()
+                        .is_some_and(|parent| parent.kind() == "module")
+                {
+                    previous = statement.prev_named_sibling();
+                    continue;
+                }
+                // Directives redirect lookup; unlike assignment/deletion they
+                // do not establish a new value for the decorator binding.
+                while let Some(parent) = node.parent() {
+                    if remaining == 0 {
+                        return false;
+                    }
+                    remaining -= 1;
+                    if global && parent.kind() == "module" {
+                        break;
+                    }
+                    node = parent;
+                    if !global && matches!(node.kind(), "function_definition" | "class_definition")
+                    {
+                        break;
+                    }
+                }
+                crossed_scope = true;
+                continue 'lookup;
+            }
             if let Some(imported) = statement_binding(content, statement, binding, module) {
                 return imported;
             }
@@ -88,8 +125,27 @@ fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool
         {
             return false;
         }
+        // A method's decorators can use their immediate class namespace, but
+        // nested functions/classes do not close over an enclosing class body.
+        crossed_scope |= matches!(parent.kind(), "function_definition" | "class_definition");
         node = parent;
     }
+}
+
+fn class_namespace(mut node: Node<'_>) -> bool {
+    for _ in 0..MAX_BINDING_STATEMENTS {
+        match node.kind() {
+            "class_definition" => return true,
+            "function_definition" | "module" => return false,
+            _ => {}
+        }
+        let Some(parent) = node.parent() else {
+            return false;
+        };
+        node = parent;
+    }
+    // An unproven namespace must not supply a typing import binding.
+    true
 }
 
 fn parameter_binds(content: &str, parameters: Node<'_>, binding: &str) -> bool {

@@ -241,7 +241,67 @@ fn canonical_work_gate_fails_closed_for_missing_or_invalid_observations() {
         assert!(!gates[0].passed);
     }
     assert!(
-        super::canonical_work_metrics(&format!("test canonical_call_query_work_budget ... {good}"))
-            .is_ok()
+        super::query_work_metrics(
+            &format!("test canonical_call_query_work_budget ... {good}"),
+            super::CANONICAL_WORK_METRICS
+        )
+        .is_ok()
     );
+}
+
+fn feature_flag_metric_output(narrow: u64, exhausted: u64) -> String {
+    [
+        ("feature_flag_narrow_vm_steps", narrow, 2_000_000),
+        ("feature_flag_exhausted_vm_steps", exhausted, 4_097_000),
+    ]
+    .into_iter()
+    .map(|(name, value, budget)| {
+        format!(
+            "SELF_ITERATION_METRIC {}\n",
+            serde_json::json!({"name":name,"value":value,"budget":budget})
+        )
+    })
+    .collect()
+}
+
+#[test]
+fn feature_flag_work_gate_rejects_unbounded_seed_work_and_missing_evidence() {
+    let good = feature_flag_metric_output(500_000, 4_097_000);
+    for (stdout, expected) in [
+        (good.clone(), true),
+        (feature_flag_metric_output(2_000_001, 4_097_000), false),
+        (feature_flag_metric_output(500_000, 9_299_000), false),
+        (feature_flag_metric_output(0, 4_097_000), false),
+        ("running 0 tests".to_owned(), false),
+        (good.lines().next().unwrap().to_owned(), false),
+        (format!("{good}{good}"), false),
+        (good.replace("4097000", "9299000"), false),
+        (canonical_metric_output(19_000, 19_000), false),
+    ] {
+        let mut metrics = Vec::new();
+        let mut gates = Vec::new();
+        let mut commands = Vec::new();
+        let passed = run_quality_gate_plan(
+            vec![QualityGateStage::Parallel(vec![gate(
+                "feature_flag_query_work_budget",
+            )])],
+            |_| {
+                let mut output = result("feature_flag_query_work_budget", 0);
+                output.stdout = stdout.clone();
+                vec![output]
+            },
+            &mut commands,
+            &mut gates,
+            &mut metrics,
+        );
+        assert_eq!(passed, expected, "{stdout}");
+        assert_eq!(gates[0].passed, expected);
+        if expected {
+            for (name, budget) in super::FEATURE_FLAG_WORK_METRICS {
+                let metric = metrics.iter().find(|m| m.name == *name).unwrap();
+                assert!(metric.key && metric.lower_is_better);
+                assert_eq!(metric.budget, Some(*budget as f64));
+            }
+        }
+    }
 }

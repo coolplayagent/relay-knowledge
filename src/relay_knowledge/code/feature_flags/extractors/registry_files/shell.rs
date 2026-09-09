@@ -88,6 +88,10 @@ fn node_record(
     if !valid_key(key) {
         return Ok(None);
     }
+    if edge == "reads_config" && !super::shell_bindings::environment_read(node, key, input.content)
+    {
+        return Ok(None);
+    }
     let mut record = feature_flag_record_from_range(
         input,
         "env_var",

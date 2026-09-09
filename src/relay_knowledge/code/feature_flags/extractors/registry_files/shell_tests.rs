@@ -94,3 +94,22 @@ fn all_standard_parameter_operators_keep_the_parameter_and_only_real_defaults() 
             .is_none()
     );
 }
+
+#[test]
+fn excludes_unexported_local_data_flow_and_preserves_external_and_exported_reads() {
+    let records = facts(
+        "LOCAL=false\necho $LOCAL\nf() { local INNER=false; echo ${INNER:-true}; }\nexport GOOD=true\necho $GOOD\necho ${EXTERNAL:-false}\n",
+    );
+    assert!(
+        !records
+            .iter()
+            .any(|record| matches!(record.source_key.as_str(), "LOCAL" | "INNER"))
+    );
+    assert!(
+        records
+            .iter()
+            .any(|record| record.source_key == "GOOD" && record.edge_kind == "reads_config")
+    );
+    assert!(records.iter().any(|record| record.source_key == "EXTERNAL"
+        && record.metadata.default_value.as_deref() == Some("false")));
+}

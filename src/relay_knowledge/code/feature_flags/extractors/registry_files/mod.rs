@@ -5,6 +5,7 @@ use crate::domain::{CodeFeatureFlagMetadata, CodeFeatureFlagRecord, DomainError}
 use crate::code::config_files::ConfigRange;
 use crate::code::feature_flags::{FeatureFlagFileInput, feature_flag_record_from_range};
 pub(in crate::code) mod shell;
+mod shell_bindings;
 
 pub(in crate::code::feature_flags) fn extract(
     input: &FeatureFlagFileInput<'_>,
@@ -174,27 +175,42 @@ fn collect_template_reads(
             break;
         };
         let action = action.trim().trim_start_matches('-').trim();
-        let mut tokens = action.split_whitespace();
-        let kind = match tokens.next() {
-            Some("key" | "keyOrDefault") => Some("config_key"),
-            Some("env") => Some("env_var"),
+        let (function, arguments) = action
+            .split_once(char::is_whitespace)
+            .unwrap_or((action, ""));
+        let kind = match function {
+            "key" | "keyOrDefault" => Some("config_key"),
+            "env" => Some("env_var"),
             _ => None,
         };
-        if let (Some(kind), Some(quoted)) = (kind, tokens.next()) {
-            if let Some(key) = quoted
-                .strip_prefix('"')
-                .and_then(|key| key.strip_suffix('"'))
-                .filter(|key| valid_key(key))
-            {
+        if let (Some(kind), Some((key, arguments))) = (kind, template_string(arguments)) {
+            if valid_key(&key) {
                 let mut record =
-                    feature_flag_record_from_range(input, kind, key, "reads_config", range, line)?;
+                    feature_flag_record_from_range(input, kind, &key, "reads_config", range, line)?;
                 record.metadata.source_format = "ctmpl".to_owned();
+                if function == "keyOrDefault" {
+                    if let Some((value, _)) = template_string(arguments) {
+                        record.metadata.value_type = Some(value_type(&value).to_owned());
+                        record.metadata.default_value = Some(value);
+                    }
+                }
                 records.push(record);
             }
         }
         remaining = rest;
     }
     Ok(())
+}
+
+fn template_string(arguments: &str) -> Option<(String, &str)> {
+    let arguments = arguments.trim_start();
+    if let Some(raw) = arguments.strip_prefix('`') {
+        let (value, rest) = raw.split_once('`')?;
+        return Some((value.to_owned(), rest));
+    }
+    let mut stream = serde_json::Deserializer::from_str(arguments).into_iter::<String>();
+    let value = stream.next()?.ok()?;
+    Some((value, &arguments[stream.byte_offset()..]))
 }
 
 #[cfg(test)]
