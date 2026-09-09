@@ -5,6 +5,8 @@ use crate::code::parser::nodes::{SyntaxRange, node_text, syntax_range};
 
 const MAX_BINDING_STATEMENTS: usize = 1024;
 
+mod mutations;
+
 pub(in crate::code::parser) fn manual_definitions(
     content: &str,
     node: Node<'_>,
@@ -73,9 +75,12 @@ fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool
                 matches!(parent.kind(), "module" | "block")
                     && (!crossed_scope || !class_namespace(parent))
             })
-            && later_binding(content, node, binding, module, &mut remaining)
         {
-            return false;
+            if let Some(imported) =
+                later_import_binding(content, node, binding, module, &mut remaining)
+            {
+                return imported;
+            }
         }
         // Only module/block children are lexical statements. Parameter and
         // annotation siblings of a body are not preceding assignments.
@@ -144,29 +149,60 @@ fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool
     }
 }
 
-fn later_binding(
+fn later_import_binding(
     content: &str,
     node: Node<'_>,
     binding: &str,
     module: bool,
     remaining: &mut usize,
-) -> bool {
+) -> Option<bool> {
     let mut next = node.next_named_sibling();
+    let mut proven = None;
+    let mut execution_boundary = false;
     while let Some(statement) = next {
         if *remaining == 0 {
-            return true;
+            return Some(false);
         }
         *remaining -= 1;
-        // Outer names are read when the nested callable executes. A later
-        // write prevents proving that an earlier typing import is still bound.
-        if !matches!(statement.kind(), "global_statement" | "nonlocal_statement")
-            && statement_binding(content, statement, binding, module).is_some()
-        {
-            return true;
+        if !matches!(statement.kind(), "global_statement" | "nonlocal_statement") {
+            let linear = linear_binding_statement(statement);
+            if let Some(value) = statement_binding(content, statement, binding, module) {
+                if execution_boundary || !linear {
+                    return Some(false);
+                }
+                // A later proven import can replace a prior value, but a still
+                // later write must win. Never cross a call/return/control path.
+                proven = Some(value);
+            }
+            execution_boundary |= !linear;
         }
         next = statement.next_named_sibling();
     }
-    false
+    proven
+}
+
+fn linear_binding_statement(statement: Node<'_>) -> bool {
+    match statement.kind() {
+        "import_statement" | "import_from_statement" | "pass_statement" => true,
+        "expression_statement" => statement
+            .named_child(0)
+            .filter(|expression| expression.kind() == "assignment")
+            .and_then(|expression| expression.child_by_field_name("right"))
+            .is_some_and(|value| {
+                matches!(
+                    value.kind(),
+                    "identifier"
+                        | "lambda"
+                        | "string"
+                        | "integer"
+                        | "float"
+                        | "true"
+                        | "false"
+                        | "none"
+                )
+            }),
+        _ => false,
+    }
 }
 
 fn class_namespace(mut node: Node<'_>) -> bool {
@@ -208,6 +244,13 @@ fn statement_binding(
     binding: &str,
     module: bool,
 ) -> Option<bool> {
+    if statement.kind() == "try_statement" {
+        return try_import_binding(content, statement, binding, module);
+    }
+    simple_binding(content, statement, binding, module)
+}
+
+fn simple_binding(content: &str, statement: Node<'_>, binding: &str, module: bool) -> Option<bool> {
     if matches!(
         statement.kind(),
         "import_statement" | "import_from_statement"
@@ -223,6 +266,7 @@ fn statement_binding(
             .child_by_field_name("module_name")
             .map(|name| node_text(content, name));
         let mut cursor = statement.walk();
+        let mut imported_binding = None;
         for import in statement.children_by_field_name("name", &mut cursor) {
             let name = import.child_by_field_name("name").unwrap_or(import);
             let imported = node_text(content, name);
@@ -231,7 +275,7 @@ fn statement_binding(
                 .map(|alias| node_text(content, alias))
                 .unwrap_or_else(|| imported.split('.').next().unwrap_or_default().to_owned());
             if local == binding {
-                return Some(if module {
+                imported_binding = Some(if module {
                     from.is_none() && matches!(imported.as_str(), "typing" | "typing_extensions")
                 } else {
                     imported == "overload"
@@ -241,7 +285,7 @@ fn statement_binding(
                 });
             }
         }
-        return None;
+        return imported_binding;
     }
     let statement = if statement.kind() == "decorated_definition" {
         statement
@@ -258,42 +302,70 @@ fn statement_binding(
     }
     if statement.kind() == "expression_statement" {
         let expression = statement.named_child(0)?;
+        if module && mutations::expression_mutates_module(content, expression, binding) {
+            return Some(false);
+        }
         return expression
             .child_by_field_name("left")
-            .filter(|left| assignment_binds(content, *left, binding, module))
+            .filter(|left| mutations::assignment_binds(content, *left, binding, module))
             .map(|_| false);
     }
     // Control-flow and deletion can change a binding. Do not guess its value.
     contains_identifier(content, statement, binding).then_some(false)
 }
 
-fn assignment_binds(content: &str, node: Node<'_>, name: &str, module: bool) -> bool {
-    let mut cursor = node.walk();
+fn try_import_binding(content: &str, node: Node<'_>, binding: &str, module: bool) -> Option<bool> {
+    if !contains_identifier(content, node, binding) {
+        return None;
+    }
     let mut remaining = MAX_BINDING_STATEMENTS;
-    loop {
-        if remaining == 0 {
-            return true;
-        }
-        remaining -= 1;
-        let current = cursor.node();
-        if current.kind() == "identifier" && node_text(content, current) == name {
-            return true;
-        }
-        if module
-            && matches!(current.kind(), "attribute" | "subscript")
-            && module_receiver(content, current, name)
+    let mut cursor = node.walk();
+    for branch in node.named_children(&mut cursor) {
+        if branch
+            .child_by_field_name("alias")
+            .or_else(|| {
+                branch
+                    .child_by_field_name("value")
+                    .filter(|value| value.kind() == "as_pattern")
+                    .and_then(|value| value.child_by_field_name("alias"))
+            })
+            .is_some_and(|alias| contains_identifier(content, alias, binding))
         {
-            return true;
+            return Some(false);
         }
-        if !matches!(current.kind(), "attribute" | "subscript") && cursor.goto_first_child() {
-            continue;
-        }
-        while !cursor.goto_next_sibling() {
-            if !cursor.goto_parent() {
-                return false;
+        let body = if branch.kind() == "block" {
+            Some(branch)
+        } else {
+            let mut cursor = branch.walk();
+            branch
+                .named_children(&mut cursor)
+                .find(|child| child.kind() == "block")
+        };
+        let Some(body) = body else {
+            return Some(false);
+        };
+        let mut last_binding = None;
+        let mut cursor = body.walk();
+        for statement in body.named_children(&mut cursor) {
+            if remaining == 0 {
+                return Some(false);
+            }
+            remaining -= 1;
+            // Nested control flow is intentionally unknown; this merge accepts
+            // only independently proven imports on every completing path.
+            if let Some(value) = simple_binding(content, statement, binding, module) {
+                last_binding = Some(value);
             }
         }
+        if matches!(branch.kind(), "block" | "except_clause") {
+            if last_binding != Some(true) {
+                return Some(false);
+            }
+        } else if last_binding == Some(false) {
+            return Some(false);
+        }
     }
+    Some(true)
 }
 
 fn contains_identifier(content: &str, node: Node<'_>, name: &str) -> bool {
@@ -317,23 +389,4 @@ fn contains_identifier(content: &str, node: Node<'_>, name: &str) -> bool {
             }
         }
     }
-}
-
-fn module_receiver(content: &str, mut node: Node<'_>, name: &str) -> bool {
-    for _ in 0..MAX_BINDING_STATEMENTS {
-        match node.kind() {
-            "identifier" => return node_text(content, node) == name,
-            "attribute" | "subscript" => {
-                let Some(receiver) = node
-                    .child_by_field_name("object")
-                    .or_else(|| node.child_by_field_name("value"))
-                else {
-                    return false;
-                };
-                node = receiver;
-            }
-            _ => return false,
-        }
-    }
-    true
 }

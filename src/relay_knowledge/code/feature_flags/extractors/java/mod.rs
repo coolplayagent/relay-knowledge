@@ -6,6 +6,7 @@ use crate::domain::{CodeConfigurationReadKind, CodeFeatureFlagRecord, DomainErro
 
 use crate::code::config_files::ConfigRange;
 use crate::code::feature_flags::{FeatureFlagFileInput, feature_flag_record_from_range};
+mod platform_imports;
 mod symbols;
 use symbols as java_symbols;
 
@@ -77,8 +78,11 @@ pub(in crate::code) fn extract(
 }
 
 fn config_read(node: Node<'_>, content: &str) -> Option<(&'static str, String)> {
-    let object = text(node.child_by_field_name("object")?, content);
     let name = text(node.child_by_field_name("name")?, content);
+    let object = match node.child_by_field_name("object") {
+        Some(object) => text(object, content),
+        None => platform_imports::receiver(node, name, content)?,
+    };
     if matches!(object, "System" | "Boolean")
         && java_symbols::platform_receiver_shadowed(node, object, content)
     {

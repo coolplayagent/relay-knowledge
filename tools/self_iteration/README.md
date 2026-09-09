@@ -461,3 +461,5 @@ The `canonical_call_query_work_budget` quality gate runs as an isolated stage in
 The bounded configuration fixture is checked by the paired `fixtures/feature_flags_tests.rs` owner test.
 
 The isolated `feature_flag_query_work_budget` quality stage runs in fast/full profiles after the product test build. It executes the production configuration query against 11,001 identities and records `feature_flag_narrow_vm_steps` (2,000,000 budget) and `feature_flag_exhausted_vm_steps` (4,097,000 budget, including the final interrupt interval). The expensive seed query must report budget exhaustion, while the narrow query must succeed. Missing, invalid, duplicate, or over-budget metrics fail the stage, including a test selection that runs zero tests.
+
+Canonical-call fixture and workload unit suites live in their corresponding `canonical_calls_tests.rs` sibling files, mounted through explicit test-only paths; their test module identities and scenarios remain unchanged.

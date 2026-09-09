@@ -459,3 +459,5 @@ Fast `software_relationship_storage_cases` 门禁执行 `cargo test --lib softwa
 有界配置夹具由同目录配对的 `fixtures/feature_flags_tests.rs` owner 测试验证。
 
 独立的 `feature_flag_query_work_budget` 质量阶段在 fast/full profile 的产品测试构建后运行。它针对 11,001 个标识执行真实配置查询入口，记录 `feature_flag_narrow_vm_steps`（预算 2,000,000）和 `feature_flag_exhausted_vm_steps`（预算 4,097,000，包含最后一次中断间隔）。昂贵 seed 查询必须报告预算耗尽，窄查询必须成功。指标缺失、格式无效、重复或超预算均使阶段失败，选中零项测试也不能通过。
+
+Canonical-call fixture 与 workload 的单元测试分别位于所属目录的 `canonical_calls_tests.rs`，通过显式 test-only path 挂载；测试模块身份和场景保持不变。

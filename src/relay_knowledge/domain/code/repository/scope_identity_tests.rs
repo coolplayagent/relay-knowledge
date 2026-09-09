@@ -228,8 +228,8 @@ fn feature_flag_key_index_upgrade_changes_scope_for_the_same_tree() {
 #[test]
 fn python_overload_upgrade_invalidates_the_previous_completed_scope() {
     let previous = CODE_SNAPSHOT_FACT_VERSION.replace(
-        "python-overload-declarations-v4",
-        "python-overload-declarations-v3",
+        "python-overload-declarations-v6",
+        "python-overload-declarations-v5",
     );
     assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
     let mut input = Vec::new();

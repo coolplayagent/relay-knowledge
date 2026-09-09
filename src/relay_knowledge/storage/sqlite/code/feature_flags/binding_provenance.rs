@@ -46,4 +46,5 @@ pub(super) fn used_symbols(
 }
 
 #[cfg(test)]
+#[path = "binding_provenance_tests.rs"]
 mod tests;

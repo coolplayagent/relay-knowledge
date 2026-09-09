@@ -2,6 +2,146 @@
 use super::*;
 
 #[tokio::test]
+async fn static_java_platform_imports_survive_git_indexing_without_lexical_shadow_facts() {
+    let repo = FixtureRepo::create("config-static-imports");
+    repo.write(
+        "src/Explicit.java",
+        r#"package demo;
+import static java.lang.System.getenv;
+import static java.lang.System.getProperty;
+import static java.lang.Boolean.getBoolean;
+class Explicit {
+ void run(String getenv) {
+  if (getenv("STATIC_ENV") != null) {}
+  if (getProperty("static_property", "true") != null) {}
+  if (getBoolean("static_boolean")) {}
+ }
+}
+"#,
+    );
+    repo.write(
+        "src/Wildcard.java",
+        r#"package demo;
+import static java.lang.System.*;
+import static java.lang.Boolean.*;
+class Wildcard {
+ void run() {
+  if (getenv("WILD_ENV") != null) {}
+  if (getProperty("wild_property") != null) {}
+  if (getBoolean("wild_boolean")) {}
+ }
+}
+"#,
+    );
+    repo.write(
+        "src/Shadow.java",
+        r#"package demo;
+import static java.lang.System.getenv;
+class Shadow {
+ static String getenv(String name) { return name; }
+ void run() { if (getenv("false_local") != null) {} }
+}
+"#,
+    );
+    repo.write(
+        "src/Custom.java",
+        "package demo; class Custom { static String getenv(String name) { return name; } }\n",
+    );
+    repo.write(
+        "src/CustomImport.java",
+        r#"package demo;
+import static java.lang.System.*;
+import static demo.Custom.getenv;
+class CustomImport { void run() { if (getenv("false_import") != null) {} } }
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Static platform imports and shadows"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-static-imports").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-static-imports"),
+        )
+        .await
+        .unwrap();
+    let response = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                filtered_selector("fixture", "HEAD", "src"),
+                100,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap(),
+            context("query-static-imports"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.flags.len(), 6, "{:?}", response.flags);
+    for key in [
+        "STATIC_ENV",
+        "static_property",
+        "static_boolean",
+        "WILD_ENV",
+        "wild_property",
+        "wild_boolean",
+    ] {
+        let flag = response
+            .flags
+            .iter()
+            .find(|flag| flag.source_key == key)
+            .unwrap();
+        assert_eq!(
+            flag.source_kind,
+            if key.ends_with("ENV") {
+                "env_var"
+            } else {
+                "config_key"
+            }
+        );
+        assert_eq!(
+            flag.usages
+                .iter()
+                .filter(|usage| usage.edge_kind == "reads_config")
+                .count(),
+            1,
+            "{key}"
+        );
+        assert_eq!(
+            flag.usages
+                .iter()
+                .filter(|usage| usage.edge_kind == "guards_code")
+                .count(),
+            1,
+            "{key}"
+        );
+    }
+    assert_eq!(
+        response
+            .flags
+            .iter()
+            .find(|flag| flag.source_key == "static_property")
+            .unwrap()
+            .usages
+            .iter()
+            .find(|usage| usage.edge_kind == "reads_config")
+            .unwrap()
+            .metadata
+            .default_value
+            .as_deref(),
+        Some("true")
+    );
+}
+
+#[tokio::test]
 async fn getter_type_owners_guard_write_order_and_export_options_survive_git_indexing() {
     let repo = FixtureRepo::create("config-type-guard-export");
     repo.write("src/App.java", r#"package demo;

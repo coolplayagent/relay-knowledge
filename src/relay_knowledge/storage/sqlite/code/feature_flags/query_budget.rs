@@ -43,4 +43,5 @@ pub(super) fn run<T>(
 }
 
 #[cfg(test)]
+#[path = "query_budget_tests.rs"]
 mod tests;

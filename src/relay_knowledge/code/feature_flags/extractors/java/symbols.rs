@@ -332,7 +332,7 @@ pub(super) fn getter_bindings(node: Node<'_>, content: &str) -> Vec<String> {
     bindings
 }
 
-fn is_type(node: Node<'_>) -> bool {
+pub(super) fn is_type(node: Node<'_>) -> bool {
     matches!(
         node.kind(),
         "class_declaration"

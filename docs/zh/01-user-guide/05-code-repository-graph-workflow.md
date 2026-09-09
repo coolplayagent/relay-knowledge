@@ -344,10 +344,12 @@ relay-knowledge repo status repo --format json
 
 Java getter binding 要求读取位于 getter 自己的 callable scope 的 return 中；返回 expression/block lambda 时，其中的读取仍作为事实保留，但不绑定到返回回调对象的 getter。interface constant declaration 使用 Java 隐式 static/final 语义及完整 enclosing type 身份。局部 flag 数据流包含 return 或变量初始化中嵌套的 ternary condition，但写入、嵌套 block 与 callable 边界仍阻止越界追踪。已证明存在多个不同 key 实现的配置 getter 保留 ambiguous read/guard 引用，一致性为 unknown、`analysis_complete=false`，不猜测具体 destination。
 
-Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。v4 同时使此前版本已索引 scope 重建。`python-overload-declarations-v4` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
+Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v6 同时使此前版本已索引 scope 重建。`python-overload-declarations-v6` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
 
 配置 getter 绑定只接受零参数方法，与支持的零参数 getter 调用保持一致。平台 receiver 遮蔽检查包含接口字段，普通 for 循环条件中的直接读取会生成 guard 关系。Shell 提取排除词法可见的未导出赋值和函数局部绑定，保留显式 export 与未被遮蔽的外部环境读取；绑定扫描最多检查 1,024 个祖先或前序节点，耗尽时不猜测环境来源。模板 `keyOrDefault` 读取保留静态字符串默认值（包含空格）及其推断标量类型，动态默认值表达式保持 unknown。配置查询的 SQLite 执行预算覆盖候选排序、alias 补取和符号附加，耗尽时返回 timeout/incomplete，并提示收窄查询词或 path/language 过滤。
 
 精确调用 selector 的 `name:` 在候选准入前过滤返回的调用身份。callees 使用已解析 canonical 身份；无本地已解析目标时使用已持久化的 target hint/name，同时保留 unresolved 状态和边元数据。callers 过滤调用方身份，被调用方名称不会使无关调用方入选。既有共享执行预算与结果上限继续生效。
 
 零参数 getter 绑定使用最近的 Java 声明类型，包含 record、enum 和接口 default 方法。局部标志传播保留首次词法写入前已完成的条件，随后在写入所在 statement 停止；body 写入后的条件不再继承之前的读取。Bash 配置定义与词法绑定共享声明选项解析，支持不依赖空格形式的 `export` 及 `declare`/`typeset`/`local -x`，并排除显式取消导出。常量声明只来自真实读取绑定解析经过的 constant symbol；字符串值相等本身不构成声明证据。
+
+Java 配置读取也识别 `java.lang.System.getenv`、`java.lang.System.getProperty` 和 `java.lang.Boolean.getBoolean` 的显式及通配静态导入。显式导入优先于通配导入；可见同名方法、冲突导入或无法证明的继承方法集合会阻止平台 API 推断。变量名称属于 Java 独立的值命名空间，不会遮蔽导入的方法。导入和方法作用域证明采用 1024 节点检查预算；预算耗尽不会猜测配置读取。结构化抽取保留来源命名空间、字面量默认值及 guard 关联，不恢复 Java 环境变量的文本回退。
