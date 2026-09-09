@@ -337,3 +337,9 @@ mod boundaries;
 
 #[path = "python_alias_creation.rs"]
 mod alias_creation;
+
+#[path = "python_class_imports.rs"]
+mod class_imports;
+
+#[path = "python_control_decorators.rs"]
+mod control_decorators;

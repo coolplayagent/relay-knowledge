@@ -5,6 +5,74 @@ const APP: &str = "import typing\ndef leaf(): return 1\n@typing.overload\ndef pi
 const LOCAL: &str = "def overload(function):\n return function\n";
 
 #[tokio::test]
+async fn pyw_origin_changes_reparse_explicit_incremental_and_overlay() {
+    for overlay in [false, true] {
+        let repo = FixtureRepo::create("pyw-origin-reparse");
+        repo.write("app.pyw", APP);
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "Python windowed source"]);
+        let base = repo.git_text(["rev-parse", "HEAD"]);
+        let service = service_with_memory_store().await;
+        register_origin_repo(&service, &repo, vec![]).await;
+        index_origin(&service, CodeIndexMode::Full, "HEAD", false).await;
+        assert_origin_call(&service, "HEAD", true).await;
+        repo.write("typing.py", LOCAL);
+        let reference = if overlay {
+            index_origin(&service, CodeIndexMode::WorktreeOverlay, "HEAD", false).await;
+            "worktree"
+        } else {
+            repo.git(["add", "."]);
+            repo.git(["commit", "-m", "Local provider"]);
+            let head = repo.git_text(["rev-parse", "HEAD"]);
+            index_origin(
+                &service,
+                CodeIndexMode::incremental(base, head).unwrap(),
+                "HEAD",
+                false,
+            )
+            .await;
+            "HEAD"
+        };
+        assert_origin_call(&service, reference, false).await;
+    }
+}
+
+#[tokio::test]
+async fn overlay_origin_reparse_rejects_combined_changed_and_unchanged_byte_overflow() {
+    let repo = FixtureRepo::create("origin-total-byte-budget");
+    let prefix = format!("{APP}#");
+    let source = format!("{}{}\n", prefix, "x".repeat(256 * 1024 - prefix.len() - 1));
+    assert_eq!(source.len(), 256 * 1024);
+    for index in 0..32 {
+        repo.write(&format!("base{index}.py"), &source);
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Bounded Python base"]);
+    let service = service_with_memory_store().await;
+    register_origin_repo(&service, &repo, vec![]).await;
+    index_origin(&service, CodeIndexMode::Full, "HEAD", false).await;
+    for index in 0..32 {
+        repo.write(&format!("changed{index}.py"), &source);
+    }
+    repo.write("typing.py", LOCAL);
+    let error = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::WorktreeOverlay,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("origin-overflow"),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("bounded byte budget"), "{error:?}");
+    assert_origin_call(&service, "HEAD", true).await;
+}
+
+#[tokio::test]
 async fn explicit_python_incremental_provider_change_reparses_unchanged_app() {
     let repo = FixtureRepo::create("python-origin-explicit-incremental");
     repo.write("app.py", APP);

@@ -132,7 +132,7 @@ pub(super) fn build_incremental_snapshot(
             })
             .collect::<BTreeSet<_>>();
         for entry in &head_entries {
-            if entry.path.ends_with(".py")
+            if crate::code::language_metadata::language_id(&entry.path) == Some("python")
                 && path_is_selected_with_layout(&entry.path, registration, selector, &source_layout)
             {
                 if scheduled.insert(entry.path.clone()) {
@@ -592,7 +592,8 @@ fn parse_changed_path(
     };
     let blob_hash = stable_content_hash(&bytes);
     if context.previous_hashes.get(path) == Some(&blob_hash)
-        && !(context.reparse_python && path.ends_with(".py"))
+        && !(context.reparse_python
+            && crate::code::language_metadata::language_id(path) == Some("python"))
     {
         build.skipped_unchanged_count += 1;
         return Ok(());

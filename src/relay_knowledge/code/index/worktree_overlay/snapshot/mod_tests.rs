@@ -5,10 +5,24 @@ use std::collections::BTreeMap;
 use super::*;
 
 #[test]
+fn origin_reparse_budget_includes_changed_bytes_and_rejects_overflow() {
+    let limit = crate::domain::CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH;
+    let mut total = 0;
+    charge_origin_reparse_bytes(&mut total, limit / 2).unwrap();
+    charge_origin_reparse_bytes(&mut total, limit / 2).unwrap();
+    assert_eq!(total, limit);
+    assert!(charge_origin_reparse_bytes(&mut total, 1).is_err());
+    assert_eq!(total, limit);
+    assert!(charge_origin_reparse_bytes(&mut total, usize::MAX).is_err());
+    assert_eq!(total, limit);
+}
+
+#[test]
 fn provider_reparse_removes_only_successfully_reparsed_python_skips() {
     let repo = crate::code::test_fixtures::TempGitRepo::create("overlay-origin-counters");
     let app = "import typing\n@typing.overload\ndef pick(x:int): ...\ndef pick(x): return x\n";
     repo.write("app.py", app);
+    repo.write("window.pyw", app);
     repo.write("README.md", "unchanged\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Base"]);
@@ -23,6 +37,10 @@ fn provider_reparse_removes_only_successfully_reparsed_python_skips() {
         (
             "README.md".into(),
             crate::code::ids::stable_content_hash(b"unchanged\n"),
+        ),
+        (
+            "window.pyw".into(),
+            crate::code::ids::stable_content_hash(app.as_bytes()),
         ),
     ]);
     repo.write("app.py", "# staged\n");
@@ -43,7 +61,7 @@ fn provider_reparse_removes_only_successfully_reparsed_python_skips() {
         &Default::default(),
     )
     .unwrap();
-    assert_eq!(snapshot.files.len(), 2);
+    assert_eq!(snapshot.files.len(), 3);
     assert_eq!(snapshot.skipped_unchanged_count, 1);
     assert_eq!(snapshot.changed_path_count, 3);
 }

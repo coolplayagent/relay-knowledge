@@ -97,7 +97,7 @@ impl WorktreeOverlayRecorder<'_, '_> {
         self.deleted_paths.retain(|path| path != &entry.parent_path);
         if self.previous_hashes.get(&entry.parent_path) == Some(&blob_hash) && !was_deleted {
             *self.skipped_unchanged_count += 1;
-            if entry.parent_path.ends_with(".py") {
+            if crate::code::language_metadata::language_id(&entry.parent_path) == Some("python") {
                 self.skipped_python_paths.insert(entry.parent_path.clone());
             }
             return Ok(());

@@ -11,6 +11,10 @@ fn filesystem_provider_add_delete_reparses_unchanged_python_symbols() {
         "import typing\n@typing.overload\ndef pick(x:int): ...\ndef pick(x): return x\n",
     );
     let registration = source.registration();
+    source.write(
+        "window.pyw",
+        "import typing\n@typing.overload\ndef pick(x:int): ...\ndef pick(x): return x\n",
+    );
     let selector = source.selector();
     let first = crate::code::index::full_snapshot::build_full_snapshot(
         &registration,
@@ -41,9 +45,9 @@ fn filesystem_provider_add_delete_reparses_unchanged_python_symbols() {
             .iter()
             .filter(|s| s.name == "pick" && s.kind == "function")
             .count(),
-        2
+        4
     );
-    let paths = vec!["app.py".into(), "typing.py".into()];
+    let paths = vec!["app.py".into(), "window.pyw".into(), "typing.py".into()];
     let hashes = filesystem_content_hashes_for_paths(&source.path, &paths).unwrap();
     std::fs::remove_file(source.path.join("typing.py")).unwrap();
     let removed = super::build_filesystem_delta_snapshot(
@@ -62,7 +66,7 @@ fn filesystem_provider_add_delete_reparses_unchanged_python_symbols() {
             .iter()
             .filter(|s| s.name == "pick" && s.kind == "function_declaration")
             .count(),
-        1
+        2
     );
     assert!(removed.deleted_paths.iter().any(|path| path == "typing.py"));
 }

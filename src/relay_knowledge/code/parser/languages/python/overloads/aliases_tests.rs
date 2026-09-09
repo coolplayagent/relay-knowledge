@@ -3,6 +3,14 @@ use super::*;
 #[test]
 fn direct_alias_chains_follow_preceding_values_with_a_bound() {
     for (source, expected) in [
+        (
+            "if enabled:\n alias = typing\nalias.overload = custom\n",
+            true,
+        ),
+        (
+            "if enabled:\n def helper():\n  alias = typing\nalias.overload = custom\n",
+            false,
+        ),
         ("other = alias = typing\nalias.overload = custom\n", true),
         (
             "alias = typing\nother = alias\nother.overload = custom\n",

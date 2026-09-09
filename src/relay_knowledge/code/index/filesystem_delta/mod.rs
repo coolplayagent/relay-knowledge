@@ -192,7 +192,8 @@ pub(super) fn build_filesystem_delta_snapshot(
             ))
         })?;
         if previous_hashes.get(&entry.path) == Some(blob_hash)
-            && !(reparse_python && entry.path.ends_with(".py"))
+            && !(reparse_python
+                && crate::code::language_metadata::language_id(&entry.path) == Some("python"))
         {
             build.skipped_unchanged_count += 1;
             continue;

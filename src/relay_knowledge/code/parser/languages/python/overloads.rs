@@ -105,6 +105,38 @@ fn evaluate_decorator(
         }
         _ => return false,
     };
+    // Decorator expressions are evaluated in source order, before any decorator
+    // is applied. Later expressions cannot change an already captured provider.
+    let mut earlier = decorator.prev_named_sibling();
+    while let Some(previous) = earlier {
+        let Some(left) = remaining.checked_sub(1) else {
+            return false;
+        };
+        *remaining = left;
+        earlier = previous.prev_named_sibling();
+        if previous.kind() == "comment" {
+            continue;
+        }
+        if previous.kind() != "decorator" {
+            return false;
+        }
+        let Some(expression) = previous.named_child(0) else {
+            return false;
+        };
+        if mutations::expression_rebinds_with_budget(
+            content, expression, &binding, module, remaining,
+        ) || mutations::unknown_eager_call(
+            content,
+            expression,
+            &binding,
+            module,
+            &proven.decorators,
+            remaining,
+            proven.origins,
+        ) {
+            return false;
+        }
+    }
     visible_import(content, decorated, &binding, module, remaining, proven)
 }
 
