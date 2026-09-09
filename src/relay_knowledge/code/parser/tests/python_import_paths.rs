@@ -96,3 +96,118 @@ fn assert_python_kinds(source: &str, declaration: bool) {
         "{source}"
     );
 }
+
+#[test]
+fn python_later_imports_respect_linear_binding_order_and_execution_boundaries() {
+    assert_python_kinds(
+        r#"def outer():
+ def inner():
+  @ov
+  def pick(x:int): ...
+  def pick(x): return x
+  return pick
+ from typing import overload as ov
+ return inner
+result=outer()()
+"#,
+        true,
+    );
+    assert_python_kinds(
+        r#"def outer():
+ def inner():
+  @ov
+  def pick(x:int): ...
+  def pick(x): return x
+  return pick
+ ov=lambda fn: fn
+ from typing import overload as ov
+ return inner
+result=outer()()
+"#,
+        true,
+    );
+    assert_python_kinds(
+        r#"def outer():
+ def inner():
+  @ov
+  def pick(x:int): ...
+  def pick(x): return x
+  return pick
+ from typing import overload as ov
+ ov=lambda fn: fn
+ return inner
+result=outer()()
+"#,
+        false,
+    );
+    assert_python_kinds(
+        r#"def outer():
+ def inner():
+  @ov
+  def pick(x:int): ...
+  def pick(x): return x
+  return pick
+ result=inner()
+ from typing import overload as ov
+ return result
+result=outer()
+"#,
+        false,
+    );
+    assert_python_kinds(
+        r#"def outer():
+ def inner():
+  @ov
+  def pick(x:int): ...
+  def pick(x): return x
+  return pick
+ return inner
+ from typing import overload as ov
+result=outer()()
+"#,
+        false,
+    );
+}
+
+#[test]
+fn python_module_mutator_calls_and_duplicate_import_aliases_preserve_the_last_binding() {
+    for (prefix, decorator, typed) in [
+        (
+            "import typing\nsetattr(typing, \"overload\", custom)\n",
+            "typing.overload",
+            false,
+        ),
+        (
+            "import typing\nsetattr(typing, \"other\", custom)\n",
+            "typing.overload",
+            true,
+        ),
+        (
+            "import typing\ndelattr(typing, \"overload\")\n",
+            "typing.overload",
+            false,
+        ),
+        (
+            "import typing\nsetattr(other, \"typing\", custom)\n",
+            "typing.overload",
+            true,
+        ),
+        ("import typing as tm, types as tm\n", "tm.overload", false),
+        ("import types as tm, typing as tm\n", "tm.overload", true),
+        (
+            "from typing import overload as ov, no_type_check as ov\n",
+            "ov",
+            false,
+        ),
+        (
+            "from typing import no_type_check as ov, overload as ov\n",
+            "ov",
+            true,
+        ),
+    ] {
+        assert_python_kinds(
+            &format!("{prefix}@{decorator}\ndef pick(x:int): ...\ndef pick(x): return x\n"),
+            typed,
+        );
+    }
+}

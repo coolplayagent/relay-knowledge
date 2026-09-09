@@ -453,3 +453,5 @@ clone_pinned_repository https://github.com/Alamofire/Alamofire.git /opt/workspac
 Fast `software_relationship_storage_cases` 门禁执行 `cargo test --lib software_relationship_storage -- --nocapture`，覆盖 4,096 map topic、零持久边写入/新增页、Unicode 规范化后的配置边去重、稳定 ID/证据、limit 前 scope 过滤与有界计数/查询耗时；16,384 条 usage fixture 要求窗口前 path/language 过滤至少减半 VM 工作量，规范化字符集必须与每个 Rust Unicode scalar 一致。该门禁保护 schema 8 去除冗余兼容边存储且保留类型化 ontology statement 的合同。
 
 `canonical_call_query_work_budget` 质量门禁在 fast/full/exhaustive profile 中作为独立阶段运行，位于既有 library-test 构建之后。它用 32,768 条匹配调用边执行真实产品查询入口，从查询自身的执行预算设施获取 callers/callees SQLite VM steps。两个方向各输出一条 `SELF_ITERATION_METRIC` JSON：名称分别为 `canonical_call_callers_vm_steps`、`canonical_call_callees_vm_steps`，`value` 为正整数，`budget` 固定为 150000；它们都是越低越好的关键指标。缺失、格式错误、重复、零值或预算不一致都会使门禁失败，包括 Cargo filter 未执行任何测试。超过 150,000 steps 直接失败，不依赖易抖动的墙钟阈值；旧全量排序查询在此 fixture 上超过一百万 steps。该门禁不复制 SQL，也不使用面向 fixture 的产品分支，既有 canonical-call CLI workload 继续负责端到端结果及宽松延迟预算。
+
+Canonical-call fixture 与 workload 的单元测试分别位于所属目录的 `canonical_calls_tests.rs`，通过显式 test-only path 挂载；测试模块身份和场景保持不变。
