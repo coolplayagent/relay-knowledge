@@ -125,3 +125,7 @@ mod cpp_declaration_tests;
 #[cfg(test)]
 #[path = "tests/python_overloads.rs"]
 mod python_overload_tests;
+
+#[cfg(test)]
+#[path = "tests/python_import_paths.rs"]
+mod python_import_path_tests;

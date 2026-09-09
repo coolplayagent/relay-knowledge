@@ -208,6 +208,13 @@ fn statement_binding(
     binding: &str,
     module: bool,
 ) -> Option<bool> {
+    if statement.kind() == "try_statement" {
+        return try_import_binding(content, statement, binding, module);
+    }
+    simple_binding(content, statement, binding, module)
+}
+
+fn simple_binding(content: &str, statement: Node<'_>, binding: &str, module: bool) -> Option<bool> {
     if matches!(
         statement.kind(),
         "import_statement" | "import_from_statement"
@@ -267,6 +274,60 @@ fn statement_binding(
     contains_identifier(content, statement, binding).then_some(false)
 }
 
+fn try_import_binding(content: &str, node: Node<'_>, binding: &str, module: bool) -> Option<bool> {
+    if !contains_identifier(content, node, binding) {
+        return None;
+    }
+    let mut remaining = MAX_BINDING_STATEMENTS;
+    let mut cursor = node.walk();
+    for branch in node.named_children(&mut cursor) {
+        if branch
+            .child_by_field_name("alias")
+            .or_else(|| {
+                branch
+                    .child_by_field_name("value")
+                    .filter(|value| value.kind() == "as_pattern")
+                    .and_then(|value| value.child_by_field_name("alias"))
+            })
+            .is_some_and(|alias| contains_identifier(content, alias, binding))
+        {
+            return Some(false);
+        }
+        let body = if branch.kind() == "block" {
+            Some(branch)
+        } else {
+            let mut cursor = branch.walk();
+            branch
+                .named_children(&mut cursor)
+                .find(|child| child.kind() == "block")
+        };
+        let Some(body) = body else {
+            return Some(false);
+        };
+        let mut last_binding = None;
+        let mut cursor = body.walk();
+        for statement in body.named_children(&mut cursor) {
+            if remaining == 0 {
+                return Some(false);
+            }
+            remaining -= 1;
+            // Nested control flow is intentionally unknown; this merge accepts
+            // only independently proven imports on every completing path.
+            if let Some(value) = simple_binding(content, statement, binding, module) {
+                last_binding = Some(value);
+            }
+        }
+        if matches!(branch.kind(), "block" | "except_clause") {
+            if last_binding != Some(true) {
+                return Some(false);
+            }
+        } else if last_binding == Some(false) {
+            return Some(false);
+        }
+    }
+    Some(true)
+}
+
 fn assignment_binds(content: &str, node: Node<'_>, name: &str, module: bool) -> bool {
     let mut cursor = node.walk();
     let mut remaining = MAX_BINDING_STATEMENTS;
@@ -320,20 +381,57 @@ fn contains_identifier(content: &str, node: Node<'_>, name: &str) -> bool {
 }
 
 fn module_receiver(content: &str, mut node: Node<'_>, name: &str) -> bool {
+    let mut access = None;
     for _ in 0..MAX_BINDING_STATEMENTS {
-        match node.kind() {
-            "identifier" => return node_text(content, node) == name,
-            "attribute" | "subscript" => {
-                let Some(receiver) = node
-                    .child_by_field_name("object")
-                    .or_else(|| node.child_by_field_name("value"))
-                else {
-                    return false;
-                };
-                node = receiver;
+        let Some(receiver) = node
+            .child_by_field_name("object")
+            .or_else(|| node.child_by_field_name("value"))
+        else {
+            return false;
+        };
+        if receiver.kind() == "identifier" {
+            if node_text(content, receiver) != name {
+                return false;
             }
-            _ => return false,
+            if node.kind() != "attribute" {
+                return true;
+            }
+            let member = node
+                .child_by_field_name("attribute")
+                .map(|n| node_text(content, n));
+            return match member.as_deref() {
+                Some("overload") => true,
+                Some("__dict__") => namespace_may_write_overload(content, access),
+                _ => false,
+            };
         }
+        access = Some(node);
+        node = receiver;
     }
     true
+}
+
+fn namespace_may_write_overload(content: &str, access: Option<Node<'_>>) -> bool {
+    let Some(key) = access
+        .filter(|n| n.kind() == "subscript")
+        .and_then(|n| n.child_by_field_name("subscript"))
+    else {
+        return true;
+    };
+    let literal = node_text(content, key);
+    // Unknown/escaped expressions may name overload. Only a plain static key
+    // can prove that a different namespace member is being written.
+    if key.kind() != "string" || literal.contains('\\') {
+        return true;
+    }
+    let Some(quote) = literal.chars().next().filter(|q| matches!(q, '\'' | '"')) else {
+        return true;
+    };
+    if !literal.ends_with(quote)
+        || literal.len() < 2
+        || literal.starts_with(&quote.to_string().repeat(3))
+    {
+        return true;
+    }
+    &literal[1..literal.len() - 1] == "overload"
 }

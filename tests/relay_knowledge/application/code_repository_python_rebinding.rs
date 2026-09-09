@@ -139,3 +139,107 @@ def module_mutation_choice(): return leaf()
         }
     }
 }
+
+#[tokio::test]
+async fn python_import_fallback_and_module_members_round_trip_through_the_call_graph() {
+    let repo = FixtureRepo::create("python-import-paths");
+    repo.write(
+        "src/members.py",
+        r#"import typing as property_module
+import typing as subscript_module
+import typing as mutation_module
+from typing import get_overloads
+from types import SimpleNamespace
+events=[]
+def custom(fn): events.append(fn.__qualname__); return fn
+def leaf(): return 1
+registry=SimpleNamespace()
+property_module.unrelated_marker=object()
+@property_module.overload
+def attribute_choice(x:int): ...
+def attribute_choice(x): return leaf()
+mapping={}
+subscript_module.__dict__["unrelated_marker"]=object()
+@subscript_module.overload
+def subscript_choice(x:int): ...
+def subscript_choice(x): return leaf()
+mutation_module.__dict__["overload"]=custom
+@mutation_module.overload
+def mutation_choice(): return leaf()
+def mutation_choice(): return leaf()
+"#,
+    );
+    repo.write(
+        "src/fallback.py",
+        r#"try:
+    from typing import overload
+except ImportError:
+    from typing_extensions import overload
+from typing import get_overloads
+def leaf(): return 1
+@overload
+def fallback_choice(x:int): ...
+def fallback_choice(x): return leaf()
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Python import paths"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-python-imports"),
+        )
+        .await
+        .unwrap();
+    for name in [
+        "attribute_choice",
+        "subscript_choice",
+        "mutation_choice",
+        "fallback_choice",
+    ] {
+        let definitions = query(&service, name, CodeQueryKind::Definition).await;
+        let canonical = definitions
+            .results
+            .iter()
+            .find_map(|h| {
+                h.canonical_symbol_id
+                    .as_deref()
+                    .filter(|id| id.ends_with(name))
+            })
+            .unwrap();
+        let result = service
+            .query_code_repository(
+                CodeRetrievalRequest::new(
+                    canonical,
+                    selector("fixture", "HEAD"),
+                    CodeQueryKind::Callees,
+                    10,
+                    FreshnessPolicy::AllowStale,
+                )
+                .unwrap(),
+                context("python-imports-query"),
+            )
+            .await;
+        if name == "mutation_choice" {
+            assert_eq!(result.unwrap_err().error_kind, ErrorKind::InvalidArgument);
+        } else {
+            let response = result.unwrap();
+            assert_eq!(response.results.len(), 1);
+            assert!(
+                response.results[0]
+                    .canonical_symbol_id
+                    .as_deref()
+                    .unwrap()
+                    .ends_with("::leaf")
+            );
+        }
+    }
+}
