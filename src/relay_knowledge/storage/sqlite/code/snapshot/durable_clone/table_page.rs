@@ -20,6 +20,7 @@ struct Candidate {
 
 struct CandidatePage {
     row_count: usize,
+    projection_rows: usize,
     affected_count: usize,
     reference_occurrences: usize,
     last: Option<Candidate>,
@@ -119,7 +120,15 @@ pub(super) fn advance(
             next.phase = progress::PHASE_SEARCH.to_owned();
         }
     }
-    require_page_budget(&next, identity, page.row_count, page.bytes, 2, 3)?;
+    require_page_budget(
+        &next,
+        identity,
+        page.row_count
+            .saturating_add(page.projection_rows.div_ceil(2)),
+        page.bytes,
+        2,
+        3,
+    )?;
     progress::compare_and_store(transaction, current, &next, now_ms)
 }
 
@@ -170,6 +179,7 @@ fn load_page(
     let mut statement = transaction.prepare(&sql)?;
     let mut query = statement.query(params_from_iter(values))?;
     let mut row_count = 0usize;
+    let mut projection_rows = 0usize;
     let mut affected_count = 0usize;
     let mut reference_occurrences = 0usize;
     let mut last_rowid = None;
@@ -179,14 +189,27 @@ fn load_page(
         let measured = row.get::<_, i64>(1)?;
         let measured = usize::try_from(measured)
             .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(1, measured))?;
+        let projected = usize::try_from(row.get::<_, i64>(4)?)
+            .map_err(|_| clone_capacity_error(&current.source_scope))?;
+        let next_projection_rows = checked_add(projection_rows, projected, &current.source_scope)?;
         let row_bytes = measured
-            .checked_add(current.source_scope.len())
+            .checked_add(
+                projected
+                    .checked_mul(current.source_scope.len())
+                    .ok_or_else(|| clone_capacity_error(&current.source_scope))?,
+            )
+            .and_then(|value| value.checked_add(current.source_scope.len()))
             .and_then(|value| value.checked_add(ROW_STORAGE_OVERHEAD_BYTES))
             .ok_or_else(|| clone_capacity_error(&current.source_scope))?;
         let next_bytes = bytes
             .checked_add(row_bytes)
             .ok_or_else(|| clone_capacity_error(&current.source_scope))?;
-        if row_count == row_limit || next_bytes > byte_limit {
+        if row_count
+            .saturating_add(1)
+            .saturating_add(next_projection_rows.div_ceil(2))
+            > row_limit
+            || next_bytes > byte_limit
+        {
             if row_count == 0 {
                 return Err(clone_capacity_error(&current.source_scope));
             }
@@ -207,6 +230,7 @@ fn load_page(
         )?;
         row_count = checked_add(row_count, 1, &current.source_scope)?;
         bytes = next_bytes;
+        projection_rows = next_projection_rows;
     }
     drop(query);
     drop(statement);
@@ -215,6 +239,7 @@ fn load_page(
         .transpose()?;
     Ok(CandidatePage {
         row_count,
+        projection_rows,
         affected_count,
         reference_occurrences,
         last,
@@ -368,19 +393,29 @@ fn candidate_query(
     let limit_parameter = values.len();
     Ok((
         format!(
-            "SELECT source.rowid, ({length_sql}),
+            "SELECT source.rowid, ({length_sql})+({projection_bytes}),
                     EXISTS (
                         SELECT 1
                         FROM code_repository_incremental_clone_affected_paths affected
                         WHERE affected.source_scope = ?2
                           AND affected.path = source.path
                     ),
-                    {reference_occurrences}
+                    {reference_occurrences}, {projection_rows}
              FROM {table_name} source
              WHERE source.source_scope = ?1 {after}
              ORDER BY {order}
              LIMIT ?{limit_parameter}",
             table_name = table.table,
+            projection_bytes = if table.table == "code_repository_files" {
+                super::super::java_projection::COPY_BYTES
+            } else {
+                "0"
+            },
+            projection_rows = if table.table == "code_repository_files" {
+                super::super::java_projection::COPY_ROWS
+            } else {
+                "0"
+            },
             reference_occurrences = if table.table == "code_repository_reference_search_groups" {
                 "source.occurrence_count"
             } else {
@@ -507,3 +542,7 @@ fn checked_add(left: usize, right: usize, scope: &str) -> Result<usize, StorageE
     left.checked_add(right)
         .ok_or_else(|| clone_capacity_error(scope))
 }
+
+#[cfg(test)]
+#[path = "table_page_tests.rs"]
+mod tests;

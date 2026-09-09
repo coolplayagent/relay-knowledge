@@ -170,6 +170,7 @@ fn snapshot(paths: &[&str]) -> CodeIndexSnapshot {
 
 fn file(path: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         file_id: format!("file:{path}"),

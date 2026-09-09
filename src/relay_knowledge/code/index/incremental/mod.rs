@@ -6,6 +6,9 @@ use std::{
     path::Path,
 };
 
+mod prefetch;
+use prefetch::{ChangedPathPrefetchRequest, prefetch_changed_path_bytes};
+
 use crate::domain::{
     CodeIndexResourceBudget, CodeIndexSnapshot, CodePathTombstone, CodeRepositoryRegistration,
     CodeRepositorySelector, CodeWorkspaceDetectionConfig,
@@ -132,7 +135,7 @@ pub(super) fn build_incremental_snapshot(
             })
             .collect::<BTreeSet<_>>();
         for entry in &head_entries {
-            if entry.path.ends_with(".py")
+            if crate::code::language_metadata::language_id(&entry.path) == Some("python")
                 && path_is_selected_with_layout(&entry.path, registration, selector, &source_layout)
             {
                 if scheduled.insert(entry.path.clone()) {
@@ -145,6 +148,7 @@ pub(super) fn build_incremental_snapshot(
         }
     }
     let prefetched_bytes = prefetch_changed_path_bytes(ChangedPathPrefetchRequest {
+        reparse_python,
         registration,
         selector,
         root,
@@ -178,6 +182,9 @@ pub(super) fn build_incremental_snapshot(
 
     let parse_context = ChangedPathParseContext {
         reparse_python,
+        origin_budget: std::cell::RefCell::new(
+            super::origin_reparse_budget::OriginReparseBudget::default(),
+        ),
         registration,
         selector,
         root,
@@ -487,6 +494,7 @@ fn delete_previous_paths_under_except(
 
 struct ChangedPathParseContext<'a> {
     reparse_python: bool,
+    origin_budget: std::cell::RefCell<super::origin_reparse_budget::OriginReparseBudget>,
     registration: &'a CodeRepositoryRegistration,
     selector: &'a CodeRepositorySelector,
     root: &'a Path,
@@ -496,71 +504,6 @@ struct ChangedPathParseContext<'a> {
     previous_source_layout: &'a scope::SourceLayoutDiscovery,
     effective_path_filters: &'a [String],
     prefetched_bytes: &'a BTreeMap<String, Vec<u8>>,
-}
-
-struct ChangedPathPrefetchRequest<'a> {
-    registration: &'a CodeRepositoryRegistration,
-    selector: &'a CodeRepositorySelector,
-    root: &'a Path,
-    commit: &'a str,
-    changes: &'a [GitChange],
-    head_entries: &'a [changes::GitTreeEntry],
-    source_layout: &'a scope::SourceLayoutDiscovery,
-    previous_source_layout: &'a scope::SourceLayoutDiscovery,
-}
-
-fn prefetch_changed_path_bytes(
-    request: ChangedPathPrefetchRequest<'_>,
-) -> Result<BTreeMap<String, Vec<u8>>, CodeIndexError> {
-    let entries = request
-        .head_entries
-        .iter()
-        .map(|entry| (entry.path.as_str(), entry.byte_count))
-        .collect::<BTreeMap<_, _>>();
-    let budget = CodeIndexResourceBudget::default();
-    let mut paths = Vec::new();
-    let mut total_bytes = 0usize;
-    for path in request.changes.iter().filter_map(changed_head_path) {
-        let Some(byte_count) = entries.get(path).copied() else {
-            continue;
-        };
-        if !path_is_selected_with_layout(
-            path,
-            request.registration,
-            request.selector,
-            request.source_layout,
-        ) && !path_is_selected_with_layout(
-            path,
-            request.registration,
-            request.selector,
-            request.previous_source_layout,
-        ) {
-            continue;
-        }
-        if paths.iter().any(|selected| selected == path) {
-            continue;
-        }
-        if !paths.is_empty()
-            && (paths.len() >= budget.max_files_per_batch
-                || total_bytes.saturating_add(byte_count) > budget.max_bytes_per_batch)
-        {
-            break;
-        }
-        total_bytes = total_bytes.saturating_add(byte_count);
-        paths.push(path.to_owned());
-    }
-    let blobs =
-        source_batch_bytes_after_content_verification(request.root, request.commit, &paths, None)?;
-
-    Ok(paths.into_iter().zip(blobs).collect())
-}
-
-fn changed_head_path(change: &GitChange) -> Option<&str> {
-    match change {
-        GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => Some(path),
-        GitChange::Renamed { new_path, .. } | GitChange::Copied { new_path, .. } => Some(new_path),
-        GitChange::Deleted { .. } => None,
-    }
 }
 
 fn parse_changed_path(
@@ -592,12 +535,16 @@ fn parse_changed_path(
     };
     let blob_hash = stable_content_hash(&bytes);
     if context.previous_hashes.get(path) == Some(&blob_hash)
-        && !(context.reparse_python && path.ends_with(".py"))
+        && !(context.reparse_python
+            && crate::code::language_metadata::language_id(path) == Some("python"))
     {
         build.skipped_unchanged_count += 1;
         return Ok(());
     }
 
+    if context.reparse_python {
+        context.origin_budget.borrow_mut().charge(bytes.len())?;
+    }
     parse_indexed_file(build, path, &bytes)
 }
 

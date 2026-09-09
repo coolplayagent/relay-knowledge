@@ -2,6 +2,70 @@
 use super::*;
 
 #[tokio::test]
+async fn go_variable_declarations_preserve_freshness_and_literal_config_reads() {
+    for (suffix, partial) in [
+        (
+            "{{ $flag := key \"feature_x\" }}{{ $1bad := key \"digit_name\" }}",
+            false,
+        ),
+        ("{{ $missing }}", true),
+    ] {
+        let repo = FixtureRepo::create("template-variable-declarations");
+        repo.git(["config", "core.autocrlf", "false"]);
+        let prefix = "{{/* ignored {{ key \"fake\" }}\r\n */}}\r\n{{ keyOrDefault\r\n \"quoted\" \"a}}b\\\"c\" }}\r\n{{ keyOrDefault\r\n \"raw\" `x}}y\r\nz` }}\r\n";
+        repo.write("src/config.ctmpl", &format!("{prefix}{suffix}"));
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "Go template variable proof"]);
+        let service = service_with_memory_store().await;
+        register_fixture_repo(&service, &repo, "fixture").await;
+        service
+            .index_code_repository(
+                CodeIndexRequest {
+                    repository: selector("fixture", "HEAD"),
+                    mode: CodeIndexMode::Full,
+                    workspace_detection: Default::default(),
+                    freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                    reuse_historical: false,
+                },
+                context("index-template-variables"),
+            )
+            .await
+            .unwrap();
+        let response = service
+            .query_code_repository_feature_flags(
+                CodeFeatureFlagRequest::new(
+                    None,
+                    selector("fixture", "HEAD"),
+                    20,
+                    FreshnessPolicy::AllowStale,
+                )
+                .unwrap(),
+                context("query-template-variables"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.degraded_reason.is_some(), partial);
+        if !partial {
+            for key in ["feature_x", "digit_name"] {
+                let flag = response.flags.iter().find(|f| f.source_key == key).unwrap();
+                assert!(flag.usages.iter().any(|u| u.edge_kind == "reads_config"));
+            }
+        }
+        let quoted = response
+            .flags
+            .iter()
+            .find(|f| f.source_key == "quoted")
+            .unwrap();
+        assert!(
+            quoted
+                .usages
+                .iter()
+                .any(|u| u.metadata.default_value.as_deref() == Some("a}}b\"c"))
+        );
+    }
+}
+
+#[tokio::test]
 async fn template_action_boundaries_and_pipeline_reads_survive_real_git_indexing() {
     let repo = FixtureRepo::create("template-pipelines");
     repo.write("src/pipes.ctmpl", "{{ \"piped_key\" | key }}\n{{ \"PIPED_ENV\" | env }}\n{{ \"true\" | keyOrDefault \"piped_default\" }}\n");

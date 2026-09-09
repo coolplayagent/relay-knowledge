@@ -51,6 +51,60 @@ fn parser_worker_count_keeps_tiny_batches_serial() {
 }
 
 #[test]
+fn namespace_projection_bytes_flush_batches_without_inflating_source_checkpoints() {
+    let repo = TempGitRepo::create("namespace-byte-budget");
+    let package = "p".repeat(512);
+    let source = format!(
+        "package {package};\n{}",
+        (0..80)
+            .map(|i| format!("class C{i} {{}}\n"))
+            .collect::<String>()
+    );
+    for index in 0..6 {
+        repo.write(&format!("src/File{index}.java"), &source);
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Bound repeated namespace projection bytes"]);
+    let mut registration = repo.registration();
+    registration.language_filters.clear();
+    let budget = CodeIndexResourceBudget::new(512, 100_000, 150_000).unwrap();
+    let mut plan = prepare_full_index_plan(registration, repo.selector(), budget).unwrap();
+    let mut files = 0;
+    let mut batches = 0;
+    loop {
+        let (next, batch) = plan.parse_next_batch().unwrap();
+        plan = next;
+        let Some(batch) = batch else { break };
+        batches += 1;
+        files += batch.files.len();
+        assert_eq!(batch.parsed_byte_count, source.len() * batch.files.len());
+        assert!(
+            batch.files.len() <= 2,
+            "derived bytes must flush before all six sources"
+        );
+        assert!(
+            batch
+                .files
+                .iter()
+                .all(|file| file.java_namespace.as_ref().unwrap().complete)
+        );
+        let charged = batch
+            .files
+            .iter()
+            .fold(batch.parsed_byte_count, |total, file| {
+                total + file.namespace_projection_cost().1
+            });
+        let last = batch.files.last().unwrap();
+        assert!(
+            charged - last.namespace_projection_cost().1 - source.len()
+                < budget.max_bytes_per_batch
+        );
+    }
+    assert_eq!(files, 6);
+    assert!(batches >= 3);
+}
+
+#[test]
 fn parser_worker_count_scales_with_bounded_batch_work() {
     let available = thread::available_parallelism()
         .map(usize::from)
@@ -421,6 +475,35 @@ fn batch_row_count_includes_feature_flags() {
     .expect("feature flags should extract");
 
     assert_eq!(batch_row_count(&build), 2);
+}
+
+#[test]
+fn batch_row_count_admits_namespace_rows_including_unknown_java_files() {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+            .unwrap();
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree".to_owned(),
+        true,
+        1,
+        0,
+    );
+    crate::code::parser::parse_indexed_file(
+        &mut build,
+        "AnyName.java",
+        b"package p; class A {} interface B {}",
+    )
+    .unwrap();
+    let complete = batch_row_count(&build);
+    assert_eq!(build.files[0].namespace_projection_row_count(), 3);
+    build.files[0].java_namespace.as_mut().unwrap().complete = false;
+    assert_eq!(batch_row_count(&build), complete - 2);
+    build.files[0].java_namespace = None;
+    assert_eq!(batch_row_count(&build), complete - 2);
+    build.files[0].language_id = "rust".to_owned();
+    assert_eq!(batch_row_count(&build), complete - 3);
 }
 
 #[test]

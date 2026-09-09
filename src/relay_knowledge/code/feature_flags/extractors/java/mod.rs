@@ -20,6 +20,7 @@ pub(in crate::code) fn extract(
     root: Node<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     let mut records = Vec::new();
+    let namespace = crate::code::java_namespace::collect(root, input.content);
     let mut cursor = root.walk();
     loop {
         let node = cursor.node();
@@ -36,6 +37,16 @@ pub(in crate::code) fn extract(
                     usage.metadata.referenced_symbol = Some(key.clone());
                 }
                 usage.metadata.default_value = default_value(node, input.content);
+                usage.metadata.java_implicit_platform = node
+                    .child_by_field_name("object")
+                    .map(|object| text(object, input.content))
+                    .filter(|name| {
+                        matches!(*name, "System" | "Boolean")
+                            && !namespace.explicit_platform_types.contains(*name)
+                    })
+                    .map(|name| crate::domain::JavaImplicitPlatformRead {
+                        type_name: name.to_owned(),
+                    });
                 let method_name = text(
                     node.child_by_field_name("name").unwrap_or(node),
                     input.content,
@@ -53,6 +64,7 @@ pub(in crate::code) fn extract(
                     _ => None,
                 };
                 let read_usage_id = usage.usage_id.clone();
+                let implicit_platform = usage.metadata.java_implicit_platform.clone();
                 let read_source_kind = usage.metadata.read_source_kind;
                 records.push(usage);
                 let guard_start = records.len();
@@ -67,6 +79,7 @@ pub(in crate::code) fn extract(
                     );
                     guard.metadata.read_usage_id = Some(read_usage_id.clone());
                     guard.metadata.read_source_kind = read_source_kind;
+                    guard.metadata.java_implicit_platform = implicit_platform.clone();
                 }
             }
         }
@@ -155,11 +168,7 @@ fn constant_definition(
     let Some(key) = string_defaults::decode(text(value, input.content)) else {
         return Ok(None);
     };
-    if key.is_empty()
-        || !key
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-    {
+    if key.is_empty() {
         return Ok(None);
     }
     let Some(name) = node.child_by_field_name("name") else {

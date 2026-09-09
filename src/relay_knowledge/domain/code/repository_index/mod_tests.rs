@@ -16,6 +16,58 @@ use super::{
 };
 
 #[test]
+fn namespace_projection_rows_participate_in_batch_budget_accounting() {
+    let mut batch = super::CodeIndexBatch {
+        repository_id: "repo".into(),
+        source_scope: "scope".into(),
+        batch_index: 0,
+        parsed_byte_count: 0,
+        files: Vec::new(),
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
+        routes: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    for index in 0..150 {
+        batch.files.push(super::RepositoryCodeFileRecord {
+            java_namespace: Some(crate::domain::JavaNamespaceEvidence {
+                package: "example".into(),
+                top_level_types: (0..1024).map(|index| format!("Type{index}")).collect(),
+                complete: true,
+            }),
+            repository_id: "repo".into(),
+            source_scope: "scope".into(),
+            file_id: format!("file-{index}"),
+            path: format!("Source{index}.java"),
+            language_id: "java".into(),
+            blob_hash: "hash".into(),
+            byte_len: 16_000,
+            line_count: 1024,
+            parse_status: crate::domain::CodeParseStatus::Parsed,
+            is_generated: false,
+            degraded_reason: None,
+        });
+    }
+    let budget = CodeIndexResourceBudget::default();
+    assert!(batch.files.len() < budget.max_files_per_batch);
+    assert!(batch.row_count() > budget.max_rows_per_batch);
+    batch.files.truncate(1);
+    assert_eq!(batch.row_count(), 1026);
+    batch.files[0].java_namespace.as_mut().unwrap().complete = false;
+    assert_eq!(batch.row_count(), 2);
+    batch.files[0].java_namespace = None;
+    assert_eq!(batch.row_count(), 2);
+    batch.files[0].language_id = "rust".into();
+    assert_eq!(batch.row_count(), 1);
+}
+
+#[test]
 fn reference_resolution_tokens_are_versioned_bounded_and_canonical() {
     let cursor_digest = code_reference_resolution_cursor_digest(Some("reference:max"));
     let state = code_reference_resolution_state(usize::MAX, usize::MAX, Some("reference:max"))
@@ -72,7 +124,7 @@ fn reference_resolution_query_index_repair_preserves_the_exact_page_token() {
         })
     );
     let legacy_plan = state.replacen(
-        "finalizing:query_index_repair:v5:",
+        "finalizing:query_index_repair:v6:",
         "finalizing:query_index_repair:v2:",
         1,
     );
@@ -135,7 +187,7 @@ fn reference_search_query_index_repair_tokens_preserve_canonical_page_boundaries
         })
     );
     let version_two_state = state.replacen(
-        "finalizing:query_index_repair:v5:",
+        "finalizing:query_index_repair:v6:",
         "finalizing:query_index_repair:v2:",
         1,
     );
@@ -166,7 +218,7 @@ fn reference_search_query_index_repair_tokens_preserve_canonical_page_boundaries
     );
     for state in [
         "finalizing:query_index_repair:v1:16:resume:reference_search:v2:build:0",
-        "finalizing:query_index_repair:v6:16:resume:reference_search:v2:build:0",
+        "finalizing:query_index_repair:v7:16:resume:reference_search:v2:build:0",
         "finalizing:query_index_repair:v2:17:resume:reference_search:v2:build:0",
         "finalizing:query_index_repair:v3:16:resume:reference_search:v0:build:0",
         "finalizing:query_index_repair:v3:16:resume:reference_search:v2:build:00",
@@ -231,11 +283,11 @@ fn query_index_subphase_tokens_are_versioned_bounded_and_canonical() {
     assert!(!legacy_three.requires_legacy_retired_prefix());
     assert_eq!(
         legacy_three.next_state(17).as_deref(),
-        Some("finalizing:build_query_indexes:v5:17")
+        Some("finalizing:build_query_indexes:v6:17")
     );
     for unit in 0..CODE_QUERY_INDEX_PLAN_UNIT_COUNT {
         let state = code_query_index_subphase_state(unit).expect("bounded unit should format");
-        assert_eq!(state, format!("finalizing:build_query_indexes:v5:{unit}"));
+        assert_eq!(state, format!("finalizing:build_query_indexes:v6:{unit}"));
         assert_eq!(
             code_query_index_subphase(&state).map(|cursor| cursor.completed_unit),
             Some(unit)
@@ -261,7 +313,7 @@ fn query_index_subphase_tokens_are_versioned_bounded_and_canonical() {
     );
     assert_eq!(
         version_one.next_state(16).as_deref(),
-        Some("finalizing:build_query_indexes:v5:16")
+        Some("finalizing:build_query_indexes:v6:16")
     );
     let version_two = code_query_index_subphase("finalizing:build_query_indexes:v2:1")
         .expect("version-two cursor should parse");
@@ -299,7 +351,7 @@ fn query_index_subphase_tokens_are_versioned_bounded_and_canonical() {
             .requires_legacy_retired_prefix()
     );
     assert_eq!(
-        code_query_index_subphase("finalizing:build_query_indexes:v6:0")
+        code_query_index_subphase("finalizing:build_query_indexes:v7:0")
             .map(|cursor| cursor.completed_unit),
         None
     );
@@ -325,7 +377,7 @@ fn query_index_repair_tokens_preserve_every_stable_coarse_phase() {
     for resume_phase in CodeQueryIndexRepairResumePhase::ALL {
         let state = code_query_index_repair_state(16, resume_phase)
             .expect("bounded repair unit should format");
-        assert!(state.starts_with("finalizing:query_index_repair:v5:16:resume:"));
+        assert!(state.starts_with("finalizing:query_index_repair:v6:16:resume:"));
         assert_eq!(
             code_query_index_repair(&state),
             Some(CodeQueryIndexRepair {
@@ -366,7 +418,7 @@ fn query_index_repair_tokens_preserve_every_stable_coarse_phase() {
 fn query_index_repair_tokens_reject_noncanonical_or_unknown_fields() {
     for state in [
         "finalizing:query_index_repair:v1:15:resume:0",
-        "finalizing:query_index_repair:v6:0:resume:0",
+        "finalizing:query_index_repair:v7:0:resume:0",
         "finalizing:query_index_repair:v2:17:resume:0",
         "finalizing:query_index_repair:v3:00:resume:0",
         "finalizing:query_index_repair:v3:0:resume:00",
@@ -478,11 +530,11 @@ fn generated_summary_counts_default_when_deserializing_older_responses() {
 }
 
 #[test]
-fn version_four_prefix_transitions_to_fifth_plan_without_changing_resume_payload() {
+fn version_four_prefix_transitions_to_current_plan_without_changing_resume_payload() {
     let cursor = code_query_index_subphase("finalizing:build_query_indexes:v4:19").unwrap();
     assert_eq!(
         cursor.next_state(20).as_deref(),
-        Some("finalizing:build_query_indexes:v5:20")
+        Some("finalizing:build_query_indexes:v6:20")
     );
     assert_eq!(
         cursor.next_state(18).as_deref(),
@@ -492,7 +544,7 @@ fn version_four_prefix_transitions_to_fifth_plan_without_changing_resume_payload
     let repair = code_query_index_repair("finalizing:query_index_repair:v4:19:resume:10").unwrap();
     assert_eq!(
         repair.next_state(20).as_deref(),
-        Some("finalizing:query_index_repair:v5:20:resume:10")
+        Some("finalizing:query_index_repair:v6:20:resume:10")
     );
     let reference = code_reference_search_query_index_repair(
         "finalizing:query_index_repair:v4:19:resume:reference_search:v2:build:1",
@@ -500,6 +552,55 @@ fn version_four_prefix_transitions_to_fifth_plan_without_changing_resume_payload
     .unwrap();
     assert_eq!(
         reference.next_state(20).as_deref(),
-        Some("finalizing:query_index_repair:v5:20:resume:reference_search:v2:build:1")
+        Some("finalizing:query_index_repair:v6:20:resume:reference_search:v2:build:1")
+    );
+}
+
+#[test]
+fn version_five_prefix_preserves_resume_payload_until_appended_java_units() {
+    for unit in 0..21 {
+        let token = format!("finalizing:build_query_indexes:v5:{unit}");
+        let cursor = code_query_index_subphase(&token).unwrap();
+        assert_eq!(cursor.plan_version, 5);
+        assert!(!cursor.requires_legacy_retired_prefix());
+        assert_eq!(
+            cursor.next_state(20).as_deref(),
+            Some("finalizing:build_query_indexes:v5:20")
+        );
+        assert_eq!(
+            cursor.next_state(21).as_deref(),
+            Some("finalizing:build_query_indexes:v6:21")
+        );
+        assert!(cursor.next_state(23).is_none());
+    }
+    assert!(code_query_index_subphase("finalizing:build_query_indexes:v5:21").is_none());
+    let repair = code_query_index_repair("finalizing:query_index_repair:v5:20:resume:10").unwrap();
+    assert_eq!(
+        repair.next_state(21).as_deref(),
+        Some("finalizing:query_index_repair:v6:21:resume:10")
+    );
+    let search = code_reference_search_query_index_repair(
+        "finalizing:query_index_repair:v5:20:resume:reference_search:v2:build:7",
+    )
+    .unwrap();
+    assert_eq!(
+        search.next_state(22).as_deref(),
+        Some("finalizing:query_index_repair:v6:22:resume:reference_search:v2:build:7")
+    );
+    let resolution = code_reference_resolution_query_index_repair(
+        "finalizing:query_index_repair:v5:20:resume:reference_resolution:v1:resolve:7:31:0123456789abcdef",
+    )
+    .unwrap();
+    assert_eq!(
+        resolution.next_state(21).as_deref(),
+        Some(
+            "finalizing:query_index_repair:v6:21:resume:reference_resolution:v1:resolve:7:31:0123456789abcdef"
+        )
+    );
+    assert_eq!(
+        resolution.next_state(19).as_deref(),
+        Some(
+            "finalizing:query_index_repair:v5:19:resume:reference_resolution:v1:resolve:7:31:0123456789abcdef"
+        )
     );
 }

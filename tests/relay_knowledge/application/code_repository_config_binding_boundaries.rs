@@ -58,11 +58,11 @@ class CustomImport { void run() { if (getenv("false_import") != null) {} } }
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Static platform imports and shadows"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-static-imports").await;
+    register_complete_java_fixture_repo(&service, &repo, "register-static-imports").await;
     service
         .index_code_repository(
             CodeIndexRequest {
-                repository: filtered_selector("fixture", "HEAD", "src"),
+                repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
@@ -170,11 +170,11 @@ class App {
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Getter types guard order and exports"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-type-guard-export").await;
+    register_complete_java_fixture_repo(&service, &repo, "register-type-guard-export").await;
     service
         .index_code_repository(
             CodeIndexRequest {
-                repository: filtered_selector("fixture", "HEAD", "src"),
+                repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
@@ -289,11 +289,11 @@ class App { void run(Config config) {
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Configuration binding boundaries"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-binding-boundaries").await;
+    register_complete_java_fixture_repo(&service, &repo, "register-binding-boundaries").await;
     service
         .index_code_repository(
             CodeIndexRequest {
-                repository: filtered_selector("fixture", "HEAD", "src"),
+                repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,

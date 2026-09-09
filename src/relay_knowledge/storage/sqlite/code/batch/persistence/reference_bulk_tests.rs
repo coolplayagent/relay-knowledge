@@ -413,6 +413,7 @@ fn batch(source_scope: &str, references: Vec<RepositoryCodeReferenceRecord>) -> 
         batch_index: 1,
         parsed_byte_count: 1_024,
         files: vec![RepositoryCodeFileRecord {
+            java_namespace: None,
             repository_id: "repo".to_owned(),
             source_scope: source_scope.to_owned(),
             file_id: "file".to_owned(),

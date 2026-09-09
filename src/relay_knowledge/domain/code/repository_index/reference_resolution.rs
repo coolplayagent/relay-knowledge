@@ -2,7 +2,8 @@
 
 use super::{
     CODE_QUERY_INDEX_PLAN_VERSION, CODE_QUERY_INDEX_REPAIR_PREFIX, LEGACY_CODE_QUERY_INDEX_PLAN_V2,
-    LEGACY_CODE_QUERY_INDEX_PLAN_V3, LEGACY_CODE_QUERY_INDEX_PLAN_V4, query_index_plan_unit_count,
+    LEGACY_CODE_QUERY_INDEX_PLAN_V3, LEGACY_CODE_QUERY_INDEX_PLAN_V4,
+    LEGACY_CODE_QUERY_INDEX_PLAN_V5, query_index_plan_unit_count,
 };
 
 const PREFIX: &str = "finalizing:resolve_references";
@@ -134,7 +135,7 @@ fn query_index_repair_state_for_version(
 ) -> Option<String> {
     (matches!(
         plan_version,
-        LEGACY_CODE_QUERY_INDEX_PLAN_V2 | LEGACY_CODE_QUERY_INDEX_PLAN_V4 | LEGACY_CODE_QUERY_INDEX_PLAN_V3 | CODE_QUERY_INDEX_PLAN_VERSION
+        LEGACY_CODE_QUERY_INDEX_PLAN_V2 | LEGACY_CODE_QUERY_INDEX_PLAN_V5 | LEGACY_CODE_QUERY_INDEX_PLAN_V4 | LEGACY_CODE_QUERY_INDEX_PLAN_V3 | CODE_QUERY_INDEX_PLAN_VERSION
     ) && query_index_plan_unit_count(plan_version).is_some_and(|count| unit < count)
         && reference_resolution.checkpoint_state().is_some())
         .then(|| {
@@ -166,6 +167,7 @@ pub(crate) fn code_reference_resolution_query_index_repair(
     if !matches!(
         plan_version,
         CODE_QUERY_INDEX_PLAN_VERSION
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V5
             | LEGACY_CODE_QUERY_INDEX_PLAN_V4
             | LEGACY_CODE_QUERY_INDEX_PLAN_V3
             | LEGACY_CODE_QUERY_INDEX_PLAN_V2

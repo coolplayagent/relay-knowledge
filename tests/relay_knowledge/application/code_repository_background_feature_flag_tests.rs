@@ -42,11 +42,11 @@ class Shadow {
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "config registry fixture"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-java-config").await;
+    register_complete_java_fixture_repo(&service, &repo, "register-java-config").await;
     service
         .index_code_repository(
             CodeIndexRequest {
-                repository: filtered_selector("fixture", "HEAD", "src"),
+                repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
@@ -161,7 +161,7 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-stale-feature-flag-scope").await;
+    register_complete_java_fixture_repo(&service, &repo, "register-stale-feature-flag-scope").await;
 
     service
         .index_code_repository(
@@ -267,11 +267,11 @@ async fn java_constant_reads_preserve_environment_and_property_namespaces_end_to
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "read namespace fixture"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-read-namespaces").await;
+    register_complete_java_fixture_repo(&service, &repo, "register-read-namespaces").await;
     service
         .index_code_repository(
             CodeIndexRequest {
-                repository: filtered_selector("fixture", "HEAD", "src"),
+                repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
@@ -428,11 +428,11 @@ class Shadow { static class System {} void run() { System.getProperty("nested_fa
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "configuration extractor boundaries"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-extractor-boundaries").await;
+    register_complete_java_fixture_repo(&service, &repo, "register-extractor-boundaries").await;
     service
         .index_code_repository(
             CodeIndexRequest {
-                repository: filtered_selector("fixture", "HEAD", "src"),
+                repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
@@ -548,11 +548,11 @@ class App {
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Java callable boundaries"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-callable-boundaries").await;
+    register_complete_java_fixture_repo(&service, &repo, "register-callable-boundaries").await;
     service
         .index_code_repository(
             CodeIndexRequest {
-                repository: filtered_selector("fixture", "HEAD", "src"),
+                repository: selector("fixture", "HEAD"),
                 mode: CodeIndexMode::Full,
                 workspace_detection: Default::default(),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,

@@ -225,6 +225,7 @@ fn file(
     line_count: usize,
 ) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
         file_id: file_id.to_owned(),

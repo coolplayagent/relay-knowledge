@@ -132,13 +132,20 @@ pub(in crate::code::index) fn build_worktree_overlay_snapshot(
         workspace_detection,
     );
 
+    let mut total_bytes = 0usize;
+    if reparse_python {
+        for (_, bytes) in &files_to_parse {
+            charge_origin_reparse_bytes(&mut total_bytes, bytes.len())?;
+        }
+    }
     for (path, bytes) in files_to_parse {
         parse_indexed_file(&mut build, &path, &bytes)?;
     }
     if reparse_python {
-        let mut total_bytes = 0usize;
         for entry in &workspace_entries {
-            if !entry.path.ends_with(".py") || parsed_paths.contains(&entry.path) {
+            if crate::code::language_metadata::language_id(&entry.path) != Some("python")
+                || parsed_paths.contains(&entry.path)
+            {
                 continue;
             }
             if build.files.len() >= crate::code::index::MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS {
@@ -150,10 +157,7 @@ pub(in crate::code::index) fn build_worktree_overlay_snapshot(
                 &entry.path,
                 None,
             )?;
-            total_bytes = total_bytes.saturating_add(bytes.len());
-            if total_bytes > crate::domain::CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH {
-                return Err(CodeIndexError::InvalidInput("Python import-origin overlay reparse exceeds the bounded byte budget; commit changes and run a full code index".into()));
-            }
+            charge_origin_reparse_bytes(&mut total_bytes, bytes.len())?;
             parse_indexed_file(&mut build, &entry.path, &bytes)?;
             if skipped_python_paths.remove(&entry.path) {
                 build.skipped_unchanged_count -= 1;
@@ -162,6 +166,17 @@ pub(in crate::code::index) fn build_worktree_overlay_snapshot(
     }
 
     Ok(build.finish())
+}
+
+fn charge_origin_reparse_bytes(total: &mut usize, bytes: usize) -> Result<(), CodeIndexError> {
+    let next = total.checked_add(bytes).filter(|next| {
+        *next <= crate::domain::CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH
+    });
+    let Some(next) = next else {
+        return Err(CodeIndexError::InvalidInput("Python import-origin overlay reparse exceeds the bounded byte budget; commit changes and run a full code index".into()));
+    };
+    *total = next;
+    Ok(())
 }
 
 fn plan_worktree_overlay(

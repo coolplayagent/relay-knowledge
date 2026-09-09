@@ -205,9 +205,9 @@ fn apply_snapshot_attempt(
             "
             INSERT INTO code_repository_files (
                 repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len,
-                line_count, parse_status, is_generated, degraded_reason
+                line_count, parse_status, is_generated, degraded_reason, java_namespace_json
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ",
             params![
                 file.repository_id,
@@ -221,6 +221,11 @@ fn apply_snapshot_attempt(
                 file.parse_status.as_str(),
                 file.is_generated,
                 file.degraded_reason,
+                file.java_namespace
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|e| StorageError::InvalidInput(e.to_string()))?,
             ],
         )?;
     }
@@ -663,3 +668,5 @@ fn stage_repository_after_snapshot(
 
     Ok(())
 }
+
+mod java_projection;

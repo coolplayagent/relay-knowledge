@@ -737,6 +737,7 @@ fn snapshot_for_scope(
         deleted_paths: Vec::new(),
         tombstones: Vec::new(),
         files: vec![RepositoryCodeFileRecord {
+            java_namespace: None,
             repository_id: repository_id.to_owned(),
             source_scope: source_scope.to_owned(),
             file_id: format!("file-{source_scope}"),

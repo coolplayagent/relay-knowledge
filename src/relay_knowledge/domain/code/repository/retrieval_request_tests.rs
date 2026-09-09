@@ -4,6 +4,28 @@ use super::{
 };
 
 #[test]
+fn feature_flag_query_validation_uses_unicode_terms_and_preserves_omitted_query() {
+    let selector = CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()).unwrap();
+    let mut request =
+        super::CodeFeatureFlagRequest::new(None, selector, 10, FreshnessPolicy::GraphOnly).unwrap();
+    assert!(request.validate_query().is_ok());
+    for query in ["", " \t", "!!!", "🦀", "\u{301}"] {
+        request.query = Some(query.into());
+        let error = request.validate_query().unwrap_err();
+        assert_eq!(error.field, "query");
+        assert!(error.message.contains("searchable"));
+    }
+    for query in ["配置", "é", "١", "_", "!!! flag 🦀"] {
+        request.query = Some(query.into());
+        assert!(request.validate_query().is_ok(), "{query}");
+    }
+    assert_eq!(
+        super::CodeFeatureFlagRequest::query_terms("配置/a_b:é ١!!!").collect::<Vec<_>>(),
+        ["配置", "a_b", "é", "١"]
+    );
+}
+
+#[test]
 fn field_qualifiers_strip_known_tags_and_keep_search_text() {
     let parsed = parse_field_qualifiers(
         "kind:function,method lang:rust path:storage name:query search_code",

@@ -24,6 +24,7 @@ pub(super) struct FileStatusInput<'a> {
 
 pub(super) fn record_file_status(build: &mut SnapshotBuild, input: FileStatusInput<'_>) {
     build.files.push(RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: build.repository_id.clone(),
         source_scope: build.source_scope.clone(),
         file_id: input.file_id.to_owned(),

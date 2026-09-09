@@ -4,18 +4,28 @@ use tree_sitter::Node;
 const MAX_BINDING_STATEMENTS: usize = 1024;
 pub(super) fn expression_rebinds(content: &str, node: Node<'_>, name: &str, module: bool) -> bool {
     let mut remaining = MAX_BINDING_STATEMENTS;
-    let deferred = super::expressions::future_annotations(content, node, &mut remaining);
-    let origin_scope = lexical_scope(node, &mut remaining);
+    expression_rebinds_with_budget(content, node, name, module, &mut remaining)
+}
+
+pub(super) fn expression_rebinds_with_budget(
+    content: &str,
+    node: Node<'_>,
+    name: &str,
+    module: bool,
+    remaining: &mut usize,
+) -> bool {
+    let deferred = super::expressions::future_annotations(content, node, remaining);
+    let origin_scope = lexical_scope(node, remaining);
     let mut stack = vec![node];
     while let Some(current) = stack.pop() {
-        if remaining == 0 {
+        if *remaining == 0 {
             return true;
         }
-        remaining -= 1;
+        *remaining -= 1;
         let target = match current.kind() {
             "assignment"
                 if current.child_by_field_name("right").is_some()
-                    || super::expressions::annotation_binds_local(current, &mut remaining) =>
+                    || super::expressions::annotation_binds_local(current, remaining) =>
             {
                 current.child_by_field_name("left")
             }
@@ -26,26 +36,26 @@ pub(super) fn expression_rebinds(content: &str, node: Node<'_>, name: &str, modu
             "named_expression" => current.child_by_field_name("name"),
             _ => None,
         };
-        let class_scope = lexical_scope(current, &mut remaining)
+        let class_scope = lexical_scope(current, remaining)
             .filter(|scope| scope.kind() == "class_definition" && Some(*scope) != origin_scope);
         let foreign_class =
-            class_scope.is_some_and(|scope| !class_global(content, scope, name, &mut remaining));
+            class_scope.is_some_and(|scope| !class_global(content, scope, name, remaining));
         if target.is_some_and(|target| {
             if foreign_class {
-                return module && member_target(content, target, name, &mut remaining);
+                return module && member_target(content, target, name, remaining);
             }
-            assignment_binds(content, target, name, module, &mut remaining)
+            assignment_binds(content, target, name, module, remaining)
         }) {
             return true;
         }
         if current.kind() == "class_definition"
-            && (module || class_global(content, current, name, &mut remaining))
+            && (module || class_global(content, current, name, remaining))
         {
             if let Some(body) = current.child_by_field_name("body") {
                 stack.push(body);
             }
         }
-        if !super::expressions::eager_children(current, &mut stack, &mut remaining, deferred) {
+        if !super::expressions::eager_children(current, &mut stack, remaining, deferred) {
             return true;
         }
     }

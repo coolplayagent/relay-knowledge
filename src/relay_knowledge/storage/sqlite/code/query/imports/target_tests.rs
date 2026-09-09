@@ -487,6 +487,7 @@ fn snapshot_with_many_target_symbol_hints() -> CodeIndexSnapshot {
 
 fn file(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
         file_id: file_id.to_owned(),

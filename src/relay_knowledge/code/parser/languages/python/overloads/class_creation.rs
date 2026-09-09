@@ -21,11 +21,16 @@ pub(super) fn plain(
         *remaining = left;
         match current.kind() {
             "function_definition"
-            | "import_statement"
             | "pass_statement"
             | "comment"
             | "global_statement"
             | "nonlocal_statement" => continue,
+            "import_statement" => {
+                if !known_module_import(content, current, remaining, origins) {
+                    return false;
+                }
+                continue;
+            }
             "import_from_statement" => {
                 if !known_function_import(content, current, remaining, origins) {
                     return false;
@@ -65,6 +70,31 @@ pub(super) fn plain(
         }
     }
     true
+}
+
+fn known_module_import(
+    content: &str,
+    node: Node<'_>,
+    remaining: &mut usize,
+    origins: crate::code::python_imports::PythonModuleOrigins,
+) -> bool {
+    let mut cursor = node.walk();
+    let mut found = false;
+    for imported in node.children_by_field_name("name", &mut cursor) {
+        let Some(left) = remaining.checked_sub(1) else {
+            return false;
+        };
+        *remaining = left;
+        found = true;
+        let name = imported.child_by_field_name("name").unwrap_or(imported);
+        if !origins.permits_standard_module(&crate::code::parser::nodes::node_text(content, name)) {
+            // Import executes module top-level code before the next decorator.
+            // Arbitrary modules can mutate the containing namespace through
+            // sys.modules even when the local import target is unrelated.
+            return false;
+        }
+    }
+    found
 }
 
 fn known_function_import(

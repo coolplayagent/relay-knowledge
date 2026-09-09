@@ -471,6 +471,7 @@ async fn registered_store() -> SqliteGraphStore {
 
 fn file(source_scope: &str, file_id: &str, path: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: "repo".to_owned(),
         source_scope: source_scope.to_owned(),
         file_id: file_id.to_owned(),

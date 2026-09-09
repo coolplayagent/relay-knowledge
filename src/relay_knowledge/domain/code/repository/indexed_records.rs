@@ -6,6 +6,8 @@ use super::RepositoryCodeRange;
 /// File-level code index row.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryCodeFileRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub java_namespace: Option<super::JavaNamespaceEvidence>,
     pub repository_id: String,
     pub source_scope: String,
     pub file_id: String,
@@ -19,6 +21,46 @@ pub struct RepositoryCodeFileRecord {
     pub is_generated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
+}
+
+impl RepositoryCodeFileRecord {
+    /// Include repeated owner strings and per-row storage overhead, not just JSON.
+    pub(crate) fn namespace_projection_cost(&self) -> (usize, usize) {
+        let rows = self.namespace_projection_row_count();
+        if rows == 0 {
+            return (0, 0);
+        }
+        let common = self
+            .source_scope
+            .len()
+            .saturating_add(self.path.len())
+            .saturating_add(128);
+        let Some(namespace) = self
+            .java_namespace
+            .as_ref()
+            .filter(|namespace| namespace.complete)
+        else {
+            return (1, common);
+        };
+        let bytes = namespace.top_level_types.iter().fold(
+            rows.saturating_mul(common.saturating_add(namespace.package.len())),
+            |bytes, name| bytes.saturating_add(name.len()),
+        );
+        (rows, bytes)
+    }
+
+    /// Account for durable Java namespace projections before batch admission.
+    pub(crate) fn namespace_projection_row_count(&self) -> usize {
+        if self.language_id != "java" {
+            return 0;
+        }
+        1usize.saturating_add(
+            self.java_namespace
+                .as_ref()
+                .filter(|evidence| evidence.complete)
+                .map_or(0, |evidence| evidence.top_level_types.len()),
+        )
+    }
 }
 
 /// Previously indexed file hash used to skip unchanged incremental parses.
@@ -150,6 +192,7 @@ impl CodeConfigurationReadKind {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CodeFeatureFlagMetadata {
+    pub java_implicit_platform: Option<super::JavaImplicitPlatformRead>,
     pub default_value: Option<String>,
     pub value_type: Option<String>,
     pub domain: Option<String>,
@@ -219,3 +262,7 @@ pub struct CodePathTombstone {
     pub base_ref: String,
     pub head_ref: String,
 }
+
+#[cfg(test)]
+#[path = "indexed_records_tests.rs"]
+mod tests;

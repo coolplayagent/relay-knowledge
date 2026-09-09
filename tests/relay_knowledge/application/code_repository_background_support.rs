@@ -84,6 +84,26 @@ pub(super) async fn register_fixture_repo(
         .expect("repository should register");
 }
 
+// Java package absence requires complete repository authorization.
+pub(super) async fn register_complete_java_fixture_repo(
+    service: &RelayKnowledgeService,
+    repo: &FixtureRepo,
+    name: &str,
+) {
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context(name),
+        )
+        .await
+        .expect("repository should register");
+}
+
 pub(super) fn selector(alias: &str, ref_selector: &str) -> CodeRepositorySelector {
     CodeRepositorySelector::new(alias, ref_selector, Vec::new(), Vec::new())
         .expect("selector should validate")

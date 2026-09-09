@@ -4,6 +4,66 @@ use super::*;
 mod binding_boundaries;
 
 #[test]
+fn only_implicit_short_platform_receivers_require_scope_namespace_proof() {
+    let records = facts(
+        r#"package p; class App {
+      void run() { if (System.getProperty("short").equals("true")) {} }
+      String qualified() { return java.lang.System.getProperty("qualified"); }
+    }"#,
+    );
+    let short = records
+        .iter()
+        .filter(|record| record.source_key == "short")
+        .collect::<Vec<_>>();
+    assert_eq!(short.len(), 2);
+    assert!(short.iter().all(|record| {
+        record
+            .metadata
+            .java_implicit_platform
+            .as_ref()
+            .is_some_and(|proof| proof.type_name == "System")
+    }));
+    assert!(
+        records
+            .iter()
+            .find(|record| record.source_key == "qualified")
+            .unwrap()
+            .metadata
+            .java_implicit_platform
+            .is_none()
+    );
+    let explicit = facts(
+        r#"package p; import java.lang.System; class App { String read() { return System.getProperty("explicit"); } }"#,
+    );
+    assert!(explicit[0].metadata.java_implicit_platform.is_none());
+}
+
+#[test]
+fn constant_keys_preserve_decoded_runtime_strings_without_identifier_restrictions() {
+    let records = facts(
+        r#"class Keys {
+            static final String PATH = "feature/checkout";
+            static final String COLON = "service:ready";
+            static final String UNICODE = "功能/结账";
+            static final String EMPTY = "";
+        }"#,
+    );
+    let bindings = records
+        .iter()
+        .filter(|record| record.edge_kind == "binds_config_symbol")
+        .collect::<Vec<_>>();
+    assert_eq!(bindings.len(), 3);
+    for key in ["feature/checkout", "service:ready", "功能/结账"] {
+        assert!(bindings.iter().any(|record| record.source_key == key));
+    }
+    assert!(
+        records
+            .iter()
+            .all(|record| record.edge_kind != "declares_config_key")
+    );
+}
+
+#[test]
 fn parameterized_getters_do_not_bind_zero_argument_calls() {
     let records = facts(
         r#"class Config {

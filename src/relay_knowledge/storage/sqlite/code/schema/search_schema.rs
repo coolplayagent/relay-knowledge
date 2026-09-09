@@ -250,6 +250,24 @@ const SEARCH_QUERY_INDEXES: &[SearchQueryIndexDescriptor] = &[
         required_table: None,
         required_table_columns: &[],
     },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_java_namespace_completeness_lookup",
+        table: "code_repository_java_namespaces",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_java_namespace_completeness_lookup ON code_repository_java_namespaces(source_scope,complete,path)",
+        columns: &["source_scope", "complete", "path"],
+        mode: SearchQueryIndexMode::Required,
+        required_table: Some("code_repository_java_namespaces"),
+        required_table_columns: &["source_scope", "complete", "path"],
+    },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_java_type_lookup",
+        table: "code_repository_java_types",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_java_type_lookup ON code_repository_java_types(source_scope,package,type_name,path)",
+        columns: &["source_scope", "package", "type_name", "path"],
+        mode: SearchQueryIndexMode::Required,
+        required_table: Some("code_repository_java_types"),
+        required_table_columns: &["source_scope", "package", "type_name", "path"],
+    },
 ];
 
 const _: [(); crate::domain::CODE_QUERY_INDEX_PLAN_UNIT_COUNT] = [(); SEARCH_QUERY_INDEXES.len()];
@@ -272,11 +290,12 @@ pub(in crate::storage::sqlite::code) fn require_canonical_call_query_indexes(
 pub(in crate::storage::sqlite::code) fn require_feature_flag_query_index(
     connection: &Connection,
 ) -> Result<(), StorageError> {
-    require_persisted_query_index(connection, &SEARCH_QUERY_INDEXES[20]).map_err(|error| {
-        StorageError::InvalidInput(format!(
-            "configuration key index is unavailable; run repo index with the current binary before querying feature flags: {error}"
-        ))
-    })
+    for descriptor in &SEARCH_QUERY_INDEXES[20..23] {
+        require_persisted_query_index(connection, descriptor).map_err(|error| {
+            StorageError::InvalidInput(format!("configuration query index is unavailable; run repo index with the current binary before querying feature flags: {error}"))
+        })?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

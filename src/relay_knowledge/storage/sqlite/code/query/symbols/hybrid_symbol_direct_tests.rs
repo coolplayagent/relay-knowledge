@@ -92,6 +92,7 @@ fn snapshot_with_generated_symbol_noise() -> CodeIndexSnapshot {
 
 fn file(file_id: &str, path: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: "repo".to_owned(),
         source_scope: HYBRID_DIRECT_TEST_SOURCE_SCOPE.to_owned(),
         file_id: file_id.to_owned(),

@@ -498,6 +498,7 @@ async fn reference_resolution(
 
 fn file(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: "repo".to_owned(),
         source_scope: SOURCE_SCOPE.to_owned(),
         file_id: file_id.to_owned(),

@@ -5,6 +5,7 @@ use crate::domain::{
 
 pub(super) fn file(path: &str, language_id: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: "repo".to_owned(),
         source_scope: "git_snapshot:test".to_owned(),
         file_id: format!("file:{}", path.replace('/', ":")),

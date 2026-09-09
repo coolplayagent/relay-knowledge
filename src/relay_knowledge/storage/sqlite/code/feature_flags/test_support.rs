@@ -26,6 +26,7 @@ pub(in crate::storage::sqlite::code) fn record(
         line_range: RepositoryCodeRange { start: 1, end: 1 },
         excerpt: key.to_owned(),
         metadata: CodeFeatureFlagMetadata {
+            java_implicit_platform: None,
             source_format: "java".to_owned(),
             ..Default::default()
         },

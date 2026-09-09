@@ -19,7 +19,7 @@ async fn configuration_declarations_follow_referenced_symbols_not_equal_constant
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Actual configuration constant references"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "fixture").await;
+    register_complete_java_fixture_repo(&service, &repo, "fixture").await;
     service
         .index_code_repository(
             CodeIndexRequest {

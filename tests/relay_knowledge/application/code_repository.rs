@@ -979,3 +979,9 @@ mod unicode_config_query;
 
 #[path = "code_repository_python_alias_creation.rs"]
 mod python_alias_creation;
+
+#[path = "code_repository_python_class_imports.rs"]
+mod python_class_imports;
+
+#[path = "code_repository_python_control_decorators.rs"]
+mod python_control_decorators;

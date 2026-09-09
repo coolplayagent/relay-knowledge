@@ -3,6 +3,7 @@ use rusqlite::Connection;
 use crate::storage::StorageError;
 
 mod index_task_schema;
+mod java_namespace_schema;
 mod migrations;
 mod repository_schema;
 mod repository_set_schema;
@@ -41,6 +42,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     let reference_search_owner_was_current =
         super::super::schema::marker::reference_search_group_schema_is_current(connection)?;
     initialize_repository_schema(connection)?;
+    java_namespace_schema::initialize(connection)?;
     super::super::schema::columns::ensure_column(
         connection,
         "code_repository_feature_flags",

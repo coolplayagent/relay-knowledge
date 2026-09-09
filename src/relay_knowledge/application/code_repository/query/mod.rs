@@ -178,6 +178,9 @@ impl RelayKnowledgeService {
         request: CodeFeatureFlagRequest,
         context: RequestContext,
     ) -> Result<CodeRepositoryFeatureFlagsResponse, ApiError> {
+        request
+            .validate_query()
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         let store = self.store().await.map_err(storage_api_error)?;
         let status =
             required_code_repository(store.as_ref(), &request.repository.repository).await?;

@@ -599,6 +599,7 @@ fn target_snapshot(source_scope: &str, tree_hash: &str) -> CodeIndexSnapshot {
 
 fn file(source_scope: &str, index: usize, blob_hash: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: REPOSITORY_ID.to_owned(),
         source_scope: source_scope.to_owned(),
         file_id: format!("file-{index:03}"),

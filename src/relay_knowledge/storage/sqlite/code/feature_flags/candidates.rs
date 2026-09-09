@@ -24,7 +24,7 @@ pub(super) fn load(
     status: &CodeRepositoryStatus,
     request: &CodeFeatureFlagRequest,
 ) -> Result<(Vec<CodeFeatureFlagRecord>, bool), StorageError> {
-    let (scope_predicate, scope_params) = authorized_scope(status, request)?;
+    let (scope_predicate, scope_params) = authorized_scope(connection, status, request)?;
     let mut records = Vec::new();
     let mut analyzed_bytes = 0usize;
     if request.consistency {
@@ -104,6 +104,7 @@ pub(super) fn load(
 }
 
 fn authorized_scope(
+    connection: &Connection,
     status: &CodeRepositoryStatus,
     request: &CodeFeatureFlagRequest,
 ) -> Result<(String, Vec<Value>), StorageError> {
@@ -120,6 +121,7 @@ fn authorized_scope(
         &mut values,
         &request.repository.language_filters,
     );
+    clauses.push(super::java_platform::admission(connection, status, scope)?);
     Ok((clauses.join(" AND "), values))
 }
 
@@ -148,7 +150,7 @@ fn ranked_keys(
     values.extend_from_slice(scope_params);
     let mut query_clauses = Vec::new();
     if let Some(query) = &request.query {
-        for term in super::filters::query_terms(query) {
+        for term in CodeFeatureFlagRequest::query_terms(query) {
             let fields = [
                 "name",
                 "source_kind",

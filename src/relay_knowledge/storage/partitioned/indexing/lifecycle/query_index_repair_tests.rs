@@ -132,7 +132,7 @@ async fn partitioned_publish_repairs_missing_query_index_before_catalog_handoff(
     };
     assert_eq!(
         checkpoint_state,
-        "finalizing:query_index_repair:v5:16:resume:10"
+        "finalizing:query_index_repair:v6:16:resume:10"
     );
     assert!(code_query_index_repair(&checkpoint_state).is_some());
     drop(shard);

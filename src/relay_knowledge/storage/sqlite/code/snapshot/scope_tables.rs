@@ -14,7 +14,7 @@ pub(super) enum CodeScopeCursor {
 pub(super) const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     CodeScopeTable {
         table: "code_repository_files",
-        columns: "repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len, line_count, parse_status, is_generated, degraded_reason",
+        columns: "repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len, line_count, parse_status, is_generated, degraded_reason, java_namespace_json",
         cursor: CodeScopeCursor::Key("path"),
     },
     CodeScopeTable {
@@ -157,5 +157,19 @@ pub(super) const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
         table: "software_ontology_diagnostics",
         columns: "diagnostic_id, source_scope, shape_id, code, severity, statement_id, entity_key, field, message",
         cursor: CodeScopeCursor::Key("diagnostic_id"),
+    },
+];
+
+// Measurement-only: file triggers reconstruct these during copying.
+pub(super) const JAVA_PROJECTION_TABLES: &[CodeScopeTable] = &[
+    CodeScopeTable {
+        table: "code_repository_java_namespaces",
+        columns: "source_scope,path,package,complete",
+        cursor: CodeScopeCursor::Key("path"),
+    },
+    CodeScopeTable {
+        table: "code_repository_java_types",
+        columns: "source_scope,path,package,type_name",
+        cursor: CodeScopeCursor::Pair("path", "type_name"),
     },
 ];

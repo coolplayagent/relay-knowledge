@@ -16,16 +16,9 @@ pub(super) fn search(
     status: &CodeRepositoryStatus,
     request: &CodeFeatureFlagRequest,
 ) -> Result<Vec<CodeFeatureFlagGraph>, StorageError> {
-    if request
-        .query
-        .as_deref()
-        .is_some_and(|query| super::filters::query_terms(query).next().is_none())
-    {
-        return Err(StorageError::InvalidQueryArgument(
-            "configuration query contains no searchable Unicode letters, numbers or underscores"
-                .to_owned(),
-        ));
-    }
+    request
+        .validate_query()
+        .map_err(|error| StorageError::InvalidQueryArgument(error.to_string()))?;
     super::query_budget::run(connection, || {
         search_with_budget(connection, status, request)
     })
@@ -361,7 +354,8 @@ fn matches_filters(group: &CodeFeatureFlagGraph, request: &CodeFeatureFlagReques
             .join(" ")
     )
     .to_ascii_lowercase();
-    super::filters::query_terms(query).all(|term| haystack.contains(&term.to_ascii_lowercase()))
+    CodeFeatureFlagRequest::query_terms(query)
+        .all(|term| haystack.contains(&term.to_ascii_lowercase()))
 }
 
 fn diagnose(

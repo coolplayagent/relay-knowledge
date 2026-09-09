@@ -119,6 +119,7 @@ fn snapshot_with_feature_flags() -> CodeIndexSnapshot {
         deleted_paths: Vec::new(),
         tombstones: Vec::new(),
         files: vec![RepositoryCodeFileRecord {
+            java_namespace: None,
             repository_id: "repo".to_owned(),
             source_scope: TEST_SOURCE_SCOPE.to_owned(),
             file_id: "file".to_owned(),

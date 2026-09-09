@@ -168,6 +168,28 @@ pub struct CodeFeatureFlagRequest {
 }
 
 impl CodeFeatureFlagRequest {
+    /// Uses the same Unicode word boundaries for admission and indexed matching.
+    pub(crate) fn query_terms(query: &str) -> impl Iterator<Item = &str> {
+        query
+            .split(|character: char| !(character.is_alphanumeric() || character == '_'))
+            .filter(|term| !term.is_empty())
+    }
+
+    /// Rejects supplied non-searchable text before freshness or storage shortcuts.
+    pub(crate) fn validate_query(&self) -> Result<(), DomainError> {
+        if self
+            .query
+            .as_deref()
+            .is_some_and(|query| Self::query_terms(query).next().is_none())
+        {
+            return Err(DomainError::invalid(
+                "query",
+                "configuration query contains no searchable Unicode letters, numbers or underscores",
+            ));
+        }
+        Ok(())
+    }
+
     /// Validates metadata filters without changing snapshot selection or result bounds.
     pub fn with_metadata_filters(
         mut self,

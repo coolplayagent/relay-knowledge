@@ -13,8 +13,9 @@ fn unchanged_recording_tracks_only_python_paths_for_origin_reparse() {
     let source = crate::code::test_fixtures::TempSourceDir::create("overlay-python-skips");
     let bytes = b"unchanged\n";
     source.write("app.py", "unchanged\n");
+    source.write("window.pyw", "unchanged\n");
     source.write("README.md", "unchanged\n");
-    let hashes = ["app.py", "README.md"]
+    let hashes = ["app.py", "window.pyw", "README.md"]
         .map(|path| (path.to_owned(), stable_content_hash(bytes)))
         .into();
     let mut hash_input = Vec::new();
@@ -29,11 +30,14 @@ fn unchanged_recording_tracks_only_python_paths_for_origin_reparse() {
         skipped_unchanged_count: &mut skipped,
         skipped_python_paths: &mut python_paths,
     };
-    for path in ["app.py", "README.md"] {
+    for path in ["app.py", "window.pyw", "README.md"] {
         record_file_as(&source.path, path, path, &hashes, &mut outputs).unwrap();
     }
-    assert_eq!(skipped, 2);
-    assert_eq!(python_paths, ["app.py".to_owned()].into());
+    assert_eq!(skipped, 3);
+    assert_eq!(
+        python_paths,
+        ["app.py".to_owned(), "window.pyw".to_owned()].into()
+    );
     assert!(files.is_empty());
 }
 

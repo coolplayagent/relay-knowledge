@@ -99,6 +99,7 @@ pub(super) fn search_scope(
 mod binding_provenance;
 mod candidates;
 mod filters;
+mod java_platform;
 mod knowledge;
 mod query_budget;
 

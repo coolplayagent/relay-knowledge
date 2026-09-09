@@ -42,7 +42,7 @@ pub(super) fn reads(action: &str) -> Vec<Read> {
                 incoming = prior_input;
                 command_literal = if was_head { result } else { None };
             }
-            Kind::Assign => {
+            Kind::Assign | Kind::Declare => {
                 incoming = None;
                 command_literal = None;
                 command_head = true;

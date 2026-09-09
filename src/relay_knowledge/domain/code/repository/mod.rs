@@ -1,4 +1,5 @@
 mod indexed_records;
+mod java_namespace;
 mod registration;
 mod repository_status;
 mod retrieval_request;
@@ -12,6 +13,7 @@ pub use indexed_records::{
     RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeReferenceRecord,
     RepositoryCodeSymbolRecord,
 };
+pub use java_namespace::{JavaImplicitPlatformRead, JavaNamespaceEvidence};
 pub use registration::{
     CodeIndexMode, CodeIndexRequest, CodeRepositoryRegistration, CodeRepositorySelector,
     RepositoryCodeRange,
@@ -34,3 +36,5 @@ pub use scope_identity::{
     code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,
     code_snapshot_scope_matches_identity, code_snapshot_scope_workspace_semantic,
 };
+
+pub(crate) use registration::normalize_filesystem_path_filter;

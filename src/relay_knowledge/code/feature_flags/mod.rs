@@ -389,10 +389,15 @@ fn excerpt_for_range(content: &str, range: ConfigRange) -> String {
 }
 
 fn feature_flag_name(source_key: &str) -> String {
-    source_key
+    let normalized = source_key
         .trim_matches(|character: char| !character.is_ascii_alphanumeric())
         .replace(['-', '.', ':'], "_")
-        .to_ascii_lowercase()
+        .to_ascii_lowercase();
+    if normalized.is_empty() {
+        source_key.to_owned()
+    } else {
+        normalized
+    }
 }
 
 fn confidence_for_edge(edge_kind: &str) -> u16 {
@@ -413,3 +418,7 @@ fn confidence_tier_for_edge(edge_kind: &str) -> &'static str {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod mod_tests;
+
+#[cfg(test)]
+#[path = "name_tests.rs"]
+mod name_tests;

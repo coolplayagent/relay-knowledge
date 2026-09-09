@@ -4,6 +4,7 @@ mod dependencies;
 mod framework;
 mod graph_records;
 mod repository;
+pub use repository::{JavaImplicitPlatformRead, JavaNamespaceEvidence};
 mod repository_graph;
 mod repository_index;
 mod repository_set;
@@ -93,3 +94,5 @@ pub use workspace::{
     CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeWorkspaceDetectionConfig,
     CodeWorkspaceMember, CodeWorkspacePackageMapping,
 };
+
+pub(crate) use repository::normalize_filesystem_path_filter;

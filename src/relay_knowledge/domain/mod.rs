@@ -2,6 +2,7 @@
 
 mod business;
 mod code;
+pub use code::{JavaImplicitPlatformRead, JavaNamespaceEvidence};
 mod core;
 mod graph;
 mod knowledge;
@@ -130,3 +131,5 @@ pub use operations::{
     WorkerStatus, WorkerTaskRecord, WorkerTaskState, normalize_actor,
     reconcile_software_statements, software_authority_policy, validate_software_shapes,
 };
+
+pub(crate) use code::normalize_filesystem_path_filter;

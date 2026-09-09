@@ -125,6 +125,7 @@ async fn code_index_task_idle_retention_cleans_failed_partial_scope_without_acti
                 batch_index: 1,
                 parsed_byte_count: 1,
                 files: vec![RepositoryCodeFileRecord {
+                    java_namespace: None,
                     repository_id: "repo".to_owned(),
                     source_scope: "scope-partial".to_owned(),
                     file_id: "file".to_owned(),

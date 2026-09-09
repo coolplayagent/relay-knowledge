@@ -513,6 +513,7 @@ fn request_with_limit(
 
 fn file(file_id: &str, path: &str, language_id: &str) -> crate::domain::RepositoryCodeFileRecord {
     crate::domain::RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
         file_id: file_id.to_owned(),

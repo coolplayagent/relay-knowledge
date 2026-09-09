@@ -7,6 +7,7 @@ pub(in crate::code) enum Kind<'a> {
     Close,
     Pipe,
     Assign,
+    Declare,
     Comment,
     Other,
 }
@@ -83,7 +84,7 @@ pub(in crate::code) fn tokens(action: &str) -> Vec<Token<'_>> {
             b'=' => Kind::Assign,
             b':' if bytes.get(offset) == Some(&b'=') => {
                 offset += 1;
-                Kind::Assign
+                Kind::Declare
             }
             b',' | b'-' => Kind::Other,
             b'"' | b'`' | b'\'' => {
@@ -215,6 +216,29 @@ fn valid_action(tokens: &[Token<'_>], blocks: &mut Vec<(String, bool)>) -> bool 
             _ => {}
         }
     }
+    // A declaration binds its name without evaluating that token. Recognize
+    // only a single pipeline declaration head; variable uses still require
+    // lexical-scope evidence that this conservative recovery does not provide.
+    if let [
+        Token {
+            kind: Kind::Word(name),
+            ..
+        },
+        Token {
+            kind: Kind::Declare,
+            ..
+        },
+        ..,
+    ] = &tokens[expression_start..]
+    {
+        if !name
+            .strip_prefix('$')
+            .is_some_and(|name| name.chars().all(|ch| ch == '_' || ch.is_alphanumeric()))
+        {
+            return false;
+        }
+        expression_start += 2;
+    }
     let mut parentheses = 0usize;
     let mut need_operand = true;
     for (relative, token) in tokens[expression_start..].iter().enumerate() {
@@ -266,7 +290,7 @@ fn valid_action(tokens: &[Token<'_>], blocks: &mut Vec<(String, bool)>) -> bool 
                 }
                 need_operand = false;
             }
-            Kind::Other => return false,
+            Kind::Other | Kind::Declare => return false,
             Kind::Comment => return false,
         }
     }

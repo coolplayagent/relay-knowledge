@@ -301,7 +301,7 @@ async fn code_index_task_v3_query_index_ordinal_is_durable_across_reopen() {
     else {
         panic!("one missing descriptor should leave finalization pending");
     };
-    assert_eq!(checkpoint_state, "finalizing:build_query_indexes:v5:2");
+    assert_eq!(checkpoint_state, "finalizing:build_query_indexes:v6:2");
     assert_eq!(
         code_query_index_subphase(&checkpoint_state).map(|cursor| cursor.completed_unit),
         Some(2)
@@ -345,7 +345,7 @@ async fn code_index_task_v3_query_index_ordinal_is_durable_across_reopen() {
     assert!(matches!(
         resumed,
         super::finalization::CodeIndexFinalizationAdvance::Pending { checkpoint_state }
-            if checkpoint_state == "finalizing:build_query_indexes:v5:3"
+            if checkpoint_state == "finalizing:build_query_indexes:v6:3"
     ));
     let second_index_rebuilt = store
         .run(|connection| {

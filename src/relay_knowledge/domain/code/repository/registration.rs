@@ -117,6 +117,16 @@ pub struct CodeIndexRequest {
     pub reuse_historical: bool,
 }
 
+/// Canonical filesystem scope spelling shared by source discovery and evidence admission.
+pub(crate) fn normalize_filesystem_path_filter(filter: &str) -> &str {
+    let mut filter = filter.trim().trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+
+    filter
+}
+
 #[cfg(test)]
 #[path = "registration_tests.rs"]
 mod tests;

@@ -218,6 +218,7 @@ fn chunk_batch(source_scope: &str, chunks: Vec<RepositoryCodeChunkRecord>) -> Co
         batch_index: 1,
         parsed_byte_count: 4_096,
         files: vec![RepositoryCodeFileRecord {
+            java_namespace: None,
             repository_id: "repo".to_owned(),
             source_scope: source_scope.to_owned(),
             file_id: "file".to_owned(),

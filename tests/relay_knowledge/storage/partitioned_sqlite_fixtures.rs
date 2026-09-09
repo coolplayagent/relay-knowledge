@@ -74,6 +74,7 @@ pub(super) fn snapshot(
     content: &str,
 ) -> CodeIndexSnapshot {
     let file = RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: repository_id.to_owned(),
         source_scope: source_scope.to_owned(),
         file_id: format!("{repository_id}:src/lib.rs"),

@@ -22,3 +22,17 @@ fn code_ranges_must_be_ordered() {
 
     assert_eq!(error.field, "line_range");
 }
+
+#[test]
+fn filesystem_root_spelling_preserves_discovery_scope_contract() {
+    for root in [".", "./", " .\\ ", "./."] {
+        assert_eq!(super::normalize_filesystem_path_filter(root), ".");
+    }
+    assert_eq!(
+        super::normalize_filesystem_path_filter(" ./src/lib/ "),
+        "src/lib"
+    );
+    for narrow in ["", "src", "../", "*", "/"] {
+        assert_ne!(super::normalize_filesystem_path_filter(narrow), ".");
+    }
+}

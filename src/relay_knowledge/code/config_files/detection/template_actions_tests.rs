@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn declaration_heads_bind_names_without_proving_variable_uses() {
+    for source in [
+        "{{ $flag := key \"feature_x\" }}",
+        "{{ $1bad := key \"feature_x\" }}",
+        "{{ $é := key \"feature_x\" }}",
+        "{{ $ := \"root\" }}",
+        "{{ if $flag := key \"feature_x\" }}yes{{ end }}",
+    ] {
+        assert!(balanced(source), "{source}");
+    }
+    for source in [
+        "{{ $missing }}",
+        "{{ $flag = key \"feature_x\" }}",
+        "{{ $flag := }}",
+        "{{ $flag := $missing }}",
+        "{{ $flag.member := key \"feature_x\" }}",
+        "{{ key \"feature_x\" $flag := true }}",
+    ] {
+        assert!(!balanced(source), "{source}");
+    }
+}
+
+#[test]
 fn recovery_accepts_go_literals_comments_pipelines_and_balanced_control_actions() {
     for content in [
         "{{ keyOrDefault \"flag\" \"a}}b\" }}",

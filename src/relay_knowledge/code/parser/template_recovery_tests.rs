@@ -65,3 +65,14 @@ fn malformed_numeric_go_action_keeps_native_syntax_diagnostic() {
         );
     }
 }
+
+#[test]
+fn declared_go_variables_recover_without_accepting_unbound_uses() {
+    for (action, status) in [
+        ("{{ $flag := key \"feature_x\" }}", CodeParseStatus::Parsed),
+        ("{{ $1bad := key \"feature_x\" }}", CodeParseStatus::Parsed),
+        ("{{ $missing }}", CodeParseStatus::Partial),
+    ] {
+        assert_recovery_status(&format!("{COMPLEX_TEMPLATE}{action}"), status);
+    }
+}

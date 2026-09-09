@@ -61,7 +61,7 @@ async fn java_static_import_inheritance_and_escaped_defaults_survive_indexing() 
         "Java inheritance and escaped default values",
     ]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-inheritance-defaults").await;
+    register_complete_java_fixture_repo(&service, &repo, "register-inheritance-defaults").await;
     service
         .index_code_repository(
             CodeIndexRequest {

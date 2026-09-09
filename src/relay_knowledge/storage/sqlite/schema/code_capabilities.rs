@@ -23,6 +23,33 @@ pub(super) fn code_schema_capability_markers_are_current(
     {
         return Ok(false);
     }
+    for (table, columns) in [
+        ("code_repository_files", &["java_namespace_json"][..]),
+        (
+            "code_repository_java_namespaces",
+            &["source_scope", "path", "package", "complete"][..],
+        ),
+        (
+            "code_repository_java_types",
+            &["source_scope", "path", "package", "type_name"][..],
+        ),
+    ] {
+        if !table_has_columns(connection, table, columns)? {
+            return Ok(false);
+        }
+    }
+    // These lightweight writer capabilities are distinct from deferred query indexes.
+    // Missing legacy capabilities enter additive initialization, without backfilling files.
+    let triggers_ready: bool = connection.query_row(
+        "SELECT count(*)=3 FROM sqlite_master WHERE type='trigger' AND name IN (
+            'code_repository_java_namespace_insert', 'code_repository_java_namespace_update',
+            'code_repository_java_namespace_delete')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !triggers_ready {
+        return Ok(false);
+    }
     connection
         .query_row(
             "SELECT EXISTS (

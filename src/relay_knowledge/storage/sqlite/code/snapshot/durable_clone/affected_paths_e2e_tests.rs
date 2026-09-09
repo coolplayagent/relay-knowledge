@@ -173,6 +173,7 @@ fn snapshot(
         tombstones: Vec::new(),
         files: (0..file_count)
             .map(|index| RepositoryCodeFileRecord {
+                java_namespace: None,
                 repository_id: REPOSITORY_ID.to_owned(),
                 source_scope: source_scope.to_owned(),
                 file_id: format!("file-{index:03}"),

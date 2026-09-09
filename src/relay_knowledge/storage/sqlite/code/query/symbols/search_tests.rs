@@ -490,6 +490,7 @@ async fn delete_symbol_search_row(store: &SqliteGraphStore, path: &str) {
 
 fn file(file_id: &str, path: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
+        java_namespace: None,
         repository_id: "repo".to_owned(),
         source_scope: SYMBOL_SEARCH_TEST_SOURCE_SCOPE.to_owned(),
         file_id: file_id.to_owned(),

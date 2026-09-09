@@ -149,6 +149,7 @@ fn require_incremental_snapshot_within_budget_inner(
     for table in CODE_SCOPE_TABLES
         .iter()
         .chain(REFERENCE_SEARCH_SCOPE_TABLES)
+        .chain(super::scope_tables::JAVA_PROJECTION_TABLES)
     {
         measure_scope_table(
             transaction,
@@ -230,6 +231,10 @@ pub(super) fn measure_snapshot_insert_surface(
             .saturating_add(ROW_STORAGE_OVERHEAD_BYTES),
     );
     measure.add(insert_rows, identity_bytes)?;
+    for file in &snapshot.files {
+        let (rows, bytes) = file.namespace_projection_cost();
+        measure.add(rows, bytes)?;
+    }
     let remaining_bytes = budget.max_bytes_per_batch.saturating_sub(measure.bytes);
     let mut counter = BoundedByteCounter {
         bytes: 0,

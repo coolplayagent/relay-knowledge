@@ -223,6 +223,12 @@ pub(in crate::code::parser) fn parse_syntax_file(
     );
 
     build.symbols.extend(output.symbols);
+    if input.language.id == "java" {
+        if let Some(file) = build.files.last_mut() {
+            file.java_namespace =
+                Some(crate::code::java_namespace::collect(root, input.content).evidence);
+        }
+    }
     build.references.extend(output.references);
     build.imports.extend(imports);
     record_dependencies(build, input.path, input.file_id, input.content)?;

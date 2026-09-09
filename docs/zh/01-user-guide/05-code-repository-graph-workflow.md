@@ -344,7 +344,7 @@ relay-knowledge repo status repo --format json
 
 Java getter binding 要求读取位于 getter 自己的 callable scope 的 return 中；返回 expression/block lambda 时，其中的读取仍作为事实保留，但不绑定到返回回调对象的 getter。interface constant declaration 使用 Java 隐式 static/final 语义及完整 enclosing type 身份。局部 flag 数据流包含 return 或变量初始化中嵌套的 ternary condition，但写入、嵌套 block 与 callable 边界仍阻止越界追踪。已证明存在多个不同 key 实现的配置 getter 保留 ambiguous read/guard 引用，一致性为 unknown、`analysis_complete=false`，不猜测具体 destination。
 
-Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v11` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
+Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v13` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
 
 配置 getter 绑定只接受零参数方法，与支持的零参数 getter 调用保持一致。平台 receiver 遮蔽检查包含接口字段，普通 for 循环条件中的直接读取会生成 guard 关系。Shell 提取排除词法可见的未导出赋值和函数局部绑定，保留显式 export 与未被遮蔽的外部环境读取；绑定扫描最多检查 1,024 个祖先或前序节点，耗尽时不猜测环境来源。模板 `keyOrDefault` 读取保留静态字符串默认值（包含空格）及其推断标量类型，动态默认值表达式保持 unknown。配置查询的 SQLite 执行预算覆盖候选排序、alias 补取和符号附加，耗尽时返回 timeout/incomplete，并提示收窄查询词或 path/language 过滤。
 
@@ -366,7 +366,7 @@ Java 配置键字面量与已引用的字符串常量也使用相同的有界运
 
 表达式预算遵循求值时机：lambda 默认值与生成器最外层可迭代对象立即求值，lambda 主体及未消费生成器主体延迟执行。模块/类的仅注解语句不替换值，函数内注解仍建立局部绑定。已证明身份未变的零参数直接调用固定该次调用的装饰器绑定，后续命名空间写入不追溯改变它；其他调用、已变的可调用身份及参数求值保持保守边界。
 
-`config-registry-v4` 抽取组件独立于 Python 与查询索引版本，使采用旧配置语义的 completed scope 失效。对相同提交执行普通 `repo index <alias> --ref <ref>` 即可经持久化租约流水线刷新事实，无需 `--reset`。Java 接收者与常量证明、模板动作边界及静态 Shell 默认值一起刷新；此变化不新增 SQL schema 迁移。升级时保留 runtime database、WAL 和 task checkpoint；精确回滚须用匹配的旧 binary 恢复升级前 database/shard。
+`config-registry-v5` 抽取组件独立于 Python 与查询索引版本，使采用旧配置语义的 completed scope 失效。对相同提交执行普通 `repo index <alias> --ref <ref>` 即可经持久化租约流水线刷新事实，无需 `--reset`。Java 接收者与常量证明、模板动作边界及静态 Shell 默认值一起刷新；配置事实 v5 同时增加有界的逐文件 Java namespace 摘要及延后构建的查询索引；安装指南说明增量 schema 与 query-plan v6 升级。升级时保留 runtime database、WAL 和 task checkpoint；精确回滚须用匹配的旧 binary 恢复升级前 database/shard。
 
 Shell 参数回退元数据在类型推断前解码受支持的静态引号及拼接的引号/非引号片段，空引号操作数保留为空。外层双引号参数展开中的单引号按 Bash 语义保留为字面字符。动态替换、静态子集外的转义、不匹配引号或超过 64 KiB 的操作数保持未知默认值；引号上下文检查受 1,024 个祖先节点预算约束。读取原始范围和环境绑定检查保持完整；等价引号/非引号默认值不再产生错误的一致性冲突。
 
@@ -386,7 +386,7 @@ Java 配置读取会检查同一语法树内可证明父类型的可见继承字
 
 恢复不执行完整 Go 符号求值；需要变量声明和作用域证明的动作保守保留 parser 诊断。逗号参数、define 参数数错误、block 缺管道、字面量充当后续管道命令、缺空格 trim 标记等已确认语法错误不会通过恢复。原生无错误 AST 路径保持不变；此恢复边界不充当完整 Go 类型或执行校验器。
 
-Python overload 成员写入证明有界追踪直接模块别名，包括链式赋值中的每个目标名称，保持无关成员写入的既有含义。类创建属于立即执行边界；只有没有显式基类或元类、值可证明为非描述符，且成员来自普通函数定义、模块导入或已证明为标准 overload 函数的 from-import 等可证明形状时，才能继续声明推断。未知元类、子类及描述符创建钩子会阻止该证明。装饰器保留节点级证明，方法体仍延迟执行。
+Python overload 成员写入证明有界追踪直接模块别名，包括链式赋值中的每个目标名称，保持无关成员写入的既有含义。类创建属于立即执行边界；只有没有显式基类或元类、值可证明为非描述符，且成员来自普通函数定义、已证明标准 typing 来源的模块导入或已证明为标准 overload 函数的 from-import 等可证明形状时，才能继续声明推断。未知元类、子类及描述符创建钩子会阻止该证明。装饰器保留节点级证明，方法体仍延迟执行。
 
 提供者身份使用授权快照的路径清单。仓库顶层 `typing.py`、`typing/__init__.py`、`typing_extensions.py` 和 `typing_extensions/__init__.py` 分别阻止把对应本地导入当作标准提供者。路径或语言过滤无法覆盖候选提供者，或清单预算耗尽时，来源保持未知。索引不读取宿主 Python 环境、越权文件，也不推断脚本入口搜索路径或自定义 `sys.path` 变化；这是仓库根导入的静态模型。本地或未知来源不提供 typing 声明证明，因此查询可能保留多个可执行候选并要求具体快照选择器。外部依赖覆盖和文件降级语义保持不变。
 
@@ -397,3 +397,21 @@ Python overload 成员写入证明有界追踪直接模块别名，包括链式�
 Java 父类型可使用相对于最近可见类型作用域的嵌套路径，例如 `Outer` 内的 `Inner.Base`。解析先确定首段的词法绑定，再沿成员类型逐段查找，保留完整所属类型身份；近层同名类型遮蔽、缺失成员、歧义和预算耗尽不会退回其他同后缀类型。
 
 有界 Go 模板手动恢复区分标识符、字段链与完整数字字面量。`123abc` 等错误数字仍保留语法诊断；原生语法树无错误时的路径保持不变。Shell 未引用的前导 `~` 依赖运行时展开，因此默认值保持未知；引用的波浪号及受支持的静态拼接保留字面值。索引不会读取宿主 home 目录来猜测默认值。
+
+配置查询在访问存储、检查索引可用性和选择 freshness 分支之前完成校验。显式 query 必须按 SQL 候选筛选及最终匹配共享的分词规则包含 Unicode 字母、数字或下划线。非法查询在 `graph_only`、`allow_stale`、`wait_until_fresh` 下均返回 `invalid_argument` / HTTP 400；省略 query 仍保留列举行为，合法查询保持既有 freshness 及后端错误行为。
+
+Go 模板手动恢复识别单变量声明头 `$name := pipeline`；声明名称本身不作为读取表达式求值，并且与赋值 `=` 区分。保留 Go 合法的数字开头变量名和根变量声明。后续 pipeline 仍受既有动作字节、括号和控制块预算及字面值验证约束。未证明词法作用域的变量读取/赋值保持保守诊断，不把任意 `$name` 表达式当作合法证据；声明后的字面配置调用仍保留原始范围和默认值。
+
+Python 来源变化重解析在增量、文件系统和 worktree overlay 索引中使用共享语言分类器，包含 `.pyw`。Overlay 来源重解析与已变更文件共享既有总字节预算。类体模块导入可能执行任意模块代码，仅已证明标准 typing 来源的导入保留 overload 证明。控制流中可能建立的别名及前序装饰器表达式副作用纳入有界证明，装饰器表达式按源码顺序求值。v13 通过普通索引重建旧 scope，保持预算失败及降级诊断可见。
+
+Java 隐式平台 receiver 需要已授权索引 source scope 的包级证据。原 Java AST 记录真实 package 和直接顶层类型，包含不同文件名中的非 public 类型。同包类型遮蔽隐式平台类型；显式平台 import 或全限定 receiver 保留各自的证明。授权、解析或有界 namespace inventory 不完整时，不能证明不存在遮蔽。这是静态已授权源码模型，索引不检查宿主 classpath 或外部编译依赖。原始 read 和 guard 继续持久化，因此增删同包 provider 可改变当前 scope 的解释而不丢失原证据；保留的历史 scope 使用各自 namespace 事实。查询 path filter 只缩小返回结果，不裁剪已完整授权 scope 的 namespace 证据。已证明的常量配置键保留有界解码后的非空运行时字符串，包含斜杠、冒号及 Unicode；未被读取的字符串常量不成为配置声明。
+
+Java namespace 从原 AST 采集，限于 1,024 次节点访问和 65,536 字节名称。namespace 投影参与 batch 行数与字节预算，包括每行重复的 scope、path、package 和行开销；普通解析、直接 snapshot 准入与 durable copy 均计入这些成本，checkpoint 仍保持实际源码字节与原逻辑事实数。隐式平台读取的 metadata 只保存 receiver 类型，通过带索引的所属文件读取 package，避免每个 read 或 guard 重复克隆包名。既有 planner 在完成一个有界文件后检查 flush 阈值，因此单文件可越过该阈值；这不是新增的整批硬拒绝规则。每个 Java 文件增加一行 namespace 和最多 1,024 行 type，unknown 证据不增加 type 行；源码覆盖不完整保持 unknown，不虚构外部依赖降级。
+
+Python provider 变化导致未变更消费者重解析时，显式 Git 增量和文件系统刷新对已变更文件及额外重解析文件共享总文件数与字节预算，与有界 overlay 合同一致。Prefetch 窗口限制不能替代后续逐文件解析的总量校验。超预算刷新明确失败，并保留此前已发布 scope；更大的刷新应使用持久化完整索引流程。未发生来源变化的普通更新保持既有行为。
+
+Java 限定名从原 AST 的 identifier 节点组装，允许合法的间隔注释而不将注释文本作为名称；所有访问节点共享 namespace 采集预算。
+
+Java 隐式平台类型的排除证明中，无路径过滤的 Git snapshot 覆盖仓库根；文件系统索引的空路径过滤则采用自动发现的默认源码根，不能证明整个根目录不存在同包类型。文件系统完整 package 证据需显式注册根路径，例如 --path .。源码扫描与证据准入共享文件系统路径归一规则；请求级查询过滤仍只缩小返回的 usage。
+
+配置显示名在 ASCII 归一可生成名称时保持既有行为；若归一会抹去合法的非空 runtime key（包括纯 Unicode key），显示名回退到原 key。持久化 source key、配置绑定及源码范围不变，软件图物化也不再为此类 key 接收到空 display-name 属性。

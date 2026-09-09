@@ -218,14 +218,7 @@ pub(in crate::code) fn explicit_path_filter_opts_into_default_file_exclusion<'a>
     })
 }
 
-pub(in crate::code) fn normalize_path_filter(filter: &str) -> &str {
-    let mut filter = filter.trim().trim_end_matches(['/', '\\']);
-    while let Some(stripped) = filter.strip_prefix("./") {
-        filter = stripped;
-    }
-
-    filter
-}
+pub(in crate::code) use crate::domain::normalize_filesystem_path_filter as normalize_path_filter;
 
 fn path_matches_filter(path: &str, filter: &str) -> bool {
     let path = normalize_path_filter(path);

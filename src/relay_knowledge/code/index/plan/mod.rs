@@ -628,6 +628,9 @@ fn batch_row_count(build: &SnapshotBuild) -> usize {
     build
         .files
         .len()
+        .saturating_add(build.files.iter().fold(0usize, |rows, file| {
+            rows.saturating_add(file.namespace_projection_row_count())
+        }))
         .saturating_add(build.symbols.len())
         .saturating_add(build.references.len())
         .saturating_add(build.imports.len())
@@ -643,9 +646,12 @@ fn batch_budget_reached(
     parsed_bytes: usize,
     resource_budget: CodeIndexResourceBudget,
 ) -> bool {
+    let charged_bytes = build.files.iter().fold(parsed_bytes, |bytes, file| {
+        bytes.saturating_add(file.namespace_projection_cost().1)
+    });
     !build.files.is_empty()
         && (build.files.len() >= resource_budget.max_files_per_batch
-            || parsed_bytes >= resource_budget.max_bytes_per_batch
+            || charged_bytes >= resource_budget.max_bytes_per_batch
             || batch_row_count(build) >= resource_budget.max_rows_per_batch)
 }
 

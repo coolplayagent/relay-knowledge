@@ -919,3 +919,6 @@ mod multiline_templates;
 
 #[path = "code_repository_java_proof_boundaries.rs"]
 mod java_proof_boundaries;
+
+#[path = "code_repository_java_package_evidence.rs"]
+mod java_package_evidence;

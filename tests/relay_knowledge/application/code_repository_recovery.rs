@@ -195,6 +195,7 @@ async fn full_index_worker_rejects_a_bad_last_path_before_begin_mutates_reposito
             batch_index: 1,
             parsed_byte_count: 1,
             files: vec![RepositoryCodeFileRecord {
+                java_namespace: None,
                 repository_id: target_session.repository_id.clone(),
                 source_scope: target_session.source_scope.clone(),
                 file_id: "corrupt-prefix-file".to_owned(),

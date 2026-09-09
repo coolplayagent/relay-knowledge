@@ -14,7 +14,7 @@ async fn ambiguous_configuration_getters_preserve_read_and_guard_evidence() {
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Ambiguous configuration fixture"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "register-ambiguous-config").await;
+    register_complete_java_fixture_repo(&service, &repo, "register-ambiguous-config").await;
     service
         .index_code_repository(
             CodeIndexRequest {
