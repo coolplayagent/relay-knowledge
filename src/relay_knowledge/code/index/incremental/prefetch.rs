@@ -77,17 +77,7 @@ fn validate_origin_plan(request: &ChangedPathPrefetchRequest<'_>) -> Result<(), 
         .collect::<BTreeSet<_>>();
     let mut budget = super::super::origin_reparse_budget::OriginReparseBudget::default();
     for entry in request.head_entries {
-        let mut path = entry.path.as_str();
-        let selected = loop {
-            if changed.contains(path) {
-                break true;
-            }
-            let Some((parent, _)) = path.rsplit_once('/') else {
-                break false;
-            };
-            path = parent;
-        };
-        if selected
+        if changed.contains(entry.path.as_str())
             && (path_is_selected_with_layout(
                 &entry.path,
                 request.registration,

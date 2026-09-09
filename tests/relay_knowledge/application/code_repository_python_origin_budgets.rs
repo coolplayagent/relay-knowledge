@@ -42,13 +42,16 @@ async fn explicit_origin_refresh_rejects_total_bytes_and_preserves_base_queries(
 
 #[tokio::test]
 async fn changed_gitlink_consumers_are_parsed_once_when_provider_origin_changes() {
-    for count in [2, 257] {
+    for (count, unchanged_rust) in [(2, 0), (257, 0), (511, 0), (1, 512)] {
         let dependency = FixtureRepo::create("origin-gitlink-dependency");
         for index in 0..count {
             dependency.write(
                 &format!("app{index}.py"),
                 &format!("import typing\n@typing.overload\ndef pick{index}(x:int): ...\ndef pick{index}(x): return x\n"),
             );
+        }
+        for index in 0..unchanged_rust {
+            dependency.write(&format!("unchanged{index}.rs"), "pub fn unchanged() {}\n");
         }
         dependency.git(["add", "."]);
         dependency.git(["commit", "-m", "Consumer base"]);

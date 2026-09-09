@@ -21,6 +21,7 @@ fn overlapping_origin_paths_parse_and_charge_once_in_either_visit_order() {
     ] {
         let context = ChangedPathParseContext {
             reparse_python: true,
+            origin_plan: Default::default(),
             visited_origin_paths: Default::default(),
             origin_budget: Default::default(),
             registration: &registration,
@@ -44,4 +45,48 @@ fn overlapping_origin_paths_parse_and_charge_once_in_either_visit_order() {
         }
         assert!(context.origin_budget.borrow_mut().charge(0).is_err());
     }
+}
+
+#[test]
+fn origin_work_queue_is_bounded_before_any_source_reads() {
+    let source = crate::code::test_fixtures::TempSourceDir::create("origin-queue-bound");
+    let registration = source.registration();
+    let selector = source.selector();
+    let entries = (0..513)
+        .map(|i| changes::GitTreeEntry {
+            path: format!("app{i}.py"),
+            byte_count: 0,
+        })
+        .collect::<Vec<_>>();
+    let layout = discover_source_layout(&entries);
+    let hashes = BTreeMap::new();
+    let bytes = BTreeMap::new();
+    let context = ChangedPathParseContext {
+        reparse_python: true,
+        origin_plan: std::cell::RefCell::new(Some(BTreeSet::new())),
+        visited_origin_paths: Default::default(),
+        origin_budget: Default::default(),
+        registration: &registration,
+        selector: &selector,
+        root: &source.path,
+        base_commit: "unused",
+        previous_hashes: &hashes,
+        source_layout: &layout,
+        previous_source_layout: &layout,
+        effective_path_filters: &[],
+        prefetched_bytes: &bytes,
+    };
+    let mut build = SnapshotBuild::new(&registration, "head".into(), "tree".into(), true, 513, 0);
+    for entry in entries.iter().take(512) {
+        parse_changed_path(&mut build, &context, &entry.path).unwrap();
+    }
+    parse_changed_path(&mut build, &context, &entries[0].path).unwrap();
+    assert!(build.files.is_empty());
+    assert_eq!(context.origin_plan.borrow().as_ref().unwrap().len(), 512);
+    assert!(
+        parse_changed_path(&mut build, &context, &entries[512].path)
+            .unwrap_err()
+            .to_string()
+            .contains("bounded file/byte budget")
+    );
 }

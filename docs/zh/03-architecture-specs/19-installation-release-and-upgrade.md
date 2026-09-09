@@ -193,3 +193,5 @@ Plan rendering 与 execution 必须使用 bootstrap 捕获的精确 source execu
 导航: 上一章: [18. 可观测性、诊断与 SLO](18-observability-diagnostics-and-slo.md) | 下一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md)
 
 Python v11 在每个授权解析 worker 中使用模块来源证据。提供者路径改变时，历史增量复用自动回到既有持久化完整索引计划，保留任务租约、检查点和有界批次。显式增量、文件系统及 worktree overlay 更新会重新解析受影响的 Python 文件，即使这些文件自身字节未变；既有路径、文件及字节预算仍生效。历史提交保留自己的源清单和分类。普通同 HEAD 索引会刷新旧完成 scope，无需重置数据库；仅源目录的窄授权仍保持原范围，无法证明来源时返回未知，不越权读取。
+
+来源变化触发的增量索引先沿既有有界 Gitlink diff、重命名及复制流程展开精确的授权文件工作集。每个文件只入队一次；Gitlink 容器和无需解析的子孙文件不占用解析文件数或 blob 字节预算。读取 blob 前限制队列大小，prefetch 前准入精确计划字节，再对同一文件集执行解析及运行时预算复核。原始 diff 变化和强制 Python 候选分别保持有界，删除、tombstone、租约和 checkpoint 行为保持有效。此次准入修正不改变已成功发布的事实，因此 Python 事实版本仍为 v14；失败的更新可通过普通 update 命令重试。
