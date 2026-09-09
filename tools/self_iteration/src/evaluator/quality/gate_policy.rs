@@ -63,6 +63,7 @@ pub(super) fn quality_gate_stages(
             QualityGateStage::Parallel(vec![bm25_hierarchy_build_gate()]),
             QualityGateStage::Parallel(vec![bm25_hierarchy_gate()]),
             QualityGateStage::Parallel(vec![code_index_persistence_performance_gate()]),
+            QualityGateStage::Parallel(vec![canonical_call_work_budget_gate()]),
             QualityGateStage::Parallel(vec![
                 quality_gate(
                     "self_iteration_cargo_check",
@@ -169,6 +170,7 @@ pub(super) fn quality_gate_stages(
         ]),
         QualityGateStage::Parallel(vec![bm25_hierarchy_build_gate()]),
         QualityGateStage::Parallel(vec![bm25_hierarchy_gate()]),
+        QualityGateStage::Parallel(vec![canonical_call_work_budget_gate()]),
         QualityGateStage::Rails(vec![
             vec![
                 quality_gate(
@@ -299,6 +301,22 @@ fn code_index_persistence_performance_gate() -> QualityGate {
             "--nocapture",
         ],
         CODE_INDEX_PERSISTENCE_PERFORMANCE_TIMEOUT_SECONDS,
+    )
+}
+
+fn canonical_call_work_budget_gate() -> QualityGate {
+    quality_gate(
+        "canonical_call_query_work_budget",
+        [
+            "cargo",
+            "test",
+            "--lib",
+            "--all-features",
+            "canonical_call_query_work_budget",
+            "--",
+            "--nocapture",
+        ],
+        120,
     )
 }
 

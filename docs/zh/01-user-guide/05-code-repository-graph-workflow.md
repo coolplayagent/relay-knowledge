@@ -128,6 +128,8 @@ relay-knowledge repo query repo --query serde --kind sbom --format json
 
 Canonical 调用查询按既有调用目标规则优先选择可调用定义，不将 C/C++ 原型及只有签名的声明计为额外实现。没有定义时，唯一可调用声明仍可查询，多个声明则明确报告歧义。同一 canonical ID 最多检查 1024 个符号；超过预算会明确报错并指引使用定义的 `symbol_snapshot_id`，不会伪装为空结果或唯一匹配。
 
+直接调用查询分别按路径、行号扫描非生成和生成候选，保持非生成文件优先，避免在候选截断前排序全部匹配边。标识解析、两路扫描和代码片段读取共享约 410 万条 SQLite 指令预算。耗尽时明确报告 `call query incomplete`，不回退为空结果或部分成功；可缩小路径、语言过滤或选择更具体的 snapshot。此查询调整复用现有持久化方向索引，不需要迁移数据库或重建仓库。
+
 `cpp-callable-declarations-v1` 提取版本要求通过普通 `repo index <alias> --ref <ref>` 重建旧 scope，包括已经具备 canonical 调用索引的 scope。它将 C++ 原型声明与可执行定义正确区分；重建后需重新复制 snapshot ID。
 
 ```sh

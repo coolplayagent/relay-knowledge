@@ -164,3 +164,84 @@ fn gate_plan_does_not_measure_bm25_when_its_build_stage_fails() {
     assert_eq!(executed, ["parallel gates=bm25_hierarchy_build"]);
     assert_eq!(commands.len(), 1);
 }
+
+fn canonical_metric_output(callers: u64, callees: u64) -> String {
+    format!(
+        "SELF_ITERATION_METRIC {{\"name\":\"canonical_call_callers_vm_steps\",\"value\":{callers},\"budget\":150000}}\nSELF_ITERATION_METRIC {{\"name\":\"canonical_call_callees_vm_steps\",\"value\":{callees},\"budget\":150000}}\n"
+    )
+}
+
+#[test]
+fn canonical_work_gate_rejects_old_scan_and_accepts_index_bounded_work() {
+    for (callers, callees, expected) in [
+        (31_500, 32_000, true),
+        (1_045_800, 32_000, false),
+        (31_500, 1_045_800, false),
+    ] {
+        let mut metrics = Vec::new();
+        let mut gates = Vec::new();
+        let mut commands = Vec::new();
+        let passed = run_quality_gate_plan(
+            vec![QualityGateStage::Parallel(vec![gate(
+                "canonical_call_query_work_budget",
+            )])],
+            |_| {
+                let mut result = result("canonical_call_query_work_budget", 0);
+                result.stdout = canonical_metric_output(callers, callees);
+                vec![result]
+            },
+            &mut commands,
+            &mut gates,
+            &mut metrics,
+        );
+        assert_eq!(passed, expected);
+        assert_eq!(gates[0].passed, expected);
+        let work = metrics
+            .iter()
+            .filter(|metric| metric.name.ends_with("_vm_steps"))
+            .collect::<Vec<_>>();
+        assert_eq!(work.len(), 2);
+        assert!(work.iter().all(|metric| metric.key
+            && metric.lower_is_better
+            && metric.budget == Some(150_000.0)));
+    }
+}
+
+#[test]
+fn canonical_work_gate_fails_closed_for_missing_or_invalid_observations() {
+    let good = canonical_metric_output(31_500, 32_000);
+    for stdout in [
+        String::new(),
+        "running 0 tests".to_owned(),
+        "SELF_ITERATION_METRIC invalid".to_owned(),
+        good.lines().next().unwrap().to_owned(),
+        format!("{good}{good}"),
+        good.replace("150000", "2000000"),
+        good.replace("31500", "0"),
+        good.replace("31500", "-1"),
+        good.replace("31500", "1.5"),
+        good.replace("canonical_call_callers_vm_steps", "unknown"),
+    ] {
+        let mut metrics = Vec::new();
+        let mut gates = Vec::new();
+        let mut commands = Vec::new();
+        assert!(!run_quality_gate_plan(
+            vec![QualityGateStage::Parallel(vec![gate(
+                "canonical_call_query_work_budget"
+            )])],
+            |_| {
+                let mut result = result("canonical_call_query_work_budget", 0);
+                result.stdout = stdout.clone();
+                vec![result]
+            },
+            &mut commands,
+            &mut gates,
+            &mut metrics
+        ));
+        assert!(!gates[0].passed);
+    }
+    assert!(
+        super::canonical_work_metrics(&format!("test canonical_call_query_work_budget ... {good}"))
+            .is_ok()
+    );
+}

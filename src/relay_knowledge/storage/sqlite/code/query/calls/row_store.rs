@@ -1,5 +1,8 @@
 use rusqlite::{Connection, Row, params_from_iter, types::Value};
 
+#[path = "row_budget.rs"]
+mod row_budget;
+
 use crate::storage::sqlite::code::search::EXACT_SEARCH_OWNER_PREDICATE_SQL;
 use crate::{
     domain::{CodeRepositoryStatus, CodeRetrievalRequest, RepositoryCodeRange},
@@ -28,6 +31,17 @@ pub(super) fn search_call_identity_rows(
     request: &CodeRetrievalRequest,
     identity: &CallIdentityQuery,
 ) -> Result<CallIdentityRows, StorageError> {
+    row_budget::run(connection, row_budget::MAX_PROGRESS_CALLBACKS, || {
+        search_call_identity_rows_with_budget(connection, status, request, identity)
+    })
+}
+
+fn search_call_identity_rows_with_budget(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    identity: &CallIdentityQuery,
+) -> Result<CallIdentityRows, StorageError> {
     if identity.canonical_id.is_some() || identity.snapshot_id.is_some() {
         crate::storage::sqlite::code::schema::require_canonical_call_query_indexes(connection)?;
     }
@@ -46,11 +60,6 @@ pub(super) fn search_call_identity_rows(
     let path_filter = path_filter_sql_for_column("c.path", status, request);
     let language_filter =
         language_filter_sql_for_columns("f.language_id", "f.path", status, request);
-    let generated_filter = if request.exclude_generated {
-        "AND f.is_generated = 0"
-    } else {
-        ""
-    };
     let mut inline_filters = Vec::new();
     push_query_path_substring_filter_sql(
         &mut inline_filters,
@@ -72,16 +81,15 @@ pub(super) fn search_call_identity_rows(
         format!("AND {}", inline_filters.join(" AND "))
     };
     let direct_limit = call_identity_candidate_limit(request);
-    let sql = call_rows_sql(&format!(
+    let predicate = format!(
         "
           AND {} = ?
           {path_filter}
           {inline_filters}
           {language_filter}
-          {generated_filter}
         ",
         identity.match_column()
-    ));
+    );
     let mut values = vec![
         Value::Text(required_scope(status)?.to_owned()),
         Value::Text(
@@ -98,13 +106,22 @@ pub(super) fn search_call_identity_rows(
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
     push_language_filter_values(&mut values, &request.query_language_filters);
-    values.push(Value::Integer((direct_limit + 1) as i64));
-
-    let mut statement = prepare_code_search_statement(connection, &sql)?;
-    let rows = statement.query_map(params_from_iter(values), row_to_call)?;
-    let mut rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
+    let mut rows = Vec::new();
+    for generated in [false, true] {
+        if rows.len() > direct_limit || (generated && request.exclude_generated) {
+            break;
+        }
+        let generated_predicate = if generated { "!= 0" } else { "= 0" };
+        let sql = ordered_call_rows_sql(
+            &format!("{predicate} AND f.is_generated {generated_predicate}"),
+            "c.path ASC, c.line_start ASC",
+        );
+        let mut page_values = values.clone();
+        page_values.push(Value::Integer((direct_limit + 1 - rows.len()) as i64));
+        let mut statement = prepare_code_search_statement(connection, &sql)?;
+        let page = statement.query_map(params_from_iter(page_values), row_to_call)?;
+        rows.extend(page.collect::<Result<Vec<_>, _>>()?);
+    }
     let saturated = rows.len() > direct_limit;
     rows.truncate(direct_limit);
 
@@ -213,6 +230,13 @@ pub(super) fn search_call_fts_rows(
 }
 
 pub(super) fn call_rows_sql(predicate_sql: &str) -> String {
+    ordered_call_rows_sql(
+        predicate_sql,
+        "f.is_generated ASC, c.path ASC, c.line_start ASC",
+    )
+}
+
+fn ordered_call_rows_sql(predicate_sql: &str, ordering: &str) -> String {
     format!(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
@@ -264,7 +288,7 @@ pub(super) fn call_rows_sql(predicate_sql: &str) -> String {
            AND callee.symbol_snapshot_id = c.callee_symbol_snapshot_id
         WHERE c.source_scope = ?
           {predicate_sql}
-        ORDER BY f.is_generated ASC, c.path ASC, c.line_start ASC
+        ORDER BY {ordering}
         LIMIT ?
         "
     )
@@ -305,3 +329,7 @@ pub(super) fn row_to_call(row: &Row<'_>) -> rusqlite::Result<CallRow> {
 #[cfg(test)]
 #[path = "row_store_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "row_work_budget_tests.rs"]
+mod work_budget_tests;
