@@ -325,4 +325,4 @@ relay-knowledge repo status repo --format json
 
 `repo impact` 需要 `--head` 对应已索引 snapshot。先运行 `repo index repo --ref <head>` 或 `repo update repo --base <base> --head <head>`，再运行 impact。
 
-Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。`python-overload-declarations-v1` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
+Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。v2 同时使 v1 已索引 scope 重建。`python-overload-declarations-v2` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
