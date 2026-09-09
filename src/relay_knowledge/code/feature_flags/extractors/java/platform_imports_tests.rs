@@ -121,3 +121,42 @@ fn inherited_type_searches_spend_the_same_budget_including_sibling_scans() {
     assert!(visible_parent(tree.root_node(), "Absent", &source, &mut remaining).is_none());
     assert_eq!(remaining, 0);
 }
+
+#[test]
+fn unresolved_object_needs_explicit_platform_identity_and_noninherited_methods_do_not_shadow() {
+    assert_eq!(
+        imported_receiver(
+            "import static java.lang.System.getenv; class App extends Object { void run() { getenv(\"FLAG\"); } }"
+        ),
+        None
+    );
+    assert_eq!(
+        imported_receiver(
+            "import java.lang.Object; import static java.lang.System.getenv; class App extends Object { void run() { getenv(\"FLAG\"); } }"
+        ),
+        Some("java.lang.System")
+    );
+    for body in [
+        "class Base { private String getenv(String key) { return key; } } class App extends Base { void run() { getenv(\"FLAG\"); } }",
+        "interface Base { static String getenv(String key) { return key; } } class App implements Base { void run() { getenv(\"FLAG\"); } }",
+        "interface Base { private String getenv(String key) { return key; } } class App implements Base { void run() { getenv(\"FLAG\"); } }",
+    ] {
+        assert_eq!(
+            imported_receiver(&format!("import static java.lang.System.getenv; {body}")),
+            Some("java.lang.System"),
+            "{body}"
+        );
+    }
+    for body in [
+        "class Base { protected static String getenv(String key) { return key; } } class App extends Base { void run() { getenv(\"FLAG\"); } }",
+        "interface Base { default String getenv(String key) { return key; } } class App implements Base { void run() { getenv(\"FLAG\"); } }",
+        "interface Own { static String getenv(String key) { return key; } default void run() { getenv(\"FLAG\"); } }",
+        "class Own { private String getenv(String key) { return key; } void run() { getenv(\"FLAG\"); } }",
+    ] {
+        assert_eq!(
+            imported_receiver(&format!("import static java.lang.System.getenv; {body}")),
+            None,
+            "{body}"
+        );
+    }
+}

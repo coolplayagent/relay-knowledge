@@ -910,3 +910,9 @@ mod config_binding_boundaries;
 
 #[path = "code_repository_config_binding_provenance.rs"]
 mod config_binding_provenance;
+
+#[path = "code_repository_java_inheritance_defaults.rs"]
+mod java_inheritance_defaults;
+
+#[path = "code_repository_multiline_templates.rs"]
+mod multiline_templates;

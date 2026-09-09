@@ -5,6 +5,7 @@ use crate::code::parser::nodes::{SyntaxRange, node_text, syntax_range};
 
 const MAX_BINDING_STATEMENTS: usize = 1024;
 
+mod expressions;
 mod mutations;
 
 pub(in crate::code::parser) fn manual_definitions(
@@ -37,7 +38,11 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
         .named_children(&mut cursor)
         .filter(|node| node.kind() == "decorator")
         .any(|decorator| {
-            let Some(expression) = decorator.named_child(0) else {
+            let mut remaining = MAX_BINDING_STATEMENTS;
+            let Some(expression) = decorator
+                .named_child(0)
+                .and_then(|node| expressions::transparent(node, &mut remaining))
+            else {
                 return false;
             };
             let (binding, module) = match expression.kind() {
@@ -49,6 +54,7 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
                 {
                     let Some(object) = expression
                         .child_by_field_name("object")
+                        .and_then(|node| expressions::transparent(node, &mut remaining))
                         .filter(|node| node.kind() == "identifier")
                     else {
                         return false;
@@ -183,7 +189,7 @@ fn later_import_binding(
 
 fn linear_binding_statement(statement: Node<'_>) -> bool {
     match statement.kind() {
-        "import_statement" | "import_from_statement" | "pass_statement" => true,
+        "import_statement" | "import_from_statement" | "pass_statement" | "comment" => true,
         "expression_statement" => statement
             .named_child(0)
             .filter(|expression| expression.kind() == "assignment")
@@ -305,10 +311,8 @@ fn simple_binding(content: &str, statement: Node<'_>, binding: &str, module: boo
         if module && mutations::expression_mutates_module(content, expression, binding) {
             return Some(false);
         }
-        return expression
-            .child_by_field_name("left")
-            .filter(|left| mutations::assignment_binds(content, *left, binding, module))
-            .map(|_| false);
+        return mutations::expression_rebinds(content, expression, binding, module)
+            .then_some(false);
     }
     // Control-flow and deletion can change a binding. Do not guess its value.
     contains_identifier(content, statement, binding).then_some(false)

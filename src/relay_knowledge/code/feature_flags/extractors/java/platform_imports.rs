@@ -120,17 +120,17 @@ fn method_may_shadow(
             }
         }
         if is_type(parent) {
-            types.push(parent);
+            types.push((parent, false));
         }
         node = parent;
     }
     let mut visited = std::collections::BTreeSet::new();
-    while let Some(owner) = types.pop() {
+    while let Some((owner, inherited)) = types.pop() {
         if *remaining == 0 {
             return true;
         }
         *remaining -= 1;
-        if !visited.insert(owner.start_byte()) {
+        if !visited.insert((owner.start_byte(), inherited)) {
             continue;
         }
         let Some(body) = owner.child_by_field_name("body") else {
@@ -142,7 +142,11 @@ fn method_may_shadow(
                 return true;
             }
             *remaining -= 1;
-            if method_named(child, method, content) {
+            if method_named(child, method, content)
+                && (!inherited
+                    || inherited_method(child, owner.kind() == "interface_declaration", remaining)
+                        .is_none_or(|value| value))
+            {
                 return true;
             }
         }
@@ -166,14 +170,34 @@ fn method_may_shadow(
                     continue;
                 }
                 match visible_parent(owner, &name, content, remaining) {
-                    Some(parent) => types.push(parent),
-                    None if name == "Object" && implicit_object(owner, content, remaining) => {}
+                    Some(parent) => types.push((parent, true)),
+                    None if name == "Object"
+                        && imported_platform_object(owner, content, remaining) => {}
                     None => return true,
                 }
             }
         }
     }
     false
+}
+
+fn inherited_method(node: Node<'_>, interface: bool, remaining: &mut usize) -> Option<bool> {
+    let Some(modifiers) = node
+        .named_child(0)
+        .filter(|child| child.kind() == "modifiers")
+    else {
+        return Some(true);
+    };
+    let mut is_static = false;
+    let mut cursor = modifiers.walk();
+    for modifier in modifiers.children(&mut cursor) {
+        *remaining = remaining.checked_sub(1)?;
+        if modifier.kind() == "private" {
+            return Some(false);
+        }
+        is_static |= modifier.kind() == "static";
+    }
+    Some(!(interface && is_static))
 }
 
 fn method_named(node: Node<'_>, method: &str, content: &str) -> bool {
@@ -317,10 +341,11 @@ fn qualified_parent<'a>(
     None
 }
 
-fn implicit_object(node: Node<'_>, content: &str, remaining: &mut usize) -> bool {
+fn imported_platform_object(node: Node<'_>, content: &str, remaining: &mut usize) -> bool {
     let Some(root) = bounded_root(node, remaining) else {
         return false;
     };
+    let mut explicit = false;
     let mut cursor = root.walk();
     for import in root.named_children(&mut cursor) {
         let Some(left) = remaining.checked_sub(1) else {
@@ -330,16 +355,17 @@ fn implicit_object(node: Node<'_>, content: &str, remaining: &mut usize) -> bool
         if import.kind() != "import_declaration" {
             continue;
         }
-        let Some((path, glob)) = import_path(import, content, remaining) else {
+        let Some((path, _)) = import_path(import, content, remaining) else {
             return false;
         };
-        if (glob && path != "java.lang")
-            || (path.ends_with(".Object") && path != "java.lang.Object")
-        {
+        if path.ends_with(".Object") && path != "java.lang.Object" {
             return false;
         }
+        explicit |= path == "java.lang.Object";
     }
-    true
+    // Other compilation units may declare Object in this package. Only an
+    // explicit platform import proves its identity without package-wide facts.
+    explicit
 }
 
 #[cfg(test)]

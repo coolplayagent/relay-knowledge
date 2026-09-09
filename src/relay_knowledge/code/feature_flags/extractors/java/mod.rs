@@ -7,6 +7,7 @@ use crate::domain::{CodeConfigurationReadKind, CodeFeatureFlagRecord, DomainErro
 use crate::code::config_files::ConfigRange;
 use crate::code::feature_flags::{FeatureFlagFileInput, feature_flag_record_from_range};
 mod platform_imports;
+mod string_defaults;
 mod symbols;
 use symbols as java_symbols;
 
@@ -102,13 +103,11 @@ fn config_read(node: Node<'_>, content: &str) -> Option<(&'static str, String)> 
         return java_symbols::constant_symbol(argument, content)
             .map(|symbol| ("config_symbol", symbol));
     }
-    let key = text(argument, content)
-        .strip_prefix('"')?
-        .strip_suffix('"')?;
-    if key.is_empty() || key.contains('\\') {
+    let key = string_defaults::decode(text(argument, content))?;
+    if key.is_empty() {
         return None;
     }
-    Some((kind, key.to_owned()))
+    Some((kind, key))
 }
 
 fn constant_definition(
@@ -142,7 +141,9 @@ fn constant_definition(
     else {
         return Ok(None);
     };
-    let key = text(value, input.content).trim_matches('"');
+    let Some(key) = string_defaults::decode(text(value, input.content)) else {
+        return Ok(None);
+    };
     if key.is_empty()
         || !key
             .chars()
@@ -159,7 +160,7 @@ fn constant_definition(
     // A string constant alone does not prove a configuration key. Persist only
     // a binding candidate; snapshot resolution promotes it when a real read or
     // independent configuration definition provides matching evidence.
-    let mut definition = record(input, node, "config_key", key, "binds_config_symbol")?;
+    let mut definition = record(input, node, "config_key", &key, "binds_config_symbol")?;
     definition.metadata.bindings.push(symbol);
     Ok(Some(definition))
 }
@@ -167,7 +168,8 @@ fn constant_definition(
 fn default_value(node: Node<'_>, content: &str) -> Option<String> {
     let argument = node.child_by_field_name("arguments")?.named_child(1)?;
     (argument.kind() == "string_literal")
-        .then(|| text(argument, content).trim_matches('"').to_owned())
+        .then(|| string_defaults::decode(text(argument, content)))
+        .flatten()
 }
 
 fn containing_guard(mut node: Node<'_>) -> Option<Node<'_>> {

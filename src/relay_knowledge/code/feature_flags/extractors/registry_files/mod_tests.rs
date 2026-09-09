@@ -28,11 +28,6 @@ fn template_key_or_default_preserves_only_static_literal_fallbacks() {
             .filter(|record| matches!(record.source_key.as_str(), "dynamic" | "plain"))
             .all(|record| record.metadata.default_value.is_none())
     );
-    assert_eq!(
-        template_string("`raw literal` rest"),
-        Some(("raw literal".to_owned(), " rest"))
-    );
-    assert!(template_string("\"unterminated").is_none());
 }
 
 fn facts(path: &str, content: &str) -> Vec<CodeFeatureFlagRecord> {
