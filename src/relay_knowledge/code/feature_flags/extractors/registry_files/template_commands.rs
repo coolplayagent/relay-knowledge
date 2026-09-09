@@ -1,27 +1,14 @@
 //! Bounded action tokenization for literal configuration calls in pipelines.
-use super::template_literals;
+use crate::code::config_files::{
+    template_actions::{Kind, Token, tokens},
+    template_literals,
+};
 
 pub(super) struct Read {
     pub kind: &'static str,
     pub key: String,
     pub default: Option<String>,
     pub offset: usize,
-}
-
-#[derive(Clone, Copy)]
-enum Kind<'a> {
-    Word(&'a str),
-    Literal(&'a str),
-    Open,
-    Close,
-    Pipe,
-    Assign,
-    Other,
-}
-
-struct Token<'a> {
-    kind: Kind<'a>,
-    offset: usize,
 }
 
 pub(super) fn reads(action: &str) -> Vec<Read> {
@@ -31,16 +18,34 @@ pub(super) fn reads(action: &str) -> Vec<Read> {
     let mut template_name = false;
     let mut command_literal = None;
     let mut incoming = None;
+    let mut parentheses = Vec::new();
     for (index, token) in tokens.iter().enumerate() {
         match token.kind {
             Kind::Pipe => {
                 incoming = command_literal.take();
                 command_head = true;
             }
-            Kind::Open | Kind::Assign | Kind::Close => {
+            Kind::Open => {
+                parentheses.push((command_head, template_name, incoming));
+                command_head = true;
+                template_name = false;
                 incoming = None;
                 command_literal = None;
-                command_head = !matches!(token.kind, Kind::Close);
+            }
+            Kind::Close => {
+                let result = command_literal;
+                let Some((was_head, name, prior_input)) = parentheses.pop() else {
+                    return Vec::new();
+                };
+                command_head = false;
+                template_name = name;
+                incoming = prior_input;
+                command_literal = if was_head { result } else { None };
+            }
+            Kind::Assign => {
+                incoming = None;
+                command_literal = None;
+                command_head = true;
             }
             Kind::Word("if" | "with" | "range" | "else") if command_head => {}
             Kind::Word("template" | "block") if command_head => template_name = true,
@@ -83,7 +88,7 @@ pub(super) fn reads(action: &str) -> Vec<Read> {
                 command_literal = Some(literal);
                 command_head = false;
             }
-            Kind::Other => {}
+            Kind::Other | Kind::Comment => {}
             _ => {
                 command_head = false;
                 command_literal = None;
@@ -101,69 +106,6 @@ fn literal_argument<'a>(token: Option<&Token<'a>>, incoming: Option<&'a str>) ->
         None | Some(Kind::Close | Kind::Pipe) => incoming,
         _ => None,
     }
-}
-
-// The caller enforces the 64 KiB action bound; token slices borrow that action.
-fn tokens(action: &str) -> Vec<Token<'_>> {
-    let mut tokens = Vec::new();
-    let bytes = action.as_bytes();
-    let mut offset = 0;
-    while offset < bytes.len() {
-        let byte = bytes[offset];
-        if byte.is_ascii_whitespace() {
-            offset += 1;
-            continue;
-        }
-        if bytes[offset..].starts_with(b"/*") {
-            let Some(end) = action[offset + 2..].find("*/") else {
-                break;
-            };
-            offset += end + 4;
-            continue;
-        }
-        let start = offset;
-        offset += 1;
-        let kind = match byte {
-            b'(' => Kind::Open,
-            b')' => Kind::Close,
-            b'|' => Kind::Pipe,
-            b'=' => Kind::Assign,
-            b':' if bytes.get(offset) == Some(&b'=') => {
-                offset += 1;
-                Kind::Assign
-            }
-            b',' | b'-' => Kind::Other,
-            b'"' | b'`' | b'\'' => {
-                while offset < bytes.len() {
-                    let next = bytes[offset];
-                    offset += 1;
-                    if next == b'\\' && byte != b'`' {
-                        offset = (offset + 1).min(bytes.len());
-                    } else if next == byte {
-                        break;
-                    }
-                }
-                Kind::Literal(&action[start..offset])
-            }
-            _ => {
-                while offset < bytes.len()
-                    && !bytes[offset].is_ascii_whitespace()
-                    && !matches!(
-                        bytes[offset],
-                        b'(' | b')' | b'|' | b'=' | b':' | b',' | b'"' | b'`' | b'\''
-                    )
-                {
-                    offset += 1;
-                }
-                Kind::Word(&action[start..offset])
-            }
-        };
-        tokens.push(Token {
-            kind,
-            offset: start,
-        });
-    }
-    tokens
 }
 
 #[cfg(test)]

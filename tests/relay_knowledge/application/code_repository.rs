@@ -968,3 +968,9 @@ mod python_evaluation;
 
 #[path = "code_repository_shell_fallbacks.rs"]
 mod shell_fallbacks;
+
+#[path = "code_repository_python_boundaries.rs"]
+mod python_boundaries;
+
+#[path = "code_repository_unicode_config_query.rs"]
+mod unicode_config_query;

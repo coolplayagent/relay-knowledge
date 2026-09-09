@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn exported_definitions_decode_static_quote_concatenation_once() {
+    for (source, expected, kind) in [
+        (r#"export FLAG=tr"u"'e'"#, "true", "boolean"),
+        (r#"export FLAG="1"'2'"#, "12", "integer"),
+        ("export FLAG=''", "", "string"),
+        (r#"export FLAG="'quoted'""#, "'quoted'", "string"),
+    ] {
+        let records = facts(source);
+        let record = records
+            .iter()
+            .find(|r| r.edge_kind == "defines_config")
+            .unwrap();
+        assert_eq!(record.metadata.default_value.as_deref(), Some(expected));
+        assert_eq!(record.metadata.value_type.as_deref(), Some(kind));
+    }
+    for source in [r#"export FLAG="$OTHER""#, r#"export FLAG="\n""#] {
+        let records = facts(source);
+        assert!(records.iter().all(|r| r.metadata.default_value.is_none()));
+    }
+}
+
+#[test]
 fn exported_declaration_definitions_share_the_binding_option_contract() {
     for command in [
         "export\tFLAG=true",

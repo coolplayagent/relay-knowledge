@@ -331,3 +331,6 @@ fn python_immediate_expression_writes_and_comment_only_gaps_preserve_bindings() 
 
 #[path = "python_evaluation.rs"]
 mod evaluation;
+
+#[path = "python_boundaries.rs"]
+mod boundaries;

@@ -7,7 +7,6 @@ use crate::code::feature_flags::{FeatureFlagFileInput, feature_flag_record_from_
 pub(in crate::code) mod shell;
 mod shell_bindings;
 mod template_commands;
-mod template_literals;
 mod template_reads;
 
 pub(in crate::code::feature_flags) fn extract(

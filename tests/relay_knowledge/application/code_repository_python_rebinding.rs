@@ -5,13 +5,13 @@ async fn redirected_python_bindings_reject_later_custom_values_but_ignore_proper
     let repo = FixtureRepo::create("python-rebinding");
     repo.write(
         "src/sample.py",
-        r#"from typing import overload, get_overloads
+        r#"from types import SimpleNamespace
+registry=SimpleNamespace()
+from typing import overload, get_overloads
 from typing import overload as global_ov
-from types import SimpleNamespace
 events=[]
 def custom(fn): events.append(fn.__qualname__); return fn
 def leaf(): return 1
-registry=SimpleNamespace()
 registry.overload=custom
 @overload
 def attribute_choice(x:int): ...
@@ -49,13 +49,13 @@ def implicit_nonlocal_outer():
 global_ov=custom
 global_outer()
 nonlocal_outer()
+registry=SimpleNamespace()
 import typing as property_module
 import typing as subscript_module
 import typing as mutation_module
 from typing import get_overloads
 from types import SimpleNamespace
 events=[]
-registry=SimpleNamespace()
 registry.property_module=custom
 @property_module.overload
 def module_property_choice(x:int): ...
@@ -145,7 +145,11 @@ async fn python_import_fallback_and_module_members_round_trip_through_the_call_g
     let repo = FixtureRepo::create("python-import-paths");
     repo.write(
         "src/members.py",
-        r#"import typing as property_module
+        r#"marker_one=object()
+marker_two=object()
+from types import SimpleNamespace
+registry=SimpleNamespace()
+import typing as property_module
 import typing as subscript_module
 import typing as mutation_module
 from typing import get_overloads
@@ -153,13 +157,12 @@ from types import SimpleNamespace
 events=[]
 def custom(fn): events.append(fn.__qualname__); return fn
 def leaf(): return 1
-registry=SimpleNamespace()
-property_module.unrelated_marker=object()
+property_module.unrelated_marker=marker_one
 @property_module.overload
 def attribute_choice(x:int): ...
 def attribute_choice(x): return leaf()
 mapping={}
-subscript_module.__dict__["unrelated_marker"]=object()
+subscript_module.__dict__["unrelated_marker"]=marker_two
 @subscript_module.overload
 def subscript_choice(x:int): ...
 def subscript_choice(x): return leaf()

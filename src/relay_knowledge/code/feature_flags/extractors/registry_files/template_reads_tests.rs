@@ -91,10 +91,10 @@ fn malformed_actions_and_dynamic_arguments_do_not_invent_static_reads_or_default
     assert_eq!(records.len(), 2);
     assert!(records[0].metadata.default_value.is_none());
     assert_eq!(
-        super::super::template_literals::string("`raw literal` rest"),
+        crate::code::config_files::template_literals::string("`raw literal` rest"),
         Some(("raw literal".to_owned(), " rest"))
     );
-    assert!(super::super::template_literals::string("\"unterminated").is_none());
+    assert!(crate::code::config_files::template_literals::string("\"unterminated").is_none());
 }
 
 #[test]

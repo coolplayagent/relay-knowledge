@@ -1,10 +1,15 @@
 //! Decode Go template string literals without replacing non-UTF-8 byte values.
 
-pub(super) fn string(arguments: &str) -> Option<(String, &str)> {
+pub(in crate::code) fn string(arguments: &str) -> Option<(String, &str)> {
+    let (value, rest) = bytes(arguments)?;
+    Some((String::from_utf8(value).ok()?, rest))
+}
+
+pub(super) fn bytes(arguments: &str) -> Option<(Vec<u8>, &str)> {
     let arguments = arguments.trim_start();
     if let Some(raw) = arguments.strip_prefix('`') {
         let (value, rest) = raw.split_once('`')?;
-        return Some((value.replace('\r', ""), rest));
+        return Some((value.replace('\r', "").into_bytes(), rest));
     }
     let bytes = arguments.as_bytes();
     if bytes.first() != Some(&b'"') {
@@ -15,7 +20,7 @@ pub(super) fn string(arguments: &str) -> Option<(String, &str)> {
     while let Some(&byte) = bytes.get(position) {
         position += 1;
         match byte {
-            b'"' => return Some((String::from_utf8(decoded).ok()?, &arguments[position..])),
+            b'"' => return Some((decoded, &arguments[position..])),
             b'\n' => return None,
             b'\\' => decode_escape(bytes, &mut position, &mut decoded)?,
             byte => decoded.push(byte),

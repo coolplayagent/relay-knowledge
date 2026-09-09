@@ -64,3 +64,31 @@ fn chained_target_work_is_shared_and_never_walks_an_ordinary_value() {
         .unwrap();
     assert!(expression_rebinds(&source, node, "overload", false));
 }
+
+#[test]
+fn unknown_calls_preserve_only_proven_unrelated_member_writes() {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_python::LANGUAGE.into())
+        .unwrap();
+    for (source, unknown) in [
+        ("setattr(typing, 'other', custom)", false),
+        ("setattr(typing, 'other', mutate())", true),
+        ("mutate()", true),
+        ("def helper():\n mutate()", false),
+        ("def helper(value=mutate()): pass", true),
+    ] {
+        let tree = parser.parse(source, None).unwrap();
+        assert_eq!(
+            unknown_eager_call(
+                source,
+                tree.root_node().named_child(0).unwrap(),
+                "typing",
+                true,
+                &std::collections::BTreeMap::new(),
+                &mut 1024
+            ),
+            unknown
+        );
+    }
+}

@@ -148,10 +148,7 @@ fn ranked_keys(
     values.extend_from_slice(scope_params);
     let mut query_clauses = Vec::new();
     if let Some(query) = &request.query {
-        for term in query
-            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-            .filter(|s| !s.is_empty())
-        {
+        for term in super::filters::query_terms(query) {
             let fields = [
                 "name",
                 "source_kind",

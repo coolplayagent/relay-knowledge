@@ -141,6 +141,7 @@ pub(super) fn getter_symbol(node: Node<'_>, content: &str) -> Option<String> {
 pub(super) fn platform_receiver_shadowed(node: Node<'_>, receiver: &str, content: &str) -> bool {
     if value_shadowed(node, receiver, content, true)
         || visible_type(node, receiver, content).is_some()
+        || super::inherited_members::receiver_shadowed(node, receiver, content)
     {
         return true;
     }
@@ -314,6 +315,10 @@ pub(super) fn getter_bindings(node: Node<'_>, content: &str) -> Vec<String> {
     };
     let owner = type_owner(class, content);
     let mut bindings = vec![qualify(node, &format!("{owner}.{name}"), content)];
+    for parent in super::inherited_members::getter_contracts(class, method, name, content) {
+        let owner = type_owner(parent, content);
+        bindings.push(qualify(parent, &format!("{owner}.{name}"), content));
+    }
     if let Some(interfaces) = class.child_by_field_name("interfaces") {
         let mut cursor = interfaces.walk();
         for list in interfaces.named_children(&mut cursor) {
@@ -326,6 +331,8 @@ pub(super) fn getter_bindings(node: Node<'_>, content: &str) -> Vec<String> {
             }
         }
     }
+    bindings.sort();
+    bindings.dedup();
     bindings
 }
 

@@ -66,7 +66,7 @@ async fn template_action_boundaries_and_pipeline_reads_survive_real_git_indexing
 async fn multiline_template_reads_round_trip_through_git_indexing_with_exact_ranges() {
     let repo = FixtureRepo::create("multiline-template");
     repo.git(["config", "core.autocrlf", "false"]);
-    let content = "# 模板\r\n  {{- key\r\n \"feature_x\" -}}\r\n{{ keyOrDefault\n \"feature_y\"\n \"true\" }}\n{{ env\n `ENV_SWITCH` }}\n{{/* {{ key \"false_comment\" }} */}}\n";
+    let content = "# 妯℃澘\r\n  {{- key\r\n \"feature_x\" -}}\r\n{{ keyOrDefault\n \"feature_y\"\n \"true\" }}\n{{ env\n `ENV_SWITCH` }}\n{{/* {{ key \"false_comment\" }} */}}\n";
     repo.write("src/config.ctmpl", content);
     repo.write(
         "src/literals.ctmpl",
@@ -133,6 +133,83 @@ async fn multiline_template_reads_round_trip_through_git_indexing_with_exact_ran
         if key == "feature_y" {
             assert_eq!(usage.metadata.default_value.as_deref(), Some("true"));
             assert_eq!(usage.metadata.value_type.as_deref(), Some("boolean"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn parenthesized_template_literals_and_export_defaults_survive_git_indexing() {
+    let repo = FixtureRepo::create("template-recovery");
+    repo.git(["config", "core.autocrlf", "false"]);
+    repo.write("src/config.ctmpl", "{{/* ignored {{ key \"fake\" }}\r\n */}}\r\n{{ (\"paren_key\") | key }}\r\n{{ ((\"PAREN_ENV\")) | env }}\r\n{{ keyOrDefault \"quoted\" \"a}}b\" }}\r\n{{ keyOrDefault \"raw\" `x}}y\r\nz` }}\r\n");
+    repo.write(
+        "src/defaults.sh",
+        "export EXPORTED=tr\"u\"'e'\nprintf '%s' \"$EXPORTED\"\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Literal-aware template recovery"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-template-recovery"),
+        )
+        .await
+        .unwrap();
+    let response = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                selector("fixture", "HEAD"),
+                20,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap(),
+            context("query-template-recovery"),
+        )
+        .await
+        .unwrap();
+    assert!(
+        response.degraded_reason.is_none(),
+        "{:?}",
+        response.degraded_reason
+    );
+    assert_eq!(response.flags.len(), 5, "{:?}", response.flags);
+    for (key, default) in [
+        ("paren_key", None),
+        ("PAREN_ENV", None),
+        ("quoted", Some("a}}b")),
+        ("raw", Some("x}}y\nz")),
+        ("EXPORTED", Some("true")),
+    ] {
+        let flag = response
+            .flags
+            .iter()
+            .find(|flag| flag.source_key == key)
+            .unwrap();
+        assert_eq!(
+            flag.source_kind,
+            if matches!(key, "PAREN_ENV" | "EXPORTED") {
+                "env_var"
+            } else {
+                "config_key"
+            }
+        );
+        if let Some(default) = default {
+            assert!(
+                flag.usages
+                    .iter()
+                    .any(|usage| usage.metadata.default_value.as_deref() == Some(default)),
+                "{:?}",
+                flag.usages
+            );
         }
     }
 }

@@ -49,7 +49,7 @@ fn node_record(
             let Some((key, value)) = source.split_once('=') else {
                 return Ok(None);
             };
-            (key, Some(value.trim_matches(['\'', '"'])), "defines_config")
+            (key, Some(value), "defines_config")
         }
         "expansion" => {
             let mut cursor = node.walk();
@@ -109,9 +109,7 @@ fn node_record(
     let default = if edge == "reads_config" {
         default.and_then(|value| static_fallback(value, quoted_context(node)?))
     } else {
-        default
-            .filter(|value| !value.contains(['$', '`', '\\', '{', '}']))
-            .map(str::to_owned)
+        default.and_then(|value| static_fallback(value, false))
     };
     record.metadata.value_type = default.as_deref().map(|value| value_type(value).to_owned());
     record.metadata.default_value = default;

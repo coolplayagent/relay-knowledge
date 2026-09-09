@@ -7,6 +7,7 @@ use crate::domain::{CodeConfigurationReadKind, CodeFeatureFlagRecord, DomainErro
 use crate::code::config_files::ConfigRange;
 use crate::code::feature_flags::{FeatureFlagFileInput, feature_flag_record_from_range};
 mod inherited_constants;
+mod inherited_members;
 mod platform_imports;
 mod string_defaults;
 mod symbols;

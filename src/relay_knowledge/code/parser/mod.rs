@@ -129,3 +129,7 @@ mod python_overload_tests;
 #[cfg(test)]
 #[path = "tests/python_import_paths.rs"]
 mod python_import_path_tests;
+
+#[cfg(test)]
+#[path = "template_recovery_tests.rs"]
+mod template_recovery_tests;

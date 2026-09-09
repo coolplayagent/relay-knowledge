@@ -9,6 +9,7 @@ use super::super::languages::LanguageSpec;
 const EMPTY_TAGS_QUERY: &str = "";
 
 #[cfg(test)]
+#[path = "mod_tests.rs"]
 mod mod_tests;
 
 pub(in crate::code) fn detect(path: &str) -> Option<LanguageSpec> {
@@ -37,7 +38,7 @@ pub(in crate::code) fn recoverable_parse_error(language_id: &str, content: &str)
 
 pub(in crate::code) fn manual_parse_status(language_id: &str, content: &str) -> bool {
     match language_id {
-        "gotemplate" => gotemplate_actions_balanced(content),
+        "gotemplate" => super::template_actions::balanced(content),
         "ninja" => ninja_manifest_shape(content),
         _ => false,
     }
@@ -77,23 +78,6 @@ fn cmake_command_start(line: &str) -> bool {
         && command
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || character == '_')
-}
-
-fn gotemplate_actions_balanced(content: &str) -> bool {
-    let mut rest = content;
-    loop {
-        let Some(start) = rest.find("{{") else {
-            return !rest.contains("}}");
-        };
-        if rest[..start].contains("}}") {
-            return false;
-        }
-        let after_start = &rest[start + "{{".len()..];
-        let Some(end) = after_start.find("}}") else {
-            return false;
-        };
-        rest = &after_start[end + "}}".len()..];
-    }
 }
 
 fn ninja_manifest_shape(content: &str) -> bool {

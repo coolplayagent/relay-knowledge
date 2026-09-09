@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn completed_parenthesized_literal_results_feed_pipelines_without_guessing_calls() {
+    for (action, key) in [
+        ("(\"flag\") | key", "flag"),
+        ("((\"ENV\")) | env", "ENV"),
+        ("(\"true\") | keyOrDefault \"default\"", "default"),
+    ] {
+        let found = reads(action);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].key, key);
+    }
+    for action in [
+        "(printf `%s` \"unknown\") | key",
+        "printf `%s` (\"argument\") | key",
+        "($dynamic) | key",
+    ] {
+        assert!(reads(action).is_empty(), "{action}");
+    }
+}
+
+#[test]
 fn literal_pipeline_inputs_supply_only_proven_last_arguments() {
     for (action, key, default) in [
         ("\"piped_key\" | key", "piped_key", None),

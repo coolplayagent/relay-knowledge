@@ -1,5 +1,12 @@
 use rusqlite::types::Value;
 
+/// Share Unicode word boundaries between SQL seeds and assembled-group matching.
+pub(super) fn query_terms(query: &str) -> impl Iterator<Item = &str> {
+    query
+        .split(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .filter(|term| !term.is_empty())
+}
+
 pub(super) fn append_path_filter_clause(
     clauses: &mut Vec<String>,
     params: &mut Vec<Value>,

@@ -5,6 +5,8 @@ mod knowledge_map;
 mod languages;
 mod model;
 mod source;
+pub(super) mod template_actions;
+pub(super) mod template_literals;
 
 pub(super) use detection::{detect, manual_parse_status, recoverable_parse_error};
 pub(super) use model::{ConfigFact, ConfigImport, ConfigRange, ConfigReference, ConfigValueKind};

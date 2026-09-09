@@ -1,5 +1,5 @@
 //! Whole-file, linear template action scanning with bounded literal decoding.
-use crate::code::config_files::ConfigRange;
+use crate::code::config_files::{ConfigRange, template_actions::action_end};
 use crate::code::feature_flags::{FeatureFlagFileInput, feature_flag_record_from_range};
 use crate::domain::{CodeFeatureFlagRecord, DomainError};
 
@@ -52,42 +52,6 @@ pub(super) fn collect(
         line = end_line;
     }
     Ok(String::from_utf8(outside).expect("complete UTF-8 action spans are replaced with ASCII"))
-}
-
-// Delimiters inside Go quoted/raw strings or template comments are data.
-fn action_end(content: &str, start: usize) -> Option<usize> {
-    let bytes = content.as_bytes();
-    let mut index = start + 2;
-    let mut quote = None;
-    let mut comment = false;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if comment {
-            if bytes[index..].starts_with(b"*/") {
-                comment = false;
-                index += 2;
-                continue;
-            }
-        } else if let Some(delimiter) = quote {
-            if byte == b'\\' && delimiter != b'`' {
-                index = (index + 2).min(bytes.len());
-                continue;
-            }
-            if byte == delimiter {
-                quote = None;
-            }
-        } else if bytes[index..].starts_with(b"}}") {
-            return Some(index + 2);
-        } else if bytes[index..].starts_with(b"/*") {
-            comment = true;
-            index += 2;
-            continue;
-        } else if matches!(byte, b'"' | b'\'' | b'`') {
-            quote = Some(byte);
-        }
-        index += 1;
-    }
-    None
 }
 
 fn collect_action(

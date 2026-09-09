@@ -138,12 +138,51 @@ pub(super) fn visible_parent<'a>(
                         .is_some_and(|n| text(n, content) == leaf)
                     && (scope.kind() != "block" || child.start_byte() <= position)
                 {
-                    return qualified_parent(child, name, content, remaining);
+                    if let Some(found) = qualified_parent(child, name, content, remaining) {
+                        return Some(found);
+                    }
+                }
+                if is_type(child)
+                    && name.contains('.')
+                    && (scope.kind() != "block" || child.start_byte() <= position)
+                {
+                    if let Some(found) = nested_parent(child, name, content, remaining) {
+                        return Some(found);
+                    }
                 }
             }
         }
         scope = scope.parent()?;
     }
+}
+
+// Descend only through type bodies, never through methods or local classes.
+// Validate the complete owner path so unrelated same-leaf types cannot match.
+fn nested_parent<'a>(
+    owner: Node<'a>,
+    name: &str,
+    content: &str,
+    remaining: &mut usize,
+) -> Option<Node<'a>> {
+    let mut stack = vec![owner.child_by_field_name("body")?];
+    while let Some(body) = stack.pop() {
+        *remaining = remaining.checked_sub(1)?;
+        let mut cursor = body.walk();
+        for child in body.named_children(&mut cursor) {
+            *remaining = remaining.checked_sub(1)?;
+            if child.kind() == "enum_body_declarations" {
+                stack.push(child);
+            } else if is_type(child) {
+                if let Some(found) = qualified_parent(child, name, content, remaining) {
+                    return Some(found);
+                }
+                if let Some(body) = child.child_by_field_name("body") {
+                    stack.push(body);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn qualified_parent<'a>(

@@ -2,6 +2,47 @@ use super::super::test_support::{record, request, status};
 use super::*;
 
 #[test]
+fn unicode_terms_filter_candidates_before_limits_and_complete_groups_afterward() {
+    let store = crate::storage::SqliteGraphStore::open_in_memory().unwrap();
+    let mut connection = store.connection.lock().unwrap();
+    connection.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+    let unrelated = record("unrelated", "aaa_unrelated", "config_key");
+    let mut target = record("target", "bbb_target", "config_key");
+    target.path = "src/配置/App.java".into();
+    target.excerpt = "启用".into();
+    let transaction = connection.transaction().unwrap();
+    super::super::insert_records(&transaction, &[unrelated, target]).unwrap();
+    transaction.commit().unwrap();
+    let mut query = request();
+    query.limit = 1;
+    for consistency in [false, true] {
+        query.consistency = consistency;
+        for (text, expected) in [
+            ("配置", Some("bbb_target")),
+            ("启用", Some("bbb_target")),
+            ("未出现", None),
+            ("配置 aaa_unrelated", None),
+            ("AAA_UNRELATED", Some("aaa_unrelated")),
+        ] {
+            query.query = Some(text.into());
+            let results = search(&connection, &status(), &query).unwrap();
+            assert_eq!(results.len(), usize::from(expected.is_some()), "{text}");
+            assert_eq!(
+                results.first().map(|flag| flag.source_key.as_str()),
+                expected
+            );
+        }
+    }
+    query.query = Some("!!!".into());
+    assert!(
+        matches!(search(&connection, &status(), &query), Err(StorageError::InvalidInput(message)) if message.contains("searchable"))
+    );
+    query.query = None;
+    query.limit = 100;
+    assert_eq!(search(&connection, &status(), &query).unwrap().len(), 2);
+}
+
+#[test]
 fn consistency_compares_formats_within_each_configuration_namespace() {
     let mut property = record("property", "SAME", "config_key");
     property.metadata.source_format = "properties".into();

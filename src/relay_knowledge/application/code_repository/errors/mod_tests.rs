@@ -2,6 +2,18 @@ use super::storage_api_error;
 use crate::{api::ErrorKind, storage::StorageError};
 
 #[test]
+fn rejected_query_input_does_not_report_a_retryable_storage_outage() {
+    let error = storage_api_error(StorageError::InvalidInput(
+        "configuration query contains no searchable terms".to_owned(),
+    ));
+    assert_eq!(error.error_kind, ErrorKind::InvalidArgument);
+    assert_eq!(
+        error.message,
+        "configuration query contains no searchable terms"
+    );
+}
+
+#[test]
 fn query_work_budget_exhaustion_is_a_timeout_not_a_storage_outage() {
     let error = storage_api_error(StorageError::QueryBudgetExceeded(
         "call query incomplete; narrow path filters".to_owned(),
