@@ -10,6 +10,7 @@ pub(in crate::code) mod filesystem_delta;
 mod full_snapshot;
 mod impact_paths;
 mod incremental;
+mod origin_reparse_budget;
 pub(in crate::code) mod plan;
 pub(in crate::code) mod snapshot;
 mod worktree_overlay;

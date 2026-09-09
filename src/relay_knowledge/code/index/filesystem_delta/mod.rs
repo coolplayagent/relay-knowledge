@@ -143,6 +143,9 @@ pub(super) fn build_filesystem_delta_snapshot(
     let changed_path_count = selected_entries.len().saturating_add(deleted_paths.len());
     let selected_path_list = selected_paths.iter().cloned().collect::<Vec<_>>();
     let planned_hashes = filesystem_content_hashes_for_paths(&snapshot.root, &selected_path_list)?;
+    if reparse_python {
+        validate_origin_plan(&selected_entries, previous_hashes, &planned_hashes)?;
+    }
     let tree_hash = filesystem_tree_hash_from_path_hashes(&planned_hashes);
     if source_commit_is_filesystem(ref_selector) && ref_selector != tree_hash {
         return Err(CodeIndexError::InvalidInput(format!(
@@ -172,6 +175,7 @@ pub(super) fn build_filesystem_delta_snapshot(
         workspace_detection,
     );
 
+    let mut origin_budget = super::origin_reparse_budget::OriginReparseBudget::default();
     for entry in selected_entries {
         let bytes = source_snapshot_bytes(
             &snapshot.root,
@@ -198,10 +202,29 @@ pub(super) fn build_filesystem_delta_snapshot(
             build.skipped_unchanged_count += 1;
             continue;
         }
+        if reparse_python {
+            origin_budget.charge(bytes.len())?;
+        }
         parse_indexed_file(&mut build, &entry.path, &bytes)?;
     }
 
     Ok(build.finish())
+}
+
+fn validate_origin_plan(
+    entries: &[GitTreeEntry],
+    previous: &BTreeMap<String, String>,
+    planned: &BTreeMap<String, String>,
+) -> Result<(), CodeIndexError> {
+    let mut budget = super::origin_reparse_budget::OriginReparseBudget::default();
+    for entry in entries {
+        if crate::code::language_metadata::language_id(&entry.path) == Some("python")
+            || previous.get(&entry.path) != planned.get(&entry.path)
+        {
+            budget.charge(entry.byte_count)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
