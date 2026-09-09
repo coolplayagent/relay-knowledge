@@ -202,6 +202,8 @@ The native Windows CI gate also runs restored-definition parsing and old/checkpo
 storage preflight regressions, including Windows drive paths, SID recovery, shared-owner
 stability across principals, alias rejection, synchronous runtime independence,
 and replacement of a retained legacy directory by a link.
+Native ACL regressions restore disposable fixtures from saved SDDL and verify
+the persisted result before later cases, so injected permissions cannot leak.
 The public `KnowledgeStoreFactory::validate_lifecycle_storage` hook defaults to a
 no-op for catalog-free factories, retaining source compatibility; SQLite overrides
 it to enforce its catalog and permission checks.

@@ -172,7 +172,8 @@ Windows 升级或显式回滚停止现有服务前，还会读取旧安装定义
 Linux/macOS 执行安装、升级或回滚时也会拒绝数据目录或任一父路径为文件的配置，在任何
 生命周期修改步骤前失败。dry-run 和卸载保持无需存储，缺失目录仍可在后续正常配置。原生 Windows CI 同时执行旧定义解析和检查点存储预检回归，
 实际验证 Windows 盘符、SID 策略恢复、跨主体共享 owner 稳定性、路径别名拒绝、
-同步入口不依赖外部 runtime，以及安装后旧目录被替换成链接的拒绝行为。公开的 `KnowledgeStoreFactory::validate_lifecycle_storage` 为不含
+同步入口不依赖外部 runtime，以及安装后旧目录被替换成链接的拒绝行为。原生 ACL 回归从保存的
+SDDL 恢复一次性夹具，并回读验证持久化结果，避免注入的权限污染后续用例。公开的 `KnowledgeStoreFactory::validate_lifecycle_storage` 为不含
 catalog 的工厂提供默认空实现，保持源码兼容；SQLite 覆盖该方法执行权限和 catalog 检查。
 生命周期计划及执行会只读检查已有 control catalog，不初始化图存储或 schema。
 已有 active partitioned catalog 却选择 single_sqlite 时，在渲染计划或执行服务步骤前报错，

@@ -88,13 +88,21 @@ try {
     # Persisted shared ACLs cannot grant any account name-squatting rights,
     # including ACLs created by an earlier installation.
     $usersInfo = [System.IO.DirectoryInfo]::new("$base\users")
-    $safeUsersAcl = $usersInfo.GetAccessControl()
+    $safeUsersSddl = $usersInfo.GetAccessControl().GetSecurityDescriptorSddlForm('Access')
     $squattingAcl = $usersInfo.GetAccessControl()
     $squattingAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
         [System.Security.Principal.SecurityIdentifier]::new('S-1-5-11'), 'CreateDirectories', 'Allow'))
     $usersInfo.SetAccessControl($squattingAcl)
     try { Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -ExistingOnly } 'forbids account creation/write rights' }
-    finally { $usersInfo.SetAccessControl($safeUsersAcl) }
+    finally {
+        # SetAccessControl persists modified sections only; a saved, unmodified
+        # ACL object cannot restore the injected rule.
+        $restoredUsersAcl = [System.Security.AccessControl.DirectorySecurity]::new()
+        $restoredUsersAcl.SetSecurityDescriptorSddlForm($safeUsersSddl, 'Access')
+        $usersInfo.SetAccessControl($restoredUsersAcl)
+    }
+    if ($usersInfo.GetAccessControl().GetSecurityDescriptorSddlForm('Access') -ne $safeUsersSddl) { throw 'Shared ACL fixture restoration did not persist' }
+    Initialize-RelayPrivateStorage $data $sid -ExistingOnly
     $sharedInfo = [System.IO.DirectoryInfo]::new($base)
     $changedOwner = $sharedInfo.GetAccessControl()
     $changedOwner.SetOwner([System.Security.Principal.SecurityIdentifier]::new($sid))
