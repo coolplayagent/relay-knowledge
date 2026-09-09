@@ -64,12 +64,10 @@ impl PythonModuleOrigins {
                 PythonModuleOrigin::Unknown
             },
         };
-        let mut bytes = 0usize;
-        for (index, path) in paths.into_iter().enumerate() {
-            bytes = bytes.saturating_add(path.len());
-            if index >= 1_000_000 || bytes > 16 * 1024 * 1024 {
-                return Self::default();
-            }
+        // Callers already own the authorized, bounded snapshot inventory. Inspect only
+        // four exact module identities; unrelated path length cannot invalidate evidence.
+        // This adds no source I/O, copied paths, or collection proportional to the inventory.
+        for path in paths {
             match path {
                 "typing.py" | "typing/__init__.py" => result.typing = PythonModuleOrigin::Local,
                 "typing_extensions.py" | "typing_extensions/__init__.py" => {

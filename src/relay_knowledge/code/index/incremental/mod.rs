@@ -182,6 +182,7 @@ pub(super) fn build_incremental_snapshot(
 
     let parse_context = ChangedPathParseContext {
         reparse_python,
+        visited_origin_paths: Default::default(),
         origin_budget: std::cell::RefCell::new(
             super::origin_reparse_budget::OriginReparseBudget::default(),
         ),
@@ -494,6 +495,7 @@ fn delete_previous_paths_under_except(
 
 struct ChangedPathParseContext<'a> {
     reparse_python: bool,
+    visited_origin_paths: std::cell::RefCell<BTreeSet<String>>,
     origin_budget: std::cell::RefCell<super::origin_reparse_budget::OriginReparseBudget>,
     registration: &'a CodeRepositoryRegistration,
     selector: &'a CodeRepositorySelector,
@@ -522,6 +524,14 @@ fn parse_changed_path(
         context.selector,
         context.previous_source_layout,
     ) {
+        return Ok(());
+    }
+    if context.reparse_python
+        && !context
+            .visited_origin_paths
+            .borrow_mut()
+            .insert(path.to_owned())
+    {
         return Ok(());
     }
     let bytes = match context.prefetched_bytes.get(path) {
@@ -568,3 +578,7 @@ mod budget_tests {
         assert!(error.to_string().contains("run a full code index"));
     }
 }
+
+#[cfg(test)]
+#[path = "origin_duplicates_tests.rs"]
+mod origin_duplicates_tests;

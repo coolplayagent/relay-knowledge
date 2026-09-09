@@ -21,16 +21,18 @@ fn module_identity_is_separate_scoped_and_independent_of_path_order() {
     );
 }
 #[test]
-fn incomplete_or_overbudget_inventory_does_not_prove_standard_origin() {
+fn unrelated_inventory_size_preserves_complete_module_evidence() {
     assert!(!PythonModuleOrigins::default().permits_standard_module("typing"));
-    let many = std::iter::repeat_n("x", 1_000_001);
-    assert_eq!(
-        PythonModuleOrigins::from_authorized_paths(many, &[], &[]),
-        PythonModuleOrigins::default()
-    );
-    let long = "x".repeat(16 * 1024 * 1024 + 1);
-    assert_eq!(
-        PythonModuleOrigins::from_authorized_paths([long.as_str()], &[], &[]),
-        PythonModuleOrigins::default()
-    );
+    let many = std::iter::repeat_n("unrelated.py", 1_000_001);
+    let origins = PythonModuleOrigins::from_authorized_paths(many, &[], &[]);
+    assert!(origins.permits_standard_module("typing"));
+    assert!(origins.permits_standard_module("typing_extensions"));
+    let long = "x".repeat(16_385);
+    let paths = std::iter::repeat_n(long.as_str(), 1024).chain(["typing.py"]);
+    let origins = PythonModuleOrigins::from_authorized_paths(paths, &[], &[]);
+    assert_eq!(origins.typing, PythonModuleOrigin::Local);
+    assert!(origins.permits_standard_module("typing_extensions"));
+    let paths = std::iter::repeat_n(long.as_str(), 1024);
+    let restricted = PythonModuleOrigins::from_authorized_paths(paths, &["src".into()], &[]);
+    assert_eq!(restricted, PythonModuleOrigins::default());
 }

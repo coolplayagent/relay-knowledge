@@ -325,7 +325,7 @@ relay-knowledge repo status repo --format json
 
 `repo impact` 需要 `--head` 对应已索引 snapshot。先运行 `repo index repo --ref <head>` 或 `repo update repo --base <base> --head <head>`，再运行 impact。
 
-Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v13` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
+Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v14` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
 
 精确调用 selector 的 `name:` 在候选准入前过滤返回的调用身份。callees 使用已解析 canonical 身份；无本地已解析目标时使用已持久化的 target hint/name，同时保留 unresolved 状态和边元数据。callers 过滤调用方身份，被调用方名称不会使无关调用方入选。既有共享执行预算与结果上限继续生效。
 
@@ -341,12 +341,14 @@ Python overload 证明区分立即求值的定义默认值、装饰器、类基�
 
 Python overload 成员写入证明有界追踪直接模块别名，包括链式赋值中的每个目标名称，保持无关成员写入的既有含义。类创建属于立即执行边界；只有没有显式基类或元类、值可证明为非描述符，且成员来自普通函数定义、已证明标准 typing 来源的模块导入或已证明为标准 overload 函数的 from-import 等可证明形状时，才能继续声明推断。未知元类、子类及描述符创建钩子会阻止该证明。装饰器保留节点级证明，方法体仍延迟执行。
 
-提供者身份使用授权快照的路径清单。仓库顶层 `typing.py`、`typing/__init__.py`、`typing_extensions.py` 和 `typing_extensions/__init__.py` 分别阻止把对应本地导入当作标准提供者。路径或语言过滤无法覆盖候选提供者，或清单预算耗尽时，来源保持未知。索引不读取宿主 Python 环境、越权文件，也不推断脚本入口搜索路径或自定义 `sys.path` 变化；这是仓库根导入的静态模型。本地或未知来源不提供 typing 声明证明，因此查询可能保留多个可执行候选并要求具体快照选择器。外部依赖覆盖和文件降级语义保持不变。
+提供者身份使用授权快照的路径清单。仓库顶层 `typing.py`、`typing/__init__.py`、`typing_extensions.py` 和 `typing_extensions/__init__.py` 分别阻止把对应本地导入当作标准提供者。路径或语言过滤无法覆盖候选提供者时，来源保持未知。完整授权清单保留 provider 证据，不因无关路径数量或路径文本总长度而丢失；匹配四个已文档化提供者身份只增加常量辅助状态，不新增源码 I/O，也不复制一份路径集合。索引不读取宿主 Python 环境、越权文件，也不推断脚本入口搜索路径或自定义 `sys.path` 变化；这是仓库根导入的静态模型。本地或未知来源不提供 typing 声明证明，因此查询可能保留多个可执行候选并要求具体快照选择器。外部依赖覆盖和文件降级语义保持不变。
 
 提供者变化后，保留窗口内的历史 scope 仍保存原有分类。既有保留策略继续生效：连续三个未固定的完整发布后，最早 scope 可因超出最近两个版本窗口而退休。退休引用会明确返回缺少索引，需完整重建后再查询，不会静默套用当前提供者身份。
 
 提供者变化导致 worktree Python 文件重新解析时，该文件从未变化跳过计数中扣除。其他未变化文件仍保留跳过计数，changed-path 数继续反映 Git 状态。
 
-Python 来源变化重解析在增量、文件系统和 worktree overlay 索引中使用共享语言分类器，包含 `.pyw`。Overlay 来源重解析与已变更文件共享既有总字节预算。类体模块导入可能执行任意模块代码，仅已证明标准 typing 来源的导入保留 overload 证明。控制流中可能建立的别名及前序装饰器表达式副作用纳入有界证明，装饰器表达式按源码顺序求值。v13 通过普通索引重建旧 scope，保持预算失败及降级诊断可见。
+Python 来源变化重解析在增量、文件系统和 worktree overlay 索引中使用共享语言分类器，包含 `.pyw`。Overlay 来源重解析与已变更文件共享既有总字节预算。类体模块导入可能执行任意模块代码，仅已证明标准 typing 来源的导入保留 overload 证明。控制流中可能建立的别名及前序装饰器表达式副作用纳入有界证明，装饰器表达式按源码顺序求值。v14 通过普通索引重建旧 scope，保持预算失败及降级诊断可见。
 
 Python provider 变化导致未变更消费者重解析时，显式 Git 增量和文件系统刷新对已变更文件及额外重解析文件共享总文件数与字节预算，与有界 overlay 合同一致。Prefetch 窗口限制不能替代后续逐文件解析的总量校验。超预算刷新明确失败，并保留此前已发布 scope；更大的刷新应使用持久化完整索引流程。未发生来源变化的普通更新保持既有行为。
+
+Provider 变化与 Gitlink 更新重叠时，未改动的 Python 消费者仍进入来源刷新计划；实际解析入口用精确路径集合确保展开的已改子文件及其强制刷新只解析、计费并写入一次。既有 Gitlink diff 展开上限、来源刷新总预算及持久化完整索引回退保持有效。
