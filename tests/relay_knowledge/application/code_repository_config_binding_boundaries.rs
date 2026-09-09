@@ -2,6 +2,123 @@
 use super::*;
 
 #[tokio::test]
+async fn getter_type_owners_guard_write_order_and_export_options_survive_git_indexing() {
+    let repo = FixtureRepo::create("config-type-guard-export");
+    repo.write("src/App.java", r#"package demo;
+record RecordConfig() { String getValue() { return System.getProperty("record_key"); } }
+enum EnumConfig { INSTANCE; String getValue() { return System.getProperty("enum_key"); } }
+interface DefaultConfig { default String getValue() { return System.getProperty("interface_key"); } }
+class App {
+ void read(RecordConfig record, EnumConfig enumeration, DefaultConfig defaults) {
+  if (record.getValue() != null) {}
+  if (enumeration.getValue() != null) {}
+  if (defaults.getValue() != null) {}
+ }
+ void branch() {
+  boolean enabled = Boolean.getBoolean("before_write");
+  if (enabled) { enabled = false; if (enabled) {} }
+  if (enabled) {}
+ }
+ void after() {
+  boolean enabled = Boolean.getBoolean("after_write");
+  do { enabled = false; } while (enabled);
+  if (enabled) {}
+ }
+}
+"#);
+    repo.write("src/start.sh", "export\tTAB_EXPORT=true\ndeclare -x DECLARE_EXPORT=false\necho $TAB_EXPORT\necho $DECLARE_EXPORT\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Getter types guard order and exports"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-type-guard-export").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-type-guard-export"),
+        )
+        .await
+        .unwrap();
+    let response = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                filtered_selector("fixture", "HEAD", "src"),
+                100,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap(),
+            context("query-type-guard-export"),
+        )
+        .await
+        .unwrap();
+    let flag = |key: &str| {
+        response
+            .flags
+            .iter()
+            .find(|flag| flag.source_key == key)
+            .unwrap()
+    };
+    for key in ["record_key", "enum_key", "interface_key"] {
+        assert_eq!(
+            flag(key)
+                .usages
+                .iter()
+                .filter(|usage| usage.edge_kind == "reads_config")
+                .count(),
+            2,
+            "{key}"
+        );
+        assert_eq!(
+            flag(key)
+                .usages
+                .iter()
+                .filter(|usage| usage.edge_kind == "guards_code")
+                .count(),
+            1,
+            "{key}"
+        );
+    }
+    assert_eq!(
+        flag("before_write")
+            .usages
+            .iter()
+            .filter(|usage| usage.edge_kind == "guards_code")
+            .count(),
+        1
+    );
+    assert!(
+        !flag("after_write")
+            .usages
+            .iter()
+            .any(|usage| usage.edge_kind == "guards_code")
+    );
+    for key in ["TAB_EXPORT", "DECLARE_EXPORT"] {
+        assert_eq!(
+            flag(key)
+                .usages
+                .iter()
+                .filter(|usage| usage.edge_kind == "defines_config")
+                .count(),
+            1
+        );
+        assert_eq!(
+            flag(key)
+                .usages
+                .iter()
+                .filter(|usage| usage.edge_kind == "reads_config")
+                .count(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
 async fn config_binding_boundaries_preserve_only_proven_reads_guards_and_defaults() {
     let repo = FixtureRepo::create("config-binding-boundaries");
     repo.write(

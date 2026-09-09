@@ -40,10 +40,10 @@ fn node_record(
         "variable_assignment"
             if node.parent().is_some_and(|parent| {
                 parent.kind() == "declaration_command"
-                    && input
-                        .content
-                        .get(parent.byte_range())
-                        .is_some_and(|text| text.starts_with("export "))
+                    && matches!(
+                        super::shell_bindings::declaration_binding(parent, input.content),
+                        Some(super::shell_bindings::Binding::Exported)
+                    )
             }) =>
         {
             let Some((key, value)) = source.split_once('=') else {

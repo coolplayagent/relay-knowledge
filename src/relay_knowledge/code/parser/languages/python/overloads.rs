@@ -62,11 +62,21 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
 fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool) -> bool {
     let mut remaining = MAX_BINDING_STATEMENTS;
     let mut crossed_scope = false;
+    let mut delayed_lookup = false;
     'lookup: loop {
         if remaining == 0 {
             return false;
         }
         remaining -= 1;
+        if delayed_lookup
+            && node.parent().is_some_and(|parent| {
+                matches!(parent.kind(), "module" | "block")
+                    && (!crossed_scope || !class_namespace(parent))
+            })
+            && later_binding(content, node, binding, module, &mut remaining)
+        {
+            return false;
+        }
         // Only module/block children are lexical statements. Parameter and
         // annotation siblings of a body are not preceding assignments.
         let mut previous = node
@@ -108,6 +118,7 @@ fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool
                     }
                 }
                 crossed_scope = true;
+                delayed_lookup = true;
                 continue 'lookup;
             }
             if let Some(imported) = statement_binding(content, statement, binding, module) {
@@ -127,9 +138,35 @@ fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool
         }
         // A method's decorators can use their immediate class namespace, but
         // nested functions/classes do not close over an enclosing class body.
+        delayed_lookup |= parent.kind() == "function_definition";
         crossed_scope |= matches!(parent.kind(), "function_definition" | "class_definition");
         node = parent;
     }
+}
+
+fn later_binding(
+    content: &str,
+    node: Node<'_>,
+    binding: &str,
+    module: bool,
+    remaining: &mut usize,
+) -> bool {
+    let mut next = node.next_named_sibling();
+    while let Some(statement) = next {
+        if *remaining == 0 {
+            return true;
+        }
+        *remaining -= 1;
+        // Outer names are read when the nested callable executes. A later
+        // write prevents proving that an earlier typing import is still bound.
+        if !matches!(statement.kind(), "global_statement" | "nonlocal_statement")
+            && statement_binding(content, statement, binding, module).is_some()
+        {
+            return true;
+        }
+        next = statement.next_named_sibling();
+    }
+    false
 }
 
 fn class_namespace(mut node: Node<'_>) -> bool {
@@ -223,11 +260,40 @@ fn statement_binding(
         let expression = statement.named_child(0)?;
         return expression
             .child_by_field_name("left")
-            .filter(|left| contains_identifier(content, *left, binding))
+            .filter(|left| assignment_binds(content, *left, binding, module))
             .map(|_| false);
     }
     // Control-flow and deletion can change a binding. Do not guess its value.
     contains_identifier(content, statement, binding).then_some(false)
+}
+
+fn assignment_binds(content: &str, node: Node<'_>, name: &str, module: bool) -> bool {
+    let mut cursor = node.walk();
+    let mut remaining = MAX_BINDING_STATEMENTS;
+    loop {
+        if remaining == 0 {
+            return true;
+        }
+        remaining -= 1;
+        let current = cursor.node();
+        if current.kind() == "identifier" && node_text(content, current) == name {
+            return true;
+        }
+        if module
+            && matches!(current.kind(), "attribute" | "subscript")
+            && module_receiver(content, current, name)
+        {
+            return true;
+        }
+        if !matches!(current.kind(), "attribute" | "subscript") && cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return false;
+            }
+        }
+    }
 }
 
 fn contains_identifier(content: &str, node: Node<'_>, name: &str) -> bool {
@@ -251,4 +317,23 @@ fn contains_identifier(content: &str, node: Node<'_>, name: &str) -> bool {
             }
         }
     }
+}
+
+fn module_receiver(content: &str, mut node: Node<'_>, name: &str) -> bool {
+    for _ in 0..MAX_BINDING_STATEMENTS {
+        match node.kind() {
+            "identifier" => return node_text(content, node) == name,
+            "attribute" | "subscript" => {
+                let Some(receiver) = node
+                    .child_by_field_name("object")
+                    .or_else(|| node.child_by_field_name("value"))
+                else {
+                    return false;
+                };
+                node = receiver;
+            }
+            _ => return false,
+        }
+    }
+    true
 }

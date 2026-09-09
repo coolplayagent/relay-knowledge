@@ -310,7 +310,9 @@ pub(super) fn getter_bindings(node: Node<'_>, content: &str) -> Vec<String> {
     if !returned {
         return Vec::new();
     }
-    let Some(class) = enclosing(node, "class_declaration") else {
+    let Some(class) = std::iter::successors(method.parent(), |parent| parent.parent())
+        .find(|parent| is_type(*parent))
+    else {
         return Vec::new();
     };
     let owner = type_owner(class, content);

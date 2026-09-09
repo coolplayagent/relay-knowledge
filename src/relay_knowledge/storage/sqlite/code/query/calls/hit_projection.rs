@@ -225,6 +225,11 @@ pub(super) fn call_rows_to_hits(
                 )
                 .or_else(|| inferred_caller_name_from_excerpt(row.caller_excerpt.as_deref()))
                 .unwrap_or_else(|| "<module>".to_owned());
+                let target_hint = row.target_hint.or_else(|| {
+                    (request.code_query_kind == CodeQueryKind::Callees
+                        && row.callee_canonical_symbol_id.is_none())
+                    .then(|| row.callee_name.clone())
+                });
                 let (symbol_snapshot_id, canonical_symbol_id) =
                     if request.code_query_kind == CodeQueryKind::Callees {
                         (
@@ -265,7 +270,7 @@ pub(super) fn call_rows_to_hits(
                         degraded_reason: None,
                         edge_kind: Some("call".to_owned()),
                         edge_resolution_state: Some(row.resolution_state),
-                        edge_target_hint: row.target_hint,
+                        edge_target_hint: target_hint,
                         edge_confidence_basis_points: Some(row.confidence_basis_points),
                         edge_confidence_tier: Some(row.confidence_tier),
                     },

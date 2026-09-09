@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "binding_boundaries_tests.rs"]
+mod binding_boundaries;
+
 #[test]
 fn parameterized_getters_do_not_bind_zero_argument_calls() {
     let records = facts(

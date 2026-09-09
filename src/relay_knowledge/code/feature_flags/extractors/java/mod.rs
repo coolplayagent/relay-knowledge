@@ -211,9 +211,8 @@ fn collect_variable_guards(
             // any write or nested scope; never assume interprocedural data flow.
             let mut next = declaration.next_named_sibling();
             while let Some(statement) = next {
-                if writes_name(statement, text(name, input.content), input.content) {
-                    break;
-                }
+                let write =
+                    first_write_position(statement, text(name, input.content), input.content);
                 collect_statement_guards(
                     input,
                     statement,
@@ -221,7 +220,11 @@ fn collect_variable_guards(
                     kind,
                     key,
                     records,
+                    write,
                 )?;
+                if write.is_some() {
+                    break;
+                }
                 next = statement.next_named_sibling();
             }
             break;
@@ -244,6 +247,7 @@ fn collect_statement_guards(
     kind: &str,
     key: &str,
     records: &mut Vec<CodeFeatureFlagRecord>,
+    first_write: Option<usize>,
 ) -> Result<(), DomainError> {
     let mut cursor = statement.walk();
     loop {
@@ -258,7 +262,9 @@ fn collect_statement_guards(
         );
         if !boundary {
             if let Some(condition) = node.child_by_field_name("condition") {
-                if contains_identifier(condition, name, input.content) {
+                if first_write.is_none_or(|write| condition.end_byte() <= write)
+                    && contains_identifier(condition, name, input.content)
+                {
                     records.push(record(input, condition, kind, key, "guards_code")?);
                 }
             }
@@ -303,7 +309,7 @@ fn contains_identifier(node: Node<'_>, name: &str, content: &str) -> bool {
     }
 }
 
-fn writes_name(node: Node<'_>, name: &str, content: &str) -> bool {
+fn first_write_position(node: Node<'_>, name: &str, content: &str) -> Option<usize> {
     let mut cursor = node.walk();
     loop {
         let current = cursor.node();
@@ -316,14 +322,14 @@ fn writes_name(node: Node<'_>, name: &str, content: &str) -> bool {
         if target
             .is_some_and(|target| target.kind() == "identifier" && text(target, content) == name)
         {
-            return true;
+            return Some(current.start_byte());
         }
         if cursor.goto_first_child() {
             continue;
         }
         while !cursor.goto_next_sibling() {
             if !cursor.goto_parent() {
-                return false;
+                return None;
             }
         }
     }

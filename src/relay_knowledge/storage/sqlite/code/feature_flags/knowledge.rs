@@ -190,8 +190,7 @@ fn resolve(records: &mut [CodeFeatureFlagRecord]) -> Vec<String> {
             let symbol = record
                 .metadata
                 .referenced_symbol
-                .as_ref()
-                .unwrap_or(&record.source_key);
+                .get_or_insert_with(|| record.source_key.clone());
             let Some((targets, unknown)) = previous.get(symbol) else {
                 return "unresolved".to_owned();
             };
@@ -243,17 +242,7 @@ fn promote_bound_declarations(
     records: Vec<CodeFeatureFlagRecord>,
     states: Vec<String>,
 ) -> Vec<(CodeFeatureFlagRecord, String)> {
-    let observed = records
-        .iter()
-        .filter(|record| {
-            record.edge_kind != "binds_config_symbol"
-                && !matches!(
-                    record.source_kind.as_str(),
-                    "config_symbol" | "config_getter"
-                )
-        })
-        .map(|record| (record.source_kind.clone(), record.source_key.clone()))
-        .collect::<BTreeSet<_>>();
+    let observed = super::binding_provenance::used_symbols(&records, &states);
     let mut projected = Vec::new();
     for (record, state) in records.into_iter().zip(states) {
         if record.source_kind == "config_getter" && state != "ambiguous" {
@@ -269,7 +258,10 @@ fn promote_bound_declarations(
             CodeConfigurationReadKind::ConfigKey,
             CodeConfigurationReadKind::EnvVar,
         ] {
-            if !observed.contains(&(kind.as_str().to_owned(), record.source_key.clone())) {
+            let used = observed.get(&(kind.as_str().to_owned(), record.source_key.clone()));
+            if !used
+                .is_some_and(|symbols| record.metadata.bindings.iter().any(|s| symbols.contains(s)))
+            {
                 continue;
             }
             let mut declaration = record.clone();

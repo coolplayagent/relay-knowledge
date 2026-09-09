@@ -1,5 +1,47 @@
 use super::*;
 
+#[test]
+fn exported_declaration_definitions_share_the_binding_option_contract() {
+    for command in [
+        "export\tFLAG=true",
+        "declare -x FLAG=true",
+        "typeset -rx FLAG=true",
+        "local -x FLAG=true",
+    ] {
+        let records = facts(&format!("{command}\necho $FLAG\n"));
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.edge_kind == "defines_config")
+                .count(),
+            1,
+            "{command}: {records:?}"
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| record.edge_kind == "defines_config")
+                .unwrap()
+                .metadata
+                .default_value
+                .as_deref(),
+            Some("true")
+        );
+    }
+    for command in [
+        "export -n FLAG=true",
+        "declare +x FLAG=true",
+        "local FLAG=true",
+    ] {
+        assert!(
+            !facts(&format!("{command}\n"))
+                .iter()
+                .any(|record| record.edge_kind == "defines_config"),
+            "{command}"
+        );
+    }
+}
+
 fn facts(content: &str) -> Vec<CodeFeatureFlagRecord> {
     let mut parser = tree_sitter::Parser::new();
     parser

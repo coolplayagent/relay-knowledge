@@ -35,7 +35,7 @@ pub(super) fn environment_read(mut node: Node<'_>, key: &str, content: &str) -> 
     !assigned
 }
 
-enum Binding {
+pub(super) enum Binding {
     Assigned,
     Local,
     Exported,
@@ -48,7 +48,6 @@ fn binding(node: Node<'_>, key: &str, content: &str) -> Option<Binding> {
     if !matches!(node.kind(), "declaration_command" | "unset_command") {
         return None;
     }
-    let source = content.get(node.byte_range())?;
     let mut cursor = node.walk();
     let names_key = node.named_children(&mut cursor).any(|child| {
         assignment_names(child, key, content)
@@ -58,6 +57,14 @@ fn binding(node: Node<'_>, key: &str, content: &str) -> Option<Binding> {
     if !names_key {
         return None;
     }
+    declaration_binding(node, content)
+}
+
+pub(super) fn declaration_binding(node: Node<'_>, content: &str) -> Option<Binding> {
+    if !matches!(node.kind(), "declaration_command" | "unset_command") {
+        return None;
+    }
+    let source = content.get(node.byte_range())?;
     let mut words = source.split_whitespace();
     let command = words.next()?;
     let options = words

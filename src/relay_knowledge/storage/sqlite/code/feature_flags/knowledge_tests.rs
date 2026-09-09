@@ -291,10 +291,14 @@ fn typed_environment_read_projects_constant_identity_and_declaration() {
 fn declaration_projection_preserves_distinct_same_line_occurrences() {
     let mut first = record("first-occurrence", "SWITCH", "config_key");
     first.edge_kind = "binds_config_symbol".to_owned();
+    first.metadata.bindings = vec!["demo.Keys.KEY".to_owned()];
     let mut second = first.clone();
     second.usage_id = "second-occurrence".to_owned();
-    let rows = vec![first, second, record("read", "SWITCH", "env_var")];
-    let projected = promote_bound_declarations(rows, vec!["literal".to_owned(); 3]);
+    let mut read = record("read", "demo.Keys.KEY", "config_symbol");
+    read.metadata.read_source_kind = Some(CodeConfigurationReadKind::EnvVar);
+    let mut rows = vec![first, second, read];
+    let states = resolve(&mut rows);
+    let projected = promote_bound_declarations(rows, states);
     assert_eq!(projected.len(), 3);
     assert_ne!(projected[0].0.usage_id, projected[1].0.usage_id);
     assert!(
