@@ -12,7 +12,9 @@ use crate::code::parser::nodes::{SyntaxRange, node_text, syntax_range};
 
 pub(in crate::code::parser) use annotations::manual_type_references;
 pub(in crate::code::parser) use node_kinds::{definition_kind, is_call_node};
-pub(in crate::code::parser) use overloads::{is_overload_declaration, manual_definitions};
+pub(in crate::code::parser) use overloads::{
+    is_overload_declaration, is_overload_declaration_with_origins, manual_definitions,
+};
 
 const MAX_TYPEVAR_LOOKBACK_LINES: usize = 4096;
 

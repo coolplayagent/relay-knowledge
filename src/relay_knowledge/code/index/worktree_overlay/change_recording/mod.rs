@@ -40,6 +40,7 @@ pub(super) fn record_worktree_change(
                 deleted_paths: &mut *outputs.deleted_paths,
                 files_to_parse: &mut *outputs.files_to_parse,
                 skipped_unchanged_count: &mut *outputs.skipped_unchanged_count,
+                skipped_python_paths: &mut *outputs.skipped_python_paths,
             };
             record_deleted_gitlink_overlay(
                 context.root,
@@ -73,6 +74,7 @@ pub(super) fn record_worktree_change(
             deleted_paths: &mut *outputs.deleted_paths,
             files_to_parse: &mut *outputs.files_to_parse,
             skipped_unchanged_count: &mut *outputs.skipped_unchanged_count,
+            skipped_python_paths: &mut *outputs.skipped_python_paths,
         };
         if record_staged_gitlink_overlay(change, context.root, context.commit, &mut recorder)? {
             return Ok(());
@@ -98,6 +100,7 @@ fn record_worktree_path(
                 deleted_paths: &mut *outputs.deleted_paths,
                 files_to_parse: &mut *outputs.files_to_parse,
                 skipped_unchanged_count: &mut *outputs.skipped_unchanged_count,
+                skipped_python_paths: &mut *outputs.skipped_python_paths,
             };
             if record_deleted_gitlink_overlay(context.root, context.commit, path, &mut recorder)? {
                 return Ok(());
@@ -157,6 +160,7 @@ fn record_worktree_directory(
             deleted_paths: &mut *outputs.deleted_paths,
             files_to_parse: &mut *outputs.files_to_parse,
             skipped_unchanged_count: &mut *outputs.skipped_unchanged_count,
+            skipped_python_paths: &mut *outputs.skipped_python_paths,
         };
         record_unstaged_gitlink_overlay(context.root, context.commit, path, &mut recorder)?;
         return Ok(());

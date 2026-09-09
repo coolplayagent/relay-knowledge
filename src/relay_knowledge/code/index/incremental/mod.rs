@@ -69,7 +69,7 @@ pub(super) fn build_incremental_snapshot(
     let base_commit = resolve_ref(root, request.base_ref)?;
     let commit = resolve_ref(root, request.head_ref)?;
     let parent_tree_hash = resolve_tree(root, &commit)?;
-    let changes = diff_changes(root, &base_commit, &commit)?;
+    let mut changes = diff_changes(root, &base_commit, &commit)?;
     validate_changed_path_budget(changes.len())?;
     let entry_scope = tracked_entry_scope_for_selector(registration, selector);
     let base_entries = tracked_entries_with_scope(root, &base_commit, &entry_scope)?;
@@ -95,6 +95,55 @@ pub(super) fn build_incremental_snapshot(
     let effective_path_filters = path_filters.clone();
     let language_filters =
         snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let python_module_origins =
+        crate::code::python_imports::PythonModuleOrigins::from_authorized_paths(
+            head_entries
+                .iter()
+                .filter(|entry| {
+                    path_is_selected_with_layout(
+                        &entry.path,
+                        registration,
+                        selector,
+                        &source_layout,
+                    )
+                })
+                .map(|entry| entry.path.as_str()),
+            &path_filters,
+            &language_filters,
+        );
+    let previous_python_origins =
+        crate::code::python_imports::PythonModuleOrigins::from_authorized_paths(
+            request.previous_hashes.keys().map(String::as_str),
+            &path_filters,
+            &language_filters,
+        );
+    let reparse_python = python_module_origins != previous_python_origins;
+    if reparse_python {
+        let mut scheduled = changes
+            .iter()
+            .filter_map(|change| match change {
+                GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => {
+                    Some(path.clone())
+                }
+                GitChange::Renamed { new_path, .. } | GitChange::Copied { new_path, .. } => {
+                    Some(new_path.clone())
+                }
+                GitChange::Deleted { .. } => None,
+            })
+            .collect::<BTreeSet<_>>();
+        for entry in &head_entries {
+            if entry.path.ends_with(".py")
+                && path_is_selected_with_layout(&entry.path, registration, selector, &source_layout)
+            {
+                if scheduled.insert(entry.path.clone()) {
+                    changes.push(GitChange::AddedOrModified {
+                        path: entry.path.clone(),
+                    });
+                }
+                validate_changed_path_budget(changes.len())?;
+            }
+        }
+    }
     let prefetched_bytes = prefetch_changed_path_bytes(ChangedPathPrefetchRequest {
         registration,
         selector,
@@ -118,6 +167,7 @@ pub(super) fn build_incremental_snapshot(
         0,
     );
     build.base_resolved_commit_sha = Some(base_commit.clone());
+    build.python_module_origins = python_module_origins;
 
     build.detect_and_fill_workspaces(
         root,
@@ -127,6 +177,7 @@ pub(super) fn build_incremental_snapshot(
     );
 
     let parse_context = ChangedPathParseContext {
+        reparse_python,
         registration,
         selector,
         root,
@@ -435,6 +486,7 @@ fn delete_previous_paths_under_except(
 }
 
 struct ChangedPathParseContext<'a> {
+    reparse_python: bool,
     registration: &'a CodeRepositoryRegistration,
     selector: &'a CodeRepositorySelector,
     root: &'a Path,
@@ -539,7 +591,9 @@ fn parse_changed_path(
         )?),
     };
     let blob_hash = stable_content_hash(&bytes);
-    if context.previous_hashes.get(path) == Some(&blob_hash) {
+    if context.previous_hashes.get(path) == Some(&blob_hash)
+        && !(context.reparse_python && path.ends_with(".py"))
+    {
         build.skipped_unchanged_count += 1;
         return Ok(());
     }

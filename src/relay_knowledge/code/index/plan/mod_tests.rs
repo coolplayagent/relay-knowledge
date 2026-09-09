@@ -9,6 +9,43 @@ use crate::code::{
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn all_parse_batches_share_complete_python_provider_inventory() {
+    let repo = TempGitRepo::create("plan-python-origin");
+    repo.write(
+        "a.py",
+        "import typing\n@typing.overload\ndef pick(x:int): ...\ndef pick(x): return x\n",
+    );
+    repo.write("typing.py", "def overload(f): return f\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Provider sorts after consumer"]);
+    let mut registration = repo.registration();
+    registration.path_filters.clear();
+    registration.language_filters.clear();
+    let mut plan = prepare_full_index_plan(
+        registration,
+        repo.selector(),
+        CodeIndexResourceBudget::new(1, 1024 * 1024, 10000).unwrap(),
+    )
+    .unwrap();
+    let (next, batch) = plan.parse_next_batch().unwrap();
+    plan = next;
+    let batch = batch.unwrap();
+    assert_eq!(batch.files[0].path, "a.py");
+    assert_eq!(
+        batch
+            .symbols
+            .iter()
+            .filter(|s| s.name == "pick" && s.kind == "function")
+            .count(),
+        2
+    );
+    assert_eq!(
+        plan.python_module_origins.typing,
+        crate::code::python_imports::PythonModuleOrigin::Local
+    );
+}
+
+#[test]
 fn parser_worker_count_keeps_tiny_batches_serial() {
     assert_eq!(worker_count(7, 32 * 1024), 1);
 }

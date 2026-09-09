@@ -12,6 +12,7 @@ fn plan_identity_distinguishes_clean_and_changed_overlay_inputs() {
         deleted_paths: Vec::new(),
         files_to_parse: Vec::new(),
         skipped_unchanged_count: 0,
+        skipped_python_paths: Default::default(),
     };
     let clean_identity = clean.identity();
     let changed = WorktreeOverlayPlan {

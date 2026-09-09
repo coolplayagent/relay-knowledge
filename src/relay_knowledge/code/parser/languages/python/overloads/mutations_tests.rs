@@ -86,7 +86,8 @@ fn unknown_calls_preserve_only_proven_unrelated_member_writes() {
                 "typing",
                 true,
                 &std::collections::BTreeMap::new(),
-                &mut 1024
+                &mut 1024,
+                crate::code::python_imports::PythonModuleOrigins::default()
             ),
             unknown
         );

@@ -53,11 +53,13 @@ fn modified_regular_files_flow_into_the_shared_parse_queue() {
     let mut deleted_paths = Vec::new();
     let mut files_to_parse = Vec::new();
     let mut skipped_unchanged_count = 0;
+    let mut skipped_python_paths = std::collections::BTreeSet::new();
     let mut outputs = WorktreeFileOutputs {
         overlay_hash_input: &mut hash_input,
         deleted_paths: &mut deleted_paths,
         files_to_parse: &mut files_to_parse,
         skipped_unchanged_count: &mut skipped_unchanged_count,
+        skipped_python_paths: &mut skipped_python_paths,
     };
 
     record_worktree_change(&context, &change, &mut outputs)

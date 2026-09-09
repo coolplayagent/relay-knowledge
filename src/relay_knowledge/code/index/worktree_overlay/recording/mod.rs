@@ -11,6 +11,7 @@ pub(super) struct WorktreeFileOutputs<'a> {
     pub(super) deleted_paths: &'a mut Vec<String>,
     pub(super) files_to_parse: &'a mut Vec<(String, Vec<u8>)>,
     pub(super) skipped_unchanged_count: &'a mut usize,
+    pub(super) skipped_python_paths: &'a mut std::collections::BTreeSet<String>,
 }
 
 pub(super) fn record_status_marker(path: &str, overlay_hash_input: &mut Vec<u8>) {
@@ -64,6 +65,9 @@ pub(super) fn record_file_as(
     outputs.deleted_paths.retain(|path| path != indexed_path);
     if previous_hashes.get(indexed_path) == Some(&blob_hash) && !was_deleted {
         *outputs.skipped_unchanged_count += 1;
+        if indexed_path.ends_with(".py") {
+            outputs.skipped_python_paths.insert(indexed_path.to_owned());
+        }
         return Ok(());
     }
     outputs

@@ -184,6 +184,7 @@ fn path_filter_covers(filter: &str, path: &str) -> bool {
 
 #[derive(Debug, Clone)]
 pub(in crate::code) struct SnapshotBuild {
+    pub(in crate::code) python_module_origins: crate::code::python_imports::PythonModuleOrigins,
     pub(in crate::code) repository_id: String,
     pub(in crate::code) source_scope: String,
     pub(in crate::code) base_resolved_commit_sha: Option<String>,
@@ -253,7 +254,7 @@ impl SnapshotBuild {
             path_filters: Vec::new(),
             language_filters: Vec::new(),
         };
-        Self::new_with_selector(
+        let mut build = Self::new_with_selector(
             registration,
             &selector,
             commit,
@@ -261,7 +262,15 @@ impl SnapshotBuild {
             full_replace,
             changed_path_count,
             skipped_unchanged_count,
-        )
+        );
+        // Unit parser fixtures model a complete isolated source inventory.
+        build.python_module_origins =
+            crate::code::python_imports::PythonModuleOrigins::from_authorized_paths(
+                std::iter::empty(),
+                &[],
+                &[],
+            );
+        build
     }
 
     pub(in crate::code) fn new_with_selector(
@@ -308,6 +317,7 @@ impl SnapshotBuild {
             &language_filters,
         );
         Self {
+            python_module_origins: Default::default(),
             repository_id: registration.repository_id.clone(),
             source_scope,
             base_resolved_commit_sha: None,

@@ -87,6 +87,21 @@ pub(in crate::code::index) fn build_worktree_overlay_snapshot(
     let (overlay_commit, tree_hash) = plan.identity();
     let language_filters =
         snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let workspace_entries =
+        workspace_overlay_entries(previous_hashes, &plan.deleted_paths, &plan.files_to_parse);
+    let python_module_origins =
+        crate::code::python_imports::PythonModuleOrigins::from_authorized_paths(
+            workspace_entries.iter().map(|entry| entry.path.as_str()),
+            &plan.path_filters,
+            &language_filters,
+        );
+    let reparse_python = python_module_origins
+        != crate::code::python_imports::PythonModuleOrigins::from_authorized_paths(
+            previous_hashes.keys().map(String::as_str),
+            &plan.path_filters,
+            &language_filters,
+        );
+    let base_commit = plan.commit.clone();
     let mut build = SnapshotBuild::new_with_scope_filters(
         registration,
         overlay_commit,
@@ -100,10 +115,14 @@ pub(in crate::code::index) fn build_worktree_overlay_snapshot(
         plan.skipped_unchanged_count,
     );
     build.base_resolved_commit_sha = Some(plan.commit);
+    build.python_module_origins = python_module_origins;
     let deleted_paths = plan.deleted_paths;
     let files_to_parse = plan.files_to_parse;
-    let workspace_entries =
-        workspace_overlay_entries(previous_hashes, &deleted_paths, &files_to_parse);
+    let mut skipped_python_paths = plan.skipped_python_paths;
+    let parsed_paths = files_to_parse
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect::<BTreeSet<_>>();
     build.deleted_paths = deleted_paths;
 
     build.detect_and_fill_workspaces(
@@ -115,6 +134,31 @@ pub(in crate::code::index) fn build_worktree_overlay_snapshot(
 
     for (path, bytes) in files_to_parse {
         parse_indexed_file(&mut build, &path, &bytes)?;
+    }
+    if reparse_python {
+        let mut total_bytes = 0usize;
+        for entry in &workspace_entries {
+            if !entry.path.ends_with(".py") || parsed_paths.contains(&entry.path) {
+                continue;
+            }
+            if build.files.len() >= crate::code::index::MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS {
+                return Err(CodeIndexError::InvalidInput("Python import-origin overlay reparse exceeds the bounded file budget; commit changes and run a full code index".into()));
+            }
+            let bytes = crate::code::source::source_bytes_after_content_verification(
+                root,
+                &base_commit,
+                &entry.path,
+                None,
+            )?;
+            total_bytes = total_bytes.saturating_add(bytes.len());
+            if total_bytes > crate::domain::CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH {
+                return Err(CodeIndexError::InvalidInput("Python import-origin overlay reparse exceeds the bounded byte budget; commit changes and run a full code index".into()));
+            }
+            parse_indexed_file(&mut build, &entry.path, &bytes)?;
+            if skipped_python_paths.remove(&entry.path) {
+                build.skipped_unchanged_count -= 1;
+            }
+        }
     }
 
     Ok(build.finish())
@@ -149,6 +193,7 @@ fn plan_worktree_overlay(
             deleted_paths: Vec::new(),
             files_to_parse: Vec::new(),
             skipped_unchanged_count: 0,
+            skipped_python_paths: Default::default(),
         });
     }
     let changes = bounded_worktree_changes(changes, &overlay_scope)?;
@@ -156,6 +201,7 @@ fn plan_worktree_overlay(
     let mut deleted_paths = Vec::new();
     let mut files_to_parse = Vec::new();
     let mut skipped_unchanged_count = 0;
+    let mut skipped_python_paths = std::collections::BTreeSet::new();
     let context = WorktreeChangeContext {
         root,
         commit: &commit,
@@ -167,6 +213,7 @@ fn plan_worktree_overlay(
         deleted_paths: &mut deleted_paths,
         files_to_parse: &mut files_to_parse,
         skipped_unchanged_count: &mut skipped_unchanged_count,
+        skipped_python_paths: &mut skipped_python_paths,
     };
     for change in &changes {
         record_worktree_change(&context, change, &mut outputs)?;
@@ -180,6 +227,7 @@ fn plan_worktree_overlay(
         deleted_paths,
         files_to_parse,
         skipped_unchanged_count,
+        skipped_python_paths,
     })
 }
 

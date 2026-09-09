@@ -10,6 +10,7 @@ pub(super) struct WorktreeOverlayPlan {
     pub(super) deleted_paths: Vec<String>,
     pub(super) files_to_parse: Vec<(String, Vec<u8>)>,
     pub(super) skipped_unchanged_count: usize,
+    pub(super) skipped_python_paths: std::collections::BTreeSet<String>,
 }
 
 impl WorktreeOverlayPlan {

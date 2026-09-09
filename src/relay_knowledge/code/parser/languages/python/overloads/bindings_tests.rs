@@ -21,7 +21,12 @@ fn finalizer_binding_overrides_completing_branch_and_local_scan_has_a_budget() {
                 source,
                 tree.root_node().named_child(0).unwrap(),
                 "overload",
-                false
+                false,
+                PythonModuleOrigins {
+                    typing: crate::code::python_imports::PythonModuleOrigin::StandardCandidate,
+                    typing_extensions:
+                        crate::code::python_imports::PythonModuleOrigin::StandardCandidate,
+                }
             ),
             Some(expected)
         );

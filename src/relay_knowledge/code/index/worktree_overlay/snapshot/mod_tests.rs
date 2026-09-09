@@ -5,6 +5,50 @@ use std::collections::BTreeMap;
 use super::*;
 
 #[test]
+fn provider_reparse_removes_only_successfully_reparsed_python_skips() {
+    let repo = crate::code::test_fixtures::TempGitRepo::create("overlay-origin-counters");
+    let app = "import typing\n@typing.overload\ndef pick(x:int): ...\ndef pick(x): return x\n";
+    repo.write("app.py", app);
+    repo.write("README.md", "unchanged\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Base"]);
+    let mut registration = repo.registration();
+    registration.path_filters.clear();
+    registration.language_filters.clear();
+    let hashes = BTreeMap::from([
+        (
+            "app.py".into(),
+            crate::code::ids::stable_content_hash(app.as_bytes()),
+        ),
+        (
+            "README.md".into(),
+            crate::code::ids::stable_content_hash(b"unchanged\n"),
+        ),
+    ]);
+    repo.write("app.py", "# staged\n");
+    repo.write("README.md", "staged\n");
+    repo.git(["add", "app.py", "README.md"]);
+    repo.write("app.py", app);
+    repo.write("README.md", "unchanged\n");
+    repo.write("typing.py", "def overload(f): return f\n");
+    let plan = plan_worktree_overlay(&registration, &repo.selector(), &repo.path, &hashes).unwrap();
+    assert_eq!(plan.skipped_unchanged_count, 2);
+    assert_eq!(plan.skipped_python_paths, ["app.py".to_owned()].into());
+    let snapshot = build_worktree_overlay_snapshot(
+        &registration,
+        &repo.selector(),
+        &repo.path,
+        &hashes,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(snapshot.files.len(), 2);
+    assert_eq!(snapshot.skipped_unchanged_count, 1);
+    assert_eq!(snapshot.changed_path_count, 3);
+}
+
+#[test]
 fn workspace_entries_remove_deletions_and_replace_changed_byte_counts() {
     let previous_hashes = BTreeMap::from([
         ("src/keep.rs".to_owned(), "keep".to_owned()),

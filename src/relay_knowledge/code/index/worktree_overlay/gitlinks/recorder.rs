@@ -48,6 +48,8 @@ pub(in crate::code::index::worktree_overlay) struct WorktreeOverlayRecorder<'a, 
     pub(in crate::code::index::worktree_overlay) deleted_paths: &'a mut Vec<String>,
     pub(in crate::code::index::worktree_overlay) files_to_parse: &'a mut Vec<(String, Vec<u8>)>,
     pub(in crate::code::index::worktree_overlay) skipped_unchanged_count: &'a mut usize,
+    pub(in crate::code::index::worktree_overlay) skipped_python_paths:
+        &'a mut std::collections::BTreeSet<String>,
 }
 
 impl WorktreeOverlayRecorder<'_, '_> {
@@ -95,6 +97,9 @@ impl WorktreeOverlayRecorder<'_, '_> {
         self.deleted_paths.retain(|path| path != &entry.parent_path);
         if self.previous_hashes.get(&entry.parent_path) == Some(&blob_hash) && !was_deleted {
             *self.skipped_unchanged_count += 1;
+            if entry.parent_path.ends_with(".py") {
+                self.skipped_python_paths.insert(entry.parent_path.clone());
+            }
             return Ok(());
         }
         self.files_to_parse.push((entry.parent_path.clone(), bytes));

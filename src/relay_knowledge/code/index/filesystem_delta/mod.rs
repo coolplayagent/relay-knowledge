@@ -105,6 +105,18 @@ pub(super) fn build_filesystem_delta_snapshot(
         .iter()
         .map(|entry| entry.path.clone())
         .collect::<BTreeSet<_>>();
+    let python_module_origins =
+        crate::code::python_imports::PythonModuleOrigins::from_authorized_paths(
+            selected_paths.iter().map(String::as_str),
+            &path_filters,
+            &language_filters,
+        );
+    let reparse_python = python_module_origins
+        != crate::code::python_imports::PythonModuleOrigins::from_authorized_paths(
+            previous_hashes.keys().map(String::as_str),
+            &path_filters,
+            &language_filters,
+        );
     let deleted_paths = previous_hashes
         .keys()
         .filter(|path| !selected_paths.contains(*path))
@@ -150,6 +162,7 @@ pub(super) fn build_filesystem_delta_snapshot(
         0,
     );
     build.base_resolved_commit_sha = Some(base_commit.to_owned());
+    build.python_module_origins = python_module_origins;
     build.deleted_paths = deleted_paths;
 
     build.detect_and_fill_workspaces(
@@ -178,7 +191,9 @@ pub(super) fn build_filesystem_delta_snapshot(
                 build.commit, entry.path
             ))
         })?;
-        if previous_hashes.get(&entry.path) == Some(blob_hash) {
+        if previous_hashes.get(&entry.path) == Some(blob_hash)
+            && !(reparse_python && entry.path.ends_with(".py"))
+        {
             build.skipped_unchanged_count += 1;
             continue;
         }

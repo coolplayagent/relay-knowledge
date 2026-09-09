@@ -10,6 +10,7 @@ mod identity;
 mod index;
 mod language_metadata;
 mod parser;
+mod python_imports;
 mod registration;
 mod search;
 mod source;

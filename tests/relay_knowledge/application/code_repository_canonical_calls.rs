@@ -8,7 +8,18 @@ async fn python_method_nested_functions_do_not_capture_class_overload_imports() 
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Python function skips class scope"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".into(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-full-origin-inventory"),
+        )
+        .await
+        .unwrap();
     service
         .index_code_repository(
             CodeIndexRequest {
@@ -96,7 +107,18 @@ def enclosing():
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Python overload declarations"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".into(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-full-origin-inventory"),
+        )
+        .await
+        .unwrap();
     service
         .index_code_repository(
             CodeIndexRequest {

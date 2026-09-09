@@ -74,7 +74,18 @@ def module_mutation_choice(): return leaf()
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Python namespace bindings"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".into(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-full-origin-inventory"),
+        )
+        .await
+        .unwrap();
     service
         .index_code_repository(
             CodeIndexRequest {
@@ -188,7 +199,18 @@ def fallback_choice(x): return leaf()
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Python import paths"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".into(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-full-origin-inventory"),
+        )
+        .await
+        .unwrap();
     service
         .index_code_repository(
             CodeIndexRequest {
@@ -321,7 +343,18 @@ result=outer()()
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Later Python import order"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".into(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-full-origin-inventory"),
+        )
+        .await
+        .unwrap();
     service
         .index_code_repository(
             CodeIndexRequest {
@@ -401,7 +434,18 @@ def from_choice(): return leaf()
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Python mutation and import order"]);
     let service = service_with_memory_store().await;
-    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".into(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-full-origin-inventory"),
+        )
+        .await
+        .unwrap();
     service
         .index_code_repository(
             CodeIndexRequest {

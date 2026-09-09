@@ -43,6 +43,7 @@ struct PendingParsedFile {
 /// Blocking plan for a checkpointed full repository index.
 #[derive(Debug, Clone)]
 pub struct CodeIndexPlan {
+    python_module_origins: crate::code::python_imports::PythonModuleOrigins,
     registration: CodeRepositoryRegistration,
     root: PathBuf,
     commit: String,
@@ -452,6 +453,7 @@ fn parse_one_file(
         0,
     );
     build.bind_verified_source_scope(&plan.source_scope)?;
+    build.python_module_origins = plan.python_module_origins;
     parse_indexed_file(&mut build, path, bytes)?;
 
     Ok(build)
@@ -543,6 +545,12 @@ pub fn prepare_full_index_plan_with_workspace_detection(
     );
 
     Ok(CodeIndexPlan {
+        python_module_origins:
+            crate::code::python_imports::PythonModuleOrigins::from_authorized_paths(
+                snapshot.entries.iter().map(|entry| entry.path.as_str()),
+                &snapshot.path_filters,
+                &snapshot.language_filters,
+            ),
         registration,
         root: snapshot.root,
         commit: snapshot.resolved_commit_sha,

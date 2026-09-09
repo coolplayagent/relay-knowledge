@@ -19,6 +19,7 @@ mod contracts;
 mod feature_flag_projection;
 mod framework_projection;
 mod parse_status;
+mod python_origins;
 mod route_projection;
 mod text_only;
 
@@ -168,6 +169,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
         &config_references,
         &mut output,
     )?;
+    python_origins::reconcile(&context, root, &mut output);
     let mut embedded_imports = if input.language.id == "vue" {
         collect_vue_script_facts(build, &input, &mut output)?
     } else {
