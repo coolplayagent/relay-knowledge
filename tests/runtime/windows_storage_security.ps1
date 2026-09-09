@@ -88,7 +88,9 @@ try {
     # Persisted shared ACLs cannot grant any account name-squatting rights,
     # including ACLs created by an earlier installation.
     $usersInfo = [System.IO.DirectoryInfo]::new("$base\users")
-    $safeUsersSddl = $usersInfo.GetAccessControl().GetSecurityDescriptorSddlForm('Access')
+    $safeUsersAcl = $usersInfo.GetAccessControl()
+    $safeUsersSddl = $safeUsersAcl.GetSecurityDescriptorSddlForm('Access')
+    $safeUsersRules = @($safeUsersAcl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
     $squattingAcl = $usersInfo.GetAccessControl()
     $squattingAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
         [System.Security.Principal.SecurityIdentifier]::new('S-1-5-11'), 'CreateDirectories', 'Allow'))
@@ -101,7 +103,13 @@ try {
         $restoredUsersAcl.SetSecurityDescriptorSddlForm($safeUsersSddl, 'Access')
         $usersInfo.SetAccessControl($restoredUsersAcl)
     }
-    if ($usersInfo.GetAccessControl().GetSecurityDescriptorSddlForm('Access') -ne $safeUsersSddl) { throw 'Shared ACL fixture restoration did not persist' }
+    $persistedUsersAcl = $usersInfo.GetAccessControl()
+    $persistedUsersRules = @($persistedUsersAcl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+    # Windows may normalize SDDL control flags; compare effective ACL fields.
+    $changedRules = Compare-Object $safeUsersRules $persistedUsersRules -Property IdentityReference,FileSystemRights,AccessControlType,InheritanceFlags,PropagationFlags,IsInherited
+    if ($changedRules -or $persistedUsersAcl.AreAccessRulesProtected -ne $safeUsersAcl.AreAccessRulesProtected) {
+        throw "Shared ACL fixture restoration changed permissions: $safeUsersSddl -> $($persistedUsersAcl.GetSecurityDescriptorSddlForm('Access'))"
+    }
     Initialize-RelayPrivateStorage $data $sid -ExistingOnly
     $sharedInfo = [System.IO.DirectoryInfo]::new($base)
     $changedOwner = $sharedInfo.GetAccessControl()
