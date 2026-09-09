@@ -959,3 +959,6 @@ mod canonical_calls;
 mod python_rebinding;
 #[path = "code_repository_unresolved_call_names.rs"]
 mod unresolved_call_names;
+
+#[path = "code_repository_python_chains.rs"]
+mod python_chains;

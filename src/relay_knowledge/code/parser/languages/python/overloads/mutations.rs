@@ -2,21 +2,58 @@
 use crate::code::parser::nodes::node_text;
 use tree_sitter::Node;
 const MAX_BINDING_STATEMENTS: usize = 1024;
-pub(super) fn assignment_binds(content: &str, node: Node<'_>, name: &str, module: bool) -> bool {
-    let mut cursor = node.walk();
+pub(super) fn expression_rebinds(
+    content: &str,
+    mut node: Node<'_>,
+    name: &str,
+    module: bool,
+) -> bool {
+    if !matches!(node.kind(), "assignment" | "augmented_assignment") {
+        return false;
+    }
     let mut remaining = MAX_BINDING_STATEMENTS;
     loop {
         if remaining == 0 {
             return true;
         }
         remaining -= 1;
+        let Some(left) = node.child_by_field_name("left") else {
+            return false;
+        };
+        if assignment_binds(content, left, name, module, &mut remaining) {
+            return true;
+        }
+        // Chained assignments nest on the right; ordinary RHS reads are not targets.
+        let Some(right) = node
+            .child_by_field_name("right")
+            .filter(|right| right.kind() == "assignment")
+        else {
+            return false;
+        };
+        node = right;
+    }
+}
+
+fn assignment_binds(
+    content: &str,
+    node: Node<'_>,
+    name: &str,
+    module: bool,
+    remaining: &mut usize,
+) -> bool {
+    let mut cursor = node.walk();
+    loop {
+        if *remaining == 0 {
+            return true;
+        }
+        *remaining -= 1;
         let current = cursor.node();
         if current.kind() == "identifier" && node_text(content, current) == name {
             return true;
         }
         if module
             && matches!(current.kind(), "attribute" | "subscript")
-            && module_receiver(content, current, name)
+            && module_receiver(content, current, name, remaining)
         {
             return true;
         }
@@ -31,9 +68,10 @@ pub(super) fn assignment_binds(content: &str, node: Node<'_>, name: &str, module
     }
 }
 
-fn module_receiver(content: &str, mut node: Node<'_>, name: &str) -> bool {
+fn module_receiver(content: &str, mut node: Node<'_>, name: &str, remaining: &mut usize) -> bool {
     let mut access = None;
-    for _ in 0..MAX_BINDING_STATEMENTS {
+    while *remaining > 0 {
+        *remaining -= 1;
         let Some(receiver) = node
             .child_by_field_name("object")
             .or_else(|| node.child_by_field_name("value"))

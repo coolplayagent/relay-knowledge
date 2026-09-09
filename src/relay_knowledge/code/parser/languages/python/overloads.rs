@@ -37,7 +37,7 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
         .named_children(&mut cursor)
         .filter(|node| node.kind() == "decorator")
         .any(|decorator| {
-            let Some(expression) = decorator.named_child(0) else {
+            let Some(expression) = decorator.named_child(0).and_then(transparent_expression) else {
                 return false;
             };
             let (binding, module) = match expression.kind() {
@@ -49,6 +49,7 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
                 {
                     let Some(object) = expression
                         .child_by_field_name("object")
+                        .and_then(transparent_expression)
                         .filter(|node| node.kind() == "identifier")
                     else {
                         return false;
@@ -59,6 +60,28 @@ pub(in crate::code::parser) fn is_overload_declaration(content: &str, function: 
             };
             visible_import(content, decorated, &binding, module)
         })
+}
+
+fn transparent_expression(mut node: Node<'_>) -> Option<Node<'_>> {
+    let mut remaining = MAX_BINDING_STATEMENTS;
+    loop {
+        remaining = remaining.checked_sub(1)?;
+        if node.kind() != "parenthesized_expression" {
+            return Some(node);
+        }
+        let mut expression = None;
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            remaining = remaining.checked_sub(1)?;
+            if child.kind() == "comment" {
+                continue;
+            }
+            if expression.replace(child).is_some() {
+                return None;
+            }
+        }
+        node = expression?;
+    }
 }
 
 fn visible_import(content: &str, mut node: Node<'_>, binding: &str, module: bool) -> bool {
@@ -305,10 +328,8 @@ fn simple_binding(content: &str, statement: Node<'_>, binding: &str, module: boo
         if module && mutations::expression_mutates_module(content, expression, binding) {
             return Some(false);
         }
-        return expression
-            .child_by_field_name("left")
-            .filter(|left| mutations::assignment_binds(content, *left, binding, module))
-            .map(|_| false);
+        return mutations::expression_rebinds(content, expression, binding, module)
+            .then_some(false);
     }
     // Control-flow and deletion can change a binding. Do not guess its value.
     contains_identifier(content, statement, binding).then_some(false)
