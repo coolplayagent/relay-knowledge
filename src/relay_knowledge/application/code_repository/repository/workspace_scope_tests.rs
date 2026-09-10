@@ -78,6 +78,7 @@ async fn equivalent_enabled_workspace_config_reuses_the_exact_published_scope() 
                 CodeMonorepoWorkspaceFormat::CargoWorkspace,
                 CodeMonorepoWorkspaceFormat::Pnpm,
                 CodeMonorepoWorkspaceFormat::GoModules,
+                CodeMonorepoWorkspaceFormat::Maven,
                 CodeMonorepoWorkspaceFormat::CargoWorkspace,
             ],
         },
