@@ -96,4 +96,23 @@ fn maven_impact_respects_request_and_indexed_language_and_path_filters() {
             .unwrap()
             .is_empty()
     );
+    connection
+        .execute("UPDATE maven_reactor_status SET complete = 0", [])
+        .unwrap();
+    status.path_filters.clear();
+    request.repository.language_filters = vec!["java".into()];
+    assert!(
+        module_impacts(&connection, &status, &request, &changed)
+            .unwrap()
+            .is_empty()
+    );
+    request.repository.language_filters.clear();
+    status.language_filters = vec!["java".into()];
+    assert!(
+        module_impacts(&connection, &status, &request, &changed)
+            .unwrap()
+            .is_empty()
+    );
+    status.language_filters.clear();
+    assert!(module_impacts(&connection, &status, &request, &changed).is_err());
 }

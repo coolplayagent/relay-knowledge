@@ -51,7 +51,10 @@ pub(super) fn resolve_effective_model_load(
             Ok(Some(raw)) => {
                 raw_models.insert(raw.document.path.clone(), raw);
             }
-            Ok(None) => {}
+            Ok(None) => {
+                tracing::warn!(source_scope = %source_scope, path = %path, "indexed POM has no project document");
+                preserve_existing_facts = true;
+            }
             Err(StorageError::InvalidInput(error)) => {
                 tracing::warn!(
                     source_scope = %source_scope,

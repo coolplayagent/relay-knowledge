@@ -37,7 +37,27 @@ pub(in crate::storage::sqlite) fn refresh(
     version: GraphVersion,
 ) -> Result<(), StorageError> {
     let loaded = super::super::effective_models(connection, scope)?;
-    if loaded.preserve_existing_facts {
+    let model_paths = loaded
+        .models
+        .iter()
+        .map(|model| model.document.path.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut statement = connection.prepare("SELECT path FROM code_repository_files WHERE source_scope = ?1 AND (path = 'pom.xml' OR path LIKE '%/pom.xml') ORDER BY path LIMIT ?2")?;
+    let paths = statement
+        .query_map(params![scope, super::MAX_MODULES + 1], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    if paths.len() > super::MAX_MODULES {
+        return Err(StorageError::CapacityExceeded(
+            "Maven reactor module budget exceeded".into(),
+        ));
+    }
+    if loaded.preserve_existing_facts
+        || paths
+            .iter()
+            .any(|path| !model_paths.contains(path.as_str()))
+    {
         connection.execute(
             "INSERT OR REPLACE INTO maven_reactor_status VALUES (?1, 0)",
             [scope],

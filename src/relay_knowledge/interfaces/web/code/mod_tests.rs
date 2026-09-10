@@ -502,15 +502,24 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
 
 async fn test_service(label: &str) -> RelayKnowledgeService {
     let home = unique_temp_dir(label);
+    let home_path = home.as_path().to_str().expect("utf8 path");
     let environment = EnvironmentConfig::from_pairs(
-        PlatformKind::Unix,
+        if cfg!(windows) {
+            PlatformKind::Windows
+        } else {
+            PlatformKind::Unix
+        },
         [
-            ("HOME", "/tmp"),
-            (
-                "RELAY_KNOWLEDGE_HOME",
-                home.as_path().to_str().expect("utf8 path"),
-            ),
-        ],
+            "HOME",
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "TEMP",
+            "TMPDIR",
+            "RELAY_KNOWLEDGE_HOME",
+        ]
+        .into_iter()
+        .map(|key| (key, home_path)),
     )
     .expect("environment should parse");
 
@@ -625,3 +634,6 @@ fn unique_temp_dir(label: &str) -> PathBuf {
 
     std::env::temp_dir().join(format!("relay-knowledge-web-{label}-{now}"))
 }
+
+#[path = "pagination_tests.rs"]
+mod pagination_tests;

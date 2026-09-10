@@ -14,6 +14,15 @@ pub(super) fn module_impacts(
     request: &CodeImpactRequest,
     changed: &BTreeSet<String>,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+    if !crate::storage::sqlite::scope_filters::language_filter_allows(
+        "xml",
+        &status.language_filters,
+    ) || !crate::storage::sqlite::scope_filters::language_filter_allows(
+        "xml",
+        &request.repository.language_filters,
+    ) {
+        return Ok(Vec::new());
+    }
     let impacts = crate::storage::sqlite::maven::reactor::downstream(
         connection,
         required_scope(status)?,
