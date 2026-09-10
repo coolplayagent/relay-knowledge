@@ -991,9 +991,10 @@ mod canonical_declaration_edges;
 
 #[path = "code_repository_python_independent_modules.rs"]
 mod python_independent_modules;
-
 #[path = "code_repository_python_literal_managers.rs"]
 mod python_literal_managers;
-
 #[path = "code_repository_python_safe_member_writes.rs"]
 mod python_safe_member_writes;
+
+#[path = "code_repository_python_execution_boundaries.rs"]
+mod python_execution_boundaries;

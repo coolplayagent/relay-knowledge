@@ -49,6 +49,12 @@ pub(super) fn expression_rebinds_with_budget(
                 remaining,
             )
         });
+        if !foreign_class
+            && current.kind() == "case_clause"
+            && super::pattern_bindings::binds(content, current, name, remaining)
+        {
+            return true;
+        }
         if target.is_some_and(|target| {
             if foreign_class {
                 return module && member_target(content, target, name, remaining);
@@ -303,6 +309,11 @@ fn builtin_unbound(content: &str, mut node: Node<'_>, name: &str, remaining: &mu
             return false;
         };
         *remaining = left;
+        if current.kind() == "case_clause"
+            && super::pattern_bindings::binds(content, current, name, remaining)
+        {
+            return false;
+        }
         let target = match current.kind() {
             "assignment" | "augmented_assignment" | "for_statement" => {
                 current.child_by_field_name("left")

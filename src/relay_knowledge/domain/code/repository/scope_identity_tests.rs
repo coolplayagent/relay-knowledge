@@ -198,7 +198,11 @@ fn cpp_declaration_upgrade_invalidates_scopes_with_canonical_call_indexes() {
 #[test]
 fn callable_fact_upgrades_invalidate_previous_completed_scopes() {
     let previous_python = CODE_SNAPSHOT_FACT_VERSION.replace(
+        "python-overload-declarations-v17",
         "python-overload-declarations-v16",
+    );
+    let previous_python_v15 = CODE_SNAPSHOT_FACT_VERSION.replace(
+        "python-overload-declarations-v17",
         "python-overload-declarations-v15",
     );
     let previous_cpp = CODE_SNAPSHOT_FACT_VERSION.replace(
@@ -209,7 +213,12 @@ fn callable_fact_upgrades_invalidate_previous_completed_scopes() {
         "cpp-callable-declarations-v2",
         "cpp-callable-declarations-v1",
     );
-    for previous in [previous_python, previous_cpp, previous_both] {
+    for previous in [
+        previous_python,
+        previous_python_v15,
+        previous_cpp,
+        previous_both,
+    ] {
         assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
         let mut input = Vec::new();
         for value in ["git_snapshot", "repo-upgrade", "tree-unchanged"] {

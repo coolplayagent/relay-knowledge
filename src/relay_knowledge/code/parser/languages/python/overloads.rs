@@ -12,12 +12,14 @@ mod expressions;
 use bindings::{contains_identifier, statement_binding};
 mod aliases;
 mod class_creation;
+mod direct_execution;
 mod implicit_protocols;
 mod imported_modules;
 mod local_classes;
 mod local_instances;
 mod mutation_scopes;
 mod mutations;
+mod pattern_bindings;
 mod protocol_contract;
 mod proven_aliases;
 mod transparent;
@@ -212,6 +214,7 @@ fn visible_import(
     remaining: &mut usize,
     proven: &mut Proof,
 ) -> bool {
+    let decorated = node;
     let mut crossed_scope = false;
     let mut delayed_lookup = false;
     'lookup: loop {
@@ -219,15 +222,27 @@ fn visible_import(
             return false;
         }
         *remaining -= 1;
+        if node.kind() == "case_clause"
+            && (!crossed_scope || !class_namespace(node))
+            && pattern_bindings::binds(content, node, binding, remaining)
+        {
+            return false;
+        }
         if delayed_lookup
             && node.parent().is_some_and(|parent| {
                 matches!(parent.kind(), "module" | "block")
                     && (!crossed_scope || !class_namespace(parent))
             })
         {
-            if let Some(imported) =
-                later_import_binding(content, node, binding, module, remaining, proven.origins)
-            {
+            if let Some(imported) = later_import_binding(
+                content,
+                node,
+                decorated,
+                binding,
+                module,
+                remaining,
+                proven.origins,
+            ) {
                 return imported;
             }
         }
@@ -321,6 +336,7 @@ fn visible_import(
 fn later_import_binding(
     content: &str,
     node: Node<'_>,
+    decorated: Node<'_>,
     binding: &str,
     module: bool,
     remaining: &mut usize,
@@ -329,10 +345,11 @@ fn later_import_binding(
     let mut next = node.next_named_sibling();
     let mut proven = None;
     let mut execution_boundary = false;
-    let callable_name = (node.kind() == "function_definition")
-        .then(|| node.child_by_field_name("name"))
-        .flatten()
-        .map(|name| node_text(content, name));
+    let callable_name = (node.kind() == "function_definition"
+        && direct_execution::reaches(content, node, decorated, remaining))
+    .then(|| node.child_by_field_name("name"))
+    .flatten()
+    .map(|name| node_text(content, name));
     let mut callable_unchanged = true;
     while let Some(statement) = next {
         if *remaining == 0 {
@@ -345,8 +362,25 @@ fn later_import_binding(
                 .as_deref()
                 .is_some_and(|name| direct_function_call(content, statement, name, remaining))
         {
-            // This proven direct invocation evaluates the decorators now; later
-            // namespace writes cannot retroactively change that invocation.
+            // Later calls, including calls through aliases, can evaluate the
+            // same decorator again after a provider write. Only a nonexecuting
+            // linear tail makes this invocation sufficient evidence.
+            let mut later = statement.next_named_sibling();
+            while let Some(tail) = later {
+                let Some(left) = remaining.checked_sub(1) else {
+                    return Some(false);
+                };
+                *remaining = left;
+                if !matches!(
+                    tail.kind(),
+                    "expression_statement" | "pass_statement" | "comment"
+                ) || !linear_binding_statement(tail)
+                    || expressions::has_eager_call(content, tail, remaining)
+                {
+                    return Some(false);
+                }
+                later = tail.next_named_sibling();
+            }
             return proven;
         }
         if expressions::has_eager_call(content, statement, remaining) {
@@ -491,3 +525,7 @@ fn decorator_proven(
     proven.decorators.insert(decorator.start_byte(), value);
     value
 }
+
+#[cfg(test)]
+#[path = "overloads/execution_boundary_tests.rs"]
+mod execution_boundary_tests;
