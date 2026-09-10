@@ -1,19 +1,23 @@
-//! Reads a bounded module graph without reparsing POMs on the query path.
+//! Keyset pages over persisted reactor facts; no POM parsing on query paths.
+use super::persistence::{decode, require_complete};
+use crate::storage::sqlite::scope_filters::{path_filter_sql_for_column, push_path_filter_values};
+use crate::{domain::SoftwareGlobalRequest, storage::StorageError};
+use rusqlite::{Connection, params_from_iter, types::Value};
 
-use super::{MAX_EDGES, MAX_MODULES, persistence::decode};
-use crate::storage::sqlite::scope_filters::path_filter_allows;
-use crate::{
-    domain::{SoftwareBuildTarget, SoftwareGlobalRequest, SoftwareRelationship},
-    storage::StorageError,
-};
-use rusqlite::{Connection, params};
-
-pub(in crate::storage::sqlite) fn projection(
+pub(in crate::storage::sqlite) fn read_page<T: serde::de::DeserializeOwned>(
     connection: &Connection,
     scope: &str,
     request: &SoftwareGlobalRequest,
-) -> Result<(Vec<SoftwareBuildTarget>, Vec<SoftwareRelationship>), StorageError> {
-    super::persistence::require_complete(connection, scope)?;
+    after: &str,
+    limit: usize,
+    edges: bool,
+) -> Result<Vec<T>, StorageError> {
+    require_complete(connection, scope)?;
+    if limit > 501 {
+        return Err(StorageError::InvalidInput(
+            "reactor page exceeds 500 rows plus lookahead".into(),
+        ));
+    }
     if !request.repository.language_filters.is_empty()
         && !request
             .repository
@@ -21,55 +25,39 @@ pub(in crate::storage::sqlite) fn projection(
             .iter()
             .any(|language| matches!(language.as_str(), "java" | "kotlin" | "scala" | "jvm"))
     {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok(Vec::new());
     }
-    let mut statement = connection.prepare(
-        "SELECT payload FROM maven_reactor_modules WHERE source_scope = ?1 ORDER BY path LIMIT ?2",
-    )?;
-    let mut modules = Vec::<SoftwareBuildTarget>::new();
-    let mut seen = 0;
-    for row in statement.query_map(params![scope, MAX_MODULES + 1], |row| {
-        row.get::<_, String>(0)
-    })? {
-        seen += 1;
-        if seen > MAX_MODULES {
-            return Err(capacity());
-        }
-        let module: SoftwareBuildTarget = decode(row?)?;
-        if path_filter_allows(&module.evidence_path, &request.repository.path_filters) {
-            modules.push(module);
-            if modules.len() > request.limit {
-                return Err(capacity());
-            }
-        }
-    }
-    let selected = modules
-        .iter()
-        .map(|module| module.target_id.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut statement = connection.prepare("SELECT payload FROM maven_reactor_edges WHERE source_scope = ?1 ORDER BY source_id, kind, edge_id LIMIT ?2")?;
-    let mut edges = Vec::new();
-    let mut seen = 0;
-    for row in statement.query_map(params![scope, MAX_EDGES + 1], |row| row.get::<_, String>(0))? {
-        seen += 1;
-        if seen > MAX_EDGES {
-            return Err(capacity());
-        }
-        let edge: SoftwareRelationship = decode(row?)?;
-        if selected.contains(edge.source_id.as_str())
-            && path_filter_allows(&edge.evidence_path, &request.repository.path_filters)
-        {
-            edges.push(edge);
-            if modules.len() + edges.len() > request.limit {
-                return Err(capacity());
-            }
-        }
-    }
-    Ok((modules, edges))
-}
-
-fn capacity() -> StorageError {
-    StorageError::CapacityExceeded("Maven module graph exceeds result budget; raise --limit (maximum 500) or narrow the requested path scope; no partial graph was returned".into())
+    let path_filter = path_filter_sql_for_column("m.path", &request.repository.path_filters);
+    let (sql, mut values) = if edges {
+        let evidence_filter = path_filter_sql_for_column(
+            "json_extract(e.payload, '$.evidence_path')",
+            &request.repository.path_filters,
+        );
+        let mut values = vec![Value::Text(scope.into()), Value::Text(after.into())];
+        push_path_filter_values(&mut values, &request.repository.path_filters);
+        push_path_filter_values(&mut values, &request.repository.path_filters);
+        (
+            format!(
+                "SELECT e.payload FROM maven_reactor_edges e JOIN maven_reactor_modules m ON m.source_scope=e.source_scope AND m.module_id=e.source_id WHERE e.source_scope=? AND e.edge_id>? {path_filter} {evidence_filter} ORDER BY e.edge_id LIMIT ?"
+            ),
+            values,
+        )
+    } else {
+        let mut values = vec![Value::Text(scope.into()), Value::Text(after.into())];
+        push_path_filter_values(&mut values, &request.repository.path_filters);
+        (
+            format!(
+                "SELECT m.payload FROM maven_reactor_modules m WHERE m.source_scope=? AND m.module_id>? {path_filter} ORDER BY m.module_id LIMIT ?"
+            ),
+            values,
+        )
+    };
+    values.push(Value::Integer(limit as i64));
+    let mut statement = connection.prepare(&sql)?;
+    statement
+        .query_map(params_from_iter(values), |row| row.get::<_, String>(0))?
+        .map(|row| decode(row?))
+        .collect()
 }
 
 #[cfg(test)]

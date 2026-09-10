@@ -119,6 +119,7 @@ fn empty_response() -> SoftwareGlobalResponse {
     };
 
     SoftwareGlobalResponse {
+        next_cursor: None,
         metadata: ApiMetadata {
             trace_id: "trace".to_owned(),
             request_id: "request".to_owned(),

@@ -96,7 +96,10 @@ pub(super) fn persist(
     Ok(())
 }
 
-pub(super) fn require_complete(connection: &Connection, scope: &str) -> Result<(), StorageError> {
+pub(in crate::storage::sqlite) fn require_complete(
+    connection: &Connection,
+    scope: &str,
+) -> Result<(), StorageError> {
     use rusqlite::OptionalExtension;
     let complete = connection
         .query_row(

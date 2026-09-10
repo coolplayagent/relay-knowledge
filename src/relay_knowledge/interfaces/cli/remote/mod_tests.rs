@@ -121,6 +121,7 @@ async fn every_repository_remote_command_rejects_an_empty_alias_before_transport
             alias: String::new(),
         },
         RepoCommand::Software {
+            cursor: None,
             path_filters: Vec::new(),
             alias: String::new(),
             ref_selector: "HEAD".to_owned(),

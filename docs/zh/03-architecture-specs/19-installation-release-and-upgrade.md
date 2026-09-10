@@ -193,6 +193,8 @@ Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_re
 
 升级后为 Maven 仓库执行完整索引或等待既有投影修复任务完成，再查询 modules。旧二进制回滚前应 drain/cancel 当前任务并恢复一致的数据库备份；不要手工删除 reactor marker 或修改 checkpoint。新 workspace `maven` 使用 workspace-v1 mask 的第 4 位，旧三种格式的位值不变；禁用检测的 scope identity 保持兼容。
 
+依赖分页在 schema 初始化时幂等增加 `(source_scope, component_id)` 与 `(source_scope, usage_id)` 读取索引，不改变事实载荷或 schema 9 版本。已有调用可以省略 `cursor`；需要完整 dependencies/modules 结果的客户端必须消费 `next_cursor`。回滚旧二进制会忽略新增索引，并失去扩展的 dependencies 返回内容和游标支持。
+
 ---
 
 导航: 上一章: [18. 可观测性、诊断与 SLO](18-observability-diagnostics-and-slo.md) | 下一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md)

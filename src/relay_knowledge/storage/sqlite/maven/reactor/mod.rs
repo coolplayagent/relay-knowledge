@@ -5,8 +5,8 @@ mod persistence;
 mod query;
 mod traversal;
 
-pub(in crate::storage::sqlite) use persistence::{initialize_schema, refresh};
-pub(in crate::storage::sqlite) use query::projection;
+pub(in crate::storage::sqlite) use persistence::{initialize_schema, refresh, require_complete};
+pub(in crate::storage::sqlite) use query::read_page;
 pub(in crate::storage::sqlite) use traversal::downstream;
 
 use crate::domain::{SoftwareBuildTarget, SoftwareRelationship};

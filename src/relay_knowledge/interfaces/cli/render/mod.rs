@@ -348,6 +348,11 @@ where
         _ => operation.to_owned(),
     };
 
+    if operation == "code.repo.software" {
+        if let Some(cursor) = value["next_cursor"].as_str() {
+            return Ok(format!("{line} next_cursor={}\n", single_line(cursor)));
+        }
+    }
     Ok(format!("{line}\n"))
 }
 

@@ -241,6 +241,8 @@ Software projection schema 9 adds snapshot-scoped `maven_reactor_modules`, `mave
 
 Reindex Maven repositories or allow durable projection repair to finish before querying modules. Before binary rollback, drain/cancel active tasks and restore a consistent database backup; never manually edit reactor markers or checkpoints. Maven workspace detection uses the fourth bit (mask 8) of workspace-v1 while preserving the original three bits and disabled-scope identities.
 
+Dependency pagination adds idempotent `(source_scope, component_id)` and `(source_scope, usage_id)` read indexes during schema initialization; stored fact payloads and schema version 9 are unchanged. Existing clients may omit `cursor`; clients requiring complete dependencies/modules results must consume `next_cursor`. Rollback to an older binary ignores the extra indexes and loses the expanded dependencies response and cursor support.
+
 ---
 
 Navigation: Previous: [18. Observability, Diagnostics, and SLO](18-observability-diagnostics-and-slo.md) | Next: [20. Multi-Repository Code Graph Overlay](20-multi-repository-code-graph-overlay.md)

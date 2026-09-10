@@ -180,6 +180,7 @@ pub(in crate::storage::sqlite) fn refreshed_fenced_projection(
     let dependency_usage_count = count_dependency_usages(connection, source_scope)?;
 
     Ok(SoftwareGlobalProjection {
+        next_cursor: None,
         components: components_for_scope(
             connection,
             source_scope,
@@ -425,6 +426,7 @@ fn unfiltered_request(status: &SoftwareGlobalStatus) -> SoftwareGlobalRequest {
         kind: SoftwareGlobalKind::All,
         freshness_policy: FreshnessPolicy::AllowStale,
         limit: 1,
+        cursor: None,
     }
 }
 

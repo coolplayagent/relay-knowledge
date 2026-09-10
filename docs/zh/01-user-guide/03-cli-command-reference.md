@@ -115,7 +115,7 @@ relay-knowledge repo framework <alias> [--query <text>] [--framework angular|vue
 relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
-relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|modules|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--path <prefix>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
+relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|modules|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--path <prefix>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--cursor <token>]
 relay-knowledge repo software export <alias> --profile spdx-3|cyclonedx-1.7|prov-o [--ref <ref>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo business <alias> [--ref <ref>] [--domain <id>] [--query <text>] [--kind terms|mappings|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo view <alias> [--kind architecture-layers|business-domains|dependency-tour|process-flow|affected-scope] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--changed-path <path>]
@@ -242,4 +242,4 @@ software/architecture model、impact 和 code context 证据。
 该 skill 不配置 MCP、不调用 MCP 工具，也不管理 ACP session。协议级 agent 接入请使用
 MCP/ACP 对应章节。
 
-`repo software --kind modules` 返回每个 Maven POM 一个模块节点及聚合/依赖边，支持重复 `--path` 过滤；节点与边共享 `--limit`，超限明确报错。`repo impact` 返回默认 profile 下的直接和传递下游 POM 证据链。详情见[软件全域模型](../03-architecture-specs/21-software-global-domain-modeling.md)。
+`repo software --kind dependencies` 返回 Maven 模块、POM 声明依赖、组件和源码使用记录；`--kind modules` 只返回 reactor 图。两者每页所有数组共享 `--limit`（上限 500），有后续数据时返回 `next_cursor`。保持 ref 和过滤条件不变，使用 `--cursor <token>` 继续读取，直到游标省略；合并各页得到完整结果。`repo impact` 返回默认 profile 的下游 POM 证据链。详见[软件全域模型](../03-architecture-specs/21-software-global-domain-modeling.md)。

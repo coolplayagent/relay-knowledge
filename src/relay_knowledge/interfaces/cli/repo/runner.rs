@@ -434,6 +434,7 @@ pub async fn run_repo(
             render_report_response(&response, format)
         }
         RepoCommand::Software {
+            cursor,
             path_filters,
             alias,
             ref_selector,
@@ -447,6 +448,7 @@ pub async fn run_repo(
                 freshness,
                 limit,
             )
+            .and_then(|request| request.with_cursor(cursor))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .software_global_projection(request, context)

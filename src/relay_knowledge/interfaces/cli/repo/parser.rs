@@ -468,9 +468,14 @@ fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let mut freshness = FreshnessPolicy::AllowStale;
     let mut limit = 100;
     let mut path_filters = Vec::new();
+    let mut cursor = None;
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
+            "--cursor" => {
+                cursor = Some(value_after(tokens, index, "--cursor")?);
+                index += 2;
+            }
             "--path" => {
                 path_filters.push(value_after(tokens, index, "--path")?);
                 index += 2;
@@ -499,6 +504,7 @@ fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
     }
 
     Ok(RepoCommand::Software {
+        cursor,
         path_filters,
         alias,
         ref_selector,

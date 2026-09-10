@@ -32,6 +32,8 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
 
         CREATE INDEX IF NOT EXISTS software_components_scope
             ON software_components(source_scope, language_id, ecosystem, name);
+        CREATE INDEX IF NOT EXISTS software_components_page
+            ON software_components(source_scope, component_id);
 
         CREATE TABLE IF NOT EXISTS software_sdk_usages (
             usage_id TEXT PRIMARY KEY,

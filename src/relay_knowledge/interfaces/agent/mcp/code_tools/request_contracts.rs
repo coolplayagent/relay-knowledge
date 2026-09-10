@@ -124,6 +124,8 @@ pub(super) struct CodeFrameworkGraphArgs {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct CodeSoftwareQueryArgs {
+    #[serde(default)]
+    pub(super) cursor: Option<String>,
     pub(super) repository: String,
     #[serde(default)]
     pub(super) kind: Option<String>,

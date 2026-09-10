@@ -188,12 +188,18 @@ pub(super) fn code_impact_request(payload: &Value) -> Result<CodeImpactRequest, 
 }
 
 pub(super) fn code_software_request(payload: &Value) -> Result<SoftwareGlobalRequest, WebError> {
+    let cursor = match payload.get("cursor") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(cursor)) => Some(cursor.clone()),
+        _ => return Err(WebError::bad_request("cursor must be a string".into())),
+    };
     SoftwareGlobalRequest::new(
         code_selector(payload)?,
         parse_software_kind(string_field(payload, "kind")?)?,
         parse_freshness(string_field(payload, "freshness")?)?,
         usize_field(payload, "limit")?,
     )
+    .and_then(|request| request.with_cursor(cursor))
     .map_err(|error| WebError::bad_request(error.to_string()))
 }
 

@@ -25,6 +25,7 @@ use super::{
 };
 
 mod component_order;
+mod dependencies;
 mod entity_targets;
 mod fair_limit;
 mod fenced;
@@ -39,6 +40,7 @@ const COMPONENT_USAGE_TARGET_QUERY_BATCH_SIZE: usize = 256;
 
 #[derive(Default)]
 struct ProjectionSlices {
+    next_cursor: Option<String>,
     components: Vec<SoftwareComponent>,
     dependency_usages: Vec<SoftwareDependencyUsage>,
     sdk_usages: Vec<SoftwareSdkUsage>,
@@ -137,6 +139,7 @@ pub(in super::super) fn refresh_projection(
     transaction.commit()?;
 
     Ok(SoftwareGlobalProjection {
+        next_cursor: None,
         status,
         components,
         dependency_usages,
@@ -194,9 +197,13 @@ pub(in super::super) fn projection_for_scope(
             design_element_count: 0,
             last_error: Some("software global projection has not been refreshed".to_owned()),
         });
+    request
+        .validate()
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
     let slices = projection_slices(connection, source_scope, &request)?;
 
     Ok(SoftwareGlobalProjection {
+        next_cursor: slices.next_cursor,
         status,
         components: slices.components,
         dependency_usages: slices.dependency_usages,
@@ -219,17 +226,8 @@ fn projection_slices(
     request: &SoftwareGlobalRequest,
 ) -> Result<ProjectionSlices, StorageError> {
     match request.kind {
-        SoftwareGlobalKind::Dependencies => {
-            let components =
-                components_for_scope(connection, source_scope, request, request.limit)?;
-            let remaining = request.limit.saturating_sub(components.len());
-            let dependency_usages =
-                dependency_usage::usages_for_scope(connection, source_scope, request, remaining)?;
-            Ok(ProjectionSlices {
-                components,
-                dependency_usages,
-                ..ProjectionSlices::default()
-            })
+        SoftwareGlobalKind::Dependencies | SoftwareGlobalKind::Modules => {
+            dependencies::page(connection, source_scope, request)
         }
         SoftwareGlobalKind::Sdks => Ok(ProjectionSlices {
             sdk_usages: sdk_usages_for_scope(connection, source_scope, request, request.limit)?,
@@ -252,19 +250,6 @@ fn projection_slices(
             )?,
             ..ProjectionSlices::default()
         }),
-        SoftwareGlobalKind::Modules => {
-            let (build_targets, relationships) =
-                crate::storage::sqlite::maven::reactor::projection(
-                    connection,
-                    source_scope,
-                    request,
-                )?;
-            Ok(ProjectionSlices {
-                build_targets,
-                relationships,
-                ..ProjectionSlices::default()
-            })
-        }
         SoftwareGlobalKind::Build => Ok(ProjectionSlices {
             build_targets: lifecycle::build_targets_for_scope(
                 connection,
@@ -382,6 +367,7 @@ fn projection_slices(
                 request.limit,
             )?;
             let mut slices = ProjectionSlices {
+                next_cursor: None,
                 components,
                 dependency_usages,
                 sdk_usages: sdk_usages_for_scope(connection, source_scope, request, request.limit)?,

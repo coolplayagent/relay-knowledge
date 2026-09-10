@@ -173,7 +173,9 @@ pub(super) async fn code_software_query_tool(
         Ok(selector) => selector,
         Err(error) => return tool_error_result(domain_argument_error(error)),
     };
-    let request = match SoftwareGlobalRequest::new(selector, kind, freshness, limit) {
+    let request = match SoftwareGlobalRequest::new(selector, kind, freshness, limit)
+        .and_then(|request| request.with_cursor(args.cursor))
+    {
         Ok(request) => request,
         Err(error) => return tool_error_result(domain_argument_error(error)),
     };

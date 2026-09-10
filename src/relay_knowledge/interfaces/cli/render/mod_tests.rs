@@ -1,6 +1,12 @@
 use super::render_text;
 
 #[test]
+fn software_text_exposes_page_continuation() {
+    let text = render_text("code.repo.software", &serde_json::json!({"request":{"kind":"modules"}, "build_targets":[], "relationships":[], "status":{"stale":false}, "next_cursor":"sw1:abcd"})).unwrap();
+    assert!(text.contains("next_cursor=sw1:abcd"));
+}
+
+#[test]
 fn map_show_reports_complete_v1_history_window() {
     let rendered = render_text(
         "knowledge.map.show",

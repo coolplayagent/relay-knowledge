@@ -2,6 +2,9 @@
 use super::*;
 use relay_knowledge::domain::{CodeImpactRequest, CodeWorkspaceDetectionConfig};
 
+#[path = "code_repository_maven_cli.rs"]
+mod cli;
+
 #[tokio::test]
 async fn maven_modules_propagate_downstream_and_incremental_removes_old_edges() {
     let repo = FixtureRepo::create("maven-reactor");
@@ -105,6 +108,18 @@ async fn maven_152_modules_preserve_all_direct_dependency_edges() {
         members.push_str(&format!("<module>{name}</module>"));
         let dependency = (index > 0).then(|| "unit-0".to_owned());
         write_module(&repo, &name, dependency.as_deref());
+        let pom_path = format!("{name}/pom.xml");
+        let pom = std::fs::read_to_string(repo.path.join(&pom_path)).unwrap();
+        let external = "<dependency><groupId>external</groupId><artifactId>logging</artifactId><version>1</version></dependency>";
+        let pom = if pom.contains("</dependencies>") {
+            pom.replace("</dependencies>", &format!("{external}</dependencies>"))
+        } else {
+            pom.replace(
+                "</project>",
+                &format!("<dependencies>{external}</dependencies></project>"),
+            )
+        };
+        repo.write(&pom_path, &pom);
     }
     repo.write("pom.xml", &format!("<project><groupId>demo</groupId><artifactId>root</artifactId><version>1</version><packaging>pom</packaging><modules>{members}</modules></project>"));
     repo.git(["add", "."]);
@@ -114,15 +129,57 @@ async fn maven_152_modules_preserve_all_direct_dependency_edges() {
     let indexed = index(&service, CodeIndexMode::Full).await;
     assert_eq!(indexed.summary.indexed_file_count, 305);
     assert_eq!(indexed.summary.degraded_file_count, 0);
-    let graph = modules(&service).await;
-    assert_eq!(graph.build_targets.len(), 153);
-    assert_eq!(graph.relationships.len(), 303);
-    assert!(
-        graph
-            .relationships
-            .iter()
-            .all(|edge| edge.resolution_state == "resolved")
-    );
+    for kind in [
+        SoftwareGlobalKind::Modules,
+        SoftwareGlobalKind::Dependencies,
+    ] {
+        let mut request = SoftwareGlobalRequest::new(
+            selector("fixture", "HEAD"),
+            kind,
+            FreshnessPolicy::WaitUntilFresh,
+            500,
+        )
+        .unwrap();
+        let mut nodes = std::collections::BTreeSet::new();
+        let mut edges = std::collections::BTreeSet::new();
+        let mut artifacts = 0;
+        let mut pages = 0;
+        loop {
+            let graph = service
+                .software_global_projection(request.clone(), context("paged-large-reactor"))
+                .await
+                .unwrap();
+            assert!(
+                graph.build_targets.len()
+                    + graph.relationships.len()
+                    + graph.components.len()
+                    + graph.dependency_usages.len()
+                    <= 500
+            );
+            for node in graph.build_targets {
+                assert!(nodes.insert(node.target_id));
+            }
+            for edge in graph.relationships {
+                assert!(edges.insert(edge.relationship_id));
+                if edge.target_kind == "artifact" {
+                    artifacts += 1;
+                    assert_eq!(edge.resolution_state, "unresolved");
+                } else {
+                    assert_eq!(edge.resolution_state, "resolved");
+                }
+            }
+            pages += 1;
+            assert!(pages < 20);
+            let Some(cursor) = graph.next_cursor else {
+                break;
+            };
+            request.cursor = Some(cursor);
+        }
+        assert!(pages >= 2);
+        assert_eq!(nodes.len(), 153);
+        assert_eq!(edges.len(), 455);
+        assert_eq!(artifacts, 152);
+    }
 }
 
 fn write_module(repo: &FixtureRepo, name: &str, dependency: Option<&str>) {

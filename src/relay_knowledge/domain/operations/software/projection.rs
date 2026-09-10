@@ -91,6 +91,9 @@ fn legacy_ontology_version() -> String {
 /// Projected software global facts for one repository scope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SoftwareGlobalProjection {
+    /// Continuation for a bounded dependencies/modules page; absent on the last page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
     pub status: SoftwareGlobalStatus,
     pub components: Vec<SoftwareComponent>,
     pub dependency_usages: Vec<SoftwareDependencyUsage>,

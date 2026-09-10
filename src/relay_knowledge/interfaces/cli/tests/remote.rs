@@ -301,7 +301,8 @@ async fn remote_repo_software_posts_stable_code_api_and_kind() {
         assert!(request.starts_with("POST /api/v1/code/repositories/fixture/software HTTP/1.1"));
         assert!(request.contains("x-relay-trace-id: trace-remote-software"));
         assert!(request.contains("\"repository\":\"fixture\""));
-        assert!(request.contains("\"kind\":\"relationships\""));
+        assert!(request.contains("\"kind\":\"dependencies\""));
+        assert!(request.contains("\"cursor\":\"sw1:abcd\""));
         let response = json!({
             "metadata": {
                 "trace_id": "trace-remote-software",
@@ -371,10 +372,11 @@ async fn remote_repo_software_posts_stable_code_api_and_kind() {
             .expect("response body should write");
     });
     let action = CliAction::Repo(repo::RepoCommand::Software {
+        cursor: Some("sw1:abcd".into()),
         path_filters: Vec::new(),
         alias: "fixture".to_owned(),
         ref_selector: "HEAD".to_owned(),
-        kind: SoftwareGlobalKind::Relationships,
+        kind: SoftwareGlobalKind::Dependencies,
         freshness: FreshnessPolicy::AllowStale,
         limit: 25,
     });
