@@ -444,6 +444,7 @@ pub(super) fn static_owner(node: Node<'_>, method: &str, content: &str) -> Optio
             && current
                 .child_by_field_name("name")
                 .is_some_and(|n| text(n, content) == method)
+            && super::static_imports::shadows(current, node, content)
         {
             return None;
         }

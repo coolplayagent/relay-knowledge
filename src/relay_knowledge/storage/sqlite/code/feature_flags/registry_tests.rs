@@ -383,3 +383,6 @@ fn conflicts_include_located_sources_and_unknown_flow_cannot_claim_completeness(
             .any(|d| d.starts_with("incomplete_analysis"))
     );
 }
+
+#[path = "review_tests.rs"]
+mod review_tests;

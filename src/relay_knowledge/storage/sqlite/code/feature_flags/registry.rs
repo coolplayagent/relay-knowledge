@@ -2,9 +2,9 @@
 use super::*;
 mod consistency;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-const MAX_ROWS: usize = 10_000;
+pub(super) const MAX_ROWS: usize = 10_000;
 const MAX_BYTES: usize = 16 * 1024 * 1024;
-const COLUMNS: &str = "flag.feature_flag_id,flag.usage_id,flag.file_id,flag.path,flag.language_id,flag.name,flag.source_kind,flag.source_key,flag.edge_kind,flag.confidence_basis_points,flag.confidence_tier,flag.byte_start,flag.byte_end,flag.line_start,flag.line_end,flag.excerpt,flag.metadata_json,NULL,NULL";
+const COLUMNS: &str = "flag.feature_flag_id,flag.usage_id,flag.file_id,flag.path,flag.language_id,flag.name,flag.source_kind,flag.source_key,flag.edge_kind,flag.confidence_basis_points,flag.confidence_tier,flag.byte_start,flag.byte_end,flag.line_start,flag.line_end,flag.excerpt,flag.metadata_json,(SELECT symbol_snapshot_id FROM code_repository_symbols symbol WHERE symbol.source_scope=flag.source_scope AND symbol.path=flag.path AND symbol.line_start<=flag.line_start AND symbol.line_end>=flag.line_start ORDER BY symbol.line_start DESC,symbol.line_end ASC LIMIT 1),(SELECT name FROM code_repository_symbols symbol WHERE symbol.source_scope=flag.source_scope AND symbol.path=flag.path AND symbol.line_start<=flag.line_start AND symbol.line_end>=flag.line_start ORDER BY symbol.line_start DESC,symbol.line_end ASC LIMIT 1)";
 struct QueryBudget<'a>(&'a Connection);
 impl Drop for QueryBudget<'_> {
     fn drop(&mut self) {
@@ -13,6 +13,22 @@ impl Drop for QueryBudget<'_> {
 }
 
 pub(super) fn search(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeFeatureFlagRequest,
+) -> Result<Vec<CodeFeatureFlagGraph>, StorageError> {
+    search_bounded(connection, status, request).map_err(query_error)
+}
+fn query_error(error: StorageError) -> StorageError {
+    if matches!(&error, StorageError::Sqlite(rusqlite::Error::SqliteFailure(code, _))
+        if code.code == rusqlite::ErrorCode::OperationInterrupted)
+    {
+        incomplete("SQLite query time or step budget exceeded")
+    } else {
+        error
+    }
+}
+fn search_bounded(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     request: &CodeFeatureFlagRequest,
@@ -347,6 +363,13 @@ fn check_size(rows: &[FeatureFlagRow]) -> Result<(), StorageError> {
     Ok(())
 }
 fn load(
+    connection: &Connection,
+    sql: &str,
+    params: &[Value],
+) -> Result<Vec<FeatureFlagRow>, StorageError> {
+    load_rows(connection, sql, params).map_err(query_error)
+}
+fn load_rows(
     connection: &Connection,
     sql: &str,
     params: &[Value],

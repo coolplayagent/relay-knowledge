@@ -201,7 +201,7 @@ fn feature_flag_sql_query(
         "
     );
     let mut params = filter_params.clone();
-    params.push(Value::Integer(request.limit as i64));
+    params.push(Value::Integer(registry::MAX_ROWS as i64 + 1));
     params.extend(filter_params);
 
     FeatureFlagSqlQuery { sql, params }

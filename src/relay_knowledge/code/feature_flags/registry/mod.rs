@@ -4,6 +4,7 @@ use crate::code::config_files::ConfigRange;
 use crate::domain::{CodeConfigMetadata, CodeFeatureFlagRecord, DomainError};
 mod files;
 mod java;
+mod shell;
 
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,

@@ -295,3 +295,98 @@ fn ordinary_string_constants_remain_internal_candidates() {
         "declares_config_key"
     );
 }
+
+#[test]
+fn java_sdk_flags_survive_registry_extraction() {
+    let rows = crate::code::feature_flags::extract_feature_flags(FeatureFlagFileInput {
+        repository_id: "repo",
+        source_scope: "scope",
+        file_id: "file",
+        path: "App.java",
+        language_id: "java",
+        content: r#"class App { void run() {
+          var client = OpenFeature.getClient();
+          if (client.getBooleanValue("sdk_checkout", false)) {}
+          ldClient.variation("sdk_payment", false);
+          unleash.isEnabled("sdk_orders");
+          System.getProperty("local_setting");
+        }}"#,
+        config_facts: &[],
+    })
+    .unwrap();
+    for key in ["sdk_checkout", "sdk_payment", "sdk_orders"] {
+        assert!(
+            rows.iter().any(|r| r.source_kind == "sdk_flag_key"
+                && r.source_key == key
+                && r.metadata.source_format == "java"),
+            "{rows:?}"
+        );
+    }
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.source_key == "local_setting" && r.edge_kind == "reads_config")
+            .count(),
+        1
+    );
+}
+#[test]
+fn properties_escapes_do_not_corrupt_ini_or_template_defaults() {
+    for language in ["ini", "gotemplate"] {
+        let rows = facts(language, r"directory=C:\temp\files");
+        assert_eq!(
+            rows[0].metadata.default_value.as_deref(),
+            Some(r"C:\temp\files")
+        );
+    }
+    assert_eq!(
+        facts("properties", r"directory=C:\temp")[0]
+            .metadata
+            .default_value
+            .as_deref(),
+        Some("C:\temp")
+    );
+}
+#[test]
+fn static_imports_ignore_sibling_nested_and_inapplicable_methods() {
+    let rows = facts(
+        "java",
+        r#"import static java.lang.System.getenv;
+      class Sibling { String getenv(String key) { return key; } }
+      class App { class Nested { String getenv(String key) { return key; } }
+        String getenv(int index) { return "local"; }
+        void run() { getenv("REAL_ENV"); }
+      }
+      class Shadow { String getenv(String key) { return key; }
+        void run() { getenv("NOT_ENV"); }
+      }"#,
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "REAL_ENV" && r.source_kind == "env_var")
+    );
+    assert!(!rows.iter().any(|r| r.source_key == "NOT_ENV"));
+}
+#[test]
+fn later_export_retains_only_the_latest_unconditional_shell_assignment() {
+    let rows = facts(
+        "bash",
+        r#"FLAG=no; FLAG=yes; export FLAG; echo "$FLAG"
+      OTHER=old; if test -f marker; then OTHER=new; fi; export OTHER
+      GONE=old; unset GONE; export GONE
+    "#,
+    );
+    let definitions = rows
+        .iter()
+        .filter(|r| r.edge_kind == "defines_config")
+        .collect::<Vec<_>>();
+    assert_eq!(definitions.len(), 1, "{rows:?}");
+    assert_eq!(definitions[0].source_key, "FLAG");
+    assert_eq!(
+        definitions[0].metadata.default_value.as_deref(),
+        Some("yes")
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "FLAG" && r.edge_kind == "reads_config")
+    );
+}

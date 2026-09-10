@@ -330,3 +330,5 @@ relay-knowledge repo feature-flags demo --query feature_y --consistency --format
 Java getter 值流还支持已确认属于 java.lang 的 Boolean/Integer/Long/Double 解析及装箱转换。无法解析的 getter 返回值流通过 `metadata.flow_incomplete` 标记，不能宣称一致性分析完整。字符串常量只有被范围内的配置读取引用、带显式 `@config domain=...` / `hot-reload=...` 元数据，或遵循声明约定（所属类型名以 `Keys` 结尾、字段名以 `_KEY` 结尾）时才公开为配置声明。其余字符串仅作为内部符号候选，不进入配置查询及通用配置视图。
 
 一致性检查从限定范围的已索引文件清单获取格式覆盖，包含空模板和只有注释的模板，并遵守仓库路径、语言限制。`conflicting_default_sources` 返回冲突默认值对应的使用记录，可直接通过 `metadata.default_value`、`path`、`line_range`、`excerpt`、`usage_id` 定位每个来源；原有简短 `conflicting_defaults` 诊断继续保留。
+
+Java SDK 开关继续使用现有 SDK 提取器，与配置读取同时提取。静态平台导入不会被无关兄弟类、嵌套类或不适用的重载方法遮蔽。Shell 先赋值后明确导出的变量保留定义与默认值；properties 转义解码不再改变 INI/模板的反斜杠。扩展查询和一致性查询保留所在符号的信息。结果数量限制在符号键解析、分组和排序后应用：候选仍受 10,000 条使用记录预算约束，超出预算或 SQLite 时间/步骤预算时返回明确的分析不完整错误。返回陈旧快照时，即使其持久化状态曾为已完成且新鲜，也不能给出确定性的一致性结论。

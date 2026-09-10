@@ -91,7 +91,7 @@ pub(crate) fn extract_feature_flags(
         let sdk_keys = sdk_flag_keys_for_line(&scan_line, &mut sdk_receivers, brace_depth);
         if !matches!(
             input.language_id,
-            "java" | "properties" | "ini" | "gotemplate" | "bash"
+            "properties" | "ini" | "gotemplate" | "bash"
         ) {
             collect_line_records(
                 &mut records,
@@ -282,18 +282,20 @@ fn collect_line_records(
 
     let mut seen = Vec::<(String, String, &'static str)>::new();
     for (source_kind, source_key, edge_kind) in line_records {
+        if context.input.language_id == "java" && source_kind != "sdk_flag_key" {
+            continue;
+        }
         if seen.iter().any(|(known_kind, known_key, known_edge)| {
             known_kind == source_kind && known_key == &source_key && known_edge == &edge_kind
         }) {
             continue;
         }
         seen.push((source_kind.to_owned(), source_key.clone(), edge_kind));
-        records.push(feature_flag_record(
-            &context,
-            source_kind,
-            &source_key,
-            edge_kind,
-        )?);
+        let mut record = feature_flag_record(&context, source_kind, &source_key, edge_kind)?;
+        if context.input.language_id == "java" {
+            record.metadata.source_format = "java".into();
+        }
+        records.push(record);
     }
 
     Ok(())

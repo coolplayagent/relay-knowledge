@@ -77,12 +77,25 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
                 10,
                 FreshnessPolicy::AllowStale,
             )
-            .expect("feature flag request should validate"),
+            .expect("feature flag request should validate")
+            .with_filters(relay_knowledge::domain::CodeConfigFilter {
+                consistency: true,
+                ..Default::default()
+            })
+            .unwrap(),
             context("query-stale-feature-flag-a"),
         )
         .await
         .expect("allow-stale feature flags should use the latest compatible a scope");
 
+    assert!(flags.flags.iter().all(|flag| {
+        !flag.analysis_complete
+            && flag.conflicting_default_sources.is_empty()
+            && flag
+                .consistency_diagnostics
+                .iter()
+                .all(|d| d.starts_with("incomplete_analysis"))
+    }));
     assert!(flags.metadata.stale);
     assert!(flags.scope.stale);
     assert_eq!(flags.freshness.state, CodeRepositoryFreshnessState::Pending);

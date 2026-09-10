@@ -1,12 +1,11 @@
 //! Properties/INI/template values and exported shell configuration facts.
 use super::*;
-use tree_sitter::Node;
 
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     if input.language_id == "bash" {
-        return shell(input);
+        return super::shell::extract(input);
     }
     let mut records = Vec::new();
     let mut offset = 0;
@@ -36,7 +35,11 @@ pub(super) fn extract(
         } else if !line.is_empty() && !line.starts_with(['#', '!', ';']) && !line.starts_with("{{")
         {
             if let Some((key, raw)) = assignment(line) {
-                let key = decode(key).unwrap_or_default();
+                let key = if input.language_id == "properties" {
+                    decode(key).unwrap_or_default()
+                } else {
+                    key.to_owned()
+                };
                 if !key.is_empty() {
                     let key = if section.is_empty() {
                         key
@@ -57,7 +60,11 @@ pub(super) fn extract(
                         offset,
                     )?;
                     if !template {
-                        let value = decode(raw.trim()).unwrap_or_else(|| raw.to_owned());
+                        let value = if input.language_id == "properties" {
+                            decode(raw.trim()).unwrap_or_else(|| raw.to_owned())
+                        } else {
+                            raw.trim().to_owned()
+                        };
                         row.metadata.value_type = Some(value_type(&value).to_owned());
                         row.metadata.default_value = Some(value);
                     }
@@ -188,7 +195,7 @@ fn action_end(content: &str, start: usize) -> Option<usize> {
     }
     None
 }
-fn quoted(raw: &str) -> Option<(String, usize)> {
+pub(super) fn quoted(raw: &str) -> Option<(String, usize)> {
     let quote = raw.chars().next()?;
     if !matches!(quote, '"' | '`' | '\'') {
         return None;
@@ -215,161 +222,4 @@ fn quoted(raw: &str) -> Option<(String, usize)> {
         }
     }
     None
-}
-
-fn shell(input: &FeatureFlagFileInput<'_>) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
-    let mut parser = tree_sitter::Parser::new();
-    parser
-        .set_language(&tree_sitter_bash::LANGUAGE.into())
-        .map_err(|e| DomainError::invalid("shell", e.to_string()))?;
-    let tree = parser
-        .parse(input.content, None)
-        .ok_or_else(|| DomainError::invalid("shell", "parse cancelled"))?;
-    let mut pending = vec![tree.root_node()];
-    let mut rows = Vec::new();
-    while let Some(node) = pending.pop() {
-        if node.kind() == "variable_assignment"
-            && node
-                .parent()
-                .and_then(|parent| export_mode(parent, input.content))
-                == Some(true)
-        {
-            if let (Some(name), Some(value)) = (
-                node.child_by_field_name("name"),
-                node.child_by_field_name("value"),
-            ) {
-                let mut row = record(
-                    input,
-                    "env_var",
-                    &input.content[name.byte_range()],
-                    "defines_config",
-                    node.start_byte(),
-                    node.end_byte(),
-                )?;
-                let value = &input.content[value.byte_range()];
-                if !value.contains(['$', '`']) {
-                    let value = quoted(value).map_or_else(|| value.to_owned(), |(value, _)| value);
-                    row.metadata.value_type = Some(value_type(&value).to_owned());
-                    row.metadata.default_value = Some(value);
-                }
-                rows.push(row);
-            }
-        }
-        if matches!(node.kind(), "simple_expansion" | "expansion") {
-            let mut cursor = node.walk();
-            if let Some(name) = node
-                .named_children(&mut cursor)
-                .find(|child| child.kind() == "variable_name")
-            {
-                let key = &input.content[name.byte_range()];
-                if shell_external(node, key, input.content) {
-                    rows.push(record(
-                        input,
-                        "env_var",
-                        key,
-                        "reads_config",
-                        node.start_byte(),
-                        node.end_byte(),
-                    )?);
-                }
-            }
-        }
-        let mut cursor = node.walk();
-        pending.extend(node.named_children(&mut cursor));
-    }
-    Ok(rows)
-}
-
-fn export_mode(node: Node<'_>, content: &str) -> Option<bool> {
-    if !matches!(node.kind(), "declaration_command" | "unset_command") {
-        return None;
-    }
-    let mut words = content[node.byte_range()].split_whitespace();
-    let command = words.next()?;
-    let options = words
-        .take_while(|word| word.starts_with(['-', '+']))
-        .collect::<Vec<_>>();
-    if command == "unset"
-        || options
-            .iter()
-            .any(|option| *option == "-n" || (option.starts_with('+') && option.contains('x')))
-    {
-        return Some(false);
-    }
-    if options.contains(&"-p") {
-        return None;
-    }
-    if command == "export"
-        || options
-            .iter()
-            .any(|option| option.starts_with('-') && option.contains('x'))
-    {
-        return Some(true);
-    }
-    (command == "local").then_some(false)
-}
-fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> bool {
-    let mut budget = 1024_usize;
-    let mut assigned = false;
-    while let Some(parent) = node.parent() {
-        if budget == 0 {
-            return false;
-        }
-        budget -= 1;
-        if matches!(parent.kind(), "program" | "compound_statement" | "do_group") {
-            let mut previous = node.prev_named_sibling();
-            while let Some(statement) = previous {
-                let mut pending = vec![(statement, false)];
-                while let Some((candidate, conditional)) = pending.pop() {
-                    if budget == 0 {
-                        return false;
-                    }
-                    budget -= 1;
-                    if let Some(exported) = export_mode(candidate, content) {
-                        let mut cursor = candidate.walk();
-                        let names = candidate.named_children(&mut cursor).any(|child| {
-                            (matches!(child.kind(), "word" | "variable_name")
-                                && &content[child.byte_range()] == key)
-                                || (child.kind() == "variable_assignment"
-                                    && child
-                                        .child_by_field_name("name")
-                                        .is_some_and(|name| &content[name.byte_range()] == key))
-                        });
-                        if names {
-                            return !conditional && exported;
-                        }
-                    }
-                    if candidate.kind() == "variable_assignment"
-                        && candidate
-                            .child_by_field_name("name")
-                            .is_some_and(|name| &content[name.byte_range()] == key)
-                    {
-                        if conditional {
-                            return false;
-                        }
-                        assigned = true;
-                        continue;
-                    }
-                    let conditional = match candidate.kind() {
-                        "compound_statement" | "declaration_command" => conditional,
-                        "list" | "if_statement" | "elif_clause" | "else_clause"
-                        | "while_statement" | "for_statement" | "do_group" | "case_statement"
-                        | "case_item" => true,
-                        _ => continue,
-                    };
-                    let mut cursor = candidate.walk();
-                    for child in candidate.named_children(&mut cursor) {
-                        if budget == 0 {
-                            return false;
-                        }
-                        budget -= 1;
-                        pending.push((child, conditional));
-                    }
-                }
-                previous = statement.prev_named_sibling();
-            }
-        }
-        node = parent;
-    }
-    !assigned
 }

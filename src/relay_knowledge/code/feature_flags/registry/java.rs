@@ -3,6 +3,7 @@ use super::*;
 use tree_sitter::Node;
 mod flow;
 mod names;
+mod static_imports;
 use names::{field_symbol, literal, receiver_type, text};
 
 pub(super) fn extract(
