@@ -155,8 +155,8 @@ pub(super) fn code_feature_flag_request(
     payload: &Value,
 ) -> Result<CodeFeatureFlagRequest, WebError> {
     let filters = crate::domain::CodeConfigFilter {
-        domain: optional_string_field(payload, "domain"),
-        source: optional_string_field(payload, "source"),
+        domain: optional_filter_string(payload, "domain")?,
+        source: optional_filter_string(payload, "source")?,
         hot_reload: optional_bool_field(payload, "hot_reload")?,
         consistency: optional_bool_field(payload, "consistency")?.unwrap_or(false),
     };
@@ -301,6 +301,17 @@ pub(super) fn string_field<'a>(
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| WebError::bad_request(format!("{field} is required")))
+}
+
+fn optional_filter_string(
+    payload: &Value,
+    field: &'static str,
+) -> Result<Option<String>, WebError> {
+    match payload.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(_) => Err(WebError::bad_request(format!("{field} must be a string"))),
+    }
 }
 
 pub(super) fn optional_string_field(payload: &Value, field: &'static str) -> Option<String> {

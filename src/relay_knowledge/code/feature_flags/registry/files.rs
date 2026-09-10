@@ -27,7 +27,9 @@ pub(super) fn extract(
             && logical.chars().rev().take_while(|c| *c == '\\').count() % 2 == 1
         {
             logical.pop();
-            continue;
+            if offset < input.content.len() {
+                continue;
+            }
         }
         let line = if input.language_id == "properties" {
             logical.trim_start()

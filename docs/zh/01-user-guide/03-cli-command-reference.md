@@ -194,9 +194,11 @@ Kind 取值按命令家族隔离：
 
 配置注册表支持 `--domain <domain>`（显式注释中的领域值）、`--source java|properties|ini|ctmpl|shell` 和 `--hot-reload true|false`。来源和领域值不区分大小写；未知领域或热加载元数据不匹配显式过滤条件。过滤条件选择配置分组，并保留其关联使用关系。`--query` 使用 Unicode 小写匹配。`--consistency` 增加读取未定义、缺少格式和默认值冲突诊断；`conflicting_default_sources` 给出每个默认值对应的路径、行号和 excerpt。数据过期、降级，或关联绑定未解析、值流不受支持时，相应分组标记 `analysis_complete: false`，不输出确定的一致性结论；无关分组仍可独立分析。使用关系、字节、符号、展开深度或 SQLite 查询超出预算时返回明确的分析不完整错误，需要收窄查询范围。Java 嵌套类型及带显式注释的常量字段参与绑定解析。配置行号范围不包含末尾换行符。 绑定结果和配置证据按引用及剩余深度缓存，避免接口使用关系重复扫描全部实现。Java getter 标记计入每文件 10,000 条事实预算，getter 收集也受限。局部变量守卫不匹配无关的同名方法或字段。Shell 定义要求主 shell 中无条件的赋值和导出；条件分支、延迟执行函数及子 shell 内的导出不能证明主 shell 配置已定义。
 
-文本查询可从匹配的 getter 路径或 excerpt 开始解析，再应用分组元数据过滤。getter 单一返回值分析忽略注释；支持单一类型通配导入，多个竞争通配导入保持未解析。Java key 常量声明按实际读取归入属性或环境变量命名空间；同一常量用于两者时分别保留声明证据。Properties 默认值保留末尾空白。Properties、INI、模板和 Shell 每文件最多抽取 10,000 条事实，模板读取动作也计入预算。
+文本查询可从匹配的 getter 路径或 excerpt 开始解析，再应用分组元数据过滤。getter 单一返回值分析忽略注释；通配导入本身不能证明接收者归属；缺少索引类型证据时保持未解析，显式导入和可见本地类型优先。Java key 常量声明按实际读取归入属性或环境变量命名空间；同一常量用于两者时分别保留声明证据。Properties 默认值保留末尾空白。Properties、INI、模板和 Shell 每文件最多抽取 10,000 条事实，模板读取动作也计入预算。
 
 查询词用于选择分组，一致性分析前加载所选分组及符号解析所得 key 在已选范围内的全部证据。`--domain`、`--source` 缺值时，即使后面紧跟另一选项也报错。Java `this.KEY` 关联声明字段。裸 key 和空白分隔赋值仅适用于 Properties；INI/模板定义必须包含 `=` 或 `:`。模板 `keyOrDefault` 的带引号回退值及类型计入默认值冲突检查。
+
+Unicode 领域注释与过滤值使用相同的小写规范化。Properties 在 EOF 处理尚未结束的续行。隐式 lambda 参数阻止向外层字段回退，无关嵌套类型不遮蔽 Java 平台 API。Shell 默认值按解析后的引号和转义处理；词法扫描超限明确报告分析不完整。行加载在保留每条记录之前检查累计字节，包括字符串及元数据，避免先分配整个结果再检查 16 MiB 事实预算。操作 payload 的 domain/source 字段接受字符串或 null（视为未提供），拒绝其他值类型。
 
 `repo framework` 读取索引阶段写入的独立 Angular/Vue component-template graph。重复传入 `--framework`、`--kind` 或 `--path` 可以取交集过滤；省略时在所选 scope 内受界枚举。Graph 包含 component、template、binding、slot、template variable 和 control flow 等类型化 node，以及 ownership、render、binding、event、read/write、directive 和 slot edge。Vue SFC 的 script symbol/import 仍可通过普通 `repo query` 查询。该命令不在查询期扫描源码，也不启动索引；`wait-until-fresh` 要求 durable indexed snapshot 已包含当前 framework fact。
 

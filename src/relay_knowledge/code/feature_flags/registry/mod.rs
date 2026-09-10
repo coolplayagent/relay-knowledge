@@ -77,7 +77,7 @@ fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadat
             for part in annotation.split_whitespace() {
                 if let Some((key, value)) = part.split_once('=') {
                     match key {
-                        "domain" => meta.domain = Some(value.to_ascii_lowercase()),
+                        "domain" => meta.domain = Some(value.to_lowercase()),
                         "hot-reload" => meta.hot_reload = value.parse().ok(),
                         _ => {}
                     }

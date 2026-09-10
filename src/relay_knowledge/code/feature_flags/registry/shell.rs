@@ -1,8 +1,8 @@
 //! Bounded lexical export state for shell configuration facts.
-use super::files::quoted;
 use super::*;
 use tree_sitter::Node;
 mod options;
+mod values;
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
@@ -22,7 +22,7 @@ pub(super) fn extract(
                 .parent()
                 .and_then(|parent| export_mode(parent, input.content))
                 == Some(true)
-                || options::allexport(node, input.content))
+                || options::allexport(node, input.content)?)
         {
             if let Some(row) = definition(input, node)? {
                 check_fact_budget(rows.len())?;
@@ -51,7 +51,7 @@ pub(super) fn extract(
                 .find(|child| child.kind() == "variable_name")
             {
                 let key = &input.content[name.byte_range()];
-                if shell_external(node, key, input.content) {
+                if shell_external(node, key, input.content)? {
                     check_fact_budget(rows.len())?;
                     rows.push(record(
                         input,
@@ -114,12 +114,15 @@ fn export_mode(node: Node<'_>, content: &str) -> Option<bool> {
     }
     (command == "local").then_some(false)
 }
-fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> bool {
+fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> Result<bool, DomainError> {
     let mut budget = 1024_usize;
     let mut assigned = false;
     while let Some(parent) = node.parent() {
         if budget == 0 {
-            return false;
+            return Err(DomainError::invalid(
+                "configuration",
+                "shell export analysis incomplete: lexical budget exceeded",
+            ));
         }
         budget -= 1;
         if matches!(parent.kind(), "program" | "compound_statement" | "do_group") {
@@ -128,7 +131,10 @@ fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> bool {
                 let mut pending = vec![(statement, false)];
                 while let Some((candidate, conditional)) = pending.pop() {
                     if budget == 0 {
-                        return false;
+                        return Err(DomainError::invalid(
+                            "configuration",
+                            "shell export analysis incomplete: lexical budget exceeded",
+                        ));
                     }
                     budget -= 1;
                     if let Some(exported) = export_mode(candidate, content) {
@@ -142,7 +148,7 @@ fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> bool {
                                         .is_some_and(|name| &content[name.byte_range()] == key))
                         });
                         if names {
-                            return !conditional && exported;
+                            return Ok(!conditional && exported);
                         }
                     }
                     if candidate.kind() == "variable_assignment"
@@ -151,10 +157,10 @@ fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> bool {
                             .is_some_and(|name| &content[name.byte_range()] == key)
                     {
                         if conditional {
-                            return false;
+                            return Ok(false);
                         }
-                        if options::allexport(candidate, content) {
-                            return true;
+                        if options::allexport(candidate, content)? {
+                            return Ok(true);
                         }
                         assigned = true;
                         continue;
@@ -169,7 +175,10 @@ fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> bool {
                     let mut cursor = candidate.walk();
                     for child in candidate.named_children(&mut cursor) {
                         if budget == 0 {
-                            return false;
+                            return Err(DomainError::invalid(
+                                "configuration",
+                                "shell export analysis incomplete: lexical budget exceeded",
+                            ));
                         }
                         budget -= 1;
                         pending.push((child, conditional));
@@ -180,7 +189,7 @@ fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> bool {
         }
         node = parent;
     }
-    !assigned
+    Ok(!assigned)
 }
 
 fn definition(
@@ -198,12 +207,7 @@ fn definition(
         node.start_byte(),
         node.end_byte(),
     )?;
-    let value = node
-        .child_by_field_name("value")
-        .map(|v| &input.content[v.byte_range()])
-        .unwrap_or("");
-    if !value.contains(['$', '`']) {
-        let value = quoted(value).map_or_else(|| value.to_owned(), |(value, _)| value);
+    if let Some(value) = values::static_value(node.child_by_field_name("value"), input.content)? {
         row.metadata.value_type = Some(value_type(&value).to_owned());
         row.metadata.default_value = Some(value);
     }

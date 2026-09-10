@@ -72,7 +72,11 @@ fn return_only_getters_ignore_comments_but_not_executable_statements() {
 #[test]
 fn wildcard_receiver_imports_respect_explicit_and_local_type_precedence() {
     for (imports, declaration, expected) in [
-        ("import demo.config.*;", "", "demo.config.Config.getX"),
+        (
+            "import demo.config.*;",
+            "",
+            "<ambiguous-import>.Config.getX",
+        ),
         (
             "import demo.config.*; import explicit.Config;",
             "",
@@ -724,3 +728,6 @@ fn allexport_enables_definitions_and_survives_disable_for_existing_exports() {
     let rows = facts("bash", "(set -a)\nLOCAL=no\necho \"$LOCAL\"\n");
     assert!(!rows.iter().any(|r| r.source_key == "LOCAL"));
 }
+
+#[path = "review_tests.rs"]
+mod review_tests;

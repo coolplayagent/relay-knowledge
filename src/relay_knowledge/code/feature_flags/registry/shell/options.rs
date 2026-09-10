@@ -1,21 +1,25 @@
 //! Bounded lexical allexport state; conditional and deferred changes are not assumed.
+use crate::domain::DomainError;
 use tree_sitter::Node;
-pub(super) fn allexport(mut node: Node<'_>, content: &str) -> bool {
+pub(super) fn allexport(mut node: Node<'_>, content: &str) -> Result<bool, DomainError> {
     let mut budget = 1024usize;
     while let Some(parent) = node.parent() {
         if parent.kind() == "function_definition" {
-            return false;
+            return Ok(false);
         }
         let mut previous = node.prev_named_sibling();
         while let Some(statement) = previous {
             let mut pending = vec![(statement, false)];
             while let Some((candidate, conditional)) = pending.pop() {
                 let Some(remaining) = budget.checked_sub(1) else {
-                    return false;
+                    return Err(DomainError::invalid(
+                        "configuration",
+                        "shell allexport analysis incomplete: lexical budget exceeded",
+                    ));
                 };
                 budget = remaining;
                 if let Some(mode) = mode(candidate, content) {
-                    return !conditional && mode;
+                    return Ok(!conditional && mode);
                 }
                 let conditional = match candidate.kind() {
                     "compound_statement" => conditional,
@@ -26,7 +30,10 @@ pub(super) fn allexport(mut node: Node<'_>, content: &str) -> bool {
                 let mut cursor = candidate.walk();
                 for child in candidate.named_children(&mut cursor) {
                     let Some(remaining) = budget.checked_sub(1) else {
-                        return false;
+                        return Err(DomainError::invalid(
+                            "configuration",
+                            "shell allexport analysis incomplete: lexical budget exceeded",
+                        ));
                     };
                     budget = remaining;
                     pending.push((child, conditional));
@@ -36,7 +43,7 @@ pub(super) fn allexport(mut node: Node<'_>, content: &str) -> bool {
         }
         node = parent;
     }
-    false
+    Ok(false)
 }
 fn mode(node: Node<'_>, content: &str) -> Option<bool> {
     if node.kind() != "command" {

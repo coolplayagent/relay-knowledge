@@ -1,6 +1,64 @@
 //! Regression cases from the configuration registry code review.
 use super::*;
 #[test]
+fn loading_stops_at_byte_budget_before_later_malformed_rows() {
+    let db = fixture();
+    let metadata = CodeConfigMetadata {
+        flow_incomplete: Some("x".repeat(60_000)),
+        ..Default::default()
+    };
+    for _ in 0..300 {
+        add(&db, "flag", "config_key", "reads_config", metadata.clone());
+    }
+    add(
+        &db,
+        "invalid",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata::default(),
+    );
+    db.execute("UPDATE code_repository_feature_flags SET metadata_json='invalid' WHERE source_key='invalid'", []).unwrap();
+    let error = load(
+        &db,
+        &format!("SELECT {COLUMNS} FROM code_repository_feature_flags flag ORDER BY flag.rowid"),
+        &[],
+    )
+    .map(|_| ())
+    .expect_err("oversized stream must fail before the malformed tail");
+    assert!(
+        error.to_string().contains("16 MiB fact budget exceeded"),
+        "{error}"
+    );
+}
+
+#[test]
+fn unicode_domain_filters_match_normalized_annotation_evidence() {
+    let db = fixture();
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            domain: Some("über".into()),
+            ..Default::default()
+        },
+    );
+    let groups = search(
+        &db,
+        &status(),
+        &request(
+            None,
+            CodeConfigFilter {
+                domain: Some("ÜBER".into()),
+                ..Default::default()
+            },
+        ),
+    )
+    .unwrap();
+    assert_eq!(groups.len(), 1);
+}
+#[test]
 fn path_queries_load_all_selected_key_evidence_before_consistency() {
     for symbolic in [false, true] {
         let db = fixture();

@@ -71,13 +71,11 @@ pub(super) fn qualified(node: Node<'_>, name: &str, content: &str) -> String {
             }
         }
     }
-    if !local_type && (suffix.is_empty() || head.chars().next().is_some_and(char::is_uppercase)) {
-        if wildcards.len() == 1 {
-            return format!("{}.{name}", wildcards.first().unwrap());
-        }
-        if wildcards.len() > 1 {
-            return format!("<ambiguous-import>.{name}");
-        }
+    if !local_type
+        && (suffix.is_empty() || head.chars().next().is_some_and(char::is_uppercase))
+        && !wildcards.is_empty()
+    {
+        return format!("<ambiguous-import>.{name}");
     }
     // A dotted name beginning with a type is a relative nested type. Package
     // prefixes remain qualified; imports and local declarations take priority.
@@ -155,8 +153,14 @@ fn binding<'a>(mut node: Node<'a>, name: &str, content: &str) -> Option<Node<'a>
             .child_by_field_name("parameters")
             .filter(|_| !explicit_field)
         {
+            if parameters.kind() == "identifier" && text(parameters, content) == name {
+                return Some(parameters);
+            }
             let mut cursor = parameters.walk();
             for parameter in parameters.named_children(&mut cursor) {
+                if parameter.kind() == "identifier" && text(parameter, content) == name {
+                    return Some(parameter);
+                }
                 if parameter
                     .child_by_field_name("name")
                     .is_some_and(|n| text(n, content) == name)
@@ -407,13 +411,10 @@ pub(super) fn platform_visible(node: Node<'_>, name: &str, content: &str) -> boo
     if binding(node, name, content).is_some() {
         return false;
     }
-    let mut pending = vec![root(node)];
-    let mut budget = 4096;
-    while let Some(current) = pending.pop() {
-        if budget == 0 {
-            return false;
-        }
-        budget -= 1;
+    let position = node.start_byte();
+    let mut scope = Some(node);
+    let mut budget = 4096usize;
+    while let Some(current) = scope {
         if is_type(current)
             && current
                 .child_by_field_name("name")
@@ -421,21 +422,36 @@ pub(super) fn platform_visible(node: Node<'_>, name: &str, content: &str) -> boo
         {
             return false;
         }
-        if current.kind() == "import_declaration" {
-            let imported = text(current, content)
-                .trim_start_matches("import")
-                .trim()
-                .trim_end_matches(';')
-                .trim();
-            if imported.rsplit('.').next() == Some(name) && imported != format!("java.lang.{name}")
-            {
-                return false;
+        if matches!(current.kind(), "program" | "class_body" | "block") {
+            let mut cursor = current.walk();
+            for candidate in current.named_children(&mut cursor) {
+                let Some(remaining) = budget.checked_sub(1) else {
+                    return false;
+                };
+                budget = remaining;
+                if is_type(candidate)
+                    && (current.kind() != "block" || candidate.start_byte() < position)
+                    && candidate
+                        .child_by_field_name("name")
+                        .is_some_and(|n| text(n, content) == name)
+                {
+                    return false;
+                }
+                if candidate.kind() == "import_declaration" {
+                    let imported = text(candidate, content)
+                        .trim_start_matches("import")
+                        .trim()
+                        .trim_end_matches(';')
+                        .trim();
+                    if imported.rsplit('.').next() == Some(name)
+                        && imported != format!("java.lang.{name}")
+                    {
+                        return false;
+                    }
+                }
             }
         }
-        if current.kind() == "program" || is_type(current) || current.kind() == "class_body" {
-            let mut cursor = current.walk();
-            pending.extend(current.named_children(&mut cursor));
-        }
+        scope = current.parent();
     }
     true
 }

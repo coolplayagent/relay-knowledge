@@ -348,20 +348,39 @@ fn check_size(rows: &[FeatureFlagRow]) -> Result<(), StorageError> {
     if rows.len() > MAX_ROWS {
         return Err(incomplete("usage budget exceeded"));
     }
-    let bytes = rows
-        .iter()
-        .map(|r| {
-            r.excerpt.len()
-                + r.source_key.len()
-                + r.path.len()
-                + serde_json::to_vec(&r.metadata).map_or(MAX_BYTES, |v| v.len())
-        })
-        .sum::<usize>();
+    let bytes = rows.iter().map(row_size).sum::<usize>();
     if bytes > MAX_BYTES {
         return Err(incomplete("16 MiB fact budget exceeded"));
     }
     Ok(())
 }
+fn row_size(row: &FeatureFlagRow) -> usize {
+    std::mem::size_of::<FeatureFlagRow>()
+        + [
+            &row.feature_flag_id,
+            &row.usage_id,
+            &row.file_id,
+            &row.path,
+            &row.language_id,
+            &row.name,
+            &row.source_kind,
+            &row.source_key,
+            &row.edge_kind,
+            &row.confidence_tier,
+            &row.excerpt,
+        ]
+        .iter()
+        .map(|value| value.len())
+        .sum::<usize>()
+        + row
+            .related_symbol_snapshot_id
+            .as_ref()
+            .map_or(0, String::len)
+        + row.related_symbol_name.as_ref().map_or(0, String::len)
+        + row.metadata.bindings.capacity() * std::mem::size_of::<String>()
+        + serde_json::to_vec(&row.metadata).map_or(MAX_BYTES, |value| value.len())
+}
+
 fn load(
     connection: &Connection,
     sql: &str,
@@ -410,11 +429,17 @@ fn load_rows(
         })
     })?;
     let mut rows = Vec::new();
+    let mut bytes = 0usize;
     for row in mapped {
-        rows.push(row?);
-        if rows.len() > MAX_ROWS {
+        let row = row?;
+        bytes = bytes.saturating_add(row_size(&row));
+        if bytes > MAX_BYTES {
+            return Err(incomplete("16 MiB fact budget exceeded"));
+        }
+        if rows.len() >= MAX_ROWS {
             return Err(incomplete("usage budget exceeded"));
         }
+        rows.push(row);
     }
     check_size(&rows)?;
     Ok(rows)

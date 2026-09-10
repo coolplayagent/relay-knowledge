@@ -269,7 +269,7 @@
 | `service.run.streamable_http` | 兼容的服务状态快照；不会从 Web request 启动常驻进程 | 无 |
 | `provider.embedding.probe` | 嵌入提供者探测 | 无 |
 
-`code.repo.feature_flags` 的过滤字段直接位于操作 payload：`domain` 为显式领域字符串，`source` 为 `java`、`properties`、`ini`、`ctmpl` 或 `shell`，`hot_reload` 为布尔值，`consistency` 为布尔值（默认 `false`）。未知元数据不匹配显式过滤条件。`query` 用于选择配置分组；响应保留已选范围内该分组的全部定义、声明、读取和守卫证据，再执行一致性检查。
+`code.repo.feature_flags` 的过滤字段直接位于操作 payload：`domain` 为显式领域字符串，`source` 为 `java`、`properties`、`ini`、`ctmpl` 或 `shell`，`hot_reload` 为布尔值，`consistency` 为布尔值（默认 `false`）。`domain`、`source` 接受字符串或 null（视为未提供），其他类型返回 bad request，不得静默忽略过滤。未知元数据不匹配显式过滤条件。`query` 用于选择配置分组；响应保留已选范围内该分组的全部定义、声明、读取和守卫证据，再执行一致性检查。
 
 **freshness 枚举值**：`allow-stale`、`wait-until-fresh`、`graph-only`
 **code query kind 枚举值**：`hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`、`sbom`

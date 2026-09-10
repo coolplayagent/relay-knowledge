@@ -45,7 +45,7 @@ impl CodeConfigFilter {
     pub fn validate(mut self) -> Result<Self, DomainError> {
         for (field, value) in [("domain", &mut self.domain), ("source", &mut self.source)] {
             if let Some(text) = value {
-                *text = text.trim().to_ascii_lowercase();
+                *text = text.trim().to_lowercase();
                 if text.is_empty() || text.len() > 128 {
                     return Err(DomainError::invalid(field, "must contain 1 to 128 bytes"));
                 }
