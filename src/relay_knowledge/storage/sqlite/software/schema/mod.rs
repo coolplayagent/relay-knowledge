@@ -121,7 +121,7 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
             build_target_count INTEGER NOT NULL DEFAULT 0,
             iac_resource_count INTEGER NOT NULL DEFAULT 0,
             design_element_count INTEGER NOT NULL DEFAULT 0,
-            projection_schema_version INTEGER NOT NULL DEFAULT 8,
+            projection_schema_version INTEGER NOT NULL DEFAULT 9,
             ontology_version TEXT NOT NULL DEFAULT '0',
             source_coverage_json TEXT NOT NULL DEFAULT '{\"source_kinds\":[],\"source_path_count\":0,\"evidence_ref_count\":0}',
             completeness_basis_points INTEGER NOT NULL DEFAULT 0,
@@ -216,6 +216,7 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
     mark_legacy_projection_schema_stale(connection)?;
     dependency_usage::initialize_schema(connection)?;
     lifecycle::initialize_schema(connection)?;
+    crate::storage::sqlite::maven::reactor::initialize_schema(connection)?;
     ontology::initialize_schema(connection)
 }
 

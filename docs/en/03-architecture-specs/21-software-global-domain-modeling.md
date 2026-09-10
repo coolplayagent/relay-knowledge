@@ -132,6 +132,21 @@ are defined by [Code-Map-Backed Knowledge Development Loop](24-code-map-backed-k
 Code-index publication remains the only writer path that refreshes these
 software projections for a source scope.
 
+
+### Maven module graph and downstream impact (#390)
+
+`repo software <alias> --kind modules --ref HEAD --limit 500 --format json` returns one `reactor_module` build target per indexed POM, including aggregators, with `language_id=jvm`, plus `aggregates` and `depends_on` relationships. Module IDs use repository identity and case-sensitive POM paths, independently of snapshot, version or source line; storage keys additionally include snapshot scope. `output_hint` identifies the module directory; changed files belong to their longest enclosing module directory.
+
+Resolution reuses the effective POM model, including repository-local parent, properties, dependency management and imported BOM handling. It never runs Maven or reads a registry/cache. A unique local group/artifact with the exact effective version, matching packaging/type and no classifier resolves to a module. Missing/external versions and classifier artifacts remain unresolved; duplicate coordinates remain ambiguous. Dependency target hints retain version, scope, type, classifier, optional and profile metadata.
+
+Impact traverses resolved direct dependency edges in reverse, using default-profile facts only, and returns POM declaration lines with `edge_kind=module_depends_on` and a direct or multi-hop POM path chain in `edge_target_hint`. These are conservative downstream build/verification candidates, not Maven transitive-classpath mediation. Test, provided and optional dependencies may require direct consumers to be revalidated. Explicit profile variants remain visible but are not assumed active. Aggregation alone does not propagate impact. Traversal uses the head snapshot, not historical graphs for deleted modules or unauthorized repositories.
+
+The existing fenced software Lifecycle transaction replaces reactor data and advances its checkpoint atomically for full, incremental and overlay indexes. Malformed/truncated evidence preserves existing records with an incomplete marker; modules queries and module impact fail explicitly rather than treating those records as complete. Bounds are 8192 modules, 131072 edges, 32 KiB per persisted fact and 64 BFS levels with a visited set. Modules and relationships share the request limit (maximum 500); exceeding it returns a capacity error, not a silently partial graph. Raise the limit or narrow path filters.
+
+Optional workspace detection accepts `maven` and recursively discovers declared coordinates and nested members from authorized snapshot POMs, including parent groupId declarations. This is separate from always-on effective reactor projection. A disabled workspace detector does not disable Maven facts. The existing dependencies slice remains component/import evidence; the build slice remains lifecycle facts, whose count is not a module count.
+
+Regression coverage includes transitive impact, cycle/budget bounds, ambiguous and external artifacts, profile variants, incremental dependency removal, stable identities, and a 152-child-module fixture. See the [Maven reactor guide](https://maven.apache.org/guides/mini/guide-multiple-modules.html) and [dependency mechanism](https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html).
+
 ---
 
 Navigation: Previous: [20. Multi-Repository Code Graph Overlay](20-multi-repository-code-graph-overlay.md) | Next: [22. Service Deployment, Control Plane, and Data Plane](22-service-deployment-control-data-plane.md)

@@ -434,6 +434,7 @@ pub async fn run_repo(
             render_report_response(&response, format)
         }
         RepoCommand::Software {
+            path_filters,
             alias,
             ref_selector,
             kind,
@@ -441,7 +442,7 @@ pub async fn run_repo(
             limit,
         } => {
             let request = SoftwareGlobalRequest::new(
-                selector(alias, ref_selector, Vec::new(), Vec::new(), format)?,
+                selector(alias, ref_selector, path_filters, Vec::new(), format)?,
                 kind,
                 freshness,
                 limit,

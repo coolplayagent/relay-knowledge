@@ -9,6 +9,10 @@ use crate::{
 #[test]
 fn agent_kind_aliases_normalize_to_existing_code_and_software_kinds() {
     assert_eq!(
+        parse_software_query_kind("modules").unwrap(),
+        SoftwareGlobalKind::Modules
+    );
+    assert_eq!(
         parse_code_query_kind("caller").unwrap(),
         CodeQueryKind::Callers
     );

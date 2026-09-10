@@ -12,6 +12,8 @@ pub enum SoftwareGlobalKind {
     Topics,
     Relationships,
     Build,
+    /// One Maven reactor module per POM and its declared dependency edges.
+    Modules,
     Iac,
     Design,
     Systems,
@@ -35,6 +37,7 @@ impl SoftwareGlobalKind {
             Self::Topics => "topics",
             Self::Relationships => "relationships",
             Self::Build => "build",
+            Self::Modules => "modules",
             Self::Iac => "iac",
             Self::Design => "design",
             Self::Systems => "systems",

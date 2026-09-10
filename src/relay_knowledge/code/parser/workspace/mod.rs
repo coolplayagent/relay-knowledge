@@ -17,6 +17,7 @@ use crate::domain::{
 
 mod cargo_workspace;
 mod go_work;
+mod maven;
 mod pnpm_workspace;
 
 pub(in crate::code) trait WorkspaceSource {
@@ -191,11 +192,26 @@ pub(in crate::code) fn detect_workspaces_from_source(
         CodeMonorepoWorkspaceFormat::Pnpm,
         CodeMonorepoWorkspaceFormat::GoModules,
         CodeMonorepoWorkspaceFormat::CargoWorkspace,
+        CodeMonorepoWorkspaceFormat::Maven,
     ] {
         if !config.supported_formats.contains(&format) {
             continue;
         }
         match format {
+            CodeMonorepoWorkspaceFormat::Maven => {
+                if let Some(members) = maven::detect(source) {
+                    workspaces.push(CodeMonorepoWorkspace {
+                        format,
+                        root_path: source.root_path().display().to_string(),
+                        workspace_file_path: source
+                            .root_path()
+                            .join("pom.xml")
+                            .display()
+                            .to_string(),
+                        members,
+                    });
+                }
+            }
             CodeMonorepoWorkspaceFormat::Pnpm => {
                 if let Some(members) = pnpm_workspace::detect_pnpm_workspace(source) {
                     workspaces.push(CodeMonorepoWorkspace {

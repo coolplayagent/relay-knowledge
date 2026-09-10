@@ -383,6 +383,8 @@ Network entry points support connection budgets, request budgets, body limits, t
 
 Repository Map v4 must retain at most 16 contiguous recent history entries in each root and must not create or reference repository-local history archives. `omitted_through` records the last intentionally discarded version; requests at or before that checkpoint fail explicitly, and long-term audit relies on Git or repository backups. Migration must validate the complete authorized legacy archive chain before publishing v4, publish both current and fallback roots in v4 before cleanup, and remove only recognized generated archive files through a bounded, resumable, path-confined cleanup. Symlinks, unknown entries, and integrity failures stop cleanup without deleting unrecognized data.
 
+Maven reactor identities, coordinate resolution, persistence and bounded reverse traversal belong to `storage/sqlite/maven/reactor/`; build, persistence, query and traversal each own adjacent unit tests. Software and code-impact callers consume this boundary without duplicating POM parsing or reading source files on query hot paths.
+
 ---
 
 Navigation: Previous: [1. Architecture Vision and Algorithm Map](01-architecture-vision-and-algorithm-map.md) | Next: [3. Foundational Runtime](03-foundational-runtime.md)

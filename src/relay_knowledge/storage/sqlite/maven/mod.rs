@@ -15,6 +15,7 @@ mod mod_tests;
 mod model;
 mod pom_path;
 mod property_interpolation;
+pub(in crate::storage::sqlite) mod reactor;
 #[cfg(test)]
 mod tests;
 mod xml;

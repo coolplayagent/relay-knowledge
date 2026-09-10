@@ -8,7 +8,7 @@ use super::{
 };
 
 /// Current SQLite read-model contract. Older scopes are rebuilt through the durable projection task.
-pub const SOFTWARE_PROJECTION_SCHEMA_VERSION: u32 = 8;
+pub const SOFTWARE_PROJECTION_SCHEMA_VERSION: u32 = 9;
 
 /// Read-model freshness kept explicit even when repository scope metadata is unavailable.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

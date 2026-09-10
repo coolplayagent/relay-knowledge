@@ -431,6 +431,7 @@ pub(super) async fn run_remote(
             repo::render_report_response(&response, format).map(Some)
         }
         RepoCommand::Software {
+            path_filters,
             alias,
             ref_selector,
             kind,
@@ -441,7 +442,7 @@ pub(super) async fn run_remote(
                 repo::selector(
                     alias.clone(),
                     ref_selector.clone(),
-                    Vec::new(),
+                    path_filters.clone(),
                     Vec::new(),
                     format,
                 )?,

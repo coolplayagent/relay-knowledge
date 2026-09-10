@@ -234,6 +234,13 @@ automatic silent upgrades.
 - Installed Web services resolve Knowledge Map operations through explicit managed repository aliases and persisted repository roots; service behavior must not depend on the service manager's process working directory.
 - The release workflow or an equivalent gate must run a service lifecycle dry-run smoke so release binaries prove their service definition, rollback plan, and package-manifest checks do not drift from the release tag.
 
+
+### Maven reactor derived-data upgrade
+
+Software projection schema 9 adds snapshot-scoped `maven_reactor_modules`, `maven_reactor_edges` and `maven_reactor_status`. Existing projections become stale and rebuild through durable repair/index tasks; query hot paths never parse POMs. Immutable-scope imports, explicit cleanup and bounded retention GC include all three tables. Legacy GC tasks already past the added phases contain no new reactor data because these tables are only populated after upgrade. No runtime directories, environment settings or service processes are added.
+
+Reindex Maven repositories or allow durable projection repair to finish before querying modules. Before binary rollback, drain/cancel active tasks and restore a consistent database backup; never manually edit reactor markers or checkpoints. Maven workspace detection uses the fourth bit (mask 8) of workspace-v1 while preserving the original three bits and disabled-scope identities.
+
 ---
 
 Navigation: Previous: [18. Observability, Diagnostics, and SLO](18-observability-diagnostics-and-slo.md) | Next: [20. Multi-Repository Code Graph Overlay](20-multi-repository-code-graph-overlay.md)

@@ -131,6 +131,21 @@ ref 的 spec context 和 commit 后的一致性恢复由
 [代码地图驱动的 Knowledge 开发闭环](24-code-map-backed-knowledge-development-loop.md)
 定义。Code index publication 仍是按 source scope 刷新这些软件投影的唯一写入路径。
 
+
+### Maven 模块图与下游影响（#390）
+
+`repo software <alias> --kind modules --ref HEAD --limit 500 --format json` 返回独立的 Maven reactor 视图：`build_targets` 每个已索引 POM 只有一个 `kind=reactor_module`、`language_id=jvm` 节点（包括聚合项目），`relationships` 包含 `aggregates` 与 `depends_on`。模块 ID 由 repository identity 与大小写敏感的 POM 路径确定，跨 ref、版本和行号变化保持稳定；SQL 主键同时包含 snapshot scope。`output_hint` 是模块目录，源码文件按最长目录前缀归属模块。
+
+依赖沿用已有 effective POM 的 parent、properties、dependencyManagement 和本地 imported BOM 解析结果，不执行 Maven、不读取包缓存、不访问 registry。只有 group/artifact、显式有效版本、无 classifier 且 type 与本地 packaging 匹配的唯一候选才解析为模块目标。外部制品、版本不匹配、缺失版本和 classifier 目标保留 `unresolved`；重复坐标保留 `ambiguous`，均不制造 parser degradation。依赖 `target_hint` 保留版本、scope、type、classifier、optional 与 profile；聚合关系不等价于构建依赖。
+
+`repo impact` 从变更路径所属模块反向遍历已解析、默认 profile 的直接依赖，返回依赖声明所在 POM 行和 `edge_kind=module_depends_on`，`edge_target_hint` 为直接或多跳 POM 路径链。这是保守的下游构建/验证影响候选，不是 Maven 传递 classpath 求解；test/provided/optional 声明也可使直接消费者需要重新验证。显式 profile 变体在图中可见，但未请求 profile 激活时不假定其启用；聚合边不参与传播。当前传播依据 head snapshot，不借用未授权仓库或已删除模块的历史图。
+
+模块图在现有 fenced software Lifecycle transaction 内替换，与 checkpoint 同提交；全量、增量和 overlay 都走该边界。解析证据截断或损坏时保留已有记录并设置 reactor incomplete marker；modules 查询与模块 impact 明确报错，不能用旧图冒充完整图。每 scope 最多 8192 个模块、131072 条边，每条持久化事实最多 32 KiB；BFS 最多 64 层，使用 visited 集合终止循环。模块视图的节点与边共享请求 limit（最大 500），超过预算返回 capacity error 而不是悄悄截断；可提高 limit 或缩小请求路径范围。
+
+Workspace detector 可显式启用 `maven`，从授权 snapshot 的根 POM 递归读取 modules，识别声明的 group/artifact（包括 parent groupId）。它保持独立于始终执行的 effective module graph projection；`workspace_detection.enabled=false` 不表示 Maven 事实禁用。现有 `--kind dependencies` 仍只返回组件与 import 使用证据；`--kind build` 仍是构建事实视图；`status.build_target_count` 不是 Maven 模块总数。
+
+回归覆盖两模块以上的多跳传播、循环与预算、坐标歧义、外部依赖、profile 变体、增量删除依赖、稳定身份，以及 152 个子模块的全量入库。Maven 语义参考 [reactor 文档](https://maven.apache.org/guides/mini/guide-multiple-modules.html) 和 [依赖机制](https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html)。
+
 ---
 
 导航: 上一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md) | 下一章: [22. 服务化部署、控制面与数据面分离](22-service-deployment-control-data-plane.md)

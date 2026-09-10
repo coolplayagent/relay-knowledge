@@ -73,6 +73,7 @@ fn workspace_detection_mask(
         super::super::workspace::CodeMonorepoWorkspaceFormat::Pnpm,
         super::super::workspace::CodeMonorepoWorkspaceFormat::GoModules,
         super::super::workspace::CodeMonorepoWorkspaceFormat::CargoWorkspace,
+        super::super::workspace::CodeMonorepoWorkspaceFormat::Maven,
     ];
     Some(
         formats
@@ -117,7 +118,7 @@ fn parse_scope_identity(source_scope: &str) -> Option<ParsedScopeIdentity> {
         return None;
     }
     let mask = encoded.parse::<u8>().ok()?;
-    if mask >= 8 || encoded != mask.to_string() {
+    if mask >= 16 || encoded != mask.to_string() {
         return None;
     }
     Some(ParsedScopeIdentity {

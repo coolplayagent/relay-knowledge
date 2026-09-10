@@ -371,6 +371,7 @@ async fn remote_repo_software_posts_stable_code_api_and_kind() {
             .expect("response body should write");
     });
     let action = CliAction::Repo(repo::RepoCommand::Software {
+        path_filters: Vec::new(),
         alias: "fixture".to_owned(),
         ref_selector: "HEAD".to_owned(),
         kind: SoftwareGlobalKind::Relationships,

@@ -86,6 +86,7 @@ pub(super) fn refresh_projection(
     source_scope: &str,
     graph_version: GraphVersion,
 ) -> Result<LifecycleProjection, StorageError> {
+    crate::storage::sqlite::maven::reactor::refresh(connection, source_scope, graph_version)?;
     let mut build_targets = build::begin_refresh(connection, source_scope)?;
     let mut iac_resources = iac::new_resources();
     let mut design_elements = design::new_elements();

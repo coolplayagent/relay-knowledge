@@ -467,9 +467,14 @@ fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let mut kind = SoftwareGlobalKind::All;
     let mut freshness = FreshnessPolicy::AllowStale;
     let mut limit = 100;
+    let mut path_filters = Vec::new();
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
+            "--path" => {
+                path_filters.push(value_after(tokens, index, "--path")?);
+                index += 2;
+            }
             "--ref" => {
                 ref_selector = value_after(tokens, index, "--ref")?;
                 index += 2;
@@ -494,6 +499,7 @@ fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
     }
 
     Ok(RepoCommand::Software {
+        path_filters,
         alias,
         ref_selector,
         kind,
@@ -681,6 +687,7 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, CliError> {
         "topics" => Ok(SoftwareGlobalKind::Topics),
         "relationships" => Ok(SoftwareGlobalKind::Relationships),
         "build" => Ok(SoftwareGlobalKind::Build),
+        "modules" => Ok(SoftwareGlobalKind::Modules),
         "iac" => Ok(SoftwareGlobalKind::Iac),
         "design" => Ok(SoftwareGlobalKind::Design),
         "systems" => Ok(SoftwareGlobalKind::Systems),

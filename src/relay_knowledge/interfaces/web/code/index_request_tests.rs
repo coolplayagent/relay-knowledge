@@ -13,6 +13,17 @@ fn payload() -> Value {
 }
 
 #[test]
+fn accepts_maven_workspace_format() {
+    let mut input = payload();
+    input["workspace_detection"] = json!({"enabled": true, "supported_formats": ["maven"]});
+    let request = code_index_request(&input, CodeIndexMode::Full).unwrap();
+    assert_eq!(
+        request.workspace_detection.supported_formats,
+        [crate::domain::CodeMonorepoWorkspaceFormat::Maven]
+    );
+}
+
+#[test]
 fn defaults_workspace_detection_when_absent() {
     let request = code_index_request(&payload(), CodeIndexMode::Full).expect("request");
     assert_eq!(

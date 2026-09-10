@@ -252,6 +252,19 @@ fn projection_slices(
             )?,
             ..ProjectionSlices::default()
         }),
+        SoftwareGlobalKind::Modules => {
+            let (build_targets, relationships) =
+                crate::storage::sqlite::maven::reactor::projection(
+                    connection,
+                    source_scope,
+                    request,
+                )?;
+            Ok(ProjectionSlices {
+                build_targets,
+                relationships,
+                ..ProjectionSlices::default()
+            })
+        }
         SoftwareGlobalKind::Build => Ok(ProjectionSlices {
             build_targets: lifecycle::build_targets_for_scope(
                 connection,

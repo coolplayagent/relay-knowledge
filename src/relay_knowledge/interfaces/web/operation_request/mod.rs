@@ -435,6 +435,7 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, WebError> {
         "topics" => Ok(SoftwareGlobalKind::Topics),
         "relationships" => Ok(SoftwareGlobalKind::Relationships),
         "build" => Ok(SoftwareGlobalKind::Build),
+        "modules" => Ok(SoftwareGlobalKind::Modules),
         "iac" => Ok(SoftwareGlobalKind::Iac),
         "design" => Ok(SoftwareGlobalKind::Design),
         "systems" => Ok(SoftwareGlobalKind::Systems),

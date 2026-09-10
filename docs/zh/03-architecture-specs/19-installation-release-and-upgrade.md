@@ -186,6 +186,13 @@ Plan rendering 与 execution 必须使用 bootstrap 捕获的精确 source execu
 - 安装后的 Web 服务必须通过显式的托管仓库别名与持久化仓库根目录解析 Knowledge Map 操作；服务行为不得依赖 service manager 设置的进程工作目录。
 - Release workflow 或等价门禁必须运行 service lifecycle dry-run smoke，验证发布二进制生成的 service definition、rollback plan 和 package manifest 检查不会与 release tag 漂移。
 
+
+### Maven reactor 派生数据升级
+
+Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_reactor_edges` 和 `maven_reactor_status` 三张 snapshot-scoped 派生表。旧投影标记 stale，由现有 durable repair/index task 重建，不在查询热路径解析 POM。三个 owner 同时纳入 immutable-scope import、显式 scope 清理和有界 retention GC；新表只在升级后开始填充，升级前已越过新增 GC phase 的旧任务没有这些数据需要回收。没有新增运行目录、环境变量或服务进程。
+
+升级后为 Maven 仓库执行完整索引或等待既有投影修复任务完成，再查询 modules。旧二进制回滚前应 drain/cancel 当前任务并恢复一致的数据库备份；不要手工删除 reactor marker 或修改 checkpoint。新 workspace `maven` 使用 workspace-v1 mask 的第 4 位，旧三种格式的位值不变；禁用检测的 scope identity 保持兼容。
+
 ---
 
 导航: 上一章: [18. 可观测性、诊断与 SLO](18-observability-diagnostics-and-slo.md) | 下一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md)
