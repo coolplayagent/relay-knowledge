@@ -2,6 +2,8 @@
 
 中文 | [English](README.md)
 
+fast profile 默认包含 `java_class_calls`（`cases/repository_java_class_calls.json`）：生成 Java 类/方法调用对，并在 256 个噪声文件中加入 32,768 次无关调用。两个类名查询方向都必须返回正确成员证据，查询 p95 预算为 2,000 ms，用于保护 issue #388，查询不使用 canonical ID。设置 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=java_class_calls` 可运行定向 fast 评估。
+
 `tools/self_iteration` 是独立的 Rust 自迭代 harness，用 Codex 生成候选补丁，并用固定评估集判断它是否真正改进代码仓库检索、semantic/vector 检索、性能、稳定性或研究质量。它不属于产品 crate 的 `src/` 模块树，运行状态统一写入 `.git/relay-knowledge-self-iteration/`。旧的 tracked Python harness 已在功能对齐后移除，仓库根目录的 `self-iterate.sh` 会直接构建并运行 Rust binary。
 
 ## 快速路径

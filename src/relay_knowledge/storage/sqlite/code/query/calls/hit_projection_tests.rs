@@ -52,7 +52,7 @@ fn callees_project_the_resolved_callee_identity() {
         is_generated: false,
     }];
 
-    let hits = call_rows_to_hits(&status, &request, rows);
+    let hits = call_rows_to_hits(&status, &request, rows, 0.0);
 
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].symbol_snapshot_id.as_deref(), Some("callee"));
@@ -79,7 +79,7 @@ fn callers_rank_production_symbols_before_embedded_test_symbols() {
         ),
     ];
 
-    let mut hits = call_rows_to_hits(&status, &request, rows);
+    let mut hits = call_rows_to_hits(&status, &request, rows, 0.0);
     hits.sort_by(|left, right| right.score.total_cmp(&left.score));
 
     assert!(hits[0].excerpt.starts_with("check_key_valid calls"));
