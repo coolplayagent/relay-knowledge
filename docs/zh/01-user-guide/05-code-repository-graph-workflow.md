@@ -325,7 +325,7 @@ relay-knowledge repo status repo --format json
 
 `repo impact` 需要 `--head` 对应已索引 snapshot。先运行 `repo index repo --ref <head>` 或 `repo update repo --base <base> --head <head>`，再运行 impact。
 
-Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v14` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
+Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v15` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
 
 精确调用 selector 的 `name:` 在候选准入前过滤返回的调用身份。callees 使用已解析 canonical 身份；无本地已解析目标时使用已持久化的 target hint/name，同时保留 unresolved 状态和边元数据。callers 过滤调用方身份，被调用方名称不会使无关调用方入选。既有共享执行预算与结果上限继续生效。
 
@@ -354,3 +354,5 @@ Python provider 变化导致未变更消费者重解析时，显式 Git 增量�
 Provider 变化与 Gitlink 更新重叠时，未改动的 Python 消费者仍进入来源刷新计划；实际解析入口用精确路径集合确保展开的已改子文件及其强制刷新只解析、计费并写入一次。既有 Gitlink diff 展开上限、来源刷新总预算及持久化完整索引回退保持有效。
 
 来源变化触发的增量索引先沿既有有界 Gitlink diff、重命名及复制流程展开精确的授权文件工作集。每个文件只入队一次；Gitlink 容器和无需解析的子孙文件不占用解析文件数或 blob 字节预算。读取 blob 前限制队列大小，prefetch 前准入精确计划字节，再对同一文件集执行解析及运行时预算复核。原始 diff 变化和强制 Python 候选分别保持有界，删除、tombstone、租约和 checkpoint 行为保持有效。此次准入修正不改变已成功发布的事实，因此 Python 事实版本仍为 v14；失败的更新可通过普通 update 命令重试。
+
+Python overload 证明计入类体立即执行时通过 `global` 或 `nonlocal` 重定向到同一词法绑定目标的写入，包括函数和类定义引入的名称。重定向后的自定义装饰器保留为可执行证据，不再被当作 typing 声明排除；同一 canonical 身份对应两个可执行定义时仍须报告歧义，并使用 snapshot selector 选择。普通类局部名称和延迟执行的函数体保持各自的作用域与求值规则，遍历继续受既有共享工作预算限制。`python-overload-declarations-v15` 组件使普通同 HEAD 索引以修正后的分类重建旧 completed scope，无需 reset 或修改源文件。

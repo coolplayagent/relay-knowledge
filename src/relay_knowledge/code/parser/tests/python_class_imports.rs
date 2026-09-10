@@ -18,3 +18,40 @@ fn class_module_imports_require_proven_standard_origins() {
         );
     }
 }
+
+#[test]
+fn eager_class_redirected_definitions_invalidate_outer_overload_proofs() {
+    for (body, typed) in [
+        (
+            "nonlocal overload\n        def overload(fn): return fn",
+            false,
+        ),
+        ("nonlocal overload\n        class overload: pass", false),
+        ("def overload(fn): return fn", true),
+        ("nonlocal other\n        def other(fn): return fn", true),
+        ("global overload\n        def overload(fn): return fn", true),
+        (
+            "nonlocal overload\n        def unrelated(fn): return fn",
+            true,
+        ),
+        (
+            "def later():\n            nonlocal overload\n            overload = lambda fn: fn",
+            true,
+        ),
+    ] {
+        assert_python_kinds(
+            &format!(
+                "def outer():\n    from typing import overload\n    other = None\n    class Change:\n        {body}\n    @overload\n    def pick(): return leaf()\n    def pick(): return final_leaf()\n"
+            ),
+            typed,
+        );
+    }
+    assert_python_kinds(
+        "from typing import overload\ndef outer():\n    class Change:\n        global overload\n        def overload(fn): return fn\n    @overload\n    def pick(): return leaf()\n    def pick(): return final_leaf()\n",
+        false,
+    );
+    assert_python_kinds(
+        "def outer():\n    from typing import overload as ov\n    class Change:\n        nonlocal ov\n        def ov(fn): return fn\n    @ov\n    def pick(): return leaf()\n    def pick(): return final_leaf()\n",
+        false,
+    );
+}
