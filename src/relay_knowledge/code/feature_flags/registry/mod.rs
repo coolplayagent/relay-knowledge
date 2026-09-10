@@ -16,6 +16,16 @@ pub(super) fn extract(
     }
 }
 
+fn check_fact_budget(count: usize) -> Result<(), DomainError> {
+    if count >= 10_000 {
+        return Err(DomainError::invalid(
+            "configuration",
+            "file fact budget exceeded",
+        ));
+    }
+    Ok(())
+}
+
 fn record(
     input: &FeatureFlagFileInput<'_>,
     kind: &str,

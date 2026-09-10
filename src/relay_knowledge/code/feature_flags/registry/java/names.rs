@@ -37,6 +37,7 @@ pub(super) fn qualified(node: Node<'_>, name: &str, content: &str) -> String {
         .split_once('.')
         .map_or((name, ""), |(head, _)| (head, &name[head.len()..]));
     let mut local_type = false;
+    let mut wildcards = std::collections::BTreeSet::new();
     let mut package = String::new();
     let mut cursor = root(node).walk();
     for child in root(node).named_children(&mut cursor) {
@@ -62,9 +63,20 @@ pub(super) fn qualified(node: Node<'_>, name: &str, content: &str) -> String {
                 .trim()
                 .trim_end_matches(';')
                 .trim();
+            if let Some(prefix) = imported.strip_suffix(".*") {
+                wildcards.insert(prefix.to_owned());
+            }
             if imported.rsplit('.').next() == Some(head) {
                 return format!("{imported}{suffix}");
             }
+        }
+    }
+    if !local_type && (suffix.is_empty() || head.chars().next().is_some_and(char::is_uppercase)) {
+        if wildcards.len() == 1 {
+            return format!("{}.{name}", wildcards.first().unwrap());
+        }
+        if wildcards.len() > 1 {
+            return format!("<ambiguous-import>.{name}");
         }
     }
     // A dotted name beginning with a type is a relative nested type. Package

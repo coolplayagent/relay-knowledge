@@ -25,6 +25,7 @@ pub(super) fn extract(
                 || options::allexport(node, input.content))
         {
             if let Some(row) = definition(input, node)? {
+                check_fact_budget(rows.len())?;
                 rows.push(row);
             }
         }
@@ -37,6 +38,7 @@ pub(super) fn extract(
                 let key = &input.content[name.byte_range()];
                 if let Some(assignment) = prior_assignment(node, key, input.content) {
                     if let Some(row) = definition(input, assignment)? {
+                        check_fact_budget(rows.len())?;
                         rows.push(row);
                     }
                 }
@@ -50,6 +52,7 @@ pub(super) fn extract(
             {
                 let key = &input.content[name.byte_range()];
                 if shell_external(node, key, input.content) {
+                    check_fact_budget(rows.len())?;
                     rows.push(record(
                         input,
                         "env_var",

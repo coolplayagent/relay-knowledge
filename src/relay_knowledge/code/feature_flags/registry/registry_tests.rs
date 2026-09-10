@@ -1,5 +1,100 @@
 use super::*;
 #[test]
+fn return_only_getters_ignore_comments_but_not_executable_statements() {
+    let rows = facts(
+        "java",
+        r#"class Config {
+        boolean getX() { /* context */ return Boolean.getBoolean("flag"); // explanation
+        }
+        boolean getY() { log(); return Boolean.getBoolean("other"); }
+    }"#,
+    );
+    let row = rows.iter().find(|r| r.source_key == "flag").unwrap();
+    assert!(row.metadata.bindings.contains(&"Config.getX".into()));
+    assert!(row.metadata.flow_incomplete.is_none());
+    assert!(
+        rows.iter()
+            .find(|r| r.source_key == "other")
+            .unwrap()
+            .metadata
+            .flow_incomplete
+            .is_some()
+    );
+}
+
+#[test]
+fn wildcard_receiver_imports_respect_explicit_and_local_type_precedence() {
+    for (imports, declaration, expected) in [
+        ("import demo.config.*;", "", "demo.config.Config.getX"),
+        (
+            "import demo.config.*; import explicit.Config;",
+            "",
+            "explicit.Config.getX",
+        ),
+        (
+            "import demo.config.*;",
+            "class Config {}",
+            "app.Config.getX",
+        ),
+        (
+            "import first.*; import second.*;",
+            "",
+            "<ambiguous-import>.Config.getX",
+        ),
+    ] {
+        let rows = facts(
+            "java",
+            &format!(
+                "package app; {imports} {declaration} class Reader {{ void run(Config config) {{ if(config.getX()) {{}} }} }}"
+            ),
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.metadata.reference.as_deref() == Some(expected)),
+            "{expected}"
+        );
+    }
+}
+
+#[test]
+fn properties_defaults_keep_trailing_whitespace_and_continuations() {
+    let rows = facts("properties", "mode=on \ncontinued=on\\\n  value \t\n");
+    assert_eq!(rows[0].metadata.default_value.as_deref(), Some("on "));
+    assert_eq!(
+        rows[1].metadata.default_value.as_deref(),
+        Some("onvalue \t")
+    );
+}
+
+#[test]
+fn dense_configuration_files_fail_at_the_shared_fact_budget() {
+    for (language, line) in [
+        ("properties", "x=y\n"),
+        ("ini", "x=y\n"),
+        ("gotemplate", "{{ env \"X\" }}\n"),
+        ("bash", "export X=y\n"),
+    ] {
+        let source = line.repeat(10_001);
+        let result = extract(&FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path: "config",
+            language_id: language,
+            content: &source,
+            config_facts: &[],
+        });
+        let error = result
+            .map(|_| ())
+            .expect_err("dense file must hit the fact budget");
+        assert!(
+            error.to_string().contains("file fact budget exceeded"),
+            "{language}: {error}"
+        );
+    }
+}
+
+#[test]
 fn local_guard_reads_exclude_unrelated_method_and_field_names() {
     let rows = facts(
         "java",

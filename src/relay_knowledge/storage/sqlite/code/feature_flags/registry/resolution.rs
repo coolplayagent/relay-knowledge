@@ -17,7 +17,9 @@ impl Resolver<'_> {
         }
         let key = (reference.clone(), depth);
         if let Some(target) = self.targets.get(&key) {
-            return target.clone();
+            return target
+                .clone()
+                .map(|(kind, key)| (row.metadata.target_kind.clone().unwrap_or(kind), key));
         }
         let mut targets = BTreeSet::new();
         let mut complete = true;
@@ -37,7 +39,7 @@ impl Resolver<'_> {
             None
         };
         self.targets.insert(key, target.clone());
-        target
+        target.map(|(kind, key)| (row.metadata.target_kind.clone().unwrap_or(kind), key))
     }
 
     pub(super) fn has_config_evidence(&mut self, reference: &str, depth: usize) -> bool {

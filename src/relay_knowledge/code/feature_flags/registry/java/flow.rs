@@ -15,9 +15,17 @@ pub(super) fn returning_method<'a>(mut node: Node<'a>, content: &str) -> Option<
                 node = call;
             }
             "return_statement" => {
-                let body = parent
-                    .parent()
-                    .filter(|n| n.kind() == "block" && n.named_child_count() == 1)?;
+                let body = parent.parent().filter(|n| {
+                    let mut cursor = n.walk();
+                    n.kind() == "block"
+                        && n.named_children(&mut cursor)
+                            .filter(|child| {
+                                !matches!(child.kind(), "line_comment" | "block_comment")
+                            })
+                            .take(2)
+                            .count()
+                            == 1
+                })?;
                 return body.parent().filter(|method| {
                     method.kind() == "method_declaration"
                         && method

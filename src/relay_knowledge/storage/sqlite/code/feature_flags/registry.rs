@@ -147,6 +147,16 @@ fn search_bounded(
         .filter(|row| row.metadata.target_kind.is_some())
         .filter_map(|row| row.metadata.reference.as_ref())
         .collect::<BTreeSet<_>>();
+    let mut binding_kinds = HashMap::<&str, BTreeSet<String>>::new();
+    for row in &rows {
+        if let (Some(reference), Some(kind)) = (&row.metadata.reference, &row.metadata.target_kind)
+        {
+            binding_kinds
+                .entry(reference)
+                .or_default()
+                .insert(kind.clone());
+        }
+    }
     let mut groups = BTreeMap::<(String, String), CodeFeatureFlagGraph>::new();
     for (row_index, row) in rows.iter().enumerate() {
         if row.edge_kind == "declares_string_constant"
@@ -181,17 +191,6 @@ fn search_bounded(
         } else if let Some((kind, key)) = targets {
             resolved.source_kind = row.metadata.target_kind.clone().unwrap_or(kind);
             resolved.source_key = key;
-            let mut hasher = crate::identity::StableHasher64::new();
-            for part in [
-                &status.repository_id,
-                scope,
-                &resolved.source_kind,
-                &resolved.source_key,
-            ] {
-                hasher.update(&(part.len() as u64).to_le_bytes());
-                hasher.update(part.as_bytes());
-            }
-            resolved.feature_flag_id = format!("feature_flag:{:016x}", hasher.finish());
             resolved.name = resolved
                 .source_key
                 .replace(['.', '-', ':'], "_")
@@ -200,48 +199,79 @@ fn search_bounded(
         } else {
             false
         };
-        let key = (resolved.source_kind.clone(), resolved.source_key.clone());
-        let group = groups.entry(key).or_insert_with(|| CodeFeatureFlagGraph {
-            feature_flag_id: resolved.feature_flag_id.clone(),
-            name: resolved.name.clone(),
-            source_kind: resolved.source_kind.clone(),
-            source_key: resolved.source_key.clone(),
-            score: 0.0,
-            usages: Vec::new(),
-            consistency_diagnostics: Vec::new(),
-            conflicting_default_sources: Vec::new(),
-            analysis_complete: !status.stale
-                && status.degraded_reason.is_none()
-                && !incomplete_rows[row_index],
-        });
-        group.analysis_complete &=
-            complete && !incomplete_rows[row_index] && row.metadata.flow_incomplete.is_none();
-        if !complete
-            && !group
-                .consistency_diagnostics
-                .iter()
-                .any(|d| d == "unresolved_or_ambiguous_config_symbol")
-        {
-            group
-                .consistency_diagnostics
-                .push("unresolved_or_ambiguous_config_symbol".to_owned());
+        let mut kinds = BTreeSet::new();
+        if matches!(
+            row.edge_kind.as_str(),
+            "declares_config_key" | "declares_string_constant"
+        ) {
+            for binding in &row.metadata.bindings {
+                if let Some(namespaces) = binding_kinds.get(binding.as_str()) {
+                    kinds.extend(namespaces.iter().cloned());
+                }
+            }
         }
-        group.score = group.score.max(score_row(&resolved, &terms));
-        group.usages.push(CodeFeatureFlagUsage {
-            usage_id: resolved.usage_id,
-            path: resolved.path,
-            language_id: resolved.language_id,
-            file_id: resolved.file_id,
-            byte_range: resolved.byte_range,
-            line_range: resolved.line_range,
-            edge_kind: resolved.edge_kind,
-            related_symbol_snapshot_id: resolved.related_symbol_snapshot_id,
-            related_symbol_name: resolved.related_symbol_name,
-            confidence_basis_points: resolved.confidence_basis_points,
-            confidence_tier: resolved.confidence_tier,
-            excerpt: resolved.excerpt,
-            metadata: resolved.metadata,
-        });
+        if kinds.is_empty() {
+            kinds.insert(resolved.source_kind.clone());
+        }
+        for kind in kinds {
+            let mut resolved = resolved.clone();
+            resolved.source_kind = kind;
+            if row.metadata.reference.is_some() || resolved.source_kind != row.source_kind {
+                let mut hasher = crate::identity::StableHasher64::new();
+                for part in [
+                    &status.repository_id,
+                    scope,
+                    &resolved.source_kind,
+                    &resolved.source_key,
+                ] {
+                    hasher.update(&(part.len() as u64).to_le_bytes());
+                    hasher.update(part.as_bytes());
+                }
+                resolved.feature_flag_id = format!("feature_flag:{:016x}", hasher.finish());
+            }
+            let key = (resolved.source_kind.clone(), resolved.source_key.clone());
+            let group = groups.entry(key).or_insert_with(|| CodeFeatureFlagGraph {
+                feature_flag_id: resolved.feature_flag_id.clone(),
+                name: resolved.name.clone(),
+                source_kind: resolved.source_kind.clone(),
+                source_key: resolved.source_key.clone(),
+                score: 0.0,
+                usages: Vec::new(),
+                consistency_diagnostics: Vec::new(),
+                conflicting_default_sources: Vec::new(),
+                analysis_complete: !status.stale
+                    && status.degraded_reason.is_none()
+                    && !incomplete_rows[row_index],
+            });
+            group.analysis_complete &=
+                complete && !incomplete_rows[row_index] && row.metadata.flow_incomplete.is_none();
+            if !complete
+                && !group
+                    .consistency_diagnostics
+                    .iter()
+                    .any(|d| d == "unresolved_or_ambiguous_config_symbol")
+            {
+                group
+                    .consistency_diagnostics
+                    .push("unresolved_or_ambiguous_config_symbol".to_owned());
+            }
+            group.score = group.score.max(score_row(&resolved, &terms));
+            group.usages.push(CodeFeatureFlagUsage {
+                usage_id: resolved.usage_id,
+                path: resolved.path,
+                language_id: resolved.language_id,
+                file_id: resolved.file_id,
+                byte_range: resolved.byte_range,
+                line_range: resolved.line_range,
+                edge_kind: resolved.edge_kind,
+                related_symbol_snapshot_id: resolved.related_symbol_snapshot_id,
+                related_symbol_name: resolved.related_symbol_name,
+                confidence_basis_points: resolved.confidence_basis_points,
+                confidence_tier: resolved.confidence_tier,
+                excerpt: resolved.excerpt,
+                metadata: resolved.metadata,
+            });
+        }
     }
     let mut groups = groups
         .into_values()

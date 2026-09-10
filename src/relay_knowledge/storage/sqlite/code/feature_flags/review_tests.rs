@@ -1,6 +1,120 @@
 //! Regression cases from the configuration registry code review.
 use super::*;
 #[test]
+fn getter_usage_paths_seed_queries_before_group_metadata_filters() {
+    let db = fixture();
+    add(
+        &db,
+        "feature_x",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            bindings: vec!["Config.getX".into()],
+            domain: Some("business".into()),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "Config.getX",
+        "config_symbol",
+        "guards_code",
+        CodeConfigMetadata {
+            reference: Some("Config.getX".into()),
+            ..Default::default()
+        },
+    );
+    db.execute("UPDATE code_repository_feature_flags SET path='src/Reader.java',excerpt='if (configuration.getX())' WHERE source_kind='config_symbol'", []).unwrap();
+    for term in ["Reader", "configuration"] {
+        let groups = search(
+            &db,
+            &status(),
+            &request(
+                Some(term),
+                CodeConfigFilter {
+                    domain: Some("business".into()),
+                    ..Default::default()
+                },
+            ),
+        )
+        .unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].source_key, "feature_x");
+        assert_eq!(groups[0].usages.len(), 2);
+    }
+}
+
+#[test]
+fn referenced_constants_join_each_observed_namespace_without_a_synthetic_group() {
+    for declaration in ["declares_config_key", "declares_string_constant"] {
+        let db = fixture();
+        add(
+            &db,
+            "HOME",
+            "config_key",
+            declaration,
+            CodeConfigMetadata {
+                bindings: vec!["Keys.HOME_KEY".into()],
+                ..Default::default()
+            },
+        );
+        add(
+            &db,
+            "Keys.HOME_KEY",
+            "config_symbol",
+            "reads_config",
+            CodeConfigMetadata {
+                reference: Some("Keys.HOME_KEY".into()),
+                target_kind: Some("env_var".into()),
+                bindings: vec!["Config.getHome".into()],
+                ..Default::default()
+            },
+        );
+        add(
+            &db,
+            "Config.getHome",
+            "config_symbol",
+            "guards_code",
+            CodeConfigMetadata {
+                reference: Some("Config.getHome".into()),
+                ..Default::default()
+            },
+        );
+        let mut query = request(None, CodeConfigFilter::default());
+        query.limit = 10;
+        let groups = search(&db, &status(), &query).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].source_kind, "env_var");
+        assert_eq!(groups[0].usages.len(), 3);
+        assert!(
+            groups[0]
+                .usages
+                .iter()
+                .any(|u| u.edge_kind == "declares_config_key")
+        );
+        add(
+            &db,
+            "Keys.HOME_KEY",
+            "config_symbol",
+            "reads_config",
+            CodeConfigMetadata {
+                reference: Some("Keys.HOME_KEY".into()),
+                target_kind: Some("config_key".into()),
+                ..Default::default()
+            },
+        );
+        let groups = search(&db, &status(), &query).unwrap();
+        assert_eq!(groups.len(), 2);
+        assert!(groups.iter().all(|g| {
+            g.analysis_complete
+                && g.usages
+                    .iter()
+                    .any(|u| u.edge_kind == "declares_config_key")
+        }));
+    }
+}
+
+#[test]
 fn repeated_interface_usages_reuse_one_resolution_and_evidence_entry() {
     let db = fixture();
     for _ in 0..2000 {

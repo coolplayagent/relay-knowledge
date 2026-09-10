@@ -29,7 +29,11 @@ pub(super) fn extract(
             logical.pop();
             continue;
         }
-        let line = logical.trim();
+        let line = if input.language_id == "properties" {
+            logical.trim_start()
+        } else {
+            logical.trim()
+        };
         if input.language_id == "ini" && line.starts_with('[') && line.ends_with(']') {
             section = line[1..line.len() - 1].trim().to_owned();
         } else if !line.is_empty() && !line.starts_with(['#', '!', ';']) && !line.starts_with("{{")
@@ -47,6 +51,7 @@ pub(super) fn extract(
                         format!("{section}.{key}")
                     };
                     let template = input.language_id == "gotemplate" && raw.contains("{{");
+                    check_fact_budget(records.len())?;
                     let mut row = record(
                         input,
                         "config_key",
@@ -61,7 +66,7 @@ pub(super) fn extract(
                     )?;
                     if !template {
                         let value = if input.language_id == "properties" {
-                            decode(raw.trim()).unwrap_or_else(|| raw.to_owned())
+                            decode(raw).unwrap_or_else(|| raw.to_owned())
                         } else {
                             raw.trim().to_owned()
                         };
@@ -154,6 +159,7 @@ fn template_reads(
             let argument = tokens.next().unwrap_or_default().trim();
             if matches!(command, "key" | "keyOrDefault" | "env") {
                 if let Some((key, _)) = quoted(argument) {
+                    check_fact_budget(rows.len())?;
                     rows.push(record(
                         input,
                         if command == "env" {
