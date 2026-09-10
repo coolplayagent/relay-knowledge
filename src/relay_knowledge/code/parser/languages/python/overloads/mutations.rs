@@ -127,7 +127,12 @@ fn module_receiver(content: &str, mut node: Node<'_>, name: &str, remaining: &mu
                 .child_by_field_name("attribute")
                 .map(|n| node_text(content, n));
             return match member.as_deref() {
-                Some("overload") => true,
+                Some(member)
+                    if member == "overload"
+                        || super::protocol_contract::MODULE_DISPATCH_HOOKS.contains(&member) =>
+                {
+                    true
+                }
                 Some("__dict__") => namespace_may_write_overload(content, access),
                 _ => false,
             };
@@ -164,7 +169,8 @@ fn key_may_name_overload(content: &str, key: Node<'_>) -> bool {
     {
         return true;
     }
-    &literal[1..literal.len() - 1] == "overload"
+    let member = &literal[1..literal.len() - 1];
+    member == "overload" || super::protocol_contract::MODULE_DISPATCH_HOOKS.contains(&member)
 }
 
 pub(super) fn expression_mutates_module(
@@ -246,8 +252,12 @@ pub(super) fn unknown_eager_call(
             return true;
         };
         *remaining = left;
-        if node.kind() == "decorator" && proven_decorators.get(&node.start_byte()) != Some(&true) {
-            return true;
+        if node.kind() == "decorator" {
+            if proven_decorators.get(&node.start_byte()) != Some(&true) {
+                return true;
+            }
+            // This exact decorator has already proven its provider and effects.
+            continue;
         }
         if node.kind() == "class_definition" {
             if !super::class_creation::plain(content, node, remaining, origins) {
@@ -260,6 +270,14 @@ pub(super) fn unknown_eager_call(
         if node.kind() == "call"
             && (!module || mutator_member_effect(content, node, binding, remaining) != Some(false))
         {
+            return true;
+        }
+        if super::implicit_protocols::dispatches(
+            content,
+            node,
+            Some((binding, module, origins)),
+            remaining,
+        ) {
             return true;
         }
         if !super::expressions::eager_children(node, &mut stack, remaining, deferred) {

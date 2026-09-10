@@ -2,7 +2,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{
+use super::super::{
     mark_schema_initialization_current, reference_resolution_progress_schema_is_current,
     schema_initialization_is_current,
 };

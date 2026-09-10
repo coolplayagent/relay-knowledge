@@ -237,6 +237,7 @@ fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRecord {
         doc_comment: None,
         byte_range: RepositoryCodeRange { start: 0, end: 8 },
         line_range: RepositoryCodeRange { start: 1, end: 1 },
+        callable_signature_key: None,
         symbol_role: None,
     }
 }

@@ -1,7 +1,7 @@
 //! Python decorator bindings use namespace writes, not matching property names.
 use super::*;
 #[tokio::test]
-async fn redirected_python_bindings_reject_later_custom_values_but_ignore_properties() {
+async fn redirected_python_bindings_and_unknown_external_receivers_preserve_runtime_facts() {
     let repo = FixtureRepo::create("python-rebinding");
     repo.write(
         "src/sample.py",
@@ -132,22 +132,16 @@ def module_mutation_choice(): return leaf()
                 context("python-rebinding-query"),
             )
             .await;
-        if matches!(
-            name,
-            "attribute_choice" | "module_property_choice" | "module_subscript_choice"
-        ) {
-            let response = result.unwrap();
-            assert_eq!(response.results.len(), 1);
-            assert!(
-                response.results[0]
-                    .canonical_symbol_id
-                    .as_deref()
-                    .unwrap()
-                    .ends_with("::leaf")
-            );
-        } else {
-            assert_eq!(result.unwrap_err().error_kind, ErrorKind::InvalidArgument);
-        }
+        // The property/subscript cases follow writes through an external
+        // SimpleNamespace constructor without authorized receiver-origin proof.
+        // Their local execution is harmless, but those earlier unknown effects
+        // prevent declaration-only evidence just as actual custom bindings do.
+        let error = result.expect_err(name);
+        assert_eq!(error.error_kind, ErrorKind::InvalidArgument, "{name}");
+        assert!(
+            error.message.contains("multiple definitions"),
+            "{name}: {error:?}"
+        );
     }
 }
 
@@ -253,8 +247,16 @@ def fallback_choice(x): return leaf()
                 context("python-imports-query"),
             )
             .await;
-        if name == "mutation_choice" {
-            assert_eq!(result.unwrap_err().error_kind, ErrorKind::InvalidArgument);
+        if matches!(name, "mutation_choice" | "subscript_choice") {
+            // The independent receiver proof for the earlier property-module
+            // write stops at the intervening external import. The dictionary
+            // operation itself has a separate positive real-Git control.
+            let error = result.expect_err(name);
+            assert_eq!(error.error_kind, ErrorKind::InvalidArgument, "{name}");
+            assert!(
+                error.message.contains("multiple definitions"),
+                "{name}: {error:?}"
+            );
         } else {
             let response = result.unwrap();
             assert_eq!(response.results.len(), 1);

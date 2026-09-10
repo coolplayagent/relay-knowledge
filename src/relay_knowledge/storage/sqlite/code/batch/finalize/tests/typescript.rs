@@ -507,6 +507,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(0, 8),
         line_range: range(1, 1),
+        callable_signature_key: None,
         symbol_role: None,
     }
 }

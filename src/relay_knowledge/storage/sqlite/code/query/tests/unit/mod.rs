@@ -803,6 +803,7 @@ fn code_query_symbol(
         doc_comment: None,
         byte_range: code_query_range(0, 1),
         line_range: code_query_range(1, 1),
+        callable_signature_key: None,
         symbol_role: None,
     }
 }

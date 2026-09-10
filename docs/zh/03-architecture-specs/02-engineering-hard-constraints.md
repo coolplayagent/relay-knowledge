@@ -401,3 +401,5 @@ Repository Map v4 的每个 root 最多保留 16 条连续的最近历史，不�
 ---
 
 导航: 上一章: [1. 架构愿景与算法版图](01-architecture-vision-and-algorithm-map.md) | 下一章: [3. 基础运行时层](03-foundational-runtime.md)
+
+SQLite warm-schema 回归模块由既有 `marker_tests.rs` 测试模块统一组装，生产 marker 只保留测试入口。仅测试使用的相对导入随层级调整，在保留 warm-open 覆盖的同时遵守 marker 所有者既有行数上限。

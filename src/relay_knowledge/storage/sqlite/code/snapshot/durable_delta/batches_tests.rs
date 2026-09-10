@@ -216,6 +216,7 @@ fn symbol(path: &str) -> RepositoryCodeSymbolRecord {
         byte_range: range(),
         line_range: range(),
         symbol_role: None,
+        callable_signature_key: None,
     }
 }
 
@@ -231,4 +232,30 @@ fn diagnostic(path: &str) -> CodeFileDiagnostic {
 
 fn range() -> RepositoryCodeRange {
     RepositoryCodeRange::new("fixture", 0, 1).expect("range")
+}
+
+#[test]
+fn callable_key_bytes_can_exhaust_the_frozen_delta_writer_quantum() {
+    let mut snapshot = snapshot(&["owned.c"]);
+    snapshot.symbols = vec![symbol("owned.c")];
+    let before = file_surfaces(&snapshot)
+        .unwrap()
+        .remove("owned.c")
+        .unwrap()
+        .bytes;
+    let control = batch_control_bytes(&snapshot).unwrap();
+    let budget = CodeIndexResourceBudget::new(1, before + control, 100).unwrap();
+    assert!(DeltaBatchPlan::new(&snapshot, budget).is_ok());
+    snapshot.symbols[0].callable_signature_key =
+        Some("é".repeat(crate::domain::MAX_CALLABLE_SIGNATURE_KEY_BYTES / 2));
+    let after = file_surfaces(&snapshot)
+        .unwrap()
+        .remove("owned.c")
+        .unwrap()
+        .bytes;
+    assert!(after >= before + crate::domain::MAX_CALLABLE_SIGNATURE_KEY_BYTES);
+    assert!(matches!(
+        DeltaBatchPlan::new(&snapshot, budget),
+        Err(crate::storage::StorageError::CapacityExceeded(_))
+    ));
 }

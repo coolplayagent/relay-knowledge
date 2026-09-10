@@ -109,6 +109,7 @@ fn symbol(
             start: line_start,
             end: line_end,
         },
+        callable_signature_key: None,
         symbol_role: None,
     }
 }

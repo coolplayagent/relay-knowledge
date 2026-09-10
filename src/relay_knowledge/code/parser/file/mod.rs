@@ -15,6 +15,7 @@ use crate::code::{
     stable_content_hash, stable_id,
 };
 
+mod callable_signatures;
 mod contracts;
 mod feature_flag_projection;
 mod framework_projection;
@@ -169,6 +170,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
         &config_references,
         &mut output,
     )?;
+    callable_signatures::project(&context, root, &mut output);
     python_origins::reconcile(&context, root, &mut output);
     let mut embedded_imports = if input.language.id == "vue" {
         collect_vue_script_facts(build, &input, &mut output)?

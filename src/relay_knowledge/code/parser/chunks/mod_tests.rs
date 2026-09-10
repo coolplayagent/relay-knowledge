@@ -385,6 +385,7 @@ fn symbol(
             start: line as u32,
             end: line as u32,
         },
+        callable_signature_key: None,
         symbol_role: None,
     }
 }

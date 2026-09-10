@@ -663,3 +663,7 @@ fn stage_repository_after_snapshot(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "callable_signature_key_tests.rs"]
+mod callable_signature_key_tests;

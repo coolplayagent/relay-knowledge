@@ -979,3 +979,21 @@ mod python_class_imports;
 
 #[path = "code_repository_python_control_decorators.rs"]
 mod python_control_decorators;
+
+#[path = "code_repository_python_annotation_owner.rs"]
+mod python_annotation_owner;
+
+#[path = "code_repository_python_implicit_protocols.rs"]
+mod python_implicit_protocols;
+
+#[path = "code_repository_canonical_declaration_edges.rs"]
+mod canonical_declaration_edges;
+
+#[path = "code_repository_python_independent_modules.rs"]
+mod python_independent_modules;
+
+#[path = "code_repository_python_literal_managers.rs"]
+mod python_literal_managers;
+
+#[path = "code_repository_python_safe_member_writes.rs"]
+mod python_safe_member_writes;

@@ -131,6 +131,10 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
             |row| row.get(0),
         )
         .expect("symbol should import");
+    let callable_key: Option<String> = target.query_row(
+        "SELECT callable_signature_key FROM code_repository_symbols WHERE symbol_snapshot_id = 'symbol'", [], |row| row.get(0),
+    ).expect("legacy symbols should have an unknown callable proof");
+    assert_eq!(callable_key, None);
     let route_count: i64 = target
         .query_row(
             "SELECT COUNT(*) FROM code_repository_routes WHERE source_scope = 'git_snapshot:test'",

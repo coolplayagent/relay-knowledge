@@ -386,3 +386,5 @@ Repository Map v4 must retain at most 16 contiguous recent history entries in ea
 ---
 
 Navigation: Previous: [1. Architecture Vision and Algorithm Map](01-architecture-vision-and-algorithm-map.md) | Next: [3. Foundational Runtime](03-foundational-runtime.md)
+
+SQLite warm-schema regression modules are assembled under the existing `marker_tests.rs` test module. The production marker retains only its test entry point; test-only relative imports follow that nesting, preserving warm-open coverage without increasing the marker owner’s line budget.

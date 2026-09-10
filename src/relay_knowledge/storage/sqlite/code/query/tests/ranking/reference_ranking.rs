@@ -828,6 +828,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(10, 20),
         line_range: range(10, 20),
+        callable_signature_key: None,
         symbol_role: None,
     }
 }

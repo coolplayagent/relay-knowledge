@@ -37,7 +37,7 @@ fn symbol_role_search_fields_include_every_route_handler_binding() {
 #[test]
 fn code_index_persistence_performance_suite_symbol_insert_crosses_the_1024_row_boundary_in_input_order()
  {
-    assert_eq!(SYMBOL_INSERT_BIND_COUNT, 17_408);
+    assert_eq!(SYMBOL_INSERT_BIND_COUNT, 18_432);
     let mut connection = symbol_database();
     let records = (0..=SYMBOL_INSERT_BATCH_SIZE)
         .map(symbol)
@@ -195,7 +195,7 @@ fn second_group_failure_remains_rollback_safe() {
 #[test]
 fn insert_records_clamps_fact_groups_to_the_runtime_variable_limit() {
     let mut connection = symbol_database();
-    connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 34);
+    connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 36);
     let transaction = connection.transaction().expect("transaction should start");
 
     insert_records(&transaction, &(0..5).map(symbol).collect::<Vec<_>>())
@@ -208,7 +208,7 @@ fn insert_records_clamps_fact_groups_to_the_runtime_variable_limit() {
 #[test]
 fn one_symbol_row_may_use_the_exact_sqlite_variable_limit() {
     let mut exact_connection = symbol_database();
-    exact_connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 17);
+    exact_connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 18);
     let exact_transaction = exact_connection
         .transaction()
         .expect("transaction should start");
@@ -219,14 +219,14 @@ fn one_symbol_row_may_use_the_exact_sqlite_variable_limit() {
         .expect("transaction should commit");
 
     let mut short_connection = symbol_database();
-    short_connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 16);
+    short_connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 17);
     let short_transaction = short_connection
         .transaction()
         .expect("transaction should start");
     let error = insert_records(&short_transaction, &[symbol(1)])
         .expect_err("fewer variables than one row requires must fail closed");
     assert!(
-        matches!(error, StorageError::Invariant(message) if message.contains("17-column symbol row"))
+        matches!(error, StorageError::Invariant(message) if message.contains("18-column symbol row"))
     );
     assert_eq!(row_counts(&short_transaction), (0, 0, 0));
     short_transaction
@@ -258,6 +258,7 @@ fn symbol(index: usize) -> RepositoryCodeSymbolRecord {
             end: offset + 1,
         },
         symbol_role: None,
+        callable_signature_key: None,
     }
 }
 
@@ -284,6 +285,7 @@ fn symbol_database() -> Connection {
                 line_start INTEGER NOT NULL,
                 line_end INTEGER NOT NULL,
                 symbol_role_json TEXT,
+                callable_signature_key TEXT,
                 PRIMARY KEY (source_scope, symbol_snapshot_id)
             );
             CREATE VIRTUAL TABLE code_repository_search USING fts5(
@@ -360,4 +362,48 @@ fn row_counts(connection: &Connection) -> (i64, i64, i64) {
             )
             .expect("metadata rows should count"),
     )
+}
+
+#[test]
+fn callable_keys_round_trip_without_entering_display_or_search_content() {
+    let mut connection = symbol_database();
+    let mut records = vec![symbol(1), symbol(2)];
+    let key = "é".repeat(crate::domain::MAX_CALLABLE_SIGNATURE_KEY_BYTES / 2);
+    records[0].callable_signature_key = Some(key.clone());
+    let transaction = connection.transaction().unwrap();
+    insert_records(&transaction, &records).unwrap();
+    let stored: (String, Option<String>) = transaction.query_row(
+        "SELECT signature, callable_signature_key FROM code_repository_symbols WHERE symbol_snapshot_id = 'symbol-1'",
+        [], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    assert_eq!(stored, (records[0].signature.clone(), Some(key.clone())));
+    let absent: Option<String> = transaction.query_row(
+        "SELECT callable_signature_key FROM code_repository_symbols WHERE symbol_snapshot_id = 'symbol-2'", [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(absent, None);
+    let content: String = transaction
+        .query_row(
+            "SELECT content FROM code_repository_search WHERE record_id = 'symbol-1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(content.contains(&records[0].signature));
+    assert!(!content.contains(&key));
+}
+
+#[test]
+fn oversized_callable_key_rejects_the_entire_input_before_any_symbol_write() {
+    let mut connection = symbol_database();
+    let mut records = vec![symbol(1), symbol(2)];
+    records[1].callable_signature_key = Some(format!(
+        "{}x",
+        "é".repeat(crate::domain::MAX_CALLABLE_SIGNATURE_KEY_BYTES / 2)
+    ));
+    let transaction = connection.transaction().unwrap();
+    assert!(matches!(
+        insert_records(&transaction, &records),
+        Err(StorageError::InvalidInput(_))
+    ));
+    assert_eq!(row_counts(&transaction), (0, 0, 0));
 }

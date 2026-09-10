@@ -507,3 +507,7 @@ fn checked_add(left: usize, right: usize, scope: &str) -> Result<usize, StorageE
     left.checked_add(right)
         .ok_or_else(|| clone_capacity_error(scope))
 }
+
+#[cfg(test)]
+#[path = "callable_signature_key_tests.rs"]
+mod callable_signature_key_tests;

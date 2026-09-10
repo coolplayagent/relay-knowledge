@@ -952,3 +952,9 @@ fn schema_marker_rejects_previous_schema_version() {
             .expect("previous schema marker should be stale")
     );
 }
+
+#[path = "reference_resolution_progress_tests.rs"]
+mod reference_resolution_progress_tests;
+
+#[path = "callable_signature_key_tests.rs"]
+mod callable_signature_key_tests;

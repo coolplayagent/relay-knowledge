@@ -354,14 +354,10 @@ def module_mutation_choice(): return leaf()
             .filter(|s| s.name == name)
             .map(|s| s.kind.as_str())
             .collect::<Vec<_>>();
-        let expected = if matches!(
-            name,
-            "attribute_choice" | "module_property_choice" | "module_subscript_choice"
-        ) {
-            vec!["function_declaration", "function"]
-        } else {
-            vec!["function", "function"]
-        };
+        // SimpleNamespace is an external constructor without authorized origin
+        // evidence. Its earlier attribute stores can execute unknown setters,
+        // including before the later mapping example; preserve executable facts.
+        let expected = vec!["function", "function"];
         assert_eq!(kinds, expected, "{name}");
     }
 }
