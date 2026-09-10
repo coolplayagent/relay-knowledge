@@ -22,6 +22,9 @@ pub(super) fn module_impacts(
     )?;
     Ok(impacts
         .into_iter()
+        .filter(|impact| {
+            super::path_selection::impact_row_allowed(&impact.path, "xml", status, request)
+        })
         .map(|impact| {
             hit_from_parts(
                 status,

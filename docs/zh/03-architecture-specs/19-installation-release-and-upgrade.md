@@ -189,6 +189,8 @@ Plan rendering 与 execution 必须使用 bootstrap 捕获的精确 source execu
 
 ### Maven reactor 派生数据升级
 
+投影 checkpoint 改为 v3 token。旧 v1/v2 的非终态 token 在原有 publication fence 下从 reset 重放派生，包括升级停在 files/topics/relationships/ontology/publish 的情况，避免 schema 9 被标为 fresh 却缺少 reactor 完成证据。
+
 从 schema 9 之前的数据库导入时，允许缺少新增的三个 reactor 表；包含 POM 却没有 reactor 完成标记的 scope 保持 incomplete，直到 durable repair/reindex 发布完整图。非 Maven 旧 scope 无需 reactor 事实。
 
 Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_reactor_edges` 和 `maven_reactor_status` 三张 snapshot-scoped 派生表。旧投影标记 stale，由现有 durable repair/index task 重建，不在查询热路径解析 POM。三个 owner 同时纳入 immutable-scope import、显式 scope 清理和有界 retention GC；新表只在升级后开始填充，升级前已越过新增 GC phase 的旧任务没有这些数据需要回收。没有新增运行目录、环境变量或服务进程。

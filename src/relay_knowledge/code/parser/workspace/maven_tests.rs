@@ -46,3 +46,38 @@ fn cdata_and_text_fragments_form_single_coordinates_and_module_paths() {
     assert_eq!(members[1].package_name, "x:child");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn maven_workspace_discovers_only_default_profile_members_in_any_element_order() {
+    let root = std::env::temp_dir().join(format!("maven-profile-workspace-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("child")).unwrap();
+    std::fs::write(
+        root.join("child/pom.xml"),
+        "<project><groupId>x</groupId><artifactId>child</artifactId></project>",
+    )
+    .unwrap();
+    for profile in [
+        "<modules><module><![CDATA[child]]></module></modules><activation><activeByDefault>true</activeByDefault></activation>",
+        "<activation><activeByDefault>true</activeByDefault></activation><modules><module>child</module></modules>",
+    ] {
+        let xml = format!(
+            "<project><groupId>x</groupId><artifactId>root</artifactId><profiles><profile><id>default</id>{profile}</profile><profile><id>opt-in</id><modules><module>excluded</module></modules></profile></profiles></project>"
+        );
+        assert_eq!(summary(&xml).unwrap().modules, ["child"]);
+        std::fs::write(root.join("pom.xml"), xml).unwrap();
+        assert_eq!(
+            detect(&FilesystemWorkspaceSource::new(&root))
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+    std::fs::remove_dir_all(root).unwrap();
+    let modules = "<module>x</module>".repeat(MAX_MEMBERS + 1);
+    assert!(summary(&format!("<project><profiles><profile><modules>{modules}</modules></profile></profiles></project>")).is_none());
+    let xml = format!(
+        "<project><modules><module>base</module></modules><profiles><profile><modules>{}</modules><activation><activeByDefault>true</activeByDefault></activation></profile></profiles></project>",
+        "<module>x</module>".repeat(MAX_MEMBERS)
+    );
+    assert!(summary(&xml).is_none());
+}

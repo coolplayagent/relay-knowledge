@@ -81,6 +81,8 @@ fn summary(content: &str) -> Option<PomSummary> {
     let mut stack = Vec::new();
     let mut result = PomSummary::default();
     let mut value = String::new();
+    let mut profile_modules = Vec::new();
+    let mut active_by_default = false;
     loop {
         match reader.read_event().ok()? {
             Event::Start(event) => {
@@ -92,7 +94,23 @@ fn summary(content: &str) -> Option<PomSummary> {
             }
             Event::End(_) => {
                 let key = stack.join("/");
-                if key == "project/modules/module" {
+                if key == "project/profiles/profile" {
+                    if active_by_default {
+                        if result.modules.len() + profile_modules.len() > MAX_MEMBERS {
+                            return None;
+                        }
+                        result.modules.append(&mut profile_modules);
+                    }
+                    profile_modules.clear();
+                    active_by_default = false;
+                } else if key == "project/profiles/profile/activation/activeByDefault" {
+                    active_by_default = value.trim().eq_ignore_ascii_case("true");
+                } else if key == "project/profiles/profile/modules/module" {
+                    if profile_modules.len() >= MAX_MEMBERS {
+                        return None;
+                    }
+                    profile_modules.push(value.trim().to_owned());
+                } else if key == "project/modules/module" {
                     if result.modules.len() >= MAX_MEMBERS {
                         return None;
                     }
