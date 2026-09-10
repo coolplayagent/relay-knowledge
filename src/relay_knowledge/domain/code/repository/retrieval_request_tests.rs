@@ -26,6 +26,27 @@ fn feature_flag_query_validation_uses_unicode_terms_and_preserves_omitted_query(
 }
 
 #[test]
+fn feature_flag_query_admission_bounds_utf8_bytes_and_normalized_terms() {
+    let selector = CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()).unwrap();
+    let mut request =
+        super::CodeFeatureFlagRequest::new(None, selector, 10, FreshnessPolicy::GraphOnly).unwrap();
+    for query in ["é".repeat(2048), vec!["needle"; 64].join(" 🦀 ")] {
+        request.query = Some(query);
+        assert!(request.validate_query().is_ok());
+    }
+    for (query, expected) in [
+        (format!("{}a", "é".repeat(2048)), "4096 UTF-8 bytes"),
+        (vec!["needle"; 65].join("/"), "64 searchable terms"),
+        (" ".repeat(4097), "4096 UTF-8 bytes"),
+    ] {
+        request.query = Some(query);
+        let error = request.validate_query().unwrap_err();
+        assert_eq!(error.field, "query");
+        assert!(error.message.contains(expected));
+    }
+}
+
+#[test]
 fn field_qualifiers_strip_known_tags_and_keep_search_text() {
     let parsed = parse_field_qualifiers(
         "kind:function,method lang:rust path:storage name:query search_code",

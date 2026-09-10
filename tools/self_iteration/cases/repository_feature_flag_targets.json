@@ -6,7 +6,34 @@
       "ref": "HEAD",
       "scope": "all",
       "isolated_index_home": true,
-      "cold_index_min_file_count": 13,
+      "cold_index_min_file_count": 36,
+      "query_p95_budget_ms": 2000
+    },
+    "feature_flags_binding_groups": {
+      "generated_fixture": "feature_flags_binding_groups_v1",
+      "alias": "feature-flags-binding-groups-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "isolated_index_home": true,
+      "cold_index_min_file_count": 3,
+      "query_p95_budget_ms": 2000
+    },
+    "feature_flags_wide_repeat_1": {
+      "generated_fixture": "feature_flags_wide_v1",
+      "alias": "feature-flags-wide-repeat-1-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "isolated_index_home": true,
+      "cold_index_min_file_count": 36,
+      "query_p95_budget_ms": 2000
+    },
+    "feature_flags_wide_repeat_2": {
+      "generated_fixture": "feature_flags_wide_v1",
+      "alias": "feature-flags-wide-repeat-2-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "isolated_index_home": true,
+      "cold_index_min_file_count": 36,
       "query_p95_budget_ms": 2000
     }
   },
@@ -20,7 +47,147 @@
       "limit": 1,
       "max_rank": 2,
       "degraded_reason": false,
-      "expected": [{"name": "selected_switch", "path": "config/selected.properties", "kind": "defines_config"}],
+      "expected": [
+        {
+          "name": "selected_switch",
+          "path": "config/selected.properties",
+          "kind": "defines_config"
+        }
+      ],
+      "case_group": "index_performance"
+    },
+    {
+      "id": "feature_flags_metadata_intersection_domain",
+      "repository": "feature_flags_wide",
+      "surface": "feature-flags",
+      "query": "metadata_needle",
+      "domain": "selected",
+      "guardrail": true,
+      "limit": 1,
+      "max_rank": 1,
+      "degraded_reason": false,
+      "expected": [
+        {
+          "name": "zzz_metadata_needle",
+          "path": "config/metadata-target.properties",
+          "kind": "defines_config"
+        }
+      ],
+      "case_group": "index_performance"
+    },
+    {
+      "id": "feature_flags_metadata_intersection_source",
+      "repository": "feature_flags_wide",
+      "surface": "feature-flags",
+      "query": "metadata_needle",
+      "source": "properties",
+      "guardrail": true,
+      "limit": 1,
+      "max_rank": 1,
+      "degraded_reason": false,
+      "expected": [
+        {
+          "name": "zzz_metadata_needle",
+          "path": "config/metadata-target.properties",
+          "kind": "defines_config"
+        }
+      ],
+      "case_group": "index_performance"
+    },
+    {
+      "id": "feature_flags_metadata_intersection_hot_reload",
+      "repository": "feature_flags_wide",
+      "surface": "feature-flags",
+      "query": "metadata_needle",
+      "hot_reload": true,
+      "guardrail": true,
+      "limit": 1,
+      "max_rank": 1,
+      "degraded_reason": false,
+      "expected": [
+        {
+          "name": "zzz_metadata_needle",
+          "path": "config/metadata-target.properties",
+          "kind": "defines_config"
+        }
+      ],
+      "case_group": "index_performance"
+    },
+    {
+      "id": "feature_flags_metadata_intersection_combined",
+      "repository": "feature_flags_wide",
+      "surface": "feature-flags",
+      "query": "metadata_needle",
+      "domain": "selected",
+      "source": "properties",
+      "hot_reload": true,
+      "guardrail": true,
+      "limit": 1,
+      "max_rank": 1,
+      "degraded_reason": false,
+      "expected": [
+        {
+          "name": "zzz_metadata_needle",
+          "path": "config/metadata-target.properties",
+          "kind": "defines_config"
+        }
+      ],
+      "case_group": "index_performance"
+    },
+    {
+      "id": "feature_flags_binding_group_metadata",
+      "repository": "feature_flags_binding_groups",
+      "surface": "feature-flags",
+      "query": "NeedleReader",
+      "domain": "alias-selected",
+      "source": "properties",
+      "guardrail": true,
+      "limit": 1,
+      "max_rank": 1,
+      "degraded_reason": false,
+      "expected": [
+        {
+          "name": "selected.key",
+          "path": "settings.properties",
+          "kind": "defines_config"
+        }
+      ],
+      "case_group": "index_performance"
+    },
+    {
+      "id": "properties_parallel_cold_stability_1",
+      "repository": "feature_flags_wide_repeat_1",
+      "surface": "feature-flags",
+      "query": "selected_switch",
+      "guardrail": true,
+      "limit": 1,
+      "max_rank": 2,
+      "degraded_reason": false,
+      "expected": [
+        {
+          "name": "selected_switch",
+          "path": "config/selected.properties",
+          "kind": "defines_config"
+        }
+      ],
+      "case_group": "index_performance"
+    },
+    {
+      "id": "properties_parallel_cold_stability_2",
+      "repository": "feature_flags_wide_repeat_2",
+      "surface": "feature-flags",
+      "query": "selected_switch",
+      "guardrail": true,
+      "limit": 1,
+      "max_rank": 2,
+      "degraded_reason": false,
+      "expected": [
+        {
+          "name": "selected_switch",
+          "path": "config/selected.properties",
+          "kind": "defines_config"
+        }
+      ],
       "case_group": "index_performance"
     }
   ]

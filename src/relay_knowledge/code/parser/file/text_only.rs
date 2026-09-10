@@ -196,6 +196,7 @@ fn record_symbol(
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         line_range: RepositoryCodeRange::new("line_range", line.number, line.number)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
+        callable_signature_key: None,
         symbol_role: None,
     };
     upsert_symbol(output, symbol);

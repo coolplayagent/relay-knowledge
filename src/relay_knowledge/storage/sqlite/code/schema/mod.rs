@@ -71,6 +71,13 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "symbol_role_json",
         "TEXT",
     )?;
+    // Additive metadata only: old rows stay NULL until ordinary versioned reindexing.
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_symbols",
+        "callable_signature_key",
+        "TEXT",
+    )?;
     super::generated::backfill_all_path_generated_flags(connection)?;
     mark_legacy_generated_detection_scopes_stale_once(connection)?;
     mark_legacy_route_extraction_scopes_stale_once(connection)?;

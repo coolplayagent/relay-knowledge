@@ -8,6 +8,7 @@ pub(crate) mod feature_flags;
 mod generated_detection;
 mod identity;
 mod index;
+mod java_identifiers;
 mod java_namespace;
 mod language_metadata;
 mod parser;

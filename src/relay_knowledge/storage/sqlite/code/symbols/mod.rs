@@ -5,23 +5,34 @@ use std::{borrow::Cow, sync::OnceLock};
 use rusqlite::{ToSql, Transaction, limits::Limit, params_from_iter};
 
 use crate::{
-    domain::{RepositoryCodeSymbolRecord, SymbolRole},
+    domain::{MAX_CALLABLE_SIGNATURE_KEY_BYTES, RepositoryCodeSymbolRecord, SymbolRole},
     storage::StorageError,
 };
 
 use super::SearchDocumentInserter;
 
 const SYMBOL_INSERT_BATCH_SIZE: usize = 1_024;
-const SYMBOL_INSERT_COLUMN_COUNT: usize = 17;
+const SYMBOL_INSERT_COLUMN_COUNT: usize = 18;
 const SYMBOL_INSERT_BIND_COUNT: usize = SYMBOL_INSERT_BATCH_SIZE * SYMBOL_INSERT_COLUMN_COUNT;
-const SYMBOL_INSERT_ROW: &str = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+const SYMBOL_INSERT_ROW: &str = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 static SYMBOL_INSERT_FULL_SQL: OnceLock<String> = OnceLock::new();
-const _: () = assert!(SYMBOL_INSERT_BIND_COUNT == 17_408);
+const _: () = assert!(SYMBOL_INSERT_BIND_COUNT == 18_432);
 
 pub(super) fn insert_records(
     transaction: &Transaction<'_>,
     records: &[RepositoryCodeSymbolRecord],
 ) -> Result<(), StorageError> {
+    for symbol in records {
+        if symbol
+            .callable_signature_key
+            .as_ref()
+            .is_some_and(|key| key.len() > MAX_CALLABLE_SIGNATURE_KEY_BYTES)
+        {
+            return Err(StorageError::InvalidInput(
+                "callable signature key exceeds its UTF-8 byte limit".to_owned(),
+            ));
+        }
+    }
     if !records.is_empty() {
         insert_symbol_facts(transaction, records)?;
     }
@@ -123,6 +134,7 @@ fn execute_symbol_insert(
         values.push(&symbol.line_range.start);
         values.push(&symbol.line_range.end);
         values.push(role_json);
+        values.push(&symbol.callable_signature_key);
     }
     statement.execute(params_from_iter(values))?;
 
@@ -139,7 +151,7 @@ fn symbol_insert_sql(row_count: usize) -> String {
             repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id,
             file_id, path, language_id, name,
             qualified_name, kind, signature, doc_comment, byte_start, byte_end,
-            line_start, line_end, symbol_role_json
+            line_start, line_end, symbol_role_json, callable_signature_key
         )
         VALUES {placeholders}
         "

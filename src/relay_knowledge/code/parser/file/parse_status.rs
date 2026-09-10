@@ -63,6 +63,13 @@ pub(super) fn syntax_parse_status(
     output: &FileParseOutput,
     imports: &[CodeImportRecord],
 ) -> (CodeParseStatus, Option<String>) {
+    if language_id == "gotemplate" && !config_files::template_actions::template_names_valid(content)
+    {
+        return (
+            CodeParseStatus::Partial,
+            Some("Go template names must be valid quoted or raw string literals within the action budget".to_owned()),
+        );
+    }
     if !root.has_error() {
         return (CodeParseStatus::Parsed, None);
     }

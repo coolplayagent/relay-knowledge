@@ -75,3 +75,30 @@ fn status_test_build() -> SnapshotBuild {
         0,
     )
 }
+
+#[test]
+fn proxy_grammar_success_cannot_hide_invalid_go_template_names() {
+    let language = detect_language("src/config.ctmpl").unwrap();
+    for source in [
+        r#"{{ template foo . }}"#,
+        r#"{{ template 'f' . }}"#,
+        r#"{{ template "bad\q" . }}"#,
+    ] {
+        let tree = parse_tree(language, source).unwrap();
+        let (status, diagnostic) = syntax_parse_status(
+            language.id,
+            tree.root_node(),
+            source,
+            &FileParseOutput::new(),
+            &[],
+        );
+        assert_eq!(status, CodeParseStatus::Partial, "{source}");
+        assert!(diagnostic.unwrap().contains("quoted or raw string"));
+    }
+    let source = r#"{{ template 'f' . }}"#;
+    let tree = parse_tree(language, source).unwrap();
+    assert!(
+        !tree.root_node().has_error(),
+        "regression must exercise the proxy's error-free bypass"
+    );
+}

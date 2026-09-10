@@ -2,26 +2,7 @@
 use crate::code::parser::nodes::node_text;
 use tree_sitter::Node;
 
-pub(super) fn transparent<'a>(mut node: Node<'a>, remaining: &mut usize) -> Option<Node<'a>> {
-    loop {
-        *remaining = remaining.checked_sub(1)?;
-        if node.kind() != "parenthesized_expression" {
-            return Some(node);
-        }
-        let mut expression = None;
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            *remaining = remaining.checked_sub(1)?;
-            if child.kind() == "comment" {
-                continue;
-            }
-            if expression.replace(child).is_some() {
-                return None;
-            }
-        }
-        node = expression?;
-    }
-}
+pub(super) use super::transparent::transparent;
 
 /// Schedule only expressions evaluated when this expression is created.
 pub(super) fn eager_children<'a>(
@@ -107,7 +88,9 @@ pub(super) fn has_eager_call(content: &str, statement: Node<'_>, remaining: &mut
             return true;
         };
         *remaining = left;
-        if node.kind() == "call" {
+        if node.kind() == "call"
+            || super::implicit_protocols::dispatches(content, node, None, remaining)
+        {
             return true;
         }
         if !eager_children(node, &mut stack, remaining, deferred) {

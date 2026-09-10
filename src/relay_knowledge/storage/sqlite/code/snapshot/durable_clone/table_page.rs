@@ -546,3 +546,7 @@ fn checked_add(left: usize, right: usize, scope: &str) -> Result<usize, StorageE
 #[cfg(test)]
 #[path = "table_page_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "callable_signature_key_tests.rs"]
+mod callable_signature_key_tests;

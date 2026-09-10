@@ -9,6 +9,8 @@ use crate::{
 use rusqlite::{Connection, params_from_iter, types::Value};
 use std::collections::BTreeSet;
 
+mod metadata_groups;
+
 const MAX_SCOPE_USAGES: usize = 10_000;
 const MAX_METADATA_BYTES: usize = 64 * 1024;
 const MAX_ANALYSIS_BYTES: usize = 16 * 1024 * 1024;
@@ -198,15 +200,55 @@ fn ranked_keys(
             values.push(Value::Integer(i64::from(value)));
         }
     }
+    let (prefix, source, predicate, state) = if let Some(plan) = metadata_groups::plan(
+        scope_predicate,
+        scope_params,
+        request,
+        MAX_CLOSURE_ROUNDS,
+        MAX_BINDING_IDENTITIES,
+    ) {
+        let mut parameters = plan.values;
+        parameters.extend(values);
+        values = parameters;
+        (
+            format!(
+                "WITH RECURSIVE {}, admitted AS NOT MATERIALIZED (SELECT flag.*, {} AS metadata_state FROM code_repository_feature_flags flag WHERE {}) ",
+                plan.prefix,
+                plan.state,
+                clauses.join(" AND ")
+            ),
+            "admitted flag",
+            "flag.metadata_state <> 0".to_owned(),
+            "MAX(flag.metadata_state)",
+        )
+    } else {
+        (
+            String::new(),
+            "code_repository_feature_flags flag",
+            clauses.join(" AND "),
+            "MAX(1)",
+        )
+    };
     values.push(Value::Integer((request.limit + 1) as i64));
-    let sql = format!("SELECT flag.source_kind, flag.source_key FROM code_repository_feature_flags flag WHERE {}
-        GROUP BY flag.source_kind, flag.source_key ORDER BY MAX(CASE flag.edge_kind WHEN 'guards_code' THEN 20.0 WHEN 'defines_config' THEN 16.0 ELSE 12.0 END
-        + CAST(flag.confidence_basis_points AS REAL) / 1000.0) DESC, MIN(flag.name), MIN(flag.source_key) LIMIT ?", clauses.join(" AND "));
+    let sql = format!("{prefix}SELECT flag.source_kind, flag.source_key, {state} FROM {source} WHERE {predicate}
+        GROUP BY flag.source_kind, flag.source_key ORDER BY {state} DESC, MAX(CASE flag.edge_kind WHEN 'guards_code' THEN 20.0 WHEN 'defines_config' THEN 16.0 ELSE 12.0 END
+        + CAST(flag.confidence_basis_points AS REAL) / 1000.0) DESC, MIN(flag.name), MIN(flag.source_key) LIMIT ?");
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(params_from_iter(values), |row| {
-        Ok((row.get(0)?, row.get(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
     })?;
-    let mut rows = rows.collect::<Result<Vec<_>, _>>()?;
+    let rows = rows.collect::<Result<Vec<_>, _>>()?;
+    if rows.iter().any(|row| row.2 == 2) {
+        return Err(incomplete("metadata binding closure budget exhausted"));
+    }
+    let mut rows = rows
+        .into_iter()
+        .map(|(kind, key, _)| (kind, key))
+        .collect::<Vec<_>>();
     let exhausted = rows.len() <= request.limit;
     rows.truncate(request.limit);
     Ok((rows.into_iter().collect(), exhausted))

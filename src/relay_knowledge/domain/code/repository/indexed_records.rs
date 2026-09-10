@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use super::super::{CodeParseStatus, SymbolRole};
 use super::RepositoryCodeRange;
 
+/// Maximum UTF-8 bytes in an AST-derived callable identity proof.
+pub const MAX_CALLABLE_SIGNATURE_KEY_BYTES: usize = 2048;
+
 /// File-level code index row.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryCodeFileRecord {
@@ -95,12 +98,35 @@ pub struct RepositoryCodeSymbolRecord {
     pub qualified_name: String,
     pub kind: String,
     pub signature: String,
+    /// Bounded structured callable identity; absent when equivalence is unproven.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_callable_signature_key"
+    )]
+    pub callable_signature_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc_comment: Option<String>,
     pub byte_range: RepositoryCodeRange,
     pub line_range: RepositoryCodeRange,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol_role: Option<SymbolRole>,
+}
+
+fn deserialize_callable_signature_key<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let key = Option::<String>::deserialize(deserializer)?;
+    if key
+        .as_ref()
+        .is_some_and(|value| value.len() > MAX_CALLABLE_SIGNATURE_KEY_BYTES)
+    {
+        return Err(serde::de::Error::custom(
+            "callable signature key exceeds byte budget",
+        ));
+    }
+    Ok(key)
 }
 
 /// Reference extracted from tree-sitter syntax and optionally resolved.

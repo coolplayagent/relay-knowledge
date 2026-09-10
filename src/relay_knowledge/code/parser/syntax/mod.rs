@@ -12,6 +12,8 @@ use tree_sitter::{
     Node, ParseOptions, Parser, Query, QueryCursor, QueryCursorOptions, StreamingIterator,
 };
 
+mod java_view;
+
 use super::{
     super::{CodeIndexError, languages::LanguageSpec},
     nodes::{SyntaxRange, node_text, syntax_range},
@@ -83,6 +85,9 @@ struct TagQueryCacheKey {
 type CompiledTagQueryCache = HashMap<TagQueryCacheKey, Arc<Query>>;
 
 static COMPILED_TAG_QUERIES: OnceLock<Mutex<CompiledTagQueryCache>> = OnceLock::new();
+// tree-sitter-properties 0.3.0 has global EOF state. Lock its parser lifecycle
+// until an upstream per-instance scanner is verified.
+static PROPERTIES_SCANNER: Mutex<()> = Mutex::new(());
 
 struct SyntaxCallbackWorkBudget {
     remaining_quanta: usize,
@@ -122,7 +127,12 @@ fn parse_tree_with_budget(
     reject_pathological_c_family_fragment(language.id, content)?;
     let mut work_budget = SyntaxCallbackWorkBudget::new(work_quanta);
     let mut progress = |_: &tree_sitter::ParseState| work_budget.consume();
-    let bytes = content.as_bytes();
+    let view = if language.id == "java" {
+        java_view::identifier_view(content)
+    } else {
+        std::borrow::Cow::Borrowed(content.as_bytes())
+    };
+    let bytes = view.as_ref();
     let parsed = with_syntax_parser(language, |parser| {
         parser.parse_with_options(
             &mut |offset, _| bytes.get(offset..).unwrap_or_default(),
@@ -140,6 +150,13 @@ fn with_syntax_parser<T>(
     language: LanguageSpec,
     operation: impl FnOnce(&mut Parser) -> T,
 ) -> Result<T, CodeIndexError> {
+    // Recover poison only with the reset below: fresh parsing deserializes empty
+    // scanner state, never resumes cancellation/panic. Other languages do not wait.
+    let _scanner = (language.id == "properties").then(|| {
+        PROPERTIES_SCANNER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    });
     let key = SyntaxParserCacheKey {
         language_id: language.id,
         language_factory_address: language.language as usize,
@@ -477,3 +494,6 @@ pub(super) fn extract_tag_captures_safely(
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod properties_tests;

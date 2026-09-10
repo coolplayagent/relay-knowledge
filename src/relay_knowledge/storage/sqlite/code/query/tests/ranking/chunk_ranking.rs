@@ -760,6 +760,7 @@ fn symbol(
         doc_comment: None,
         byte_range: range(line_range.start, line_range.end),
         line_range,
+        callable_signature_key: None,
         symbol_role: None,
     }
 }

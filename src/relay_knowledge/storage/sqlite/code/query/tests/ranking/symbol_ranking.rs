@@ -769,6 +769,7 @@ fn symbol(
             end: line_range.end,
         },
         line_range,
+        callable_signature_key: None,
         symbol_role: None,
     }
 }

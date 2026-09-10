@@ -114,3 +114,44 @@ fn range_allows_two_declaration_names_but_other_pipeline_heads_do_not() {
         assert!(!balanced(source), "{source}");
     }
 }
+
+#[test]
+fn named_template_actions_require_valid_go_string_literals() {
+    for source in [
+        r#"{{ template foo . }}"#,
+        r#"{{ template 'f' . }}"#,
+        "{{ template }}",
+        r#"{{ template "bad\q" . }}"#,
+        r#"{{ define 'f' }}body{{ end }}"#,
+        r#"{{ block 'f' . }}body{{ end }}"#,
+    ] {
+        assert!(!template_names_valid(source), "{source}");
+        assert!(!balanced(source), "{source}");
+    }
+    for source in [
+        r#"{{ define "foo" }}body{{ end }}{{ template "foo" . }}"#,
+        "{{ define `foo` }}body{{ end }}{{ template `foo` . }}",
+        r#"{{ define "f\x6fo" }}body{{ end }}{{ template "foo" . }}"#,
+        r#"{{ define "foo" }}body{{ end }}{{ template "foo" }}"#,
+        r#"{{- block "foo" . -}}body{{- end -}}"#,
+    ] {
+        assert!(template_names_valid(source), "{source}");
+        assert!(balanced(source), "{source}");
+    }
+}
+
+#[test]
+fn name_validation_keeps_proxy_syntax_and_literal_action_text_separate() {
+    for source in [
+        "{{ $bound := . }}{{ $bound }}",
+        r#"{{/* {{ template invalid . }} */}}"#,
+        r#"{{ printf "{{ template invalid . }}" }}"#,
+    ] {
+        assert!(template_names_valid(source), "{source}");
+    }
+    assert!(!template_names_valid(&format!(
+        r#"{{{{ template "foo" {} }}}}"#,
+        " ".repeat(65_536)
+    )));
+    assert!(!template_names_valid("{{ template `unfinished }}"));
+}

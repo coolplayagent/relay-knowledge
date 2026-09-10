@@ -448,6 +448,7 @@ fn symbol_record_with_doc_owner(
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
+        callable_signature_key: None,
         symbol_role: None,
     })
 }

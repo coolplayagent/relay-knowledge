@@ -101,9 +101,15 @@ fn scope_binding(
         }
         let visible = scope.kind() != "class_definition" || current.start_byte() < before;
         let target = match current.kind() {
-            "assignment" | "augmented_assignment" | "for_statement" => {
+            // Class annotations record metadata without installing a value;
+            // function annotations still declare a local for the whole body.
+            "assignment"
+                if current.child_by_field_name("right").is_some()
+                    || scope.kind() != "class_definition" =>
+            {
                 current.child_by_field_name("left")
             }
+            "augmented_assignment" | "for_statement" => current.child_by_field_name("left"),
             "function_definition" | "class_definition" | "named_expression" => {
                 current.child_by_field_name("name")
             }
@@ -192,3 +198,7 @@ fn names(content: &str, node: Node<'_>, name: &str, remaining: &mut usize) -> Op
     }
     Some(false)
 }
+
+#[cfg(test)]
+#[path = "mutation_scopes_tests.rs"]
+mod tests;

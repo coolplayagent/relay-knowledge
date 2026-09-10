@@ -109,7 +109,7 @@ shard catalog 路由是可迁移的，恢复时会基于当前 runtime data 目�
 
 Query-index finalization plan 当前为 version 3，共 17 个稳定 slot；ordinal 或 repair cursor 继续写入既有 checkpoint `state`，不增加 schema column 或 marker。Version 2 曾向冻结的 v1 plan 追加 unit 16。Version 3 保持每个 name/owner/column ordinal 不变，只退役 unit 1 `code_repository_symbols_lookup` 的创建动作：既不新建也不自动删除。若同名索引存在，每次 open 与 publication path 仍严格校验 exact legacy shape；若缺失，只有 v3 cursor 或 current coarse scan 才视为 complete。规范 v1/v2 subphase token 及 v2 普通/reference-search repair token 继续可读，并在 writer quantum 之间保留原 version；legacy token 若没有物理 legacy unit 1，就不能越过该 ordinal。Version-3 formatter 输出 v3 token；当前 formatter 输出下述 v4 token。每个 retained 非终态 coarse token 都重新校验 current plan，每事务最多修复一个缺失 required descriptor；显式稳定 resume code 跨 reopen 保存 original phase。Software/partitioned-publication repair 保持在 finalization 并跳过 parsing，partitioned public projection 不能把它报告为 completed。历史终态 `completed` checkpoint 保持不变，自动终态修复必须另行调度 durable leased migration。
 
-查询索引计划 v4 在既有 ordinal 后追加 17–19 三个单元：scope/canonical-symbol 索引及两个方向的 scope/symbol-snapshot 调用索引，不重排旧 descriptor。v1–v3 prefix 保留其校验策略，完整校验旧 prefix 后跨越旧末尾 ordinal 才转为当前 token；每个新增索引仍由单个持久 writer 单元建立。数据库 open 仅校验已有索引形状，缺索引的精确 canonical/snapshot 查询明确提示重新索引，新增 `canonical-call-selectors-v1` read-model component 与 `cpp-callable-declarations-v1` / `python-overload-declarations-v15` extraction component 推进 snapshot scope identity，因此当前 binary 的普通 `repo index <alias> --ref <ref>` 会通过带 lease 的完整流程重建旧 completed scope。`--reset` 仅重置未完成 task 状态，并非强制重建选项。canonical 事实身份不改写；有歧义的重载 canonical ID 被拒绝，使用 definition 返回且绑定原 scope/ref 的 `symbol_snapshot_id` 选择单个重载。降级二进制前应先完成或取消未完成 v4 任务，保持数据库、WAL、checkpoint 一致，无需转换 canonical 数据。
+查询索引计划 v4 在既有 ordinal 后追加 17–19 三个单元：scope/canonical-symbol 索引及两个方向的 scope/symbol-snapshot 调用索引，不重排旧 descriptor。v1–v3 prefix 保留其校验策略，完整校验旧 prefix 后跨越旧末尾 ordinal 才转为当前 token；每个新增索引仍由单个持久 writer 单元建立。数据库 open 仅校验已有索引形状，缺索引的精确 canonical/snapshot 查询明确提示重新索引，新增 `canonical-call-selectors-v1` read-model component 与 `cpp-callable-declarations-v2` / `python-overload-declarations-v16` extraction component 推进 snapshot scope identity，因此当前 binary 的普通 `repo index <alias> --ref <ref>` 会通过带 lease 的完整流程重建旧 completed scope。`--reset` 仅重置未完成 task 状态，并非强制重建选项。canonical 事实身份不改写；有歧义的重载 canonical ID 被拒绝，使用 definition 返回且绑定原 scope/ref 的 `symbol_snapshot_id` 选择单个重载。降级二进制前应先完成或取消未完成 v4 任务，保持数据库、WAL、checkpoint 一致，无需转换 canonical 数据。
 
 每次 database open 只对已经存在的 index 做只读 exact-shape preflight。每个 fresh `Restart` 无论 path count 或后续 byte/row 分批如何，都仅在完整 chunks owner 为空时预建 unit 13/14；owner 已 populated 时两者都延后。所有 resume session 与其他 descriptor 都交给逐 unit durable finalization。Direct snapshot/import writer 在 fact mutation 前预建 required empty-owner index，随后要求所有 required slot；populated owner 缺 required index 时 fail closed，旧 active scope 不变。Upgrade、rollback、backup 与 doctor 必须原样保留 v1/v2/v3 checkpoint text，保留既有 retired unit 1 而不得删除，也不能把 database open 成功当作全部 required query index 已完成的证明。
 
@@ -197,7 +197,7 @@ Query-index plan v5 在完整保留 v4 前缀的基础上追加 ordinal 20：`co
 
 配置查询的候选排序、别名补取、绑定闭包与符号附加共用一个 SQLite 执行预算。耗尽时返回可操作的 timeout，不返回部分成功；该查询保护不需要 schema 迁移或事实版本变更，原有行数与字节限制仍然生效。重试前应缩小查询词或授权的路径、语言过滤范围。
 
-`config-registry-v6` 抽取组件独立于 Python 与查询索引版本，使采用旧配置语义的 completed scope 失效。对相同提交执行普通 `repo index <alias> --ref <ref>` 即可经持久化租约流水线刷新事实，无需 `--reset`。Java 接收者与常量证明、相对嵌套父类型解析、模板动作和数字语法恢复及静态 Shell 默认值（包括未引用的波浪号展开）一起刷新；配置事实 v6 另通过下述增量 schema 与延后 query-plan 扩展记录 Java 源集身份。升级时保留 runtime database、WAL 和 task checkpoint；精确回滚须用匹配的旧 binary 恢复升级前 database/shard。
+`config-registry-v7` 抽取组件独立于 Python 与查询索引版本，使采用旧配置语义的 completed scope 失效。对相同提交执行普通 `repo index <alias> --ref <ref>` 即可经持久化租约流水线刷新事实，无需 `--reset`。Java 接收者与常量证明、相对嵌套父类型解析、模板动作和数字语法恢复及静态 Shell 默认值（包括未引用的波浪号展开）一起刷新；配置事实 v6 另通过下述增量 schema 与延后 query-plan 扩展记录 Java 源集身份。升级时保留 runtime database、WAL 和 task checkpoint；精确回滚须用匹配的旧 binary 恢复升级前 database/shard。
 
 Python v11 在每个授权解析 worker 中使用模块来源证据。提供者路径改变时，历史增量复用自动回到既有持久化完整索引计划，保留任务租约、检查点和有界批次。显式增量、文件系统及 worktree overlay 更新会重新解析受影响的 Python 文件，即使这些文件自身字节未变；既有路径、文件及字节预算仍生效。历史提交保留自己的源清单和分类。普通同 HEAD 索引会刷新旧完成 scope，无需重置数据库；仅源目录的窄授权仍保持原范围，无法证明来源时返回未知，不越权读取。
 
@@ -209,6 +209,26 @@ Warm-open schema 能力检查包含 Java namespace 列、摘要表与维护触�
 
 来源变化触发的增量索引先沿既有有界 Gitlink diff、重命名及复制流程展开精确的授权文件工作集。每个文件只入队一次；Gitlink 容器和无需解析的子孙文件不占用解析文件数或 blob 字节预算。读取 blob 前限制队列大小，prefetch 前准入精确计划字节，再对同一文件集执行解析及运行时预算复核。原始 diff 变化和强制 Python 候选分别保持有界，删除、tombstone、租约和 checkpoint 行为保持有效。此次准入修正不改变已成功发布的事实，因此 Python 事实版本仍为 v14；失败的更新可通过普通 update 命令重试。
 
-从配置事实 v5 升至 v6 前，先用同时兼容旧任务 Python 与配置事实版本的 binary（包括所需的准入修复）完成未结束的索引工作，并确认任务完成。旧增量任务处于 `retrying` 时尤其需要如此：其 base 属于旧事实版本，仓库 writer 队列不会让新的完整索引任务越过它。此前驱尚未完成时直接启动 v6 base 索引，可能只返回 `queued` 而未执行重建，不能视作完成。旧工作完成后，再用 v6 binary 普通索引所需 base ref，随后请求增量更新。全程保留 runtime database、WAL、shard 和 checkpoint，不得通过清除租约或丢弃旧任务记录绕过顺序。该源事实升级前置条件与已支持的 v1–v6 query-plan checkpoint 迁移是两个独立要求。
+从配置事实 v5 升至 v6 前，先用兼容旧任务完整 source-fact 版本合同（包括 Python、C/C++ 和配置组件）的 binary（包括所需的准入修复）完成未结束的索引工作，并确认任务完成。旧增量任务处于 `retrying` 时尤其需要如此：其 base 属于旧事实版本，仓库 writer 队列不会让新的完整索引任务越过它。此前驱尚未完成时直接启动 v6 base 索引，可能只返回 `queued` 而未执行重建，不能视作完成。旧工作完成后，再用 v6 binary 普通索引所需 base ref，随后请求增量更新。全程保留 runtime database、WAL、shard 和 checkpoint，不得通过清除租约或丢弃旧任务记录绕过顺序。该源事实升级前置条件与已支持的 v1–v6 query-plan checkpoint 迁移是两个独立要求。
 
-Python overload 证明计入类体立即执行时通过 `global` 或 `nonlocal` 重定向到同一词法绑定目标的写入，包括函数和类定义引入的名称。重定向后的自定义装饰器保留为可执行证据，不再被当作 typing 声明排除；同一 canonical 身份对应两个可执行定义时仍须报告歧义，并使用 snapshot selector 选择。普通类局部名称和延迟执行的函数体保持各自的作用域与求值规则，遍历继续受既有共享工作预算限制。`python-overload-declarations-v15` 组件使普通同 HEAD 索引以修正后的分类重建旧 completed scope，无需 reset 或修改源文件。
+Python overload 证明计入类体立即执行时通过 `global` 或 `nonlocal` 重定向到同一词法绑定目标的写入，包括函数和类定义引入的名称。重定向后的自定义装饰器保留为可执行证据，不再被当作 typing 声明排除；同一 canonical 身份对应两个可执行定义时仍须报告歧义，并使用 snapshot selector 选择。普通类局部名称和延迟执行的函数体保持各自的作用域与求值规则，遍历继续受既有共享工作预算限制。`python-overload-declarations-v16` 组件使普通同 HEAD 索引以修正后的分类重建旧 completed scope，无需 reset 或修改源文件。
+
+Python overload 证明区分类中的纯注解名称与运行时绑定：类注解只有同时赋值才拥有该名称，函数局部纯注解仍建立局部绑定。立即执行的隐式协议（包括真假判断、迭代、上下文进入、运算符、描述符、下标、格式化、解包和字典 key/set 成员哈希）可能使 typing 提供方证明失效。有界字面量证明保留安全的内建操作；字典 value 和延迟函数体继续遵守各自求值规则，并保持共享遍历预算。
+
+C/C++ canonical callers 查询将唯一可执行定义与结构化调用签名相同的声明一起作为调用目标。参数名和默认值不区分签名，参数类型、声明结构、参数数量及成员限定符仍须一致。定义歧义或无法证明声明等价时须选择明确的 snapshot；显式 snapshot 查询保持精确目标语义。可空 `callable_signature_key` 独立于展示/搜索签名，每个 key 最多 2,048 UTF-8 字节、1,024 个语法节点，每个文件共享 65,536 个语法节点预算。canonical 解析最多接纳 1,024 个候选符号并沿用查询工作预算；超限报告歧义，不截断后声称调用者完整。
+
+`cpp-callable-declarations-v2` 与 `python-overload-declarations-v16` fact component 要求普通同 HEAD 索引重建旧 completed scope。schema 迁移仅增加可空签名列，旧记录及旧库导入保留未知证据，直到重新索引，不在启动时回填事实。snapshot 与持久化 clone/delta 预算计入签名字节，导入保留可空 key。重建后重新复制 snapshot selector；升级前使用与未完成任务原始 fact 版本兼容的二进制完成或取消这些任务，回滚时一起保留数据库、WAL 和 checkpoint。
+
+当前调用等价证明支持 primitive 参数类型，忽略标量参数的顶层 cv 限定；指向类型及成员的 cv/ref、参数数量和可变参数仍影响签名。typedef、限定名/struct/template 类型、数组参数调整、相关宏、指针顶层 cv 及非规范类型写法保持未知。canonical callers 若需要合并这些声明，会要求显式 snapshot，不猜测等价，也不静默省略声明调用者。C++ `(void)` 等价于空参数列表；C 的旧式空参数列表保持未知。
+
+隐式协议分析在共享词法工作预算内保留已证明安全的接收者操作，包括直接/局部模块别名、内建容器迭代、已证明 overload 函数的真假值、已证明模块字典的字面量 key 访问及局部已证明空类的实例。中间出现未知执行或接收者修改时，证明失效。外部构造器（包括没有源码 origin 证明的导入构造器）不能仅凭名称获得信任；即使某次本地执行无副作用，其接收者仍保留未知状态。模块 `__getattr__` 和 `__class__` 写入在属性、字典和 mutator 调用语法中共用保守的协议钩子策略。已证明的装饰器不再被其他别名上下文重复解释为未知操作。
+
+Java 标识符证明采用 Unicode 16.0 的通用字符类别实现 Java identifier-start/part 规则，支持货币符号、连接标点、组合标记和 identifier-ignorable 字符。解析兼容视图保留每个源字节偏移，事实从原始源码读取，注释、字符串和 text block 的内容不变。非法标识符首字符及无关坏语法继续保留诊断。字符类别覆盖有明确版本，不表示所有 JDK 版本接受完全相同的字符集。原生 grammar 对裸 CR 行注释的缺口仍不受支持：此类文件的 namespace 证据标记不完整，避免凭错误的完整类型列表推断隐式平台读取。CRLF 仍受支持，此修改不改变仓库行坐标合同。
+
+Go template 的 `template`、`define` 和 `block` 名称必须是带合法转义的 quoted 或 raw 字符串字面量。名称缺失、未引用或使用 rune 字面量时，即使代理 grammar 没有 error node，也保留 partial 语法诊断。合法 quoted/raw、转义名称及不带 pipeline 的 template 调用继续受支持，校验沿用有界动作扫描。
+
+配置事实版本 `config-registry-v7` 使普通同 HEAD 索引重建旧 completed scope，刷新 Java 标识符和 Go template 分类。此处不增加查询索引计划版本，既有 query-plan v7 保持不变。切换二进制时继续遵循上文未完成任务兼容性及 database/WAL/checkpoint 回滚要求。
+
+worktree overlay 的直接克隆准入将 Java namespace/type 两种投影中的 `source_set_kind` 和 `module_root` 全部计入预算，包括每个重复类型行及既有读写倍率。超限时先要求既有持久化 staging 路径，再写入目标事实，活动 base scope 保持可用；任务冻结预算、租约和 checkpoint 所有权不变。
+
+Properties 解析在现有同步 parser worker 内使用仅限 properties 的互斥锁，隔离 `tree-sitter-properties` 0.3.0 的进程级 EOF 状态。锁覆盖 parser 创建、语言设置、重置与解析，其他语言仍可并行；回调工作预算、worker 准入、有界批次队列与任务租约均不变。取消或捕获 parser panic 后，下一次解析在锁内重置缓存 parser，并从空 scanner 状态开始，原始失败仍可观测。该依赖的 scanner 析构当前为空操作，因此线程本地缓存析构不会改写共享 EOF 状态；只有确认上游改用实例独立状态后才能移除此兼容锁。性能套件保留完整 36 文件配置 fixture，另运行两次隔离的 cold index，各自沿用完成状态、新鲜度和查询结果门禁，并分别记录 cold-index 延迟；查询不会重建 scope。

@@ -122,6 +122,45 @@ pub(in crate::code) fn tokens(action: &str) -> Vec<Token<'_>> {
     tokens
 }
 
+// The proxy grammar may accept Go-invalid names without an error node.
+// Check only named-template actions here, preserving its other valid syntax.
+pub(in crate::code) fn template_names_valid(content: &str) -> bool {
+    let mut offset = 0;
+    while let Some(relative) = content[offset..].find("{{") {
+        let start = offset + relative;
+        let Some(end) = action_end(content, start) else {
+            return false;
+        };
+        if end - start > 65_536 {
+            return false;
+        }
+        let mut action = &content[start + 2..end - 2];
+        if action.as_bytes().first() == Some(&b'-')
+            && action
+                .as_bytes()
+                .get(1)
+                .is_some_and(u8::is_ascii_whitespace)
+        {
+            action = &action[1..];
+        }
+        let tokens = tokens(action);
+        if matches!(
+            tokens.first().map(|token| token.kind),
+            Some(Kind::Word("template" | "define" | "block"))
+        ) && !template_name(&tokens)
+        {
+            return false;
+        }
+        offset = end;
+    }
+    true
+}
+
+fn template_name(tokens: &[Token<'_>]) -> bool {
+    matches!(tokens.get(1).map(|token| token.kind), Some(Kind::Literal(literal))
+        if super::template_literals::bytes(literal).is_some_and(|(_, rest)| rest.is_empty()))
+}
+
 pub(super) fn balanced(content: &str) -> bool {
     let mut offset = 0;
     let mut blocks = Vec::new();
@@ -181,8 +220,7 @@ fn valid_action(tokens: &[Token<'_>], blocks: &mut Vec<(String, bool)>) -> bool 
                 if tokens.len() < 2 || blocks.len() >= 128 {
                     return false;
                 }
-                if matches!(word, "define" | "block") && !matches!(tokens[1].kind, Kind::Literal(_))
-                {
+                if matches!(word, "define" | "block") && !template_name(tokens) {
                     return false;
                 }
                 if (word == "define" && (!blocks.is_empty() || tokens.len() != 2))
@@ -192,6 +230,15 @@ fn valid_action(tokens: &[Token<'_>], blocks: &mut Vec<(String, bool)>) -> bool 
                 }
                 blocks.push((word.to_owned(), false));
                 expression_start = 1;
+            }
+            "template" => {
+                if !template_name(tokens) {
+                    return false;
+                }
+                if tokens.len() == 2 {
+                    return true;
+                }
+                expression_start = 2;
             }
             "end" => return tokens.len() == 1 && blocks.pop().is_some(),
             "else" => {

@@ -27,6 +27,16 @@ fn actual_package_and_only_top_level_types_form_namespace_evidence() {
 
 #[test]
 fn malformed_escaped_or_budget_limited_namespaces_cannot_prove_absence() {
+    assert!(
+        !evidence("// comment\rclass System {}\nclass App {}")
+            .evidence
+            .complete
+    );
+    assert!(
+        evidence("// comment\r\nclass System {}\nclass App {}")
+            .evidence
+            .complete
+    );
     assert!(!evidence("package p; class Broken {").evidence.complete);
     assert!(
         !evidence(r"package p; class Syst\u0065m {}")

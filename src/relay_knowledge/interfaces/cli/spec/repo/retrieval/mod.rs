@@ -354,7 +354,7 @@ pub(in crate::interfaces::cli::spec) fn repo_feature_flags() -> CliCommandSpec {
                 Some("text"),
                 false,
                 false,
-                "Optional filter over feature flag name, config key, path, or excerpt.",
+                "Optional filter over feature flag name, config key, path, or excerpt; at most 4096 UTF-8 bytes and 64 searchable terms.",
                 None,
                 &[],
             ),

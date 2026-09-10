@@ -168,6 +168,9 @@ pub struct CodeFeatureFlagRequest {
 }
 
 impl CodeFeatureFlagRequest {
+    const MAX_QUERY_BYTES: usize = 4096;
+    const MAX_QUERY_TERMS: usize = 64;
+
     /// Uses the same Unicode word boundaries for admission and indexed matching.
     pub(crate) fn query_terms(query: &str) -> impl Iterator<Item = &str> {
         query
@@ -175,16 +178,30 @@ impl CodeFeatureFlagRequest {
             .filter(|term| !term.is_empty())
     }
 
-    /// Rejects supplied non-searchable text before freshness or storage shortcuts.
+    /// Bounds SQL expansion and rejects non-searchable text before storage access.
     pub(crate) fn validate_query(&self) -> Result<(), DomainError> {
-        if self
-            .query
-            .as_deref()
-            .is_some_and(|query| Self::query_terms(query).next().is_none())
-        {
+        let Some(query) = self.query.as_deref() else {
+            return Ok(());
+        };
+        if query.len() > Self::MAX_QUERY_BYTES {
+            return Err(DomainError::invalid(
+                "query",
+                "configuration query must be 4096 UTF-8 bytes or less",
+            ));
+        }
+        let count = Self::query_terms(query)
+            .take(Self::MAX_QUERY_TERMS + 1)
+            .count();
+        if count == 0 {
             return Err(DomainError::invalid(
                 "query",
                 "configuration query contains no searchable Unicode letters, numbers or underscores",
+            ));
+        }
+        if count > Self::MAX_QUERY_TERMS {
+            return Err(DomainError::invalid(
+                "query",
+                "configuration query must contain 64 searchable terms or fewer",
             ));
         }
         Ok(())

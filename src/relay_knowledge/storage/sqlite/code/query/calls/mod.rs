@@ -1,5 +1,6 @@
 mod ambiguous_callees;
 pub(super) mod caller_context_scoring;
+mod canonical_targets;
 mod counts;
 mod direction;
 mod display;

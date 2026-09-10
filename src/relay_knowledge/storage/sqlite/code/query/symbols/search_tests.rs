@@ -530,6 +530,7 @@ fn symbol_with_signature(
         doc_comment: None,
         byte_range: RepositoryCodeRange { start: 1, end: 1 },
         line_range: RepositoryCodeRange { start: 1, end: 1 },
+        callable_signature_key: None,
         symbol_role: None,
     }
 }

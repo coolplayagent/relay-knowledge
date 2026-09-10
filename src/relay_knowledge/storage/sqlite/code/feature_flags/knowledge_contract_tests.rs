@@ -132,7 +132,7 @@ fn result_limit_is_filled_after_multiple_high_scoring_aliases_collapse() {
 }
 
 #[test]
-fn exhausted_seed_budget_does_not_report_an_unproven_empty_result() {
+fn metadata_absence_is_proved_but_unmatched_terms_still_exhaust_seed_budget() {
     let store = crate::storage::SqliteGraphStore::open_in_memory().unwrap();
     let mut connection = store.connection.lock().unwrap();
     connection.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
@@ -150,6 +150,13 @@ fn exhausted_seed_budget_does_not_report_an_unproven_empty_result() {
     query.limit = 1;
     query.query = Some("common".into());
     query.source = Some("properties".into());
+    // All 1,001 unbound usages are Java. Metadata admission can prove this
+    // intersection empty without hydrating a ranked seed window.
+    assert!(search(&connection, &status(), &query).unwrap().is_empty());
+    // Every candidate supplies one term but none supplies the second. This
+    // still exercises the explicit seed-refill ceiling without metadata proof.
+    query.source = None;
+    query.query = Some("common absent".into());
     assert!(
         search(&connection, &status(), &query)
             .unwrap_err()

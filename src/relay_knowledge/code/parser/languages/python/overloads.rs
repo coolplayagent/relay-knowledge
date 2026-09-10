@@ -12,8 +12,15 @@ mod expressions;
 use bindings::{contains_identifier, statement_binding};
 mod aliases;
 mod class_creation;
+mod implicit_protocols;
+mod imported_modules;
+mod local_classes;
+mod local_instances;
 mod mutation_scopes;
 mod mutations;
+mod protocol_contract;
+mod proven_aliases;
+mod transparent;
 
 struct Proof {
     origins: PythonModuleOrigins,

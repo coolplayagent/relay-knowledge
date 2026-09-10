@@ -15,7 +15,14 @@ pub(super) fn collect(root: Node<'_>, source: &str) -> JavaFileNamespace {
             source_set: Default::default(),
             package: String::new(),
             top_level_types: Vec::new(),
-            complete: !root.has_error(),
+            // The native grammar's line comments terminate only at LF. Bare
+            // CR can hide declarations despite a tree without error nodes, so
+            // it cannot prove namespace completeness. Preserve source offsets
+            // rather than changing the project's existing line-number contract.
+            complete: !root.has_error()
+                && !source.as_bytes().iter().enumerate().any(|(index, value)| {
+                    *value == b'\r' && source.as_bytes().get(index + 1) != Some(&b'\n')
+                }),
         },
         explicit_platform_types: BTreeSet::new(),
     };
@@ -112,11 +119,7 @@ fn spelling(node: Node<'_>, source: &str, nodes: &mut usize, bytes: &mut usize) 
         match current.kind() {
             "identifier" => {
                 let text = source.get(current.byte_range())?;
-                if text.is_empty()
-                    || !text
-                        .chars()
-                        .all(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '$'))
-                {
+                if !super::java_identifiers::valid(text) {
                     return None;
                 }
                 let separator = usize::from(!result.is_empty());
@@ -124,7 +127,10 @@ fn spelling(node: Node<'_>, source: &str, nodes: &mut usize, bytes: &mut usize) 
                 if separator != 0 {
                     result.push('.');
                 }
-                result.push_str(text);
+                result.extend(
+                    text.chars()
+                        .filter(|value| !super::java_identifiers::is_ignorable(*value)),
+                );
             }
             "scoped_identifier" => {
                 if cursor.goto_first_child() {

@@ -10,8 +10,8 @@ mod validation;
 pub use indexed_records::{
     CodeCallRecord, CodeConfigurationReadKind, CodeFeatureFlagMetadata, CodeFeatureFlagRecord,
     CodeFileDiagnostic, CodeFileFingerprint, CodeImportRecord, CodePathTombstone, CodeRouteRecord,
-    RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeReferenceRecord,
-    RepositoryCodeSymbolRecord,
+    MAX_CALLABLE_SIGNATURE_KEY_BYTES, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
+    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
 };
 pub use java_namespace::{JavaImplicitPlatformRead, JavaNamespaceEvidence, JavaSourceSet};
 pub use registration::{

@@ -183,7 +183,7 @@ fn canonical_call_read_model_upgrade_invalidates_pre_index_scope_identity() {
 
 #[test]
 fn cpp_declaration_upgrade_invalidates_scopes_with_canonical_call_indexes() {
-    assert!(CODE_SNAPSHOT_FACT_VERSION.contains("cpp-callable-declarations-v1"));
+    assert!(CODE_SNAPSHOT_FACT_VERSION.contains("cpp-callable-declarations-v2"));
     // Same inputs indexed with canonical-call-selectors-v1 before C++ declaration repair.
     let old_scope = "git_snapshot:1747c22227b6262c";
     assert!(!code_snapshot_scope_matches_identity(
@@ -226,35 +226,45 @@ fn feature_flag_key_index_upgrade_changes_scope_for_the_same_tree() {
 }
 
 #[test]
-fn python_overload_upgrade_invalidates_the_previous_completed_scope() {
-    let previous = CODE_SNAPSHOT_FACT_VERSION.replace(
+fn callable_fact_upgrades_invalidate_previous_completed_scopes() {
+    let previous_python = CODE_SNAPSHOT_FACT_VERSION.replace(
+        "python-overload-declarations-v16",
         "python-overload-declarations-v15",
-        "python-overload-declarations-v14",
     );
-    assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
-    let mut input = Vec::new();
-    for value in ["git_snapshot", "repo-upgrade", "tree-unchanged"] {
-        append_hash_part(&mut input, value);
+    let previous_cpp = CODE_SNAPSHOT_FACT_VERSION.replace(
+        "cpp-callable-declarations-v2",
+        "cpp-callable-declarations-v1",
+    );
+    let previous_both = previous_python.replace(
+        "cpp-callable-declarations-v2",
+        "cpp-callable-declarations-v1",
+    );
+    for previous in [previous_python, previous_cpp, previous_both] {
+        assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
+        let mut input = Vec::new();
+        for value in ["git_snapshot", "repo-upgrade", "tree-unchanged"] {
+            append_hash_part(&mut input, value);
+        }
+        append_hash_list(&mut input, &[]);
+        append_hash_list(&mut input, &[]);
+        append_hash_part(&mut input, &previous);
+        let old_scope = format!(
+            "git_snapshot:{:016x}",
+            crate::identity::stable_hash64(&input)
+        );
+        assert!(!code_snapshot_scope_matches_identity(
+            "repo-upgrade",
+            "tree-unchanged",
+            &[],
+            &[],
+            &old_scope
+        ));
     }
-    append_hash_list(&mut input, &[]);
-    append_hash_list(&mut input, &[]);
-    append_hash_part(&mut input, &previous);
-    let old_scope = format!(
-        "git_snapshot:{:016x}",
-        crate::identity::stable_hash64(&input)
-    );
-    assert!(!code_snapshot_scope_matches_identity(
-        "repo-upgrade",
-        "tree-unchanged",
-        &[],
-        &[],
-        &old_scope
-    ));
 }
 
 #[test]
 fn configuration_semantic_upgrade_invalidates_the_previous_completed_scope() {
-    let previous = CODE_SNAPSHOT_FACT_VERSION.replace("config-registry-v6", "config-registry-v5");
+    let previous = CODE_SNAPSHOT_FACT_VERSION.replace("config-registry-v7", "config-registry-v6");
     assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
     let mut input = Vec::new();
     for value in ["git_snapshot", "repo-upgrade", "tree-unchanged"] {

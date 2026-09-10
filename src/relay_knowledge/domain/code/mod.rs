@@ -41,9 +41,9 @@ pub use repository::{
     CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
     CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals,
     CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, CodeRouteRecord,
-    CodeSymbolGenerationCounts, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
-    RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
-    clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
+    CodeSymbolGenerationCounts, MAX_CALLABLE_SIGNATURE_KEY_BYTES, RepositoryCodeChunkRecord,
+    RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
+    RepositoryCodeSymbolRecord, clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
     code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,
     code_snapshot_scope_matches_identity, code_snapshot_scope_workspace_semantic,
 };

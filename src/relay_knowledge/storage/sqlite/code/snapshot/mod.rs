@@ -670,3 +670,7 @@ fn stage_repository_after_snapshot(
 }
 
 mod java_projection;
+
+#[cfg(test)]
+#[path = "callable_signature_key_tests.rs"]
+mod callable_signature_key_tests;

@@ -461,3 +461,9 @@ Fast `software_relationship_storage_cases` 门禁执行 `cargo test --lib softwa
 独立的 `feature_flag_query_work_budget` 质量阶段在 fast/full profile 的产品测试构建后运行。它针对 11,001 个标识执行真实配置查询入口，记录 `feature_flag_narrow_vm_steps`（预算 2,000,000）和 `feature_flag_exhausted_vm_steps`（预算 4,097,000，包含最后一次中断间隔）。昂贵 seed 查询必须报告预算耗尽，窄查询必须成功。指标缺失、格式无效、重复或超预算均使阶段失败，选中零项测试也不能通过。
 
 Canonical-call fixture 与 workload 的单元测试分别位于所属目录的 `canonical_calls_tests.rs`，通过显式 test-only path 挂载；测试模块身份和场景保持不变。
+
+`feature_flags_wide_v1` 性能夹具还包含 1,100 个仅匹配查询的键、1,100 个仅匹配元数据的键和 1 个交集目标。四个 `feature_flags_metadata_intersection_*` guardrail 将文本与 domain、source format 或 hot-reload 条件组合，在候选准入前筛选；必须在既有 2 秒查询预算内将 `zzz_metadata_needle` 排在第 1 位。改为任一单独候选窗口会使这些案例失败。夹具继续拆分为小文件，并保留超过 10,000 个无关 usage 的精确键检查。
+
+独立的 `feature_flags_binding_groups` fast/performance 护栏加入 2,201 个文本与元数据分离的候选，以及真实 Java 常量读取；文本证据和 properties 元数据位于不同 usage。查询要求目标排名第一、结果 fresh，并维持仓库 p95 2,000 ms 预算，覆盖完整别名组 SQL 及反向绑定遍历。该用例检测相关闭包重复执行的退化，补足纯独立键夹具的覆盖；原有 36 文件、五用例负载完整保留。
+
+`properties_parallel_cold_stability_1` 和 `_2` 对未缩小的 36 文件夹具额外执行两次隔离冷索引，要求结果 fresh 且无降级原因，保护并行索引中的 properties scanner 稳定性，并保持相同的查询 p95 2,000 ms 预算。

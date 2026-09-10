@@ -452,6 +452,11 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
             "code_repository_scope_gc_jobs",
             CODE_SCOPE_GC_JOB_COLUMNS,
         )?
+        || !table_has_columns(
+            connection,
+            "code_repository_symbols",
+            &["callable_signature_key"],
+        )?
         || !code_schema_capability_markers_are_current(connection)?
         || !table_has_columns(connection, "file_index_roots", FILE_INDEX_ROOT_COLUMNS)?
         || !table_has_columns(
@@ -483,7 +488,6 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     if !fact_evidence_links_are_current(connection)? {
         return Ok(false);
     }
-
     Ok(true)
 }
 
@@ -933,7 +937,3 @@ fn fact_evidence_link_exists(
 #[cfg(test)]
 #[path = "marker_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "reference_resolution_progress_tests.rs"]
-mod reference_resolution_progress_tests;

@@ -262,6 +262,7 @@ fn symbol(path: &str) -> RepositoryCodeSymbolRecord {
         doc_comment: None,
         byte_range: range(0, 11),
         line_range: range(1, 1),
+        callable_signature_key: None,
         symbol_role: None,
     }
 }
