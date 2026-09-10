@@ -35,25 +35,33 @@ pub(super) fn search(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Option<Vec<CallRow>>, StorageError> {
-    if request.query.split_whitespace().count() != 1 {
+    if !matches!(
+        request.code_query_kind,
+        CodeQueryKind::Callers | CodeQueryKind::Callees
+    ) || request.query.split_whitespace().count() != 1
+    {
         return Ok(None);
     }
     let Some(identity) = SymbolIdentityQuery::from_query(&request.query) else {
         return Ok(None);
     };
+    // Existing Java qualified names encode file paths, not declared packages.
+    // Only short class names can use this aggregation without new index facts.
+    if identity.is_scoped() {
+        return Ok(None);
+    }
     let counter = Arc::new(AtomicUsize::new(0));
     connection.progress_handler(
         1000,
         Some(move || counter.fetch_add(1, Ordering::Relaxed) >= MAX_WORK_CALLBACKS),
     );
     let _budget = WorkBudget(connection);
-    let result = class_members::resolve(connection, required_scope(status)?, &identity).and_then(
-        |members| {
+    let result = class_members::resolve(connection, required_scope(status)?, identity.leaf_name())
+        .and_then(|members| {
             members
                 .map(|members| select_rows(connection, status, request, members))
                 .transpose()
-        },
-    );
+        });
     match result {
         Err(StorageError::Sqlite(rusqlite::Error::SqliteFailure(error, _)))
             if error.code == ErrorCode::OperationInterrupted =>

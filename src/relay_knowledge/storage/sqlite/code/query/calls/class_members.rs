@@ -2,7 +2,7 @@
 
 use rusqlite::{Connection, params};
 
-use super::super::{prepare_code_search_statement, relevance::SymbolIdentityQuery};
+use super::super::prepare_code_search_statement;
 use crate::storage::StorageError;
 
 const MAX_CLASSES: usize = 64;
@@ -16,22 +16,16 @@ pub(super) struct ClassMember {
 pub(super) fn resolve(
     connection: &Connection,
     scope: &str,
-    identity: &SymbolIdentityQuery,
+    name: &str,
 ) -> Result<Option<Vec<ClassMember>>, StorageError> {
     let mut statement = prepare_code_search_statement(
         connection,
         "SELECT symbol_snapshot_id, qualified_name, path, byte_start, byte_end
          FROM code_repository_symbols
          WHERE source_scope = ?1 AND name = ?2 AND kind = 'class' AND language_id = 'java'
-           AND (?3 IS NULL OR lower(qualified_name) LIKE ?3 ESCAPE '\\')
-         LIMIT ?4",
+         LIMIT ?3",
     )?;
-    let mut rows = statement.query(params![
-        scope,
-        identity.leaf_name(),
-        identity.scoped_like_pattern(),
-        (MAX_CLASSES + 1) as i64,
-    ])?;
+    let mut rows = statement.query(params![scope, name, (MAX_CLASSES + 1) as i64,])?;
     let mut members = Vec::new();
     let mut matched = false;
     let mut count = 0;
@@ -41,9 +35,6 @@ pub(super) fn resolve(
             return Err(capacity("more than 64 candidate classes"));
         }
         let owner: String = row.get(1)?;
-        if !identity.matches_symbol(identity.leaf_name(), &owner, "", "") {
-            continue;
-        }
         matched = true;
         let mut statement = prepare_code_search_statement(
             connection,
@@ -80,7 +71,7 @@ pub(super) fn resolve(
 
 pub(super) fn capacity(reason: &str) -> StorageError {
     StorageError::CapacityExceeded(format!(
-        "class call query incomplete: {reason}; use a qualified class name or query a member method"
+        "class call query incomplete: {reason}; query a member method"
     ))
 }
 

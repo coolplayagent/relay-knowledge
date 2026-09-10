@@ -5,10 +5,11 @@ use super::*;
 async fn java_class_call_queries_return_member_edges_without_reverse_text_matches() {
     let repo = FixtureRepo::create("java-class-calls");
     repo.write(
-        "src/demo/A.java",
+        "src/misc/A.java",
         "package demo; public class A { public static void main(String[] args) { B.process(); } }",
     );
-    repo.write("src/demo/B.java", "package demo; public class B { public static void process() { System.out.println(\"processed\"); } }");
+    // Package declarations deliberately do not mirror the repository directory.
+    repo.write("src/misc/B.java", "package demo; public class B { public static void process() { System.out.println(\"processed\"); } }");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "class calls"]);
     let service = service_with_memory_store().await;

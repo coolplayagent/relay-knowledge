@@ -2,6 +2,25 @@ use super::super::class_test_support::{database, request, status};
 use super::*;
 
 #[test]
+fn class_aggregation_does_not_intercept_hybrid_or_qualified_queries() {
+    let connection = database();
+    for (name, kind) in [
+        ("Target", CodeQueryKind::Hybrid),
+        ("Target", CodeQueryKind::Definition),
+        ("demo.Target", CodeQueryKind::Callers),
+        ("demo.Target", CodeQueryKind::Callees),
+        ("Target.Nested", CodeQueryKind::Callers),
+    ] {
+        assert!(
+            search(&connection, &status(), &request(name, kind))
+                .unwrap()
+                .is_none(),
+            "must preserve the existing path for {name} / {kind:?}"
+        );
+    }
+}
+
+#[test]
 fn aggregates_only_directional_structured_member_edges() {
     let connection = database();
     let callers = search(

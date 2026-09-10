@@ -4,8 +4,7 @@ use super::*;
 #[test]
 fn selects_direct_members_overloads_and_constructor_without_nested_or_sibling_types() {
     let connection = database();
-    let identity = SymbolIdentityQuery::from_query("Target").unwrap();
-    let mut members = resolve(&connection, "scope", &identity)
+    let mut members = resolve(&connection, "scope", "Target")
         .unwrap()
         .unwrap()
         .into_iter()
@@ -16,32 +15,20 @@ fn selects_direct_members_overloads_and_constructor_without_nested_or_sibling_ty
 }
 
 #[test]
-fn qualified_names_and_scopes_select_only_the_requested_class() {
+fn names_and_scopes_select_only_the_requested_class() {
     let connection = database();
     for (scope, name, expected) in [
-        ("scope", "demo.Target", true),
-        ("scope", "other.Target", false),
+        ("scope", "Target", true),
+        ("scope", "Missing", false),
         ("old-scope", "Target", false),
         ("scope", "execute", false),
     ] {
         assert_eq!(
-            resolve(
-                &connection,
-                scope,
-                &SymbolIdentityQuery::from_query(name).unwrap()
-            )
-            .unwrap()
-            .is_some(),
+            resolve(&connection, scope, name).unwrap().is_some(),
             expected
         );
     }
-    let nested = resolve(
-        &connection,
-        "scope",
-        &SymbolIdentityQuery::from_query("Target.Nested").unwrap(),
-    )
-    .unwrap()
-    .unwrap();
+    let nested = resolve(&connection, "scope", "Nested").unwrap().unwrap();
     assert_eq!(nested.len(), 2);
 }
 
@@ -52,11 +39,7 @@ fn refuses_to_truncate_class_or_member_identity_sets() {
         connection.execute("INSERT INTO code_repository_symbols SELECT repository_id,source_scope,?1,canonical_symbol_id,file_id,path,language_id,name,qualified_name,kind,signature,doc_comment,byte_start,byte_end,line_start,line_end,symbol_role_json FROM code_repository_symbols WHERE symbol_snapshot_id='target'", [format!("class-{i}")]).unwrap();
     }
     assert!(matches!(
-        resolve(
-            &connection,
-            "scope",
-            &SymbolIdentityQuery::from_query("Target").unwrap()
-        ),
+        resolve(&connection, "scope", "Target"),
         Err(StorageError::CapacityExceeded(_))
     ));
     let connection = database();
@@ -64,11 +47,7 @@ fn refuses_to_truncate_class_or_member_identity_sets() {
         connection.execute("INSERT INTO code_repository_symbols SELECT repository_id,source_scope,?1,canonical_symbol_id,file_id,path,language_id,name,qualified_name,kind,signature,doc_comment,byte_start,byte_end,line_start,line_end,symbol_role_json FROM code_repository_symbols WHERE symbol_snapshot_id='method'", [format!("method-{i}")]).unwrap();
     }
     assert!(matches!(
-        resolve(
-            &connection,
-            "scope",
-            &SymbolIdentityQuery::from_query("Target").unwrap()
-        ),
+        resolve(&connection, "scope", "Target"),
         Err(StorageError::CapacityExceeded(_))
     ));
 }
@@ -82,13 +61,5 @@ fn unsupported_languages_and_nonclass_names_do_not_trigger_class_selection() {
             [],
         )
         .unwrap();
-    assert!(
-        resolve(
-            &connection,
-            "scope",
-            &SymbolIdentityQuery::from_query("Target").unwrap()
-        )
-        .unwrap()
-        .is_none()
-    );
+    assert!(resolve(&connection, "scope", "Target").unwrap().is_none());
 }
