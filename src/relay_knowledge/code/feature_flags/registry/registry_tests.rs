@@ -1,4 +1,130 @@
 use super::*;
+#[test]
+fn local_guard_reads_exclude_unrelated_method_and_field_names() {
+    let rows = facts(
+        "java",
+        r#"class App { void run(Service service) {
+        boolean enabled = Boolean.getBoolean("feature_x");
+        if (service.enabled()) {} if (service.enabled) {} if (this.enabled) {}
+        if (enabled) {} if (service.accept(enabled)) {}
+    }}"#,
+    );
+    assert_eq!(
+        rows.iter().filter(|r| r.edge_kind == "guards_code").count(),
+        2
+    );
+}
+
+#[test]
+fn conditional_deferred_and_subshell_exports_do_not_define_parent_configuration() {
+    for declaration in [
+        "(export FLAG=true)",
+        "f() { export FLAG=true; }",
+        "if test x; then export FLAG=true; fi",
+        "FLAG=true; if test x; then export FLAG; fi",
+        "set -a; (FLAG=true)",
+    ] {
+        let rows = facts("bash", &format!("{declaration}\necho \"$FLAG\""));
+        assert!(
+            rows.iter().all(|r| r.edge_kind != "defines_config"),
+            "{declaration}: {rows:?}"
+        );
+    }
+    assert!(
+        facts("bash", "{ export FLAG=true; }; echo \"$FLAG\"")
+            .iter()
+            .any(|r| r.edge_kind == "defines_config")
+    );
+}
+
+#[test]
+fn java_getter_markers_and_collection_obey_the_file_budget() {
+    for (methods, reads) in [(10_001, 0), (10_000, 1)] {
+        let mut source = String::from("class Many {");
+        for index in 0..methods {
+            source.push_str(&format!("boolean get{index}() {{ return false; }}"));
+        }
+        if reads > 0 {
+            source.push_str("static final String FLAG_KEY=\"flag\";");
+        }
+        source.push('}');
+        let error = extract(&FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path: "Many.java",
+            language_id: "java",
+            content: &source,
+            config_facts: &[],
+        })
+        .map(|_| ())
+        .expect_err("over-budget getter facts must fail");
+        assert!(error.to_string().contains("budget exceeded"));
+    }
+}
+
+#[test]
+fn configuration_ranges_exclude_terminal_newlines() {
+    for newline in ["\n", "\r\n"] {
+        for language in ["properties", "ini", "gotemplate"] {
+            let single = facts(language, &format!("feature=true{newline}"));
+            assert_eq!(single[0].line_range.start, 1);
+            assert_eq!(single[0].line_range.end, 1);
+            assert_eq!(single[0].byte_range.end, 12);
+        }
+        let continued = facts("properties", &format!("feature=tr\\{newline}ue{newline}"));
+        assert_eq!(continued[0].line_range.end, 2);
+    }
+}
+
+#[test]
+fn java_field_annotations_apply_before_variable_declarator() {
+    let rows = facts(
+        "java",
+        "class Constants {\n// @config domain=business hot-reload=true\nstatic final String NAME=\"feature_x\";\n}",
+    );
+    let row = rows.iter().find(|r| r.source_key == "feature_x").unwrap();
+    assert_eq!(row.edge_kind, "declares_config_key");
+    assert_eq!(row.metadata.domain.as_deref(), Some("business"));
+    assert_eq!(row.metadata.hot_reload, Some(true));
+    assert_eq!(row.line_range.start, 3);
+}
+
+#[test]
+fn java_nested_getter_types_resolve_package_and_import_prefixes() {
+    let rows = facts(
+        "java",
+        r#"package demo;
+        class Outer { static class Config { boolean getX() { return Boolean.getBoolean("feature_x"); } } }
+        class Reader { void run(Outer.Config local, demo.Outer.Config full) { if(local.getX()) {} if(full.getX()) {} } }
+    "#,
+    );
+    assert!(rows.iter().any(|r| {
+        r.metadata
+            .bindings
+            .contains(&"demo.Outer.Config.getX".into())
+    }));
+    let guards = rows
+        .iter()
+        .filter(|r| r.edge_kind == "guards_code")
+        .collect::<Vec<_>>();
+    assert_eq!(guards.len(), 2);
+    assert!(
+        guards
+            .iter()
+            .all(|r| r.metadata.reference.as_deref() == Some("demo.Outer.Config.getX"))
+    );
+    let imported = facts(
+        "java",
+        "package app; import demo.Outer; class Reader { void run(Outer.Config config) { if(config.getX()) {} } }",
+    );
+    assert!(
+        imported
+            .iter()
+            .any(|r| r.metadata.reference.as_deref() == Some("demo.Outer.Config.getX"))
+    );
+}
+
 fn facts(language: &str, source: &str) -> Vec<CodeFeatureFlagRecord> {
     extract(&FeatureFlagFileInput {
         repository_id: "repo",

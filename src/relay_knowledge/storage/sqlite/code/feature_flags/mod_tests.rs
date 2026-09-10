@@ -38,7 +38,11 @@ fn feature_flag_sql_applies_scope_and_bounded_candidate_budget() {
         4
     );
     assert_eq!(query.sql.matches("flag.language_id IN").count(), 4);
-    assert!(query.sql.contains("lower(flag.source_key) LIKE ?"));
+    assert!(
+        query
+            .sql
+            .contains("config_casefold(flag.source_key) LIKE ?")
+    );
     assert_eq!(query.params.len(), 29);
     assert!(
         query

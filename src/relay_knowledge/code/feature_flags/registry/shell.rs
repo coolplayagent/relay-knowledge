@@ -17,6 +17,7 @@ pub(super) fn extract(
     let mut rows = Vec::new();
     while let Some(node) = pending.pop() {
         if node.kind() == "variable_assignment"
+            && unconditional(node)
             && (node
                 .parent()
                 .and_then(|parent| export_mode(parent, input.content))
@@ -27,7 +28,7 @@ pub(super) fn extract(
                 rows.push(row);
             }
         }
-        if export_mode(node, input.content) == Some(true) {
+        if export_mode(node, input.content) == Some(true) && unconditional(node) {
             let mut cursor = node.walk();
             for name in node
                 .named_children(&mut cursor)
@@ -64,6 +65,22 @@ pub(super) fn extract(
         pending.extend(node.named_children(&mut cursor));
     }
     Ok(rows)
+}
+
+fn unconditional(mut node: Node<'_>) -> bool {
+    for _ in 0..1024 {
+        let Some(parent) = node.parent() else {
+            return true;
+        };
+        if !matches!(
+            parent.kind(),
+            "program" | "compound_statement" | "declaration_command"
+        ) {
+            return false;
+        }
+        node = parent;
+    }
+    false
 }
 
 fn export_mode(node: Node<'_>, content: &str) -> Option<bool> {

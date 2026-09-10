@@ -323,13 +323,13 @@ fn append_language_filter_clause(
 
 fn append_query_term_clauses(clauses: &mut Vec<String>, params: &mut Vec<Value>, terms: &[String]) {
     let fields = [
-        "lower(flag.name) LIKE ? ESCAPE '\\'",
-        "lower(flag.source_kind) LIKE ? ESCAPE '\\'",
-        "lower(flag.source_key) LIKE ? ESCAPE '\\'",
-        "lower(flag.edge_kind) LIKE ? ESCAPE '\\'",
-        "lower(flag.path) LIKE ? ESCAPE '\\'",
-        "lower(flag.excerpt) LIKE ? ESCAPE '\\'",
-        "lower(flag.metadata_json) LIKE ? ESCAPE '\\'",
+        "config_casefold(flag.name) LIKE ? ESCAPE '\\'",
+        "config_casefold(flag.source_kind) LIKE ? ESCAPE '\\'",
+        "config_casefold(flag.source_key) LIKE ? ESCAPE '\\'",
+        "config_casefold(flag.edge_kind) LIKE ? ESCAPE '\\'",
+        "config_casefold(flag.path) LIKE ? ESCAPE '\\'",
+        "config_casefold(flag.excerpt) LIKE ? ESCAPE '\\'",
+        "config_casefold(flag.metadata_json) LIKE ? ESCAPE '\\'",
     ];
     for term in terms {
         clauses.push(format!("({})", fields.join(" OR ")));

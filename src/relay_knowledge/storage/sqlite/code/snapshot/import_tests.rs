@@ -84,6 +84,15 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
             FROM code_repository_symbols;
             DROP TABLE code_repository_symbols;
             ALTER TABLE legacy_code_repository_symbols RENAME TO code_repository_symbols;
+            ALTER TABLE code_repository_feature_flags DROP COLUMN metadata_json;
+            INSERT INTO code_repository_feature_flags (
+                repository_id, source_scope, feature_flag_id, usage_id, file_id, path,
+                language_id, name, source_kind, source_key, edge_kind,
+                confidence_basis_points, confidence_tier, byte_start, byte_end,
+                line_start, line_end, excerpt
+            ) VALUES ('repo', 'git_snapshot:test', 'flag', 'usage', 'file', 'src/routes.ts',
+                'typescript', 'flag', 'config_key', 'flag', 'reads_config', 9000,
+                'extracted', 0, 1, 1, 1, 'flag');
             DROP TABLE code_repository_routes;
             DROP TABLE code_repository_commit_scopes;
             PRAGMA foreign_keys = OFF;
@@ -119,6 +128,14 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
     )
     .expect("legacy snapshot should import");
 
+    let metadata: String = target
+        .query_row(
+            "SELECT metadata_json FROM code_repository_feature_flags WHERE usage_id='usage'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("legacy configuration usage should import with unknown metadata");
+    assert_eq!(metadata, "{}");
     let symbol_role: Option<String> = target
         .query_row(
             "

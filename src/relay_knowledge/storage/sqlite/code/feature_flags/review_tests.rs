@@ -1,6 +1,171 @@
 //! Regression cases from the configuration registry code review.
 use super::*;
 #[test]
+fn repeated_interface_usages_reuse_one_resolution_and_evidence_entry() {
+    let db = fixture();
+    for _ in 0..2000 {
+        add(
+            &db,
+            "feature_x",
+            "config_key",
+            "reads_config",
+            CodeConfigMetadata {
+                bindings: vec!["Config.getX".into()],
+                ..Default::default()
+            },
+        );
+    }
+    add(
+        &db,
+        "Config.getX",
+        "config_symbol",
+        "guards_code",
+        CodeConfigMetadata {
+            reference: Some("Config.getX".into()),
+            ..Default::default()
+        },
+    );
+    let rows = load(
+        &db,
+        &format!("SELECT {COLUMNS} FROM code_repository_feature_flags flag"),
+        &[],
+    )
+    .unwrap();
+    let providers = HashMap::from([("Config.getX".into(), (0..2000).collect())]);
+    let mut resolver = resolution::Resolver {
+        rows: &rows,
+        providers: &providers,
+        targets: HashMap::new(),
+        evidence: HashMap::new(),
+    };
+    for _ in 0..2000 {
+        assert_eq!(
+            resolver.resolve(&rows[2000], 0),
+            Some(("config_key".into(), "feature_x".into()))
+        );
+        assert!(resolver.has_config_evidence("Config.getX", 0));
+    }
+    assert_eq!(resolver.targets.len(), 1);
+    assert_eq!(resolver.evidence.len(), 1);
+}
+
+#[test]
+fn ambiguous_bindings_only_suppress_connected_groups() {
+    let db = fixture();
+    for key in ["feature_a", "feature_b"] {
+        add(
+            &db,
+            key,
+            "config_key",
+            "reads_config",
+            CodeConfigMetadata {
+                bindings: vec!["Config.getX".into()],
+                ..Default::default()
+            },
+        );
+    }
+    add(
+        &db,
+        "Config.getX",
+        "config_symbol",
+        "guards_code",
+        CodeConfigMetadata {
+            reference: Some("Config.getX".into()),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "feature_c",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata::default(),
+    );
+    let mut query = request(
+        None,
+        CodeConfigFilter {
+            consistency: true,
+            ..Default::default()
+        },
+    );
+    query.limit = 10;
+    let groups = search(&db, &status(), &query).unwrap();
+    for key in ["feature_a", "feature_b", "Config.getX"] {
+        assert!(
+            !groups
+                .iter()
+                .find(|g| g.source_key == key)
+                .unwrap()
+                .analysis_complete
+        );
+    }
+    let independent = groups.iter().find(|g| g.source_key == "feature_c").unwrap();
+    assert!(independent.analysis_complete);
+    assert!(
+        independent
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.contains("read_without_definition"))
+    );
+}
+
+#[test]
+fn unicode_query_matches_uppercase_keys_before_sql_seed_selection() {
+    let db = fixture();
+    add(
+        &db,
+        "ÜBER_FLAG",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata::default(),
+    );
+    for term in ["über", "ÜBER"] {
+        let groups = search(
+            &db,
+            &status(),
+            &request(Some(term), CodeConfigFilter::default()),
+        )
+        .unwrap();
+        assert_eq!(groups[0].source_key, "ÜBER_FLAG");
+    }
+}
+
+#[test]
+fn final_expansion_round_rejects_new_outer_getter_bindings() {
+    let db = fixture();
+    add(
+        &db,
+        "feature_x",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            bindings: vec!["Layer0.getX".into()],
+            ..Default::default()
+        },
+    );
+    for index in 1..=5 {
+        add(
+            &db,
+            &format!("Layer{}.getX", index - 1),
+            "config_symbol",
+            "reads_config",
+            CodeConfigMetadata {
+                reference: Some(format!("Layer{}.getX", index - 1)),
+                bindings: vec![format!("Layer{index}.getX")],
+                ..Default::default()
+            },
+        );
+    }
+    let error = search(
+        &db,
+        &status(),
+        &request(Some("feature_x"), CodeConfigFilter::default()),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("symbol binding depth exceeded"));
+}
+
+#[test]
 fn result_limit_counts_resolved_keys_instead_of_symbolic_seed_groups() {
     let db = fixture();
     for name in ["Keys.A", "Keys.B", "Keys.C"] {

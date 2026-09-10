@@ -1,6 +1,8 @@
 //! Bounded snapshot-local configuration binding resolution and consistency analysis.
 use super::*;
+mod connectivity;
 mod consistency;
+mod resolution;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub(super) const MAX_ROWS: usize = 10_000;
 const MAX_BYTES: usize = 16 * 1024 * 1024;
@@ -33,6 +35,13 @@ fn search_bounded(
     status: &CodeRepositoryStatus,
     request: &CodeFeatureFlagRequest,
 ) -> Result<Vec<CodeFeatureFlagGraph>, StorageError> {
+    connection.create_scalar_function(
+        "config_casefold",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |context| Ok(context.get::<String>(0)?.to_lowercase()),
+    )?;
     let mut normalized = request.clone();
     normalized.filters = normalized
         .filters
@@ -106,9 +115,10 @@ fn search_bounded(
         if round == 3
             && rows.iter().any(|row| {
                 row.metadata
-                    .reference
-                    .as_ref()
-                    .is_some_and(|r| !queried.contains(r))
+                    .bindings
+                    .iter()
+                    .chain(row.metadata.reference.iter())
+                    .any(|key| !queried.contains(key))
             })
         {
             return Err(incomplete("symbol binding depth exceeded"));
@@ -125,22 +135,20 @@ fn search_bounded(
     } else {
         BTreeSet::new()
     };
-    let unresolved_scope = request.filters.consistency
-        && rows.iter().any(|row| {
-            row.metadata.reference.is_some()
-                && (row.metadata.target_kind.is_some()
-                    || row.metadata.reference.as_ref().is_some_and(|reference| {
-                        has_config_evidence(reference, &rows, &providers, 0)
-                    }))
-                && resolve(row, &rows, &providers, &mut BTreeSet::new(), 0).is_none()
-        });
+    let mut resolver = resolution::Resolver {
+        rows: &rows,
+        providers: &providers,
+        targets: HashMap::new(),
+        evidence: HashMap::new(),
+    };
+    let incomplete_rows = connectivity::incomplete_rows(&rows, &mut resolver);
     let referenced_bindings = rows
         .iter()
         .filter(|row| row.metadata.target_kind.is_some())
         .filter_map(|row| row.metadata.reference.as_ref())
         .collect::<BTreeSet<_>>();
     let mut groups = BTreeMap::<(String, String), CodeFeatureFlagGraph>::new();
-    for row in &rows {
+    for (row_index, row) in rows.iter().enumerate() {
         if row.edge_kind == "declares_string_constant"
             && !row
                 .metadata
@@ -159,7 +167,7 @@ fn search_bounded(
                 .metadata
                 .reference
                 .as_ref()
-                .is_some_and(|reference| has_config_evidence(reference, &rows, &providers, 0))
+                .is_some_and(|reference| resolver.has_config_evidence(reference, 0))
         {
             continue;
         }
@@ -167,8 +175,7 @@ fn search_bounded(
         if resolved.edge_kind == "declares_string_constant" {
             resolved.edge_kind = "declares_config_key".into();
         }
-        let mut visiting = BTreeSet::new();
-        let targets = resolve(row, &rows, &providers, &mut visiting, 0);
+        let targets = resolver.resolve(row, 0);
         let complete = if row.metadata.reference.is_none() {
             true
         } else if let Some((kind, key)) = targets {
@@ -205,9 +212,10 @@ fn search_bounded(
             conflicting_default_sources: Vec::new(),
             analysis_complete: !status.stale
                 && status.degraded_reason.is_none()
-                && !unresolved_scope,
+                && !incomplete_rows[row_index],
         });
-        group.analysis_complete &= complete && row.metadata.flow_incomplete.is_none();
+        group.analysis_complete &=
+            complete && !incomplete_rows[row_index] && row.metadata.flow_incomplete.is_none();
         if !complete
             && !group
                 .consistency_diagnostics
@@ -257,39 +265,6 @@ fn search_bounded(
     });
     groups.truncate(request.limit);
     Ok(groups)
-}
-fn resolve(
-    row: &FeatureFlagRow,
-    rows: &[FeatureFlagRow],
-    providers: &HashMap<String, Vec<usize>>,
-    visiting: &mut BTreeSet<String>,
-    depth: usize,
-) -> Option<(String, String)> {
-    let Some(reference) = &row.metadata.reference else {
-        return Some((row.source_kind.clone(), row.source_key.clone()));
-    };
-    if depth >= 4 || !visiting.insert(reference.clone()) {
-        return None;
-    }
-    let mut targets = BTreeSet::new();
-    for index in providers.get(reference)? {
-        if rows[*index].usage_id == row.usage_id {
-            continue;
-        }
-        targets.insert(resolve(
-            &rows[*index],
-            rows,
-            providers,
-            visiting,
-            depth + 1,
-        )?);
-    }
-    visiting.remove(reference);
-    if targets.len() == 1 {
-        targets.into_iter().next()
-    } else {
-        None
-    }
 }
 fn matches_group(
     group: &CodeFeatureFlagGraph,
@@ -409,23 +384,6 @@ fn load_rows(
     Ok(rows)
 }
 
-fn has_config_evidence(
-    reference: &str,
-    rows: &[FeatureFlagRow],
-    providers: &HashMap<String, Vec<usize>>,
-    depth: usize,
-) -> bool {
-    depth < 4
-        && providers.get(reference).is_some_and(|indices| {
-            indices.iter().any(|index| {
-                let row = &rows[*index];
-                row.source_kind != "config_symbol"
-                    || row.metadata.reference.as_ref().is_some_and(|next| {
-                        next != reference && has_config_evidence(next, rows, providers, depth + 1)
-                    })
-            })
-        })
-}
 #[cfg(test)]
 #[path = "registry_tests.rs"]
 mod tests;

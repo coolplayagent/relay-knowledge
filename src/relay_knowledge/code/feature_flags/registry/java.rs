@@ -22,11 +22,21 @@ pub(super) fn extract(
     loop {
         let node = cursor.node();
         if node.kind() == "method_declaration"
+            && node.child_by_field_name("name").is_some_and(|name| {
+                let name = text(name, input.content);
+                name.starts_with("get") || name.starts_with("is")
+            })
             && node.child_by_field_name("body").is_some()
             && node
                 .child_by_field_name("parameters")
                 .is_some_and(|p| p.named_child_count() == 0)
         {
+            if methods.len() >= 10_000 {
+                return Err(DomainError::invalid(
+                    "configuration",
+                    "file getter budget exceeded",
+                ));
+            }
             methods.push(node);
         }
         if node.kind() == "method_invocation" {
@@ -91,6 +101,7 @@ pub(super) fn extract(
                             node.start_byte(),
                             node.end_byte(),
                         )?;
+                        row.metadata = metadata(input, parent.start_byte());
                         row.metadata.bindings.push(field_symbol(
                             node,
                             text(name, input.content),
@@ -118,14 +129,30 @@ pub(super) fn extract(
         }
         while !cursor.goto_next_sibling() {
             if !cursor.goto_parent() {
+                let mut known_bindings = rows
+                    .iter()
+                    .flat_map(|row| row.metadata.bindings.iter().cloned())
+                    .collect::<std::collections::BTreeSet<_>>();
+                let mut markers = Vec::new();
                 for method in methods {
                     let bindings = names::getter_bindings(method, input.content);
                     let Some(own) = bindings.first() else {
                         continue;
                     };
-                    if rows.iter().any(|row| row.metadata.bindings.contains(own)) {
+                    if known_bindings.contains(own) {
                         continue;
                     }
+                    if rows.len() + markers.len() >= 10_000 {
+                        return Err(DomainError::invalid(
+                            "configuration",
+                            "file fact budget exceeded",
+                        ));
+                    }
+                    known_bindings.extend(bindings.iter().cloned());
+                    markers.push((method, bindings));
+                }
+                for (method, bindings) in markers {
+                    let own = &bindings[0];
                     let mut marker = record(
                         input,
                         "config_symbol",
@@ -360,7 +387,15 @@ fn contains_name(node: Node<'_>, name: &str, content: &str, budget: &mut usize) 
             return false;
         }
         *budget -= 1;
-        if node.kind() == "identifier" && text(node, content) == name {
+        if node.kind() == "identifier"
+            && text(node, content) == name
+            && node.parent().is_none_or(|parent| {
+                !((matches!(parent.kind(), "method_invocation" | "method_reference")
+                    && parent.child_by_field_name("name") == Some(node))
+                    || (parent.kind() == "field_access"
+                        && parent.child_by_field_name("field") == Some(node)))
+            })
+        {
             return true;
         }
         if !matches!(node.kind(), "lambda_expression" | "class_body") {

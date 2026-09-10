@@ -115,7 +115,7 @@ relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definiti
 relay-knowledge repo graph <alias> --focus <path> --path <root> [--ref <ref>] [--depth 1|2] [--node-limit <n>] [--edge-limit <n>]
 relay-knowledge repo context <alias> --query <text> [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--max-context-bytes <n>] [--no-code] [--exclude-generated]
 relay-knowledge repo framework <alias> [--query <text>] [--framework angular|vue] [--kind component|directive|pipe|template|input|output|prop|emit|model|slot|template-variable|control-flow] [--ref <ref>] [--path <filter>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
-relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
+relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>] [--domain <domain>] [--source <format>] [--hot-reload true|false] [--consistency]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
 relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
@@ -168,6 +168,8 @@ Kind values are scoped to their command family:
 Do not pass kind values across command families. Use `repo impact` for impact
 analysis, `repo framework` for Angular/Vue template semantics, and
 `repo feature-flags` for feature flags; they are not
+
+Configuration registry filters are `--domain <domain>` (an explicit annotation value), `--source java|properties|ini|ctmpl|shell`, and `--hot-reload true|false`. Source and domain values are case-insensitive; unknown domain or hot-reload metadata does not match an explicit filter. Filters select configuration groups while retaining their connected usages. `--query` uses Unicode-aware lowercase matching. `--consistency` adds read-without-definition, missing-format and conflicting-default diagnostics; `conflicting_default_sources` attributes each value to its path, line range and excerpt. `analysis_complete: false` suppresses definitive consistency conclusions for stale/degraded data or the connected groups affected by unresolved bindings or unsupported flow. Unrelated groups remain independently analyzable. Exceeding bounded usage, byte, symbol, expansion-depth or SQLite query budgets returns an explicit incomplete-analysis error; narrow the query scope. Java nested types and annotated constant fields participate in binding resolution. Configuration line ranges exclude the terminating newline. Binding results and configuration evidence are memoized by reference and remaining depth, bounding repeated interface-provider work. Java getter markers share the 10,000-fact file budget; getter collection is also bounded. Local guard evidence excludes unrelated method/field names. Shell definitions require an unconditional parent-shell assignment/export; conditional, deferred function and subshell exports cannot prove a parent-shell definition.
 `repo query --kind` values.
 
 `--path` is the CLI flag for a path filter. `repo register --path` stores the

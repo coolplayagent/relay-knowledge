@@ -24,6 +24,10 @@ fn record(
     start: usize,
     end: usize,
 ) -> Result<CodeFeatureFlagRecord, DomainError> {
+    let end = start
+        + input.content[start..end]
+            .trim_end_matches(['\r', '\n'])
+            .len();
     let range = ConfigRange {
         byte_start: start,
         byte_end: end,

@@ -33,13 +33,21 @@ pub(super) fn qualified(node: Node<'_>, name: &str, content: &str) -> String {
         })
         .collect::<String>();
     let name = erased.as_str();
-    if name.contains('.') {
-        return name.to_owned();
-    }
+    let (head, suffix) = name
+        .split_once('.')
+        .map_or((name, ""), |(head, _)| (head, &name[head.len()..]));
+    let mut local_type = false;
     let mut package = String::new();
     let mut cursor = root(node).walk();
     for child in root(node).named_children(&mut cursor) {
         let source = text(child, content);
+        if is_type(child)
+            && child
+                .child_by_field_name("name")
+                .is_some_and(|n| text(n, content) == head)
+        {
+            local_type = true;
+        }
         if child.kind() == "package_declaration" {
             package = source
                 .trim_start_matches("package")
@@ -54,12 +62,19 @@ pub(super) fn qualified(node: Node<'_>, name: &str, content: &str) -> String {
                 .trim()
                 .trim_end_matches(';')
                 .trim();
-            if imported.rsplit('.').next() == Some(name) {
-                return imported.to_owned();
+            if imported.rsplit('.').next() == Some(head) {
+                return format!("{imported}{suffix}");
             }
         }
     }
-    if package.is_empty() {
+    // A dotted name beginning with a type is a relative nested type. Package
+    // prefixes remain qualified; imports and local declarations take priority.
+    if package.is_empty()
+        || (!suffix.is_empty()
+            && !local_type
+            && !head.chars().next().is_some_and(char::is_uppercase))
+        || name.starts_with(&format!("{package}."))
+    {
         name.to_owned()
     } else {
         format!("{package}.{name}")
