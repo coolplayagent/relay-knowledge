@@ -118,30 +118,6 @@ pub(super) fn constant_symbol(node: Node<'_>, content: &str) -> Option<String> {
     }
 }
 
-pub(super) fn getter_symbol(node: Node<'_>, content: &str) -> Option<String> {
-    if node.child_by_field_name("arguments")?.named_child_count() != 0 {
-        return None;
-    }
-    let method = text(node.child_by_field_name("name")?, content);
-    if !method.starts_with("get") && !method.starts_with("is") {
-        return None;
-    }
-    let receiver = text(node.child_by_field_name("object")?, content);
-    let declaration = enclosing(node, "method_declaration")?;
-    let parameters = declaration.child_by_field_name("parameters")?;
-    let mut cursor = parameters.walk();
-    for parameter in parameters.named_children(&mut cursor) {
-        let name = parameter
-            .child_by_field_name("name")
-            .map(|name| text(name, content));
-        if name == Some(receiver) {
-            let owner = erased_type(parameter.child_by_field_name("type")?, content)?;
-            return Some(qualify(node, &format!("{owner}.{method}"), content));
-        }
-    }
-    None
-}
-
 pub(super) fn platform_receiver_shadowed(node: Node<'_>, receiver: &str, content: &str) -> bool {
     if value_shadowed(node, receiver, content, true)
         || visible_type(node, receiver, content).is_some()
@@ -340,7 +316,7 @@ pub(super) fn getter_bindings(node: Node<'_>, content: &str) -> Vec<String> {
     bindings
 }
 
-fn type_owner(mut node: Node<'_>, content: &str) -> String {
+pub(super) fn type_owner(mut node: Node<'_>, content: &str) -> String {
     let mut owners = Vec::new();
     loop {
         if is_type(node) {
@@ -387,7 +363,7 @@ fn visible_type<'a>(mut scope: Node<'a>, name: &str, content: &str) -> Option<No
 
 // Erase only structured type arguments; commas inside nested generics never
 // become interface separators and both declaration/read identities agree.
-fn erased_type(node: Node<'_>, content: &str) -> Option<String> {
+pub(super) fn erased_type(node: Node<'_>, content: &str) -> Option<String> {
     match node.kind() {
         "type_identifier" | "identifier" => Some(text(node, content).to_owned()),
         "generic_type" => erased_type(node.named_child(0)?, content),

@@ -6,6 +6,7 @@ use crate::domain::{CodeConfigurationReadKind, CodeFeatureFlagRecord, DomainErro
 
 use crate::code::config_files::ConfigRange;
 use crate::code::feature_flags::{FeatureFlagFileInput, feature_flag_record_from_range};
+mod getter_receivers;
 mod inherited_constants;
 mod inherited_members;
 mod platform_imports;
@@ -118,8 +119,7 @@ fn config_read(node: Node<'_>, content: &str) -> Option<(&'static str, String)> 
         | ("Boolean" | "java.lang.Boolean", "getBoolean") => "config_key",
         ("System" | "java.lang.System", "getenv") => "env_var",
         _ => {
-            return java_symbols::getter_symbol(node, content)
-                .map(|symbol| ("config_getter", symbol));
+            return getter_receivers::symbol(node, content).map(|symbol| ("config_getter", symbol));
         }
     };
     let argument = node.child_by_field_name("arguments")?.named_child(0)?;

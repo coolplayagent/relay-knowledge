@@ -33,8 +33,11 @@ pub fn checkout_enabled() -> bool {
     );
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
-    let (server, service) =
-        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "fixture")]).await;
+    let (server, service) = server_and_service(
+        &repo.path,
+        [("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "fixture")],
+    )
+    .await;
     register_and_index_fixture(&service, &repo, "fixture").await;
 
     let outcome = run_cancellable_tool_call(
@@ -89,8 +92,11 @@ const emit = defineEmits<{ change: [value: string] }>()
     );
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
-    let (server, service) =
-        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "fixture")]).await;
+    let (server, service) = server_and_service(
+        &repo.path,
+        [("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "fixture")],
+    )
+    .await;
     register_and_index_fixture(&service, &repo, "fixture").await;
 
     let outcome = run_cancellable_tool_call(
@@ -162,17 +168,21 @@ async fn register_and_index_fixture(
 }
 
 async fn server_and_service<const N: usize>(
+    root: &Path,
     pairs: [(&str, &str); N],
 ) -> (McpServer, RelayKnowledgeService) {
+    // Runtime composition validates native absolute paths even with an in-memory store.
+    let home = root.join("runtime");
+    let home = home.to_str().expect("fixture path should be UTF-8");
     let mut base = vec![
-        ("HOME", "/home/alice"),
-        ("TMPDIR", "/tmp"),
-        ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+        ("HOME", home),
+        ("TMPDIR", home),
+        ("RELAY_KNOWLEDGE_HOME", home),
         ("RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED", "true"),
     ];
     base.extend(pairs);
-    let environment =
-        EnvironmentConfig::from_pairs(PlatformKind::Unix, base).expect("environment should parse");
+    let environment = EnvironmentConfig::from_pairs(PlatformKind::current(), base)
+        .expect("environment should parse");
     let runtime = RuntimeConfiguration::from_environment(&environment)
         .await
         .expect("runtime should compose");

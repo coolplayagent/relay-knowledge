@@ -147,7 +147,7 @@ pub(super) fn getter_contracts<'a>(
     contracts
 }
 
-fn modifier(node: Node<'_>, kind: &str, budget: &mut usize) -> Option<bool> {
+pub(super) fn modifier(node: Node<'_>, kind: &str, budget: &mut usize) -> Option<bool> {
     if let Some(modifiers) = node.named_child(0).filter(|n| n.kind() == "modifiers") {
         let mut cursor = modifiers.walk();
         for child in modifiers.children(&mut cursor) {

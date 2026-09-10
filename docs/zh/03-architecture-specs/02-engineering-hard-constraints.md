@@ -212,6 +212,8 @@ Feature-flag extraction 必须物理收敛在 `code::feature_flags`：`comments/
 
 普通 Java string constant 只持久化为内部 binding 候选，必须有真实配置读取或同 key 配置定义证据才提升为对外配置键，不按类名猜测。Java 配置事实由 `extractors/java/` 复用已解析 AST 生成，`symbols` 独占 package/import/constant/getter binding 身份；词法作用域中被遮蔽的 receiver 与 constant 名称不得绑定，Java 平台环境读取不得通过 lexical fallback 复活已被 AST 拒绝的调用；byte range 区分同一行的独立调用。read 与 guard 是不同 usage，guard 通过 `read_usage_id` 指向读取证据。局部变量依赖仅跟踪同一 lexical block 内后续条件，并在写入后停止，不把字符串、注释或动态键当成字面量。`extractors/registry_files/` 复用 structured ConfigFact 的 properties/INI key 与 range，ctmpl 仅解释明确 key/env action；其 `shell` owner 复用 Bash AST 排除 raw-string/comment/heredoc 内容。默认值只报告明确静态值，domain/hot-reload 只来自紧邻定义前的 `# @config domain=business hot-reload=true` 声明，缺失时保持 unknown。新增 metadata 与 symbol binding 按 source scope 持久化；跨文件查询不得读取 live 工作树或越过已授权 path/language 范围。
 
+Java 配置 getter 的接收者词法类型解析由 `extractors/java/getter_receivers` 独占；该 owner 单向消费 `symbols` 与底层类型/继承规则，不反向依赖存储或接口层。接收者查找必须限制节点和表达式深度，遵守最近声明遮蔽与字段可见性；不使用未授权源文件或运行时反射推断动态类型。字段/局部变量路径必须在端到端配置图测试中同时验证 read、guard 的 `read_usage_id`、元数据过滤和多格式一致性。 MCP 配置图测试使用每个 fixture 独立的原生绝对运行路径，避免 Windows 上的 Unix 路径假设。
+
 ### 3.8 服务生命周期计划
 
 服务生命周期必须按边界划分职责：`application::service::lifecycle_plan` 负责请求校验、install/upgrade/rollback/uninstall 步骤计划和执行编排；只有 `lifecycle_plan::platform_service` 可以选择平台服务定义文件名、渲染 systemd/launchd/Windows Service 定义、声明平台权限并生成 service manager 命令；`lifecycle_plan::execution` 独占 step/rollback 状态机与 runner dispatch，`checkpoint` 独占 binary/definition backup 与 restore，`process_runner` 独占有界子进程执行。平台渲染与命令转义不得重新并入生命周期步骤 planner。

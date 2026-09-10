@@ -199,6 +199,8 @@ Query-index plan v5 在完整保留 v4 前缀的基础上追加 ordinal 20：`co
 
 `config-registry-v7` 抽取组件独立于 Python 与查询索引版本，使采用旧配置语义的 completed scope 失效。对相同提交执行普通 `repo index <alias> --ref <ref>` 即可经持久化租约流水线刷新事实，无需 `--reset`。Java 接收者与常量证明、相对嵌套父类型解析、模板动作和数字语法恢复及静态 Shell 默认值（包括未引用的波浪号展开）一起刷新；配置事实 v6 另通过下述增量 schema 与延后 query-plan 扩展记录 Java 源集身份。升级时保留 runtime database、WAL 和 task checkpoint；精确回滚须用匹配的旧 binary 恢复升级前 database/shard。
 
+配置事实 `config-registry-v8` 增加 getter 字段、局部变量和显式接收者的词法类型解析。升级后对相同 HEAD 执行普通 `repo index` 会通过既有持久任务/租约重新抽取旧 completed scope，无需修改源文件或 `--reset`；完成前不得把旧事实当作当前 fresh 结果。该版本不改变数据库 schema 或 query-plan ordinal。未完成旧版本任务仍须按本章兼容顺序先完成；保留 database、WAL、shard 与 checkpoint，精确回滚使用匹配的旧 binary 和升级前备份。
+
 Python v11 在每个授权解析 worker 中使用模块来源证据。提供者路径改变时，历史增量复用自动回到既有持久化完整索引计划，保留任务租约、检查点和有界批次。显式增量、文件系统及 worktree overlay 更新会重新解析受影响的 Python 文件，即使这些文件自身字节未变；既有路径、文件及字节预算仍生效。历史提交保留自己的源清单和分类。普通同 HEAD 索引会刷新旧完成 scope，无需重置数据库；仅源目录的窄授权仍保持原范围，无法证明来源时返回未知，不越权读取。
 
 查询索引计划 v6 保留 v1–v5 全部 ordinal 身份，在单元 21 追加 Java namespace 完整性查询索引，在单元 22 追加 package/type 查询索引，共 23 个单元。旧 v5 token 仍限于 0–20，校验旧 prefix 时保留精确 resume payload；越过旧末尾单元后才输出当前 v6 token。配置事实版本 v5 引入文件级 namespace 事实及隐式 receiver 来源，因此普通同 HEAD 索引通过持久 lease 流程重建旧 completed scope。文件 namespace JSON 和按文件物化的 namespace/type 摘要随文件插入、复制、替换及删除事务维护；旧的或缺失的 Java namespace 证据为 unknown。新增表和维护 trigger 不在启动时回填存量数据，两项索引由延迟 writer 单元构建，打开存量数据库不构建索引。降级前先完成或取消未完成 v6 任务，并一致保留数据库、WAL 及 checkpoint。

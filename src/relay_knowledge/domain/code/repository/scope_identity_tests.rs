@@ -299,7 +299,7 @@ fn callable_fact_upgrades_invalidate_previous_completed_scopes() {
 
 #[test]
 fn configuration_semantic_upgrade_invalidates_the_previous_completed_scope() {
-    let previous = CODE_SNAPSHOT_FACT_VERSION.replace("config-registry-v7", "config-registry-v6");
+    let previous = CODE_SNAPSHOT_FACT_VERSION.replace("config-registry-v8", "config-registry-v7");
     assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
     let mut input = Vec::new();
     for value in ["git_snapshot", "repo-upgrade", "tree-unchanged"] {

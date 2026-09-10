@@ -196,6 +196,8 @@ relay-knowledge repo feature-flags repo --query feature_y --consistency --format
 
 `--consistency` 为每个开关增加 `consistency_diagnostics`，报告无定义的读取、在所选 indexed facts 已观察到的来源格式中缺失的 key，以及显式默认值冲突。Java key declaration 计为声明，不充当运行时默认值。这些是相对所选 scope 的比较，不推测拼写错误，也不声称每种格式必须包含全部 key。scope stale/degraded 或 key 无法解析时，缺失结论为 `unknown`，`analysis_complete` 为 false。普通查询先在 SQL 中选出有界 ranked group，再加载 usage 并跟踪同一 snapshot 的 binding 闭包（最多四轮加载、1,000 个身份）；即使有超过 10,000 个无关 usage，唯一 key 查询仍可用。一致性分析覆盖全部所选 scope facts，template read 计为格式存在证据，但不充当定义。单次分析或候选闭包最多 10,000 个 usage 和 16 MiB 持久化事实文本，每个 usage 的 metadata 最多 64 KiB；超过预算返回显式 incomplete-analysis 错误，不生成错误的 missing-key 结论。可使用 `--path`、`--language` 缩小比较 scope；`--limit` 在分析后限制返回 group。定义及元数据的修改、删除沿用 durable incremental snapshot 的复制/删除流程，历史 ref 保留自己的事实。
 
+Java getter 接收者解析覆盖方法/构造器参数、显式类型字段与局部变量、`this.field`、括号、显式类型转换和 `new` 表达式；`var` 仅从静态可解析的初始化表达式推导，支持有界别名链。同文件可见父类字段和对象字段访问复用类型身份，内层局部变量、lambda 参数、循环变量和资源变量优先于外层同名字段；不从动态工厂调用或缺失外部类型定义猜测类型。每次查找最多访问 4,096 个节点、深入 16 层表达式，预算耗尽或类型未知时不建立确定配置绑定。getter 字段/局部变量的读取与 guard 使用和参数形式相同的持久化事实、过滤与一致性分析。
+
 ### 软件全域本体与兼容投影
 
 `repo software` 暴露同一 repository scope 内的兼容投影、类型化 ontology entity、provenance statement 和冲突诊断：
