@@ -81,3 +81,11 @@ fn maven_workspace_discovers_only_default_profile_members_in_any_element_order()
     );
     assert!(summary(&xml).is_none());
 }
+
+#[test]
+fn workspace_decodes_named_and_numeric_entities_but_keeps_cdata_literal() {
+    let pom = summary("<project><groupId>x</groupId><artifactId>root&#x2d;api</artifactId><modules><module>foo&amp;bar</module><module>num&#45;child</module><module><![CDATA[literal&amp;child]]></module></modules></project>").unwrap();
+    assert_eq!(pom.coordinate().as_deref(), Some("x:root-api"));
+    assert_eq!(pom.modules, ["foo&bar", "num-child", "literal&amp;child"]);
+    assert!(summary("<project><artifactId>&unknown;</artifactId></project>").is_none());
+}

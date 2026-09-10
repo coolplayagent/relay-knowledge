@@ -4,6 +4,13 @@ use crate::storage::sqlite::scope_filters::{path_filter_sql_for_column, push_pat
 use crate::{domain::SoftwareGlobalRequest, storage::StorageError};
 use rusqlite::{Connection, params_from_iter, types::Value};
 
+pub(in crate::storage::sqlite) fn includes_language(filters: &[String]) -> bool {
+    filters.is_empty()
+        || filters
+            .iter()
+            .any(|language| matches!(language.as_str(), "java" | "kotlin" | "scala" | "jvm"))
+}
+
 pub(in crate::storage::sqlite) fn read_page<T: serde::de::DeserializeOwned>(
     connection: &Connection,
     scope: &str,
@@ -12,21 +19,15 @@ pub(in crate::storage::sqlite) fn read_page<T: serde::de::DeserializeOwned>(
     limit: usize,
     edges: bool,
 ) -> Result<Vec<T>, StorageError> {
-    require_complete(connection, scope)?;
     if limit > 501 {
         return Err(StorageError::InvalidInput(
             "reactor page exceeds 500 rows plus lookahead".into(),
         ));
     }
-    if !request.repository.language_filters.is_empty()
-        && !request
-            .repository
-            .language_filters
-            .iter()
-            .any(|language| matches!(language.as_str(), "java" | "kotlin" | "scala" | "jvm"))
-    {
+    if !includes_language(&request.repository.language_filters) {
         return Ok(Vec::new());
     }
+    require_complete(connection, scope)?;
     let path_filter = path_filter_sql_for_column("m.path", &request.repository.path_filters);
     let (sql, mut values) = if edges {
         let evidence_filter = path_filter_sql_for_column(

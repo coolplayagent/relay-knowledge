@@ -50,7 +50,7 @@ struct PomLoad {
 }
 
 #[derive(Debug)]
-struct MavenModels {
+pub(super) struct MavenModels {
     models: Vec<EffectivePom>,
     preserve_existing_facts: bool,
 }
@@ -74,17 +74,15 @@ pub(super) struct MavenBuildFact {
 }
 
 pub(super) fn visit_build_target_inputs(
-    connection: &Connection,
-    source_scope: &str,
+    loaded: &MavenModels,
     graph_version: GraphVersion,
     mut visit: impl FnMut(SoftwareBuildTargetInput) -> Result<(), StorageError>,
 ) -> Result<(), StorageError> {
-    let loaded = effective_models(connection, source_scope)?;
     if loaded.preserve_existing_facts {
         return Ok(());
     }
-    for model in loaded.models {
-        visit_build_facts(&model, |fact| visit(build_input(fact, graph_version)))?;
+    for model in &loaded.models {
+        visit_build_facts(model, |fact| visit(build_input(fact, graph_version)))?;
     }
     Ok(())
 }
@@ -96,18 +94,15 @@ fn build_target_inputs(
     graph_version: GraphVersion,
 ) -> Result<Vec<SoftwareBuildTargetInput>, StorageError> {
     let mut inputs = Vec::new();
-    visit_build_target_inputs(connection, source_scope, graph_version, |input| {
-        inputs.push(input);
-        Ok(())
-    })?;
+    visit_build_target_inputs(
+        &effective_models(connection, source_scope)?,
+        graph_version,
+        |input| {
+            inputs.push(input);
+            Ok(())
+        },
+    )?;
     Ok(inputs)
-}
-
-pub(super) fn preserves_existing_facts(
-    connection: &Connection,
-    source_scope: &str,
-) -> Result<bool, StorageError> {
-    Ok(effective_models(connection, source_scope)?.preserve_existing_facts)
 }
 
 #[cfg(test)]
@@ -256,7 +251,7 @@ fn refresh_effective_dependency_records(
     })
 }
 
-fn effective_models(
+pub(super) fn effective_models(
     connection: &Connection,
     source_scope: &str,
 ) -> Result<MavenModels, StorageError> {

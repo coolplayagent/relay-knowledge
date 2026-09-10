@@ -31,7 +31,9 @@ pub(super) fn page(
     let connection = snapshot
         .as_ref()
         .map_or(connection, |transaction| transaction);
-    reactor::require_complete(connection, scope)?;
+    if reactor::includes_language(&request.repository.language_filters) {
+        reactor::require_complete(connection, scope)?;
+    }
     let phases = if request.kind == SoftwareGlobalKind::Modules {
         2
     } else {

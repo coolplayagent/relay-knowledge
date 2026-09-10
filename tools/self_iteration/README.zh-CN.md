@@ -1,5 +1,7 @@
 # relay-knowledge 自迭代
 
+`code_index_persistence_performance_suite_maven_lifecycle_loads_models_once` 用例通过 SQL trace 跟踪 128 个索引 POM 的 reset 与 lifecycle，要求 `maven_effective_model_loads=1`，并校验 reactor 模块和构建事实。重复物化 POM 会使现有 fast/performance gate 失败；有界 worker 阶段、publication fence 与不完整证据保留规则不变。
+
 中文 | [English](README.md)
 
 `tools/self_iteration` 是独立的 Rust 自迭代 harness，用 Codex 生成候选补丁，并用固定评估集判断它是否真正改进代码仓库检索、semantic/vector 检索、性能、稳定性或研究质量。它不属于产品 crate 的 `src/` 模块树，运行状态统一写入 `.git/relay-knowledge-self-iteration/`。旧的 tracked Python harness 已在功能对齐后移除，仓库根目录的 `self-iterate.sh` 会直接构建并运行 Rust binary。

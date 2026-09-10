@@ -757,13 +757,17 @@ fn build_target_visitor_stops_at_the_callers_bounded_capacity() {
         .expect("pom chunk should seed");
     let mut visited = 0_usize;
 
-    let error = visit_build_target_inputs(&connection, "scope", GraphVersion::new(1), |_| {
-        if visited >= 1 {
-            return Err(StorageError::CapacityExceeded("test target cap".to_owned()));
-        }
-        visited += 1;
-        Ok(())
-    })
+    let error = visit_build_target_inputs(
+        &super::effective_models(&connection, "scope").unwrap(),
+        GraphVersion::new(1),
+        |_| {
+            if visited >= 1 {
+                return Err(StorageError::CapacityExceeded("test target cap".to_owned()));
+            }
+            visited += 1;
+            Ok(())
+        },
+    )
     .expect_err("visitor capacity should stop Maven fact generation");
 
     assert_eq!(visited, 1);

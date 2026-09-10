@@ -109,3 +109,12 @@ fn invalid_or_missing_pom_documents_preserve_graph_until_valid_repair_or_deletio
         Err(StorageError::CapacityExceeded(_))
     ));
 }
+
+fn refresh(
+    connection: &Connection,
+    scope: &str,
+    version: GraphVersion,
+) -> Result<bool, StorageError> {
+    let loaded = super::super::super::effective_models(connection, scope)?;
+    super::refresh(connection, scope, version, &loaded)
+}

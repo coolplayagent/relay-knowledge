@@ -185,3 +185,34 @@ fn parent_edges_follow_effective_resolution_and_preserve_external_evidence() {
         );
     }
 }
+
+#[test]
+fn xml_entities_resolve_module_paths_without_unescaping_cdata_twice() {
+    let input = models(&[
+        (
+            "pom.xml",
+            "<project><groupId>x</groupId><artifactId>root&#x2d;api</artifactId><version>1</version><modules><module>foo&amp;bar</module><module>num&#45;child</module><module><![CDATA[literal&amp;child]]></module></modules></project>",
+        ),
+        (
+            "foo&bar/pom.xml",
+            "<project><groupId>x</groupId><artifactId>child1</artifactId><version>1</version></project>",
+        ),
+        (
+            "num-child/pom.xml",
+            "<project><groupId>x</groupId><artifactId>child2</artifactId><version>1</version></project>",
+        ),
+        (
+            "literal&amp;child/pom.xml",
+            "<project><groupId>x</groupId><artifactId>child3</artifactId><version>1</version></project>",
+        ),
+    ]);
+    let (nodes, edges) = facts(&input, GraphVersion::ZERO).unwrap();
+    assert_eq!(nodes.len(), 4);
+    assert!(nodes.iter().any(|node| node.target.name == "x:root-api:1"));
+    assert_eq!(edges.len(), 3);
+    assert!(
+        edges
+            .iter()
+            .all(|edge| edge.relationship.resolution_state == "resolved")
+    );
+}

@@ -82,3 +82,49 @@ fn cursors_reject_malformed_wrong_kind_and_oversized_input() {
     };
     assert!(large.encode().is_err());
 }
+
+#[test]
+fn non_jvm_dependency_pages_ignore_incomplete_reactor_and_keep_other_evidence() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    create_test_schema(&connection);
+    super::super::super::schema::initialize_schema(&connection).unwrap();
+    seed_scope(&connection);
+    super::super::refresh_projection(&mut connection, "scope-1").unwrap();
+    connection
+        .execute(
+            "UPDATE maven_reactor_status SET complete=0 WHERE source_scope='scope-1'",
+            [],
+        )
+        .unwrap();
+    let mut request = SoftwareGlobalRequest::new(
+        CodeRepositorySelector::new("repo", "commit-1", vec![], vec!["rust".into()]).unwrap(),
+        SoftwareGlobalKind::Dependencies,
+        FreshnessPolicy::AllowStale,
+        1,
+    )
+    .unwrap();
+    let mut ids = BTreeSet::new();
+    for _ in 0..10 {
+        let result = page(&connection, "scope-1", &request).unwrap();
+        assert!(result.build_targets.is_empty() && result.relationships.is_empty());
+        for component in result.components {
+            assert_eq!(component.language_id, "rust");
+            assert!(ids.insert(component.component_id));
+        }
+        request.cursor = result.next_cursor;
+        if request.cursor.is_none() {
+            break;
+        }
+    }
+    assert!(request.cursor.is_none());
+    assert!(!ids.is_empty());
+    request.kind = SoftwareGlobalKind::Modules;
+    assert!(
+        page(&connection, "scope-1", &request)
+            .unwrap()
+            .build_targets
+            .is_empty()
+    );
+    request.repository.language_filters = vec!["java".into()];
+    assert!(page(&connection, "scope-1", &request).is_err());
+}

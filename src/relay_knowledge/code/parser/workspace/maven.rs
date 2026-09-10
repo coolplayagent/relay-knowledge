@@ -127,6 +127,11 @@ fn summary(content: &str) -> Option<PomSummary> {
             Event::Text(event) => {
                 value.push_str(&quick_xml::escape::unescape(&event.decode().ok()?).ok()?);
             }
+            Event::GeneralRef(event) => {
+                value.push_str(
+                    &quick_xml::escape::unescape(&format!("&{};", event.decode().ok()?)).ok()?,
+                );
+            }
             Event::CData(event) => {
                 value.push_str(&event.decode().ok()?);
             }

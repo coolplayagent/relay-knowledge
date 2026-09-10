@@ -960,3 +960,6 @@ mod test_support;
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod maven_performance_tests;

@@ -35,8 +35,8 @@ pub(in crate::storage::sqlite) fn refresh(
     connection: &Connection,
     scope: &str,
     version: GraphVersion,
-) -> Result<(), StorageError> {
-    let loaded = super::super::effective_models(connection, scope)?;
+    loaded: &super::super::MavenModels,
+) -> Result<bool, StorageError> {
     let model_paths = loaded
         .models
         .iter()
@@ -62,10 +62,11 @@ pub(in crate::storage::sqlite) fn refresh(
             "INSERT OR REPLACE INTO maven_reactor_status VALUES (?1, 0)",
             [scope],
         )?;
-        return Ok(());
+        return Ok(false);
     }
     let (modules, edges) = build::facts(&loaded.models, version)?;
-    persist(connection, scope, &modules, &edges)
+    persist(connection, scope, &modules, &edges)?;
+    Ok(true)
 }
 
 pub(super) fn persist(

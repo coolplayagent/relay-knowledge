@@ -57,7 +57,21 @@ pub(super) fn parse_xml_document(content: &str) -> Result<Option<XmlNode>, Stora
                     let text = event
                         .decode()
                         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-                    node.text.push_str(text.as_ref());
+                    node.text.push_str(
+                        &quick_xml::escape::unescape(&text)
+                            .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
+                    );
+                }
+            }
+            Ok(Event::GeneralRef(event)) => {
+                if let Some(node) = stack.last_mut() {
+                    let reference = event
+                        .decode()
+                        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+                    node.text.push_str(
+                        &quick_xml::escape::unescape(&format!("&{reference};"))
+                            .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
+                    );
                 }
             }
             Ok(Event::CData(event)) => {

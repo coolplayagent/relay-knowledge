@@ -1,5 +1,7 @@
 # relay-knowledge self-iteration
 
+The `code_index_persistence_performance_suite_maven_lifecycle_loads_models_once` case traces 128 indexed POMs through reset and lifecycle. It requires `maven_effective_model_loads=1` while verifying reactor module and lifecycle build facts, so repeated POM materialization fails the existing fast/performance gate. This preserves bounded worker phases, publication fences and incomplete-evidence retention.
+
 [中文](README.zh-CN.md) | English
 
 `tools/self_iteration` is the standalone Rust self-iteration harness. It asks Codex to generate candidate patches, then accepts only candidates that improve repository retrieval, semantic/vector retrieval, performance, stability, or research quality against fixed evaluation workloads. It stays outside the product crate `src/` tree and stores runtime state under `.git/relay-knowledge-self-iteration/`. The old tracked Python harness has been removed after feature parity checks; the repository-root `self-iterate.sh` builds and runs the Rust binary directly.
