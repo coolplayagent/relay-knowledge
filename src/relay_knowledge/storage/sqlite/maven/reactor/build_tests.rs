@@ -104,3 +104,84 @@ fn same_line_profile_variants_keep_separate_edges() {
     input[0].dependencies.push(variant);
     assert_eq!(facts(&input, GraphVersion::ZERO).unwrap().1.len(), 2);
 }
+
+#[test]
+fn system_artifact_does_not_resolve_to_matching_reactor_coordinate() {
+    let input = models(&[
+        (
+            "a/pom.xml",
+            "<project><groupId>x</groupId><artifactId>a</artifactId><version>1</version><dependencies><dependency><groupId>x</groupId><artifactId>b</artifactId><version>1</version><scope>system</scope><systemPath>/opt/lib/b.jar</systemPath></dependency></dependencies></project>",
+        ),
+        (
+            "b/pom.xml",
+            "<project><groupId>x</groupId><artifactId>b</artifactId><version>1</version></project>",
+        ),
+    ]);
+    let (_, edges) = facts(&input, GraphVersion::ZERO).unwrap();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].relationship.resolution_state, "unresolved");
+    assert_eq!(edges[0].relationship.target_kind, "artifact");
+    assert!(
+        edges[0]
+            .relationship
+            .target_hint
+            .as_deref()
+            .unwrap()
+            .contains("scope=system")
+    );
+}
+
+#[test]
+fn default_profile_modules_and_prefixed_poms_are_in_the_reactor() {
+    let input = models(&[
+        (
+            "pom.xml",
+            "<m:project xmlns:m='http://maven.apache.org/POM/4.0.0'><m:groupId>x</m:groupId><m:artifactId>root</m:artifactId><m:version>1</m:version><m:packaging>pom</m:packaging><m:profiles><m:profile><m:id>default</m:id><m:activation><m:activeByDefault>true</m:activeByDefault></m:activation><m:properties><m:member>child</m:member></m:properties><m:modules><m:module>${member}</m:module></m:modules></m:profile><m:profile><m:id>opt-in</m:id><m:modules><m:module>absent</m:module></m:modules></m:profile></m:profiles></m:project>",
+        ),
+        (
+            "child/pom.xml",
+            "<m:project xmlns:m='http://maven.apache.org/POM/4.0.0'><m:groupId>x</m:groupId><m:artifactId>child</m:artifactId><m:version>1</m:version><m:description/></m:project>",
+        ),
+    ]);
+    let (modules, edges) = facts(&input, GraphVersion::ZERO).unwrap();
+    assert_eq!(modules.len(), 2);
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].relationship.relationship_kind, "aggregates");
+    assert_eq!(edges[0].relationship.resolution_state, "resolved");
+    assert_eq!(edges[0].relationship.target_hint.as_deref(), Some("child"));
+}
+
+#[test]
+fn parent_edges_follow_effective_resolution_and_preserve_external_evidence() {
+    let input = models(&[
+        (
+            "pom.xml",
+            "<project><groupId>x</groupId><artifactId>root</artifactId><version>1</version><packaging>pom</packaging></project>",
+        ),
+        (
+            "child/pom.xml",
+            "<project><parent><groupId>x</groupId><artifactId>root</artifactId><version>1</version></parent><artifactId>child</artifactId></project>",
+        ),
+        (
+            "external/pom.xml",
+            "<project><parent><groupId>x</groupId><artifactId>remote</artifactId><version>1</version><relativePath/></parent><artifactId>external</artifactId></project>",
+        ),
+        (
+            "mismatch/pom.xml",
+            "<project><parent><groupId>x</groupId><artifactId>root</artifactId><version>2</version><relativePath>../pom.xml</relativePath></parent><artifactId>mismatch</artifactId></project>",
+        ),
+    ]);
+    let (_, edges) = facts(&input, GraphVersion::ZERO).unwrap();
+    assert_eq!(edges.len(), 3);
+    for edge in edges {
+        assert_eq!(edge.relationship.relationship_kind, "inherits_from");
+        assert_eq!(
+            edge.relationship.resolution_state,
+            if edge.relationship.evidence_path == "child/pom.xml" {
+                "resolved"
+            } else {
+                "unresolved"
+            }
+        );
+    }
+}

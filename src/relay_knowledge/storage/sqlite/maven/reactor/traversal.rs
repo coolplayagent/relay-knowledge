@@ -44,7 +44,7 @@ pub(in crate::storage::sqlite) fn downstream(
         .iter()
         .map(|(id, _, path)| (id.as_str(), path.as_str()))
         .collect::<BTreeMap<_, _>>();
-    let mut statement = connection.prepare("SELECT payload FROM maven_reactor_edges WHERE source_scope = ?1 AND target_id = ?2 AND kind = 'depends_on' AND resolution_state = 'resolved' AND dependency_scope IN ('compile', 'runtime', 'provided', 'test', 'system') AND profile IS NULL ORDER BY source_id, edge_id LIMIT ?3")?;
+    let mut statement = connection.prepare("SELECT payload FROM maven_reactor_edges WHERE source_scope = ?1 AND target_id = ?2 AND resolution_state = 'resolved' AND (kind = 'inherits_from' OR (kind = 'depends_on' AND dependency_scope IN ('compile', 'runtime', 'provided', 'test', 'import'))) AND profile IS NULL ORDER BY source_id, edge_id LIMIT ?3")?;
     let mut result = Vec::new();
     let mut scanned = 0usize;
     while let Some((target, chain)) = queue.pop_front() {

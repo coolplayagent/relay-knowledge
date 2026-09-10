@@ -128,3 +128,79 @@ fn deep_dependency_graph_fails_explicitly_at_depth_budget() {
         .is_err()
     );
 }
+
+#[test]
+fn bom_and_parent_changes_reach_consumers_and_transitive_children() {
+    let connection = database();
+    let input = super::super::tests::models(&[
+        (
+            "bom/pom.xml",
+            "<project><groupId>x</groupId><artifactId>bom</artifactId><version>1</version><packaging>pom</packaging></project>",
+        ),
+        (
+            "parent/pom.xml",
+            "<project><groupId>x</groupId><artifactId>parent</artifactId><version>1</version><packaging>pom</packaging><dependencyManagement><dependencies><dependency><groupId>x</groupId><artifactId>bom</artifactId><version>1</version><type>pom</type><scope>import</scope></dependency></dependencies></dependencyManagement></project>",
+        ),
+        (
+            "child/pom.xml",
+            "<project><parent><groupId>x</groupId><artifactId>parent</artifactId><version>1</version><relativePath>../parent/pom.xml</relativePath></parent><artifactId>child</artifactId><packaging>pom</packaging></project>",
+        ),
+        (
+            "grandchild/pom.xml",
+            "<project><parent><groupId>x</groupId><artifactId>child</artifactId><version>1</version><relativePath>../child/pom.xml</relativePath></parent><artifactId>grandchild</artifactId></project>",
+        ),
+    ]);
+    let (modules, edges) =
+        super::super::build::facts(&input, crate::domain::GraphVersion::ZERO).unwrap();
+    super::super::persistence::persist(&connection, "scope", &modules, &edges).unwrap();
+    let parent_impacts = downstream(
+        &connection,
+        "scope",
+        &BTreeSet::from(["parent/pom.xml".into()]),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(parent_impacts.len(), 2);
+    assert_eq!(parent_impacts[0].chain, "child/pom.xml -> parent/pom.xml");
+    assert_eq!(
+        parent_impacts[1].chain,
+        "grandchild/pom.xml -> child/pom.xml -> parent/pom.xml"
+    );
+    assert_eq!(
+        downstream(
+            &connection,
+            "scope",
+            &BTreeSet::from(["bom/pom.xml".into()]),
+            &[]
+        )
+        .unwrap()
+        .len(),
+        3
+    );
+    assert!(
+        downstream(
+            &connection,
+            "scope",
+            &BTreeSet::from(["grandchild/pom.xml".into()]),
+            &[]
+        )
+        .unwrap()
+        .is_empty()
+    );
+    connection
+        .execute(
+            "UPDATE maven_reactor_edges SET profile = 'opt-in' WHERE dependency_scope = 'import'",
+            [],
+        )
+        .unwrap();
+    assert!(
+        downstream(
+            &connection,
+            "scope",
+            &BTreeSet::from(["bom/pom.xml".into()]),
+            &[]
+        )
+        .unwrap()
+        .is_empty()
+    );
+}

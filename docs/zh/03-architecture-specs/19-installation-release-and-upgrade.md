@@ -189,6 +189,8 @@ Plan rendering 与 execution 必须使用 bootstrap 捕获的精确 source execu
 
 ### Maven reactor 派生数据升级
 
+从 schema 9 之前的数据库导入时，允许缺少新增的三个 reactor 表；包含 POM 却没有 reactor 完成标记的 scope 保持 incomplete，直到 durable repair/reindex 发布完整图。非 Maven 旧 scope 无需 reactor 事实。
+
 Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_reactor_edges` 和 `maven_reactor_status` 三张 snapshot-scoped 派生表。旧投影标记 stale，由现有 durable repair/index task 重建，不在查询热路径解析 POM。三个 owner 同时纳入 immutable-scope import、显式 scope 清理和有界 retention GC；新表只在升级后开始填充，升级前已越过新增 GC phase 的旧任务没有这些数据需要回收。没有新增运行目录、环境变量或服务进程。
 
 升级后为 Maven 仓库执行完整索引或等待既有投影修复任务完成，再查询 modules。旧二进制回滚前应 drain/cancel 当前任务并恢复一致的数据库备份；不要手工删除 reactor marker 或修改 checkpoint。新 workspace `maven` 使用 workspace-v1 mask 的第 4 位，旧三种格式的位值不变；禁用检测的 scope identity 保持兼容。

@@ -48,10 +48,11 @@ pub(super) fn facts(
                 .flatten()
                 .copied()
                 .filter(|index| {
-                    dependency
-                        .version
-                        .as_deref()
-                        .is_some_and(|version| !version.contains("${"))
+                    dependency.scope.as_deref() != Some("system")
+                        && dependency
+                            .version
+                            .as_deref()
+                            .is_some_and(|version| !version.contains("${"))
                         && dependency.version == models[*index].version
                         && dependency.classifier.as_deref().unwrap_or("").is_empty()
                         && dependency.dep_type.as_deref().unwrap_or("jar")
@@ -93,6 +94,29 @@ pub(super) fn facts(
             edge.dependency_scope = dependency.scope.clone().unwrap_or_else(|| "compile".into());
             edge.profile = dependency.profile.clone();
             insert_edge(&mut edges, edge)?;
+        }
+        if let Some(parent) = &model.parent {
+            let target = parent
+                .path
+                .as_deref()
+                .and_then(|path| paths.get(path))
+                .map(|index| &modules[*index]);
+            insert_edge(
+                &mut edges,
+                relationship(
+                    &modules[i],
+                    target,
+                    "inherits_from",
+                    if target.is_some() {
+                        "resolved"
+                    } else {
+                        "unresolved"
+                    },
+                    parent.coordinate.clone(),
+                    (&model.document.path, parent.line),
+                    version,
+                )?,
+            )?;
         }
         for member in &model.modules {
             let path = relative_pom_path(&model.document.path, &member.value).map(|path| {

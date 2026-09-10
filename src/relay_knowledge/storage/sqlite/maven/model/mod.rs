@@ -19,9 +19,9 @@ mod dependencies_tests;
 mod plugins_tests;
 
 pub(super) use contracts::{
-    EffectiveDependency, EffectiveGoal, EffectivePlugin, EffectivePluginExecution, EffectivePom,
-    EffectiveProfile, ParentPom, PomDocument, RawDependency, RawPlugin, RawPluginExecution, RawPom,
-    RawProfile, ResolvedPomLoad, TaggedValue,
+    EffectiveDependency, EffectiveGoal, EffectiveParent, EffectivePlugin, EffectivePluginExecution,
+    EffectivePom, EffectiveProfile, ParentPom, PomDocument, RawDependency, RawPlugin,
+    RawPluginExecution, RawPom, RawProfile, ResolvedPomLoad, TaggedValue,
 };
 
 use coordinates::{insert_project_properties, parent_properties, project_coordinates};
@@ -584,6 +584,12 @@ impl EffectiveResolver {
         let modules = raw
             .modules
             .iter()
+            .chain(
+                raw.profiles
+                    .iter()
+                    .filter(|profile| profile.active_by_default)
+                    .flat_map(|profile| &profile.modules),
+            )
             .map(|module| TaggedValue {
                 value: interpolate(&module.value, &default_properties),
                 line: module.line,
@@ -596,7 +602,15 @@ impl EffectiveResolver {
             .or_else(|| raw.parent.as_ref().map(|parent| parent.line))
             .unwrap_or(1);
 
+        let effective_parent = raw.parent.as_ref().map(|declaration| EffectiveParent {
+            coordinate: declaration
+                .coordinate(&default_properties)
+                .unwrap_or_else(|| "unknown parent".into()),
+            path: parent.as_ref().map(|model| model.document.path.clone()),
+            line: declaration.line,
+        });
         Ok(EffectivePom {
+            parent: effective_parent,
             document: raw.document,
             group_id,
             artifact_id,

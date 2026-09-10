@@ -80,6 +80,7 @@ fn summary(content: &str) -> Option<PomSummary> {
     reader.config_mut().trim_text(true);
     let mut stack = Vec::new();
     let mut result = PomSummary::default();
+    let mut value = String::new();
     loop {
         match reader.read_event().ok()? {
             Event::Start(event) => {
@@ -87,26 +88,29 @@ fn summary(content: &str) -> Option<PomSummary> {
                     return None;
                 }
                 stack.push(String::from_utf8_lossy(event.local_name().as_ref()).into_owned());
+                value.clear();
             }
             Event::End(_) => {
-                stack.pop()?;
-            }
-            Event::Text(event) => {
-                let text = quick_xml::escape::unescape(&event.decode().ok()?)
-                    .ok()?
-                    .into_owned();
                 let key = stack.join("/");
                 if key == "project/modules/module" {
                     if result.modules.len() >= MAX_MEMBERS {
                         return None;
                     }
-                    result.modules.push(text);
+                    result.modules.push(value.trim().to_owned());
                 } else if matches!(
                     key.as_str(),
                     "project/groupId" | "project/artifactId" | "project/parent/groupId"
                 ) {
-                    result.values.entry(key).or_default().push_str(&text);
+                    result.values.insert(key, value.trim().to_owned());
                 }
+                stack.pop()?;
+                value.clear();
+            }
+            Event::Text(event) => {
+                value.push_str(&quick_xml::escape::unescape(&event.decode().ok()?).ok()?);
+            }
+            Event::CData(event) => {
+                value.push_str(&event.decode().ok()?);
             }
             Event::Eof => return stack.is_empty().then_some(result),
             _ => {}

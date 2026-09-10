@@ -237,7 +237,7 @@ automatic silent upgrades.
 
 ### Maven reactor derived-data upgrade
 
-Software projection schema 9 adds snapshot-scoped `maven_reactor_modules`, `maven_reactor_edges` and `maven_reactor_status`. Existing projections become stale and rebuild through durable repair/index tasks; query hot paths never parse POMs. Immutable-scope imports, explicit cleanup and bounded retention GC include all three tables. Legacy GC tasks already past the added phases contain no new reactor data because these tables are only populated after upgrade. No runtime directories, environment settings or service processes are added.
+Software projection schema 9 adds snapshot-scoped `maven_reactor_modules`, `maven_reactor_edges` and `maven_reactor_status`. Existing projections become stale and rebuild through durable repair/index tasks; query hot paths never parse POMs. Immutable-scope imports, explicit cleanup and bounded retention GC include all three tables. Imports from pre-schema-9 databases may omit these additive tables; a Maven scope without a reactor completion marker remains incomplete until durable repair/reindex publishes the graph. Non-Maven legacy scopes need no reactor facts. Legacy GC tasks already past the added phases contain no new reactor data because these tables are only populated after upgrade. No runtime directories, environment settings or service processes are added.
 
 Reindex Maven repositories or allow durable projection repair to finish before querying modules. Before binary rollback, drain/cancel active tasks and restore a consistent database backup; never manually edit reactor markers or checkpoints. Maven workspace detection uses the fourth bit (mask 8) of workspace-v1 while preserving the original three bits and disabled-scope identities.
 
