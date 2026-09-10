@@ -1,5 +1,6 @@
 {
   "include_files": [
+    "cases/repository_java_class_calls.json",
     "cases/repository_project_alias_targets.json",
     "cases/repository_relay_teams_targets.json",
     "cases/repository_linux_targets.json",

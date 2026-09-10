@@ -1,0 +1,29 @@
+{
+  "repositories": {
+    "java_class_calls": {
+      "generated_fixture": "java_class_calls_v1",
+      "alias": "java-class-calls-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "isolated_index_home": true,
+      "cold_index_min_file_count": 258,
+      "query_p95_budget_ms": 2000
+    }
+  },
+  "query_cases": [
+    {
+      "id": "java_class_member_callers", "repository": "java_class_calls",
+      "query": "Processor", "kind": "callers", "guardrail": true,
+      "limit": 5, "max_rank": 1, "degraded_reason": false,
+      "expected": [{"path": "src/Caller.java", "retrieval_layer": "call_graph", "excerpt_contains": "run calls processItem"}],
+      "case_group": "index_performance"
+    },
+    {
+      "id": "java_class_member_callees", "repository": "java_class_calls",
+      "query": "Processor", "kind": "callees", "guardrail": true,
+      "limit": 5, "max_rank": 1, "degraded_reason": false,
+      "expected": [{"path": "src/Processor.java", "retrieval_layer": "call_graph", "excerpt_contains": "processItem calls println"}],
+      "case_group": "index_performance"
+    }
+  ]
+}

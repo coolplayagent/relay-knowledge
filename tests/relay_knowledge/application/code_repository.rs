@@ -951,3 +951,6 @@ fn git_command<const N: usize>(path: &Path, args: [&str; N]) -> Command {
 
 #[path = "code_repository_historical_reuse_tests.rs"]
 mod historical_reuse_tests;
+
+#[path = "code_repository_class_calls.rs"]
+mod class_calls;
