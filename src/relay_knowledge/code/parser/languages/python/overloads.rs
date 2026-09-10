@@ -424,6 +424,16 @@ fn direct_function_call(
         return false;
     };
     if expression.kind() == "assignment" {
+        // Stores happen after the RHS invocation. Attribute/subscript targets
+        // can dispatch a setter that replaces the provider and calls this
+        // function again; destructuring and annotations add unknown effects.
+        if expression.child_by_field_name("type").is_some()
+            || !expression
+                .child_by_field_name("left")
+                .is_some_and(|target| target.kind() == "identifier")
+        {
+            return false;
+        }
         let Some(value) = expression.child_by_field_name("right") else {
             return false;
         };

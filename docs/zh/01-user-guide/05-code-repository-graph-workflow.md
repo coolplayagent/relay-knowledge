@@ -130,7 +130,7 @@ Canonical 调用查询按既有调用目标规则优先选择可调用定义，�
 
 直接调用查询分别按路径、行号扫描非生成和生成候选，保持非生成文件优先，避免在候选截断前排序全部匹配边。标识解析、两路扫描和代码片段读取共享约 410 万条 SQLite 指令预算。耗尽时明确报告 `call query incomplete`，错误类型为 `timeout`（仓库 API 返回 HTTP 408），不回退为空结果或部分成功；可缩小路径、语言过滤或选择更具体的 snapshot。有界查询算法使用持久化方向索引。升级到此版本仍须按上文执行普通持久化重建，以创建必需索引并刷新带版本的事实；不能跳过该升级步骤。
 
-`cpp-callable-declarations-v2` 提取版本要求通过普通 `repo index <alias> --ref <ref>` 重建旧 scope，包括已经具备 canonical 调用索引的 scope。它将 C++ 原型声明与可执行定义正确区分；重建后需重新复制 snapshot ID。
+`cpp-callable-declarations-v3` 提取版本要求通过普通 `repo index <alias> --ref <ref>` 重建旧 scope，包括已经具备 canonical 调用索引的 scope。它将 C++ 原型声明与可执行定义正确区分；重建后需重新复制 snapshot ID。
 
 ```sh
 relay-knowledge repo query repo --query dispatch --kind definition --ref HEAD --format json
@@ -325,7 +325,7 @@ relay-knowledge repo status repo --format json
 
 `repo impact` 需要 `--head` 对应已索引 snapshot。先运行 `repo index repo --ref <head>` 或 `repo update repo --base <base> --head <head>`，再运行 impact。
 
-Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v17` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
+Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v18` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
 
 精确调用 selector 的 `name:` 在候选准入前过滤返回的调用身份。callees 使用已解析 canonical 身份；无本地已解析目标时使用已持久化的 target hint/name，同时保留 unresolved 状态和边元数据。callers 过滤调用方身份，被调用方名称不会使无关调用方入选。既有共享执行预算与结果上限继续生效。
 
@@ -355,15 +355,15 @@ Provider 变化与 Gitlink 更新重叠时，未改动的 Python 消费者仍进
 
 来源变化触发的增量索引先沿既有有界 Gitlink diff、重命名及复制流程展开精确的授权文件工作集。每个文件只入队一次；Gitlink 容器和无需解析的子孙文件不占用解析文件数或 blob 字节预算。读取 blob 前限制队列大小，prefetch 前准入精确计划字节，再对同一文件集执行解析及运行时预算复核。原始 diff 变化和强制 Python 候选分别保持有界，删除、tombstone、租约和 checkpoint 行为保持有效。此次准入修正不改变已成功发布的事实，因此 Python 事实版本仍为 v14；失败的更新可通过普通 update 命令重试。
 
-Python overload 证明计入类体立即执行时通过 `global` 或 `nonlocal` 重定向到同一词法绑定目标的写入，包括函数和类定义引入的名称。重定向后的自定义装饰器保留为可执行证据，不再被当作 typing 声明排除；同一 canonical 身份对应两个可执行定义时仍须报告歧义，并使用 snapshot selector 选择。普通类局部名称和延迟执行的函数体保持各自的作用域与求值规则，遍历继续受既有共享工作预算限制。`python-overload-declarations-v17` 组件使普通同 HEAD 索引以修正后的分类重建旧 completed scope，无需 reset 或修改源文件。
+Python overload 证明计入类体立即执行时通过 `global` 或 `nonlocal` 重定向到同一词法绑定目标的写入，包括函数和类定义引入的名称。重定向后的自定义装饰器保留为可执行证据，不再被当作 typing 声明排除；同一 canonical 身份对应两个可执行定义时仍须报告歧义，并使用 snapshot selector 选择。普通类局部名称和延迟执行的函数体保持各自的作用域与求值规则，遍历继续受既有共享工作预算限制。`python-overload-declarations-v18` 组件使普通同 HEAD 索引以修正后的分类重建旧 completed scope，无需 reset 或修改源文件。
 
 Python overload 证明区分类中的纯注解名称与运行时绑定：类注解只有同时赋值才拥有该名称，函数局部纯注解仍建立局部绑定。立即执行的隐式协议（包括真假判断、迭代、上下文进入、运算符、描述符、下标、格式化、解包和字典 key/set 成员哈希）可能使 typing 提供方证明失效。有界字面量证明保留安全的内建操作；字典 value 和延迟函数体继续遵守各自求值规则，并保持共享遍历预算。
 
 C/C++ canonical callers 查询将唯一可执行定义与结构化调用签名相同的声明一起作为调用目标。参数名和默认值不区分签名，参数类型、声明结构、参数数量及成员限定符仍须一致。定义歧义或无法证明声明等价时须选择明确的 snapshot；显式 snapshot 查询保持精确目标语义。可空 `callable_signature_key` 独立于展示/搜索签名，每个 key 最多 2,048 UTF-8 字节、1,024 个语法节点，每个文件共享 65,536 个语法节点预算。canonical 解析最多接纳 1,024 个候选符号并沿用查询工作预算；超限报告歧义，不截断后声称调用者完整。
 
-`cpp-callable-declarations-v2` 与 `python-overload-declarations-v17` fact component 要求普通同 HEAD 索引重建旧 completed scope。schema 迁移仅增加可空签名列，旧记录及旧库导入保留未知证据，直到重新索引，不在启动时回填事实。snapshot 与持久化 clone/delta 预算计入签名字节，导入保留可空 key。重建后重新复制 snapshot selector；升级前使用与未完成任务原始 fact 版本兼容的二进制完成或取消这些任务，回滚时一起保留数据库、WAL 和 checkpoint。
+`cpp-callable-declarations-v3` 与 `python-overload-declarations-v18` fact component 要求普通同 HEAD 索引重建旧 completed scope。schema 迁移仅增加可空签名列，旧记录及旧库导入保留未知证据，直到重新索引，不在启动时回填事实。snapshot 与持久化 clone/delta 预算计入签名字节，导入保留可空 key。重建后重新复制 snapshot selector；升级前使用与未完成任务原始 fact 版本兼容的二进制完成或取消这些任务，回滚时一起保留数据库、WAL 和 checkpoint。
 
-当前调用等价证明支持 primitive 参数类型，忽略标量参数的顶层 cv 限定；指向类型及成员的 cv/ref、参数数量和可变参数仍影响签名。typedef、限定名/struct/template 类型、数组参数调整、相关宏、指针顶层 cv 及非规范类型写法保持未知。canonical callers 若需要合并这些声明，会要求显式 snapshot，不猜测等价，也不静默省略声明调用者。C++ `(void)` 等价于空参数列表；C 的旧式空参数列表保持未知。
+当前调用等价证明支持标准内建参数类型，统一等价限定词顺序与可省略的 `int`（例如 `unsigned`/`unsigned int`），忽略标量参数的顶层 cv 限定；不同类型等级以及普通/有符号/无符号 `char` 仍保持不同；指向类型及成员的 cv/ref、参数数量和可变参数仍影响签名。typedef、限定名/struct/template 类型、数组参数调整、相关宏、指针顶层 cv 及尚未支持的声明符写法保持未知。canonical callers 若需要合并这些声明，会要求显式 snapshot，不猜测等价，也不静默省略声明调用者。C++ `(void)` 等价于空参数列表；C 的旧式空参数列表保持未知。
 
 隐式协议分析在共享词法工作预算内保留已证明安全的接收者操作，包括直接/局部模块别名、内建容器迭代、已证明 overload 函数的真假值、已证明模块字典的字面量 key 访问及局部已证明空类的实例。中间出现未知执行或接收者修改时，证明失效。外部构造器（包括没有源码 origin 证明的导入构造器）不能仅凭名称获得信任；即使某次本地执行无副作用，其接收者仍保留未知状态。模块 `__getattr__` 和 `__class__` 写入在属性、字典和 mutator 调用语法中共用保守的协议钩子策略。已证明的装饰器不再被其他别名上下文重复解释为未知操作。
 
@@ -374,3 +374,5 @@ C/C++ canonical callers 查询将唯一可执行定义与结构化调用签名�
 中间若导入未经证明的外部模块，也会终止独立接收者的正证明；不能仅凭模块名称信任其执行行为。
 
 `await` 或产出值造成的挂起，以及 match 捕获模式引入的名称，都可能使早先的 overload 导入证明失效。向空内置 tuple、list 或 dictionary 的委托不会挂起。未知或自定义装饰器保留可执行分类：canonical 选择器拒绝多个可执行定义的歧义，symbol snapshot 选择器仍可选择具体定义及其既有调用边。
+
+Canonical callers/callees 的候选准入只统计可调用符号：类、构造函数、函数、函数声明、宏和方法共同受既有 1,024 个候选上限约束。同一 canonical identity 下重复的变量或常量不会让唯一函数产生歧义；多个真实定义仍要求显式 snapshot，扫描仍受既有查询执行预算约束。

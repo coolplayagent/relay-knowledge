@@ -7,6 +7,11 @@ use tree_sitter::Node;
 use super::{FileParseContext, FileParseOutput};
 use crate::domain::MAX_CALLABLE_SIGNATURE_KEY_BYTES;
 
+mod budget;
+mod primitive_types;
+
+use budget::Budget;
+
 const MAX_SIGNATURE_NODES: usize = 1024;
 const MAX_FILE_SIGNATURE_NODES: usize = 65_536;
 const PREFIX: &str = "c-family-callable-v1|";
@@ -52,19 +57,6 @@ pub(super) fn project(
                             .is_some_and(|parameters| parameters.named_child_count() != 0)
                 })
                 .and_then(|node| signature_key(context.content, node, &macros, &mut budget));
-    }
-}
-
-struct Budget<'a> {
-    remaining: usize,
-    file: &'a mut usize,
-}
-
-impl Budget<'_> {
-    fn spend(&mut self) -> Option<()> {
-        self.remaining = self.remaining.checked_sub(1)?;
-        *self.file = self.file.checked_sub(1)?;
-        Some(())
     }
 }
 
@@ -205,7 +197,6 @@ fn signature_key(
                     | "qualified_identifier"
                     | "decltype"
                     | "placeholder_type_specifier"
-                    | "sized_type_specifier"
                     | "array_declarator"
                     | "abstract_array_declarator"
                     | "attribute_specifier"
@@ -220,6 +211,15 @@ fn signature_key(
             )
         {
             return None;
+        }
+        if matches!(node.kind(), "primitive_type" | "sized_type_specifier") {
+            let token = primitive_types::canonical(content, node, budget)?;
+            let encoded = format!("{}:{token}|", token.len());
+            if result.len().checked_add(encoded.len())? > MAX_CALLABLE_SIGNATURE_KEY_BYTES {
+                return None;
+            }
+            result.push_str(&encoded);
+            continue;
         }
         if matches!(
             node.kind(),

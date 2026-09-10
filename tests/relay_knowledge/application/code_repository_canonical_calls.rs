@@ -2,6 +2,70 @@
 use super::*;
 
 #[tokio::test]
+async fn canonical_calls_ignore_non_callable_snapshots_sharing_the_function_identity() {
+    let repo = FixtureRepo::create("canonical-non-callable-candidates");
+    let mut source = (0..1100)
+        .map(|number| format!("target = {number}\n"))
+        .collect::<String>();
+    source.push_str(
+        "def leaf(): return 7\ndef target(): return leaf()\ndef caller(): return target()\n",
+    );
+    repo.write("src/sample.py", &source);
+    repo.git(["add", "."]);
+    repo.git([
+        "commit",
+        "-m",
+        "Repeated variable identity before a callable",
+    ]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-canonical-candidate-kinds"),
+        )
+        .await
+        .unwrap();
+    let leaf_callers = query(&service, "leaf", CodeQueryKind::Callers).await;
+    let function = leaf_callers
+        .results
+        .iter()
+        .find(|hit| {
+            hit.canonical_symbol_id
+                .as_deref()
+                .is_some_and(|id| id.ends_with("::target"))
+        })
+        .unwrap();
+    let canonical = function.canonical_symbol_id.as_deref().unwrap();
+    for (kind, target) in [
+        (CodeQueryKind::Callers, "::caller"),
+        (CodeQueryKind::Callees, "::leaf"),
+    ] {
+        let response = query(&service, canonical, kind).await;
+        assert_eq!(response.results.len(), 1, "{:?}", response.results);
+        assert!(
+            response.results[0]
+                .canonical_symbol_id
+                .as_deref()
+                .unwrap()
+                .ends_with(target)
+        );
+        assert!(!response.results[0].stale);
+        assert!(
+            response.results[0]
+                .retrieval_layers
+                .contains(&CodeRetrievalLayer::CallGraph)
+        );
+    }
+}
+
+#[tokio::test]
 async fn python_method_nested_functions_do_not_capture_class_overload_imports() {
     let repo = FixtureRepo::create("python-class-overload-scope");
     repo.write("src/scope.py", "def overload(fn): return fn\ndef first(): return 1\ndef second(): return 2\nclass Worker:\n    from typing import overload\n    def method(self):\n        @overload\n        def choose(): return first()\n        def choose(): return second()\n");

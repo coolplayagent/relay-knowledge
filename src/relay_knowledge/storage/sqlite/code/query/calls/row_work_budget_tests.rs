@@ -12,6 +12,9 @@ fn canonical_call_query_work_budget() {
         WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<32768)
         INSERT INTO code_repository_calls(repository_id,source_scope,call_id,file_id,path,caller_symbol_snapshot_id,caller_name,callee_symbol_snapshot_id,callee_name,line_start,line_end)
         SELECT 'repo','scope','call:'||x,'file','src/Many.java','symbol:target','target','symbol:target','target',x,x FROM n;").unwrap();
+    connection.execute_batch("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<2048)
+        INSERT INTO code_repository_symbols(repository_id,source_scope,symbol_snapshot_id,canonical_symbol_id,file_id,path,language_id,name,qualified_name,kind,signature,byte_start,byte_end,line_start,line_end)
+        SELECT 'repo','scope','symbol:noise:'||x,'repo://target','file','src/Many.java','java','target','target','field','int target;',0,10,x,x FROM n;").unwrap();
     let status = CodeRepositoryStatus {
         repository_id: "repo".into(),
         alias: "repo".into(),

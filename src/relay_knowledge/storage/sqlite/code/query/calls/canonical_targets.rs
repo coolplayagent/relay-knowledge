@@ -4,7 +4,7 @@ use super::super::prepare_code_search_statement;
 use crate::{
     domain::{
         MAX_CALLABLE_SIGNATURE_KEY_BYTES,
-        code_call_targets::{callable_definition_symbol, callable_target_symbol_kind},
+        code_call_targets::{CALLABLE_TARGET_SYMBOL_KINDS, callable_definition_symbol},
     },
     storage::StorageError,
 };
@@ -25,13 +25,30 @@ pub(super) fn snapshots(
     canonical_id: &str,
     include_declarations: bool,
 ) -> Result<Vec<String>, StorageError> {
-    let mut statement = prepare_code_search_statement(connection,
+    let mut statement = prepare_code_search_statement(
+        connection,
         "SELECT symbol_snapshot_id, kind, signature, language_id, callable_signature_key
-         FROM code_repository_symbols WHERE source_scope = ?1 AND canonical_symbol_id = ?2 LIMIT ?3")?;
+         FROM code_repository_symbols WHERE source_scope = ?1 AND canonical_symbol_id = ?2
+         AND kind IN (?4, ?5, ?6, ?7, ?8, ?9) LIMIT ?3",
+    )?;
+    let [
+        class,
+        constructor,
+        function,
+        declaration_kind,
+        macro_kind,
+        method,
+    ] = CALLABLE_TARGET_SYMBOL_KINDS;
     let mut rows = statement.query(rusqlite::params![
         scope,
         canonical_id,
-        (MAX_CANONICAL_SYMBOL_CANDIDATES + 1) as i64
+        (MAX_CANONICAL_SYMBOL_CANDIDATES + 1) as i64,
+        class,
+        constructor,
+        function,
+        declaration_kind,
+        macro_kind,
+        method
     ])?;
     let mut candidates = Vec::new();
     let mut definition = None;
@@ -45,9 +62,6 @@ pub(super) fn snapshots(
             ));
         }
         let kind: String = row.get(1)?;
-        if !callable_target_symbol_kind(&kind) {
-            continue;
-        }
         let signature: String = row.get(2)?;
         let is_definition = callable_definition_symbol(&kind, &signature);
         if is_definition {

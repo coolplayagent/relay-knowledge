@@ -455,3 +455,5 @@ Fast `software_relationship_storage_cases` 门禁执行 `cargo test --lib softwa
 `canonical_call_query_work_budget` 质量门禁在 fast/full/exhaustive profile 中作为独立阶段运行，位于既有 library-test 构建之后。它用 32,768 条匹配调用边执行真实产品查询入口，从查询自身的执行预算设施获取 callers/callees SQLite VM steps。两个方向各输出一条 `SELF_ITERATION_METRIC` JSON：名称分别为 `canonical_call_callers_vm_steps`、`canonical_call_callees_vm_steps`，`value` 为正整数，`budget` 固定为 150000；它们都是越低越好的关键指标。缺失、格式错误、重复、零值或预算不一致都会使门禁失败，包括 Cargo filter 未执行任何测试。超过 150,000 steps 直接失败，不依赖易抖动的墙钟阈值；旧全量排序查询在此 fixture 上超过一百万 steps。该门禁不复制 SQL，也不使用面向 fixture 的产品分支，既有 canonical-call CLI workload 继续负责端到端结果及宽松延迟预算。
 
 Canonical-call fixture 与 workload 的单元测试分别位于所属目录的 `canonical_calls_tests.rs`，通过显式 test-only path 挂载；测试模块身份和场景保持不变。
+
+Canonical call VM 门禁同时包含与所选函数共享 identity 的 2,048 个不可调用 field snapshot。两个精确查询方向必须保留原结果和既有 150,000 steps 上限；把这些字段计入可调用候选准入会使该 fast-profile 回归失败。
