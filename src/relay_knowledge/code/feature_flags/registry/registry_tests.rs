@@ -232,3 +232,66 @@ fn shell_export_status_survives_assignments_and_respects_unexport_and_subshells(
         );
     }
 }
+
+#[test]
+fn converted_getter_reads_bind_but_unknown_wrappers_report_incomplete_flow() {
+    let rows = facts(
+        "java",
+        r#"package demo;
+      interface FooConfig { boolean getX(); }
+      class DefaultFooConfig implements FooConfig {
+        public boolean getX() { return Boolean.parseBoolean(System.getProperty("feature_x", "false")); }
+        public boolean getUnknown() { return Custom.wrap(System.getProperty("unknown")); }
+      }
+      class Reader { void run(FooConfig cfg) { if(cfg.getX()) {} } }
+    "#,
+    );
+    let read = rows.iter().find(|r| r.source_key == "feature_x").unwrap();
+    assert!(
+        read.metadata
+            .bindings
+            .contains(&"demo.FooConfig.getX".into())
+    );
+    assert!(read.metadata.flow_incomplete.is_none());
+    assert!(
+        rows.iter()
+            .find(|r| r.source_key == "unknown")
+            .unwrap()
+            .metadata
+            .flow_incomplete
+            .is_some()
+    );
+    let shadow = facts(
+        "java",
+        r#"class Config { Custom Boolean;
+      boolean getX() { return Boolean.parseBoolean(System.getProperty("x")); }
+    }"#,
+    );
+    let read = shadow.iter().find(|r| r.source_key == "x").unwrap();
+    assert!(read.metadata.bindings.is_empty());
+    assert!(read.metadata.flow_incomplete.is_some());
+}
+#[test]
+fn ordinary_string_constants_remain_internal_candidates() {
+    let rows = facts(
+        "java",
+        r#"class Messages {
+      static final String GREETING="Welcome to the application";
+      static final String NAME="application.name";
+      static final String TIMEOUT_KEY="timeout";
+    }"#,
+    );
+    for key in ["Welcome to the application", "application.name"] {
+        assert_eq!(
+            rows.iter().find(|r| r.source_key == key).unwrap().edge_kind,
+            "declares_string_constant"
+        );
+    }
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.source_key == "timeout")
+            .unwrap()
+            .edge_kind,
+        "declares_config_key"
+    );
+}

@@ -78,7 +78,9 @@ fn relationship_fixture() -> Connection {
          INSERT INTO code_repository_feature_flags VALUES
             ('scope', 'flag', 'read', 'FEATURE', 'reads_config', 8000, 'inferred', 'src/lib.rs', 8, 8),
             ('scope', 'flag', 'guard', 'FEATURE', 'guards_code', 9000, 'extracted', 'src/lib.rs', 8, 10),
-            ('scope', 'flag', 'reference', 'FEATURE', 'other', 7000, 'ambiguous', 'src/lib.rs', 8, 8);"
+            ('scope', 'flag', 'reference', 'FEATURE', 'other', 7000, 'ambiguous', 'src/lib.rs', 8, 8),
+            ('scope', 'internal', 'candidate', 'HELLO', 'declares_string_constant', 9000, 'extracted', 'src/lib.rs', 9, 9),
+            ('scope', 'internal', 'getter', 'getHello', 'declares_config_getter', 9000, 'extracted', 'src/lib.rs', 10, 10);"
     ).expect("scoped evidence");
     connection
 }

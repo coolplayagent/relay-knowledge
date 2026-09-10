@@ -70,6 +70,9 @@ pub struct CodeFeatureFlagUsage {
 /// Feature flag graph grouped by stable configuration source.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeFeatureFlagGraph {
+    /// Located evidence for each conflicting default, populated by consistency checks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conflicting_default_sources: Vec<CodeFeatureFlagUsage>,
     #[serde(default)]
     pub consistency_diagnostics: Vec<String>,
     #[serde(default)]

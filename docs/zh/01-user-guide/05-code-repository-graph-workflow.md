@@ -326,3 +326,7 @@ relay-knowledge repo feature-flags demo --query feature_y --consistency --format
 来源筛选选择符合条件的配置组，并保留其关联 Java 使用关系。一致性分析比较当前查询范围中已观察到的格式，报告 `read_without_definition`、`missing_from_format` 和 `conflicting_defaults`；它不判断生产配置。陈旧或未解析的分析不能证明某键不存在。返回数量限制与完整性分析预算分开处理。注册命令中的 `--path src` 只是范围示例，不要求仓库采用固定目录布局。
 
 远程 CLI 与 Web 仓库端点使用相同的领域请求，其中 `filters` 对象包含 `domain`、`source`、`hot_reload`、`consistency`。MCP 在 `relay_code_feature_flags` 参数中直接暴露这四个字段。
+
+Java getter 值流还支持已确认属于 java.lang 的 Boolean/Integer/Long/Double 解析及装箱转换。无法解析的 getter 返回值流通过 `metadata.flow_incomplete` 标记，不能宣称一致性分析完整。字符串常量只有被范围内的配置读取引用、带显式 `@config domain=...` / `hot-reload=...` 元数据，或遵循声明约定（所属类型名以 `Keys` 结尾、字段名以 `_KEY` 结尾）时才公开为配置声明。其余字符串仅作为内部符号候选，不进入配置查询及通用配置视图。
+
+一致性检查从限定范围的已索引文件清单获取格式覆盖，包含空模板和只有注释的模板，并遵守仓库路径、语言限制。`conflicting_default_sources` 返回冲突默认值对应的使用记录，可直接通过 `metadata.default_value`、`path`、`line_range`、`excerpt`、`usage_id` 定位每个来源；原有简短 `conflicting_defaults` 诊断继续保留。

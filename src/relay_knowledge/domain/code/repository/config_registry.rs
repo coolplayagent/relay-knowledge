@@ -26,6 +26,9 @@ pub struct CodeConfigMetadata {
     /// Connects a guarded location to the concrete read that supplied its value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_usage_id: Option<String>,
+    /// Static read whose enclosing getter result cannot be linked soundly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flow_incomplete: Option<String>,
 }
 
 /// Optional filters apply to whole configuration groups, retaining their usage evidence.

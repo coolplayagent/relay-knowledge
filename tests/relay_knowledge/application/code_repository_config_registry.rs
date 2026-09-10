@@ -19,7 +19,7 @@ async fn configuration_registry_connects_formats_constants_getters_and_guards() 
         "src/FooConfig.java",
         "package demo; interface FooConfig { boolean getX(); }\n",
     );
-    repo.write("src/DefaultFooConfig.java","package demo; class DefaultFooConfig implements FooConfig { public boolean getX() { return Boolean.getBoolean(\"feature_x\"); } }\n");
+    repo.write("src/DefaultFooConfig.java","package demo; class DefaultFooConfig implements FooConfig { public boolean getX() { return Boolean.parseBoolean(System.getProperty(\"feature_x\", \"false\")); } }\n");
     repo.write(
         "src/Keys.java",
         "package demo; class Keys { static final String Y=\"feature_y\"; }\n",

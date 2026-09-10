@@ -1,5 +1,6 @@
 //! Bounded snapshot-local configuration binding resolution and consistency analysis.
 use super::*;
+mod consistency;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 const MAX_ROWS: usize = 10_000;
 const MAX_BYTES: usize = 16 * 1024 * 1024;
@@ -116,12 +117,11 @@ pub(super) fn search(
             providers.entry(binding.clone()).or_default().push(index);
         }
     }
-    let formats = rows
-        .iter()
-        .filter(|row| row.source_kind == "config_key" || row.source_kind == "config_symbol")
-        .map(|row| row.metadata.source_format.clone())
-        .filter(|format| !format.is_empty())
-        .collect::<BTreeSet<_>>();
+    let formats = if request.filters.consistency {
+        consistency::formats(connection, scope, status, request)?
+    } else {
+        BTreeSet::new()
+    };
     let unresolved_scope = request.filters.consistency
         && rows.iter().any(|row| {
             row.metadata.reference.is_some()
@@ -133,6 +133,18 @@ pub(super) fn search(
         });
     let mut groups = BTreeMap::<(String, String), CodeFeatureFlagGraph>::new();
     for row in &rows {
+        if row.edge_kind == "declares_string_constant"
+            && !rows.iter().any(|read| {
+                read.metadata.target_kind.is_some()
+                    && read
+                        .metadata
+                        .reference
+                        .as_ref()
+                        .is_some_and(|r| row.metadata.bindings.contains(r))
+            })
+        {
+            continue;
+        }
         if row.edge_kind == "declares_config_getter" {
             continue;
         }
@@ -147,6 +159,9 @@ pub(super) fn search(
             continue;
         }
         let mut resolved = row.clone();
+        if resolved.edge_kind == "declares_string_constant" {
+            resolved.edge_kind = "declares_config_key".into();
+        }
         let mut visiting = BTreeSet::new();
         let targets = resolve(row, &rows, &providers, &mut visiting, 0);
         let complete = if row.metadata.reference.is_none() {
@@ -182,11 +197,12 @@ pub(super) fn search(
             score: 0.0,
             usages: Vec::new(),
             consistency_diagnostics: Vec::new(),
+            conflicting_default_sources: Vec::new(),
             analysis_complete: !status.stale
                 && status.degraded_reason.is_none()
                 && !unresolved_scope,
         });
-        group.analysis_complete &= complete;
+        group.analysis_complete &= complete && row.metadata.flow_incomplete.is_none();
         if !complete
             && !group
                 .consistency_diagnostics
@@ -226,7 +242,7 @@ pub(super) fn search(
                 .then_with(|| a.byte_range.start.cmp(&b.byte_range.start))
         });
         if request.filters.consistency {
-            consistency(group, &formats);
+            consistency::check(group, &formats);
         }
     }
     groups.sort_by(|a, b| {
@@ -268,45 +284,6 @@ fn resolve(
         targets.into_iter().next()
     } else {
         None
-    }
-}
-fn consistency(group: &mut CodeFeatureFlagGraph, formats: &BTreeSet<String>) {
-    if !group.analysis_complete {
-        group
-            .consistency_diagnostics
-            .push("incomplete_analysis: absence cannot be proven".into());
-        return;
-    }
-    let definitions = group.usages.iter().any(|u| u.edge_kind == "defines_config");
-    if !definitions && group.usages.iter().any(|u| u.edge_kind == "reads_config") {
-        group
-            .consistency_diagnostics
-            .push("read_without_definition".into());
-    }
-    if group.source_kind == "config_key" {
-        let present = group
-            .usages
-            .iter()
-            .map(|u| &u.metadata.source_format)
-            .collect::<BTreeSet<_>>();
-        for format in formats {
-            if !present.contains(format) {
-                group
-                    .consistency_diagnostics
-                    .push(format!("missing_from_format: {format}"));
-            }
-        }
-    }
-    let defaults = group
-        .usages
-        .iter()
-        .filter_map(|u| u.metadata.default_value.as_ref())
-        .collect::<BTreeSet<_>>();
-    if defaults.len() > 1 {
-        group.consistency_diagnostics.push(format!(
-            "conflicting_defaults: {}",
-            defaults.into_iter().cloned().collect::<Vec<_>>().join(", ")
-        ));
     }
 }
 fn matches_group(

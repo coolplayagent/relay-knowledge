@@ -1,6 +1,7 @@
 //! Java-only configuration facts; does not change the language call graph.
 use super::*;
 use tree_sitter::Node;
+mod flow;
 mod names;
 use names::{field_symbol, literal, receiver_type, text};
 
@@ -29,8 +30,10 @@ pub(super) fn extract(
         }
         if node.kind() == "method_invocation" {
             if let Some(mut row) = read(input, node)? {
-                if let Some(method) = returning_method(node) {
+                if let Some(method) = flow::returning_method(node, input.content) {
                     row.metadata.bindings = names::getter_bindings(method, input.content);
+                } else if flow::inside_getter(node, input.content) {
+                    row.metadata.flow_incomplete = Some("unsupported_getter_value_flow".into());
                 }
                 let guards = guard_sites(node, input.content);
                 for guard in guards {
@@ -92,7 +95,12 @@ pub(super) fn extract(
                             text(name, input.content),
                             input.content,
                         ));
-                        row.metadata.value_type = Some("string".to_owned());
+                        if !flow::key_declaration(node, input.content)
+                            && row.metadata.domain.is_none()
+                            && row.metadata.hot_reload.is_none()
+                        {
+                            row.edge_kind = "declares_string_constant".into();
+                        }
                         rows.push(row);
                     }
                 }
@@ -227,26 +235,6 @@ fn read(
     )?;
     row.metadata.reference = Some(key);
     Ok(Some(row))
-}
-fn returning_method(mut node: Node<'_>) -> Option<Node<'_>> {
-    while let Some(parent) = node.parent() {
-        match parent.kind() {
-            "parenthesized_expression" | "cast_expression" => node = parent,
-            "return_statement" => {
-                let body = parent
-                    .parent()
-                    .filter(|body| body.kind() == "block" && body.named_child_count() == 1)?;
-                return body.parent().filter(|method| {
-                    method.kind() == "method_declaration"
-                        && method
-                            .child_by_field_name("parameters")
-                            .is_some_and(|p| p.named_child_count() == 0)
-                });
-            }
-            _ => return None,
-        }
-    }
-    None
 }
 fn guard_sites<'a>(node: Node<'a>, content: &str) -> Vec<Node<'a>> {
     let mut current = node;
