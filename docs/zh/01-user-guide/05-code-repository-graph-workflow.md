@@ -130,7 +130,7 @@ Canonical 调用查询按既有调用目标规则优先选择可调用定义，�
 
 直接调用查询分别按路径、行号扫描非生成和生成候选，保持非生成文件优先，避免在候选截断前排序全部匹配边。标识解析、两路扫描和代码片段读取共享约 410 万条 SQLite 指令预算。耗尽时明确报告 `call query incomplete`，错误类型为 `timeout`（仓库 API 返回 HTTP 408），不回退为空结果或部分成功；可缩小路径、语言过滤或选择更具体的 snapshot。有界查询算法使用持久化方向索引。升级到此版本仍须按上文执行普通持久化重建，以创建必需索引并刷新带版本的事实；不能跳过该升级步骤。
 
-`cpp-callable-declarations-v2` 提取版本要求通过普通 `repo index <alias> --ref <ref>` 重建旧 scope，包括已经具备 canonical 调用索引的 scope。它将 C++ 原型声明与可执行定义正确区分；重建后需重新复制 snapshot ID。
+`cpp-callable-declarations-v3` 提取版本要求通过普通 `repo index <alias> --ref <ref>` 重建旧 scope，包括已经具备 canonical 调用索引的 scope。它将 C++ 原型声明与可执行定义正确区分；重建后需重新复制 snapshot ID。
 
 ```sh
 relay-knowledge repo query repo --query dispatch --kind definition --ref HEAD --format json
@@ -344,7 +344,7 @@ relay-knowledge repo status repo --format json
 
 Java getter binding 要求读取位于 getter 自己的 callable scope 的 return 中；返回 expression/block lambda 时，其中的读取仍作为事实保留，但不绑定到返回回调对象的 getter。interface constant declaration 使用 Java 隐式 static/final 语义及完整 enclosing type 身份。局部 flag 数据流包含 return 或变量初始化中嵌套的 ternary condition，但写入、嵌套 block 与 callable 边界仍阻止越界追踪。已证明存在多个不同 key 实现的配置 getter 保留 ambiguous read/guard 引用，一致性为 unknown、`analysis_complete=false`，不猜测具体 destination。
 
-Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v17` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
+Python 经可见 `typing` 或 `typing_extensions` 导入证明的 overload 声明（支持别名）与运行时实现区分；自定义或被遮蔽的装饰器不被猜测为类型声明。类体内直接方法的装饰器可访问本类命名空间；嵌套函数或类会跳过外层类命名空间，继续查找函数和模块绑定。global/nonlocal 声明分别指向模块/外层函数命名空间；跨延迟执行函数边界访问的命名空间后续可能的重绑定阻止猜测早期 typing 导入仍有效；属性和下标写入不绑定普通装饰器名称。无关模块成员不影响导入证明；overload 成员写入和未知命名空间 key 会使证明失效。有界 try/except 分支合并要求每个正常完成分支均证明 typing 绑定，混合或未知写入保持保守。延迟查找按线性绑定顺序接受后续已证明导入，但不越过调用、return 或未知控制路径；再后续的自定义写入使证明失效。直接 setattr/delattr 调用使选定 overload 成员证明失效，无关成员保持独立；同语句重复导入别名采用最后绑定。v9 同时使此前版本已索引 scope 重建。`python-overload-declarations-v18` fact component 使旧 completed scope 失效；运行普通 `repo index <alias> --ref <ref>` 重建后重新复制 snapshot selector。
 
 配置 getter 绑定只接受零参数方法，与支持的零参数 getter 调用保持一致。平台 receiver 遮蔽检查包含接口字段，普通 for 循环条件中的直接读取会生成 guard 关系。Shell 提取排除词法可见的未导出赋值和函数局部绑定，保留显式 export 与未被遮蔽的外部环境读取；绑定扫描最多检查 1,024 个祖先或前序节点，耗尽时不猜测环境来源。模板 `keyOrDefault` 读取保留静态字符串默认值（包含空格）及其推断标量类型，动态默认值表达式保持 unknown。配置查询的 SQLite 执行预算覆盖候选排序、alias 补取和符号附加，耗尽时返回 timeout/incomplete，并提示收窄查询词或 path/language 过滤。
 
@@ -430,15 +430,15 @@ Java 隐式平台证据使用已支持的静态源码根模型。标准 Java mai
 
 来源变化触发的增量索引先沿既有有界 Gitlink diff、重命名及复制流程展开精确的授权文件工作集。每个文件只入队一次；Gitlink 容器和无需解析的子孙文件不占用解析文件数或 blob 字节预算。读取 blob 前限制队列大小，prefetch 前准入精确计划字节，再对同一文件集执行解析及运行时预算复核。原始 diff 变化和强制 Python 候选分别保持有界，删除、tombstone、租约和 checkpoint 行为保持有效。此次准入修正不改变已成功发布的事实，因此 Python 事实版本仍为 v14；失败的更新可通过普通 update 命令重试。
 
-Python overload 证明计入类体立即执行时通过 `global` 或 `nonlocal` 重定向到同一词法绑定目标的写入，包括函数和类定义引入的名称。重定向后的自定义装饰器保留为可执行证据，不再被当作 typing 声明排除；同一 canonical 身份对应两个可执行定义时仍须报告歧义，并使用 snapshot selector 选择。普通类局部名称和延迟执行的函数体保持各自的作用域与求值规则，遍历继续受既有共享工作预算限制。`python-overload-declarations-v17` 组件使普通同 HEAD 索引以修正后的分类重建旧 completed scope，无需 reset 或修改源文件。
+Python overload 证明计入类体立即执行时通过 `global` 或 `nonlocal` 重定向到同一词法绑定目标的写入，包括函数和类定义引入的名称。重定向后的自定义装饰器保留为可执行证据，不再被当作 typing 声明排除；同一 canonical 身份对应两个可执行定义时仍须报告歧义，并使用 snapshot selector 选择。普通类局部名称和延迟执行的函数体保持各自的作用域与求值规则，遍历继续受既有共享工作预算限制。`python-overload-declarations-v18` 组件使普通同 HEAD 索引以修正后的分类重建旧 completed scope，无需 reset 或修改源文件。
 
 Python overload 证明区分类中的纯注解名称与运行时绑定：类注解只有同时赋值才拥有该名称，函数局部纯注解仍建立局部绑定。立即执行的隐式协议（包括真假判断、迭代、上下文进入、运算符、描述符、下标、格式化、解包和字典 key/set 成员哈希）可能使 typing 提供方证明失效。有界字面量证明保留安全的内建操作；字典 value 和延迟函数体继续遵守各自求值规则，并保持共享遍历预算。
 
 C/C++ canonical callers 查询将唯一可执行定义与结构化调用签名相同的声明一起作为调用目标。参数名和默认值不区分签名，参数类型、声明结构、参数数量及成员限定符仍须一致。定义歧义或无法证明声明等价时须选择明确的 snapshot；显式 snapshot 查询保持精确目标语义。可空 `callable_signature_key` 独立于展示/搜索签名，每个 key 最多 2,048 UTF-8 字节、1,024 个语法节点，每个文件共享 65,536 个语法节点预算。canonical 解析最多接纳 1,024 个候选符号并沿用查询工作预算；超限报告歧义，不截断后声称调用者完整。
 
-`cpp-callable-declarations-v2` 与 `python-overload-declarations-v17` fact component 要求普通同 HEAD 索引重建旧 completed scope。schema 迁移仅增加可空签名列，旧记录及旧库导入保留未知证据，直到重新索引，不在启动时回填事实。snapshot 与持久化 clone/delta 预算计入签名字节，导入保留可空 key。重建后重新复制 snapshot selector；升级前使用与未完成任务原始 fact 版本兼容的二进制完成或取消这些任务，回滚时一起保留数据库、WAL 和 checkpoint。
+`cpp-callable-declarations-v3` 与 `python-overload-declarations-v18` fact component 要求普通同 HEAD 索引重建旧 completed scope。schema 迁移仅增加可空签名列，旧记录及旧库导入保留未知证据，直到重新索引，不在启动时回填事实。snapshot 与持久化 clone/delta 预算计入签名字节，导入保留可空 key。重建后重新复制 snapshot selector；升级前使用与未完成任务原始 fact 版本兼容的二进制完成或取消这些任务，回滚时一起保留数据库、WAL 和 checkpoint。
 
-当前调用等价证明支持 primitive 参数类型，忽略标量参数的顶层 cv 限定；指向类型及成员的 cv/ref、参数数量和可变参数仍影响签名。typedef、限定名/struct/template 类型、数组参数调整、相关宏、指针顶层 cv 及非规范类型写法保持未知。canonical callers 若需要合并这些声明，会要求显式 snapshot，不猜测等价，也不静默省略声明调用者。C++ `(void)` 等价于空参数列表；C 的旧式空参数列表保持未知。
+当前调用等价证明支持标准内建参数类型，统一等价限定词顺序与可省略的 `int`（例如 `unsigned`/`unsigned int`），忽略标量参数的顶层 cv 限定；不同类型等级以及普通/有符号/无符号 `char` 仍保持不同；指向类型及成员的 cv/ref、参数数量和可变参数仍影响签名。typedef、限定名/struct/template 类型、数组参数调整、相关宏、指针顶层 cv 及尚未支持的声明符写法保持未知。canonical callers 若需要合并这些声明，会要求显式 snapshot，不猜测等价，也不静默省略声明调用者。C++ `(void)` 等价于空参数列表；C 的旧式空参数列表保持未知。
 
 隐式协议分析在共享词法工作预算内保留已证明安全的接收者操作，包括直接/局部模块别名、内建容器迭代、已证明 overload 函数的真假值、已证明模块字典的字面量 key 访问及局部已证明空类的实例。中间出现未知执行或接收者修改时，证明失效。外部构造器（包括没有源码 origin 证明的导入构造器）不能仅凭名称获得信任；即使某次本地执行无副作用，其接收者仍保留未知状态。模块 `__getattr__` 和 `__class__` 写入在属性、字典和 mutator 调用语法中共用保守的协议钩子策略。已证明的装饰器不再被其他别名上下文重复解释为未知操作。
 
@@ -469,3 +469,7 @@ Properties 解析在现有同步 parser worker 内使用仅限 properties 的互
 `await` 或产出值造成的挂起，以及 match 捕获模式引入的名称，都可能使早先的 overload 导入证明失效。向空内置 tuple、list 或 dictionary 的委托不会挂起。未知或自定义装饰器保留可执行分类：canonical 选择器拒绝多个可执行定义的歧义，symbol snapshot 选择器仍可选择具体定义及其既有调用边。
 
 直接调用内部功能开关匹配器的存储单元测试，必须先建立公开查询准入所要求的延迟查询索引。测试先断言键索引前置条件尚未满足，再调用既有的测试专用索引构建器并确认就绪，随后使用原有记录、筛选条件、结果断言和执行预算。缺失索引仍由公开入口的拒绝测试覆盖；这项测试准备不在查询时创建索引，也不调整产品预算。
+
+Canonical callers/callees 的候选准入只统计可调用符号：类、构造函数、函数、函数声明、宏和方法共同受既有 1,024 个候选上限约束。同一 canonical identity 下重复的变量或常量不会让唯一函数产生歧义；多个真实定义仍要求显式 snapshot，扫描仍受既有查询执行预算约束。
+
+Java 克隆字节预算集成测试必须通过公开的检查点会话 API 发布基础作用域，并在尝试带围栏的覆盖写入前验证已完成且事实行数非零的持久化证明。基础和目标作用域保持相同的文件及行数限制，目标字节配额仍为 61,440；只有基础字节配额更大。断言必须识别不可变基础作用域的字节配额拒绝，并确认没有写入目标事实。缺少证明时的回退属于另一种行为，不得满足这项预算专用断言。

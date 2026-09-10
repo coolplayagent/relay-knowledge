@@ -948,22 +948,14 @@ fn git_command<const N: usize>(path: &Path, args: [&str; N]) -> Command {
     command.current_dir(path).args(args);
     command
 }
-
-#[path = "code_repository_historical_reuse_tests.rs"]
-mod historical_reuse_tests;
-
 #[path = "code_repository_canonical_calls.rs"]
 mod canonical_calls;
-
-#[path = "code_repository_python_import_origins.rs"]
-mod python_import_origins;
-#[path = "code_repository_python_rebinding.rs"]
-mod python_rebinding;
-#[path = "code_repository_unresolved_call_names.rs"]
-mod unresolved_call_names;
-
 #[path = "code_repository_canonical_declaration_edges.rs"]
 mod canonical_declaration_edges;
+#[path = "code_repository_cpp_primitive_spellings.rs"]
+mod cpp_primitive_spellings;
+#[path = "code_repository_historical_reuse_tests.rs"]
+mod historical_reuse_tests;
 #[path = "code_repository_java_unicode_identifiers.rs"]
 mod java_unicode_identifiers;
 #[path = "code_repository_properties_workers.rs"]
@@ -980,16 +972,22 @@ mod python_chains;
 mod python_class_imports;
 #[path = "code_repository_python_control_decorators.rs"]
 mod python_control_decorators;
+#[path = "code_repository_python_direct_effects.rs"]
+mod python_direct_effects;
 #[path = "code_repository_python_evaluation.rs"]
 mod python_evaluation;
 #[path = "code_repository_python_execution_boundaries.rs"]
 mod python_execution_boundaries;
 #[path = "code_repository_python_implicit_protocols.rs"]
 mod python_implicit_protocols;
+#[path = "code_repository_python_import_origins.rs"]
+mod python_import_origins;
 #[path = "code_repository_python_independent_modules.rs"]
 mod python_independent_modules;
 #[path = "code_repository_python_literal_managers.rs"]
 mod python_literal_managers;
+#[path = "code_repository_python_rebinding.rs"]
+mod python_rebinding;
 #[path = "code_repository_python_safe_member_writes.rs"]
 mod python_safe_member_writes;
 #[path = "code_repository_shell_fallbacks.rs"]
@@ -998,3 +996,5 @@ mod shell_fallbacks;
 mod template_invocations;
 #[path = "code_repository_unicode_config_query.rs"]
 mod unicode_config_query;
+#[path = "code_repository_unresolved_call_names.rs"]
+mod unresolved_call_names;

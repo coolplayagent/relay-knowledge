@@ -467,3 +467,5 @@ Canonical-call fixture 与 workload 的单元测试分别位于所属目录的 `
 独立的 `feature_flags_binding_groups` fast/performance 护栏加入 2,201 个文本与元数据分离的候选，以及真实 Java 常量读取；文本证据和 properties 元数据位于不同 usage。查询要求目标排名第一、结果 fresh，并维持仓库 p95 2,000 ms 预算，覆盖完整别名组 SQL 及反向绑定遍历。该用例检测相关闭包重复执行的退化，补足纯独立键夹具的覆盖；原有 36 文件、五用例负载完整保留。
 
 `properties_parallel_cold_stability_1` 和 `_2` 对未缩小的 36 文件夹具额外执行两次隔离冷索引，要求结果 fresh 且无降级原因，保护并行索引中的 properties scanner 稳定性，并保持相同的查询 p95 2,000 ms 预算。
+
+Canonical call VM 门禁同时包含与所选函数共享 identity 的 2,048 个不可调用 field snapshot。两个精确查询方向必须保留原结果和既有 150,000 steps 上限；把这些字段计入可调用候选准入会使该 fast-profile 回归失败。

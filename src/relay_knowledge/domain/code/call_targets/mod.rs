@@ -1,5 +1,14 @@
 //! Owns cross-language call-target candidate and callable-definition policy.
 
+pub(crate) const CALLABLE_TARGET_SYMBOL_KINDS: [&str; 6] = [
+    "class",
+    "constructor",
+    "function",
+    "function_declaration",
+    "macro",
+    "method",
+];
+
 pub(crate) fn call_target_name_candidates(name: &str, path: &str) -> Vec<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -15,10 +24,7 @@ pub(crate) fn call_target_name_candidates(name: &str, path: &str) -> Vec<String>
 }
 
 pub(crate) fn callable_target_symbol_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "class" | "constructor" | "function" | "function_declaration" | "macro" | "method"
-    )
+    CALLABLE_TARGET_SYMBOL_KINDS.contains(&kind)
 }
 
 pub(crate) fn callable_definition_symbol(kind: &str, signature: &str) -> bool {

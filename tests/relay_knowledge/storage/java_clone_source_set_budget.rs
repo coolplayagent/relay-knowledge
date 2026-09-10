@@ -1,5 +1,7 @@
 //! A fenced worktree publication must charge the complete triggered Java projection.
-use super::partitioned_sqlite_fixtures::{registration, snapshot, unique_temp_dir};
+use super::partitioned_sqlite_fixtures::{
+    batch_from_snapshot, registration, session_for_snapshot, snapshot, unique_temp_dir,
+};
 use relay_knowledge::{
     domain::{
         CodeIndexMode, CodeIndexPublicationFence, CodeIndexResourceBudget, JavaNamespaceEvidence,
@@ -41,8 +43,40 @@ async fn fenced_worktree_clone_admits_all_source_set_projection_bytes_before_pub
         top_level_types: (0..16).map(|index| format!("Type{index}")).collect(),
         complete: true,
     });
-    store.apply_code_index_snapshot(base.clone()).await.unwrap();
+    // Use the public checkpointed path so fallback cannot stop at a missing
+    // immutable-base proof instead of exercising its row/byte-quantum guard.
     let budget = CodeIndexResourceBudget::new(8, 60 * 1024, 1000).unwrap();
+    let mut session = session_for_snapshot(&base);
+    session.resource_budget = CodeIndexResourceBudget::new(
+        budget.max_files_per_batch,
+        budget.max_bytes_per_batch * 2,
+        budget.max_rows_per_batch,
+    )
+    .unwrap();
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .unwrap();
+    store
+        .apply_code_index_batch(batch_from_snapshot(base.clone()))
+        .await
+        .unwrap();
+    store.finalize_code_index_session(session).await.unwrap();
+    let checkpoint = store
+        .code_index_checkpoint(base_scope.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkpoint.state, "completed");
+    assert!(checkpoint.committed_fact_row_count > 0);
+    assert_eq!(
+        checkpoint.resource_budget.max_rows_per_batch,
+        budget.max_rows_per_batch
+    );
+    assert_eq!(
+        checkpoint.resource_budget.max_bytes_per_batch,
+        budget.max_bytes_per_batch * 2
+    );
     let audit = Connection::open(&database).unwrap();
     let projected: (usize, usize) = audit.query_row(
         "SELECT count(*), coalesce(sum(length(CAST(source_scope AS BLOB)) + length(CAST(path AS BLOB)) + length(CAST(package AS BLOB)) + length(CAST(type_name AS BLOB)) + length(CAST(source_set_kind AS BLOB)) + length(CAST(module_root AS BLOB))), 0) FROM code_repository_java_types WHERE source_scope=?1",
@@ -123,8 +157,8 @@ async fn fenced_worktree_clone_admits_all_source_set_projection_bytes_before_pub
         budget.max_bytes_per_batch
     );
     assert!(
-        matches!(result, Err(StorageError::DurableStagingRequired(_))),
-        "an oversized direct clone must request the existing durable fallback before writing target facts"
+        matches!(result, Err(StorageError::DurableStagingRequired(message)) if message.contains("row or byte quantum smaller than its immutable base")),
+        "an oversized direct clone must reach the proven-base quantum guard before writing target facts"
     );
     assert_eq!(cloned, (0, 0));
     let status = store

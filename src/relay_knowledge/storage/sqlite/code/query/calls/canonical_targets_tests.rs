@@ -256,3 +256,64 @@ fn canonical_resolution_recognizes_signature_only_legacy_callable_kinds() {
         vec!["c"]
     );
 }
+
+#[test]
+fn canonical_candidate_budget_excludes_non_callable_snapshots_before_limiting() {
+    let connection = fixture();
+    for kind in ["constant", "variable", "field", "module"] {
+        for number in 0..MAX_CANONICAL_SYMBOL_CANDIDATES + 1 {
+            insert(
+                &connection,
+                &format!("noise-{kind}-{number:04}"),
+                kind,
+                "target = 1",
+                "python",
+                None,
+            );
+        }
+    }
+    for include_declarations in [false, true] {
+        assert!(
+            snapshots(&connection, "scope", "canonical", include_declarations)
+                .unwrap()
+                .is_empty()
+        );
+    }
+    for kind in CALLABLE_TARGET_SYMBOL_KINDS {
+        insert(&connection, "target", kind, "target() {}", "python", None);
+        for include_declarations in [false, true] {
+            assert_eq!(
+                snapshots(&connection, "scope", "canonical", include_declarations).unwrap(),
+                vec!["target"]
+            );
+        }
+        connection
+            .execute(
+                "DELETE FROM code_repository_symbols WHERE symbol_snapshot_id = 'target'",
+                [],
+            )
+            .unwrap();
+    }
+    insert(
+        &connection,
+        "first",
+        "function",
+        "def target(): pass",
+        "python",
+        None,
+    );
+    insert(
+        &connection,
+        "second",
+        "function",
+        "def target(): pass",
+        "python",
+        None,
+    );
+    assert!(
+        snapshots(&connection, "scope", "canonical", false)
+            .unwrap_err()
+            .to_string()
+            .contains("multiple definitions")
+    );
+}

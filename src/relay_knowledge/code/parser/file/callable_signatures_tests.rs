@@ -161,3 +161,144 @@ fn c_family_macro_context_is_shared_and_admitted_before_wide_traversal() {
     let tree = crate::code::parser::syntax::parse_tree(language, &content).unwrap();
     assert!(macro_names(&content, tree.root_node(), &mut 100).is_none());
 }
+
+#[test]
+fn c_family_builtin_specifiers_normalize_equivalent_orders_and_implicit_int() {
+    for spellings in [
+        vec!["int", "signed", "signed int", "int signed"],
+        vec!["unsigned", "unsigned int", "int unsigned"],
+        vec!["short", "short int", "signed short", "int short signed"],
+        vec!["unsigned short", "short unsigned int", "int unsigned short"],
+        vec!["long", "long int", "signed long int", "int long signed"],
+        vec!["unsigned long", "long unsigned int", "int unsigned long"],
+        vec![
+            "long long",
+            "long long int",
+            "signed long long int",
+            "long int signed long",
+        ],
+        vec![
+            "unsigned long long",
+            "long unsigned int long",
+            "int long long unsigned",
+        ],
+        vec!["long double", "double long"],
+        vec!["signed char", "char signed"],
+        vec!["unsigned char", "char unsigned"],
+    ] {
+        for shape in ["{}", "const {}*", "{}&", "{}&&"] {
+            let source = spellings
+                .iter()
+                .enumerate()
+                .map(|(index, spelling)| {
+                    let parameter = shape.replace("{}", spelling);
+                    format!("int helper({parameter} value{index});")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let result = keys(&source);
+            assert_eq!(result.len(), spellings.len(), "{source}");
+            assert!(result[0].is_some(), "{source}");
+            assert!(
+                result.iter().all(|key| key == &result[0]),
+                "{source}: {result:?}"
+            );
+        }
+    }
+    let result = keys("int helper(const unsigned); int helper(unsigned int renamed);");
+    assert!(result[0].is_some());
+    assert_eq!(result[0], result[1]);
+}
+
+#[test]
+fn c_family_builtin_types_remain_distinct_without_target_width_guesses() {
+    let types = [
+        "char",
+        "signed char",
+        "unsigned char",
+        "short",
+        "unsigned short",
+        "int",
+        "unsigned",
+        "long",
+        "unsigned long",
+        "long long",
+        "unsigned long long",
+        "float",
+        "double",
+        "long double",
+        "bool",
+    ];
+    let source = types
+        .map(|kind| format!("int helper({kind} value);"))
+        .join("\n");
+    let result = keys(&source);
+    assert_eq!(result.len(), types.len());
+    assert!(result.iter().all(Option::is_some), "{result:?}");
+    assert_eq!(
+        result.iter().flatten().collect::<HashSet<_>>().len(),
+        result.len()
+    );
+    let result = keys(
+        "struct Box { int helper(unsigned) const; int helper(unsigned); int helper(unsigned)&; int helper(unsigned)&&; }; int helper(unsigned*); int helper(const unsigned*); int helper(unsigned,...);",
+    );
+    assert_eq!(result.len(), 7);
+    assert!(result.iter().all(Option::is_some));
+    assert_eq!(
+        result.iter().flatten().collect::<HashSet<_>>().len(),
+        result.len()
+    );
+}
+
+#[test]
+fn c_family_builtin_normalization_keeps_unknown_evidence_and_work_limits_closed() {
+    for source in [
+        "#define unsigned signed\nint helper(unsigned value);\n",
+        "typedef unsigned long T; int helper(T value);",
+        "int helper(unsigned values[3]);",
+        "int helper(unsigned* const value);",
+        "int helper(unsigned const* value);",
+        "int helper(unsigned int value) noexcept(false);",
+    ] {
+        assert_eq!(keys(source), vec![None], "{source}");
+    }
+    let content = "int helper(unsigned long long int value);";
+    let language = crate::code::languages::detect_language("src/key.cpp").unwrap();
+    let tree = crate::code::parser::syntax::parse_tree(language, content).unwrap();
+    let kind = tree
+        .root_node()
+        .named_child(0)
+        .unwrap()
+        .child_by_field_name("declarator")
+        .unwrap()
+        .child_by_field_name("parameters")
+        .unwrap()
+        .named_child(0)
+        .unwrap()
+        .child_by_field_name("type")
+        .unwrap();
+    for (nodes, file_nodes) in [(0, 100), (100, 0), (1, 100), (100, 1)] {
+        let mut file = file_nodes;
+        assert!(
+            primitive_types::canonical(
+                content,
+                kind,
+                &mut Budget {
+                    remaining: nodes,
+                    file: &mut file
+                }
+            )
+            .is_none()
+        );
+    }
+    let mut file = 100;
+    let mut budget = Budget {
+        remaining: 100,
+        file: &mut file,
+    };
+    assert_eq!(
+        primitive_types::canonical(content, kind, &mut budget),
+        Some("unsigned long long int")
+    );
+    assert!(budget.remaining < 100 && *budget.file < 100);
+}

@@ -59,6 +59,8 @@ pub(super) fn reaches(
                     | "try_statement"
                     | "with_statement"
                     | "match_statement"
+                    | "import_statement"
+                    | "import_from_statement"
                     | "call"
                     | "await"
                     | "yield"
