@@ -154,12 +154,19 @@ pub(super) fn code_context_request(payload: &Value) -> Result<CodeGraphContextRe
 pub(super) fn code_feature_flag_request(
     payload: &Value,
 ) -> Result<CodeFeatureFlagRequest, WebError> {
+    let filters = crate::domain::CodeConfigFilter {
+        domain: optional_string_field(payload, "domain"),
+        source: optional_string_field(payload, "source"),
+        hot_reload: optional_bool_field(payload, "hot_reload")?,
+        consistency: optional_bool_field(payload, "consistency")?.unwrap_or(false),
+    };
     CodeFeatureFlagRequest::new(
         optional_string_field(payload, "query"),
         code_selector(payload)?,
         usize_field(payload, "limit")?,
         parse_freshness(string_field(payload, "freshness")?)?,
     )
+    .and_then(|request| request.with_filters(filters))
     .map_err(|error| WebError::bad_request(error.to_string()))
 }
 

@@ -37,9 +37,9 @@ pub(crate) use code::{
 pub use code::{
     CODEGRAPH_CONTEXT_DEFAULT_LIMIT, CODEGRAPH_CONTEXT_DEFAULT_MAX_BYTES,
     CODEGRAPH_CONTEXT_MAX_BYTES, CODEGRAPH_CONTEXT_MAX_LIMIT, CODEGRAPH_CONTEXT_MIN_BYTES,
-    CodeCallRecord, CodeChunkRecord, CodeDependencyRecord, CodeExtractionMetadata,
-    CodeFeatureFlagGraph, CodeFeatureFlagRecord, CodeFeatureFlagRequest, CodeFeatureFlagUsage,
-    CodeFileDiagnostic, CodeFileFields, CodeFileFingerprint, CodeFileRecord,
+    CodeCallRecord, CodeChunkRecord, CodeConfigFilter, CodeConfigMetadata, CodeDependencyRecord,
+    CodeExtractionMetadata, CodeFeatureFlagGraph, CodeFeatureFlagRecord, CodeFeatureFlagRequest,
+    CodeFeatureFlagUsage, CodeFileDiagnostic, CodeFileFields, CodeFileFingerprint, CodeFileRecord,
     CodeFrameworkEdgeRecord, CodeFrameworkNodeRecord, CodeGraphBatch, CodeGraphCodeExcerpt,
     CodeGraphCommitReceipt, CodeGraphContextBudget, CodeGraphContextPack,
     CodeGraphContextProvenance, CodeGraphContextRequest, CodeGraphImpactHint, CodeImpactPathGroups,

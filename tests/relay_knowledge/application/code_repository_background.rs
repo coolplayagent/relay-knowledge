@@ -901,3 +901,5 @@ mod feature_flag_tests;
 #[path = "code_repository_background_support.rs"]
 mod support;
 use support::*;
+#[path = "code_repository_config_registry.rs"]
+mod config_registry;

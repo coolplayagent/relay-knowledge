@@ -2,6 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::storage::StorageError;
 
+use super::code_capabilities::{CODE_REPOSITORY_FILES_COLUMNS, configuration_metadata_is_current};
 use super::introspection::{
     index_has_columns, table_column_is_not_null, table_columns_have_no_defaults, table_exists,
     table_has_columns, table_has_exact_columns, table_has_exact_plain_columns,
@@ -173,19 +174,7 @@ const CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS: &[&str] = &[
     "created_at_ms",
 ];
 const CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE: &[&str] = &["set_id", "package_name", "ecosystem"];
-const CODE_REPOSITORY_FILES_COLUMNS: &[&str] = &[
-    "repository_id",
-    "source_scope",
-    "file_id",
-    "path",
-    "language_id",
-    "blob_hash",
-    "byte_len",
-    "line_count",
-    "parse_status",
-    "is_generated",
-    "degraded_reason",
-];
+
 const FILE_INDEX_ROOT_COLUMNS: &[&str] = &[
     "scope_id",
     "root_id",
@@ -477,6 +466,7 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
         || !reference_resolution_progress_schema_is_current(connection)?
         || !super::incremental_clone_marker::schema_is_current(connection)?
         || !reference_search_group_schema_is_current(connection)?
+        || !configuration_metadata_is_current(connection)?
     {
         return Ok(false);
     }

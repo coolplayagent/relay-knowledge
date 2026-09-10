@@ -804,6 +804,7 @@ fn import(path: &str, module: &str, target_hint: Option<&str>) -> CodeImportReco
 
 fn feature_flag(path: &str, name: &str, source_key: &str) -> CodeFeatureFlagRecord {
     CodeFeatureFlagRecord {
+        metadata: Default::default(),
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         feature_flag_id: format!("flag:{name}"),

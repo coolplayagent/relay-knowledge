@@ -167,7 +167,7 @@ fn language_for_extension(path: &str, extension: &str) -> Option<LanguageSpec> {
         "json" => Some(spec("json", || tree_sitter_json::LANGUAGE.into())),
         "ninja" => Some(spec("ninja", || tree_sitter_make::LANGUAGE.into())),
         "j2" | "jinja" | "jinja2" => Some(spec("jinja2", || tree_sitter_jinja2::LANGUAGE.into())),
-        "gotmpl" | "tmpl" | "tpl" => {
+        "ctmpl" | "gotmpl" | "tmpl" | "tpl" => {
             Some(spec("gotemplate", || tree_sitter_jinja2::LANGUAGE.into()))
         }
         _ if template_suffix(path) => Some(spec("jinja2", || tree_sitter_jinja2::LANGUAGE.into())),

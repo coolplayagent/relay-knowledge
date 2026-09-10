@@ -252,6 +252,7 @@ fn parses_repo_feature_flags_with_optional_filter_and_scope() {
     assert_eq!(
         command,
         RepoCommand::FeatureFlags {
+            filters: Default::default(),
             alias: "core".to_owned(),
             query: Some("checkout".to_owned()),
             limit: 20,

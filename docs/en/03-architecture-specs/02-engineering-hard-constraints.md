@@ -386,3 +386,5 @@ Repository Map v4 must retain at most 16 contiguous recent history entries in ea
 ---
 
 Navigation: Previous: [1. Architecture Vision and Algorithm Map](01-architecture-vision-and-algorithm-map.md) | Next: [3. Foundational Runtime](03-foundational-runtime.md)
+
+Configuration registry extraction belongs to the existing code-index worker, with no query-time source scan or change to the callable graph. Queries resolve at most 1,000 symbolic identities over four expansion rounds, admit at most 10,000 usages and 16 MiB of fact text, and share a two-second / two-million SQLite-step budget. A metadata value is capped at 64 KiB. Exhaustion is an explicit incomplete-analysis error; it must not become an empty successful query or a false missing-key claim. Incremental copies retain metadata and read-to-guard identities. Tests must exercise real registration/index/query, cross-file bindings, ambiguity, filters, and stale/incremental behavior.

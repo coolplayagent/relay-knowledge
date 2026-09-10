@@ -112,6 +112,10 @@ pub(in crate::interfaces::agent::mcp) fn code_feature_flags_tool_definition() ->
         "inputSchema": {
             "type": "object",
             "properties": {
+                "domain": {"type":"string","minLength":1,"maxLength":128},
+                "source": {"type":"string","enum":["java","properties","ini","ctmpl","shell"]},
+                "hot_reload": {"type":"boolean"},
+                "consistency": {"type":"boolean"},
                 "repository": {"type": "string", "minLength": 1},
                 "query": {"type": "string", "maxLength": MAX_AGENT_QUERY_CHARS},
                 "limit": {"type": "integer", "minimum": 1},

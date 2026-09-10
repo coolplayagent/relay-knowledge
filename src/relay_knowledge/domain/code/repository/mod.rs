@@ -1,3 +1,5 @@
+mod config_registry;
+pub use config_registry::{CodeConfigFilter, CodeConfigMetadata};
 mod indexed_records;
 mod registration;
 mod repository_status;
