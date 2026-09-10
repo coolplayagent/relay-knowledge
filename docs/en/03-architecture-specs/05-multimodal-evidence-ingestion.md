@@ -61,3 +61,7 @@ Worker tasks carry kind, scope, input evidence id, attempt, lease, timeout, budg
 ---
 
 Navigation: Previous: [4. Source Scope Model](04-source-scope-model.md) | Next: [6. Graph Fact Model and Versioning](06-graph-fact-model-and-versioning.md)
+
+Python overload binding proofs stop at `await` and yielding operations because protocol dispatch or suspension can change a provider before its decorator executes. Delegating to a syntactically empty built-in tuple, list, or dictionary has neither dispatch nor suspension. Match capture names bind their lexical target; dotted value references, mapping keys, class names, and keyword labels do not. A direct zero-argument call freezes a deferred decorator lookup only when a bounded proof establishes synchronous execution along a straight path to that specific decorator. Async functions, generators, conditional paths, and preceding exits cannot establish that proof; yields inside an uncalled nested function do not turn its enclosing function into a generator. All three analyses consume the shared proof budget.
+
+The first synchronous invocation is insufficient if later execution can invoke the function again, including through aliases. Freezing at that call additionally requires a bounded tail containing only proven nonexecuting linear statements; later calls, control flow, or imports invalidate the shortcut.

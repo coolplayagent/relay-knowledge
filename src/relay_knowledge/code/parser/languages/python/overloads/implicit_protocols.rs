@@ -11,6 +11,29 @@ pub(super) fn dispatches(
     remaining: &mut usize,
 ) -> bool {
     let operand = match node.kind() {
+        "await" => return true,
+        "yield" => {
+            // Even a literal yielded value can suspend this proof while other
+            // code replaces the provider. Only empty built-in delegation has
+            // neither user iteration nor a suspension point.
+            let mut cursor = node.walk();
+            let mut delegated = false;
+            for child in node.children(&mut cursor) {
+                let Some(left) = remaining.checked_sub(1) else {
+                    return true;
+                };
+                *remaining = left;
+                delegated |= child.kind() == "from";
+            }
+            return !delegated
+                || !node
+                    .named_child(0)
+                    .and_then(|value| super::transparent::transparent(value, remaining))
+                    .is_some_and(|value| {
+                        matches!(value.kind(), "tuple" | "list" | "dictionary")
+                            && value.named_child_count() == 0
+                    });
+        }
         "if_statement" | "elif_clause" | "while_statement" => {
             return node
                 .child_by_field_name("condition")

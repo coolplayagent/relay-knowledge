@@ -1,5 +1,6 @@
 //! Java identifier categories must not invalidate complete configuration namespaces.
 use super::*;
+use relay_knowledge::domain::CodeFeatureFlagRequest;
 
 #[tokio::test]
 async fn java_unicode_identifiers_keep_configuration_reads_and_original_type_names() {
@@ -16,7 +17,18 @@ async fn java_unicode_identifiers_keep_configuration_reads_and_original_type_nam
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "Java Unicode namespaces"]);
     let service = service_with_memory_store().await;
-    register_complete_java_fixture_repo(&service, &repo, "register-unicode-identifiers").await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".into(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-unicode-identifiers"),
+        )
+        .await
+        .unwrap();
     let indexed = service
         .index_code_repository(
             CodeIndexRequest {
@@ -35,7 +47,7 @@ async fn java_unicode_identifiers_keep_configuration_reads_and_original_type_nam
         .query_code_repository_feature_flags(
             CodeFeatureFlagRequest::new(
                 None,
-                filtered_selector("fixture", "HEAD", "src"),
+                CodeRepositorySelector::new("fixture", "HEAD", vec!["src".into()], vec![]).unwrap(),
                 50,
                 FreshnessPolicy::WaitUntilFresh,
             )

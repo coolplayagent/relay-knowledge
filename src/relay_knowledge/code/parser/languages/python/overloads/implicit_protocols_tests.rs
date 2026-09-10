@@ -3,6 +3,14 @@ use super::*;
 #[test]
 fn implicit_execution_requires_proven_literal_operands() {
     for (statement, effect) in [
+        ("await flag", true),
+        ("yield from flag", true),
+        ("yield from (1,)", true),
+        ("yield None", true),
+        ("yield from ()", false),
+        ("yield from []", false),
+        ("yield from {}", false),
+        ("async def later():\n await flag", false),
         ("if flag:\n pass", true),
         ("for item in flag:\n pass", true),
         ("with flag:\n pass", true),

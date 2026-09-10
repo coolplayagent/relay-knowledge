@@ -1,5 +1,6 @@
 //! Concurrent cold indexing must retain properties facts across scanner workers.
 use super::*;
+use relay_knowledge::domain::CodeFeatureFlagRequest;
 
 #[tokio::test]
 async fn repeated_mixed_configuration_cold_indexes_keep_all_properties_files() {
@@ -59,8 +60,14 @@ async fn repeated_mixed_configuration_cold_indexes_keep_all_properties_files() {
             .query_code_repository_feature_flags(
                 CodeFeatureFlagRequest::new(
                     None,
-                    filtered_selector("fixture", "HEAD", "config/metadata_00.properties"),
-                    1000,
+                    CodeRepositorySelector::new(
+                        "fixture",
+                        "HEAD",
+                        vec!["config/metadata_00.properties".into()],
+                        vec![],
+                    )
+                    .unwrap(),
+                    100,
                     FreshnessPolicy::WaitUntilFresh,
                 )
                 .unwrap(),

@@ -1,5 +1,6 @@
 //! Real Git indexing retains diagnostics for invalid Go named-template actions.
 use super::*;
+use relay_knowledge::domain::CodeFeatureFlagRequest;
 
 #[tokio::test]
 async fn named_template_actions_keep_valid_literals_and_reject_proxy_only_syntax() {

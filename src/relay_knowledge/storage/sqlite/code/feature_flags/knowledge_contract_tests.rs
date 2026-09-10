@@ -135,6 +135,11 @@ fn result_limit_is_filled_after_multiple_high_scoring_aliases_collapse() {
 fn metadata_absence_is_proved_but_unmatched_terms_still_exhaust_seed_budget() {
     let store = crate::storage::SqliteGraphStore::open_in_memory().unwrap();
     let mut connection = store.connection.lock().unwrap();
+    // Match the deferred-index prerequisite enforced by public query admission.
+    use crate::storage::sqlite::code::schema;
+    assert!(schema::require_feature_flag_query_index(&connection).is_err());
+    schema::ensure_code_query_indexes(&connection).unwrap();
+    schema::require_feature_flag_query_index(&connection).unwrap();
     connection.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
     let records = (0..1001)
         .map(|n| {

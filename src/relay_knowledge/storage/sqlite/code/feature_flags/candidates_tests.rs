@@ -134,6 +134,11 @@ fn closure_loads_both_directions_and_never_crosses_snapshot_or_path_scope() {
 fn metadata_intersection_precedes_seed_admission_when_each_filter_alone_is_broad() {
     let store = crate::storage::SqliteGraphStore::open_in_memory().unwrap();
     let mut connection = store.connection.lock().unwrap();
+    // Match the deferred-index prerequisite enforced by public query admission.
+    use crate::storage::sqlite::code::schema;
+    assert!(schema::require_feature_flag_query_index(&connection).is_err());
+    schema::ensure_code_query_indexes(&connection).unwrap();
+    schema::require_feature_flag_query_index(&connection).unwrap();
     connection.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
     let mut records = Vec::new();
     for n in 0..1100 {
@@ -379,6 +384,11 @@ fn metadata_links_preserve_source_key_and_reference_with_missing_or_null_binding
 fn full_metadata_query_retains_bound_aliases_with_broad_disjoint_noise() {
     let store = crate::storage::SqliteGraphStore::open_in_memory().unwrap();
     let mut connection = store.connection.lock().unwrap();
+    // Match the deferred-index prerequisite enforced by public query admission.
+    use crate::storage::sqlite::code::schema;
+    assert!(schema::require_feature_flag_query_index(&connection).is_err());
+    schema::ensure_code_query_indexes(&connection).unwrap();
+    schema::require_feature_flag_query_index(&connection).unwrap();
     connection.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
     let mut records = Vec::new();
     for n in 0..1100 {

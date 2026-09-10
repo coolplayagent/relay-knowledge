@@ -100,6 +100,12 @@ fn scope_binding(
             });
         }
         let visible = scope.kind() != "class_definition" || current.start_byte() < before;
+        if visible
+            && current.kind() == "case_clause"
+            && super::pattern_bindings::binds(content, current, name, remaining)
+        {
+            binding = Binding::Local;
+        }
         let target = match current.kind() {
             // Class annotations record metadata without installing a value;
             // function annotations still declare a local for the whole body.
