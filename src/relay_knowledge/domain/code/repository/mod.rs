@@ -13,7 +13,7 @@ pub use indexed_records::{
     RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeReferenceRecord,
     RepositoryCodeSymbolRecord,
 };
-pub use java_namespace::{JavaImplicitPlatformRead, JavaNamespaceEvidence};
+pub use java_namespace::{JavaImplicitPlatformRead, JavaNamespaceEvidence, JavaSourceSet};
 pub use registration::{
     CodeIndexMode, CodeIndexRequest, CodeRepositoryRegistration, CodeRepositorySelector,
     RepositoryCodeRange,

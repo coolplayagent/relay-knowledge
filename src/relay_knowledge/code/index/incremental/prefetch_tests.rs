@@ -16,9 +16,12 @@ fn origin_plan_caps_all_files_before_prefetch_including_expanded_gitlinks() {
                 byte_count: bytes,
             })
             .collect::<Vec<_>>();
-        let changes = vec![GitChange::AddedOrModified {
-            path: "vendor".into(),
-        }];
+        let changes = entries
+            .iter()
+            .map(|entry| GitChange::AddedOrModified {
+                path: entry.path.clone(),
+            })
+            .collect::<Vec<_>>();
         let layout = discover_source_layout(&entries);
         let request = ChangedPathPrefetchRequest {
             reparse_python: true,
@@ -41,4 +44,38 @@ fn origin_plan_caps_all_files_before_prefetch_including_expanded_gitlinks() {
             assert!(error.to_string().contains("bounded file/byte budget"));
         }
     }
+}
+
+#[test]
+fn exact_origin_plan_does_not_charge_unmodified_gitlink_descendants() {
+    let source = crate::code::test_fixtures::TempSourceDir::create("origin-exact-work");
+    let registration = source.registration();
+    let selector = source.selector();
+    let mut entries = (0..512)
+        .map(|i| changes::GitTreeEntry {
+            path: format!("vendor/unchanged{i}.rs"),
+            byte_count: 16 * 1024 * 1024,
+        })
+        .collect::<Vec<_>>();
+    entries.extend(
+        ["typing.py", "vendor/app.py"].map(|path| changes::GitTreeEntry {
+            path: path.into(),
+            byte_count: 10,
+        }),
+    );
+    let layout = discover_source_layout(&entries);
+    let changes =
+        ["typing.py", "vendor/app.py"].map(|path| GitChange::AddedOrModified { path: path.into() });
+    let request = ChangedPathPrefetchRequest {
+        reparse_python: true,
+        registration: &registration,
+        selector: &selector,
+        root: &source.path,
+        commit: "no-source-read",
+        changes: &changes,
+        head_entries: &entries,
+        source_layout: &layout,
+        previous_source_layout: &layout,
+    };
+    assert!(validate_origin_plan(&request).is_ok());
 }

@@ -2,7 +2,7 @@
 
 mod business;
 mod code;
-pub use code::{JavaImplicitPlatformRead, JavaNamespaceEvidence};
+pub use code::{JavaImplicitPlatformRead, JavaNamespaceEvidence, JavaSourceSet};
 mod core;
 mod graph;
 mod knowledge;

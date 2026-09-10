@@ -268,6 +268,29 @@ const SEARCH_QUERY_INDEXES: &[SearchQueryIndexDescriptor] = &[
         required_table: Some("code_repository_java_types"),
         required_table_columns: &["source_scope", "package", "type_name", "path"],
     },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_java_source_type_lookup",
+        table: "code_repository_java_types",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_java_source_type_lookup ON code_repository_java_types(source_scope,package,type_name,source_set_kind,module_root,path)",
+        columns: &[
+            "source_scope",
+            "package",
+            "type_name",
+            "source_set_kind",
+            "module_root",
+            "path",
+        ],
+        mode: SearchQueryIndexMode::Required,
+        required_table: Some("code_repository_java_types"),
+        required_table_columns: &[
+            "source_scope",
+            "package",
+            "type_name",
+            "source_set_kind",
+            "module_root",
+            "path",
+        ],
+    },
 ];
 
 const _: [(); crate::domain::CODE_QUERY_INDEX_PLAN_UNIT_COUNT] = [(); SEARCH_QUERY_INDEXES.len()];
@@ -290,7 +313,7 @@ pub(in crate::storage::sqlite::code) fn require_canonical_call_query_indexes(
 pub(in crate::storage::sqlite::code) fn require_feature_flag_query_index(
     connection: &Connection,
 ) -> Result<(), StorageError> {
-    for descriptor in &SEARCH_QUERY_INDEXES[20..23] {
+    for descriptor in &SEARCH_QUERY_INDEXES[20..24] {
         require_persisted_query_index(connection, descriptor).map_err(|error| {
             StorageError::InvalidInput(format!("configuration query index is unavailable; run repo index with the current binary before querying feature flags: {error}"))
         })?;

@@ -141,3 +141,44 @@ fn push_candidate(candidates: &mut Vec<String>, candidate: String) {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+/// Classify the same conventional Java roots used by module-path resolution.
+/// Multiple markers have no unambiguous module boundary; plain layouts retain
+/// the repository-root static model rather than inventing compiler dependencies.
+pub(crate) fn java_source_set(path: &str) -> crate::domain::JavaSourceSet {
+    use crate::domain::JavaSourceSet;
+    if path.len() > 65_536 {
+        return JavaSourceSet::Unknown;
+    }
+    let path = normalize_layout_path(path);
+    let mut found = None;
+    for marker in LEADING_SOURCE_MARKERS
+        .iter()
+        .filter(|m| m.ends_with("/java/"))
+    {
+        if path.starts_with(marker) {
+            found = Some(("", marker.contains("/test/")));
+        }
+    }
+    for marker in NESTED_SOURCE_MARKERS
+        .iter()
+        .filter(|m| m.ends_with("/java/"))
+    {
+        for (position, _) in path.match_indices(marker) {
+            if found.is_some() {
+                return JavaSourceSet::Unknown;
+            }
+            found = Some((&path[..position], marker.contains("/test/")));
+        }
+    }
+    match found {
+        Some((module_root, _)) if module_root.len() > 4096 => JavaSourceSet::Unknown,
+        Some((module_root, true)) => JavaSourceSet::Test {
+            module_root: module_root.to_owned(),
+        },
+        Some((module_root, false)) => JavaSourceSet::Main {
+            module_root: module_root.to_owned(),
+        },
+        None => JavaSourceSet::Repository,
+    }
+}

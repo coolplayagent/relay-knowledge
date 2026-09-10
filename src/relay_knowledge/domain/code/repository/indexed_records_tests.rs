@@ -18,15 +18,19 @@ fn insertion_cost_counts_repeated_owner_strings_and_unknown_rows() {
         java_namespace: None,
     };
     let common = 5 + 8 + 128;
-    assert_eq!(file.namespace_projection_cost(), (1, common));
+    assert_eq!(file.namespace_projection_cost(), (1, common + 7));
     file.java_namespace = Some(JavaNamespaceEvidence {
+        source_set: crate::domain::JavaSourceSet::Repository,
         package: "demo".into(),
         top_level_types: vec!["One".into(), "Two".into()],
         complete: true,
     });
-    assert_eq!(file.namespace_projection_cost(), (3, 3 * (common + 4) + 6));
+    assert_eq!(
+        file.namespace_projection_cost(),
+        (3, 3 * (common + 4 + 10) + 6)
+    );
     file.java_namespace.as_mut().unwrap().complete = false;
-    assert_eq!(file.namespace_projection_cost(), (1, common));
+    assert_eq!(file.namespace_projection_cost(), (1, common + 10));
     file.language_id = "rust".into();
     assert_eq!(file.namespace_projection_cost(), (0, 0));
 }

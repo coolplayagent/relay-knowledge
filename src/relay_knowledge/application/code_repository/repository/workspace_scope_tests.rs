@@ -1,6 +1,6 @@
 //! Config-aware source-scope fast-path and preview regressions.
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     api::CodeRepositoryRegisterRequest,
@@ -69,7 +69,8 @@ async fn equivalent_enabled_workspace_config_reuses_the_exact_published_scope() 
         .await
         .expect("workspace edges should load");
 
-    let observed_root = repo.path.canonicalize().expect("root should canonicalize");
+    // Match the registered Git spelling; Windows canonicalization adds a verbatim prefix.
+    let observed_root = PathBuf::from(repo.git_text(["rev-parse", "--show-toplevel"]));
     reset_tracked_entries_call_count_for_root(observed_root.clone());
     let equivalent = CodeIndexRequest {
         workspace_detection: CodeWorkspaceDetectionConfig {

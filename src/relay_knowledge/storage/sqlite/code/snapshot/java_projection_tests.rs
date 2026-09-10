@@ -15,18 +15,18 @@ fn copy_cost_charges_missing_legacy_projection_and_materialized_rows() {
             })
             .unwrap()
     };
-    assert_eq!(cost(), (1, 141));
+    assert_eq!(cost(), (1, 148));
     connection
         .execute("DELETE FROM code_repository_java_namespaces", [])
         .unwrap();
-    assert_eq!(cost(), (1, 141));
+    assert_eq!(cost(), (1, 148));
     connection
         .execute(
             "UPDATE code_repository_files SET java_namespace_json=?1",
-            [r#"{"package":"demo","top_level_types":["One","Two"],"complete":true}"#],
+            [r#"{"package":"demo","top_level_types":["One","Two"],"complete":true,"source_set":{"kind":"repository"}}"#],
         )
         .unwrap();
-    assert_eq!(cost(), (3, 3 * 145 + 6));
+    assert_eq!(cost(), (3, 3 * 155 + 6));
     connection
         .execute("UPDATE code_repository_files SET language_id='rust'", [])
         .unwrap();

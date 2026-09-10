@@ -30,7 +30,7 @@ pub(super) fn admission(
     let complete = authorized
         && connection.query_row(
             "SELECT NOT EXISTS(SELECT 1 FROM code_repository_java_namespaces
-             WHERE source_scope=?1 AND complete=0)
+             WHERE source_scope=?1 AND source_set_kind='unknown')
          AND NOT EXISTS(SELECT 1 FROM code_repository_files file
              WHERE file.source_scope=?1 AND file.language_id='java'
              AND NOT EXISTS(SELECT 1 FROM code_repository_java_namespaces namespace
@@ -47,10 +47,18 @@ pub(super) fn admission(
         EXISTS(SELECT 1 FROM code_repository_java_namespaces namespace
             WHERE namespace.source_scope=flag.source_scope AND namespace.path=flag.path
               AND namespace.complete=1
+        AND NOT EXISTS(SELECT 1 FROM code_repository_java_namespaces uncertain
+            WHERE uncertain.source_scope=flag.source_scope AND uncertain.complete=0
+              AND (namespace.source_set_kind='repository' OR uncertain.source_set_kind='repository'
+                   OR (uncertain.module_root=namespace.module_root
+                       AND (uncertain.source_set_kind='main' OR namespace.source_set_kind='test'))))
         AND NOT EXISTS(SELECT 1 FROM code_repository_java_types provider
             WHERE provider.source_scope=flag.source_scope
               AND provider.package=namespace.package
-              AND provider.type_name=json_extract(flag.metadata_json,'$.java_implicit_platform.type_name')))))".to_owned())
+              AND provider.type_name=json_extract(flag.metadata_json,'$.java_implicit_platform.type_name')
+              AND (namespace.source_set_kind='repository' OR provider.source_set_kind='repository'
+                   OR (provider.module_root=namespace.module_root
+                       AND (provider.source_set_kind='main' OR namespace.source_set_kind='test')))))))".to_owned())
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ fn legacy_metadata_and_file_records_do_not_invent_java_namespace_proof() {
 #[test]
 fn explicit_namespace_and_read_proofs_round_trip_without_losing_completeness() {
     let evidence = JavaNamespaceEvidence {
+        source_set: crate::domain::JavaSourceSet::Repository,
         package: "p".to_owned(),
         top_level_types: vec!["System".to_owned()],
         complete: false,
@@ -42,7 +43,8 @@ fn explicit_namespace_and_read_proofs_round_trip_without_losing_completeness() {
 #[test]
 fn projection_name_bytes_accept_exact_limit_and_reject_one_extra_byte() {
     let mut evidence = JavaNamespaceEvidence {
-        package: "p".repeat(32_767),
+        source_set: crate::domain::JavaSourceSet::Repository,
+        package: "p".repeat(32_757),
         top_level_types: vec!["AB".to_owned()],
         complete: true,
     };
@@ -51,4 +53,19 @@ fn projection_name_bytes_accept_exact_limit_and_reject_one_extra_byte() {
     assert_eq!(evidence.projected_name_bytes(), None);
     evidence.complete = false;
     assert_eq!(evidence.projected_name_bytes(), Some(32_767));
+}
+
+#[test]
+fn legacy_namespace_cannot_infer_a_source_set_and_module_bytes_are_charged_per_type() {
+    let legacy: JavaNamespaceEvidence =
+        serde_json::from_str(r#"{"package":"p","top_level_types":["App"],"complete":true}"#)
+            .unwrap();
+    assert_eq!(legacy.source_set, crate::domain::JavaSourceSet::Unknown);
+    let mut current = legacy;
+    current.source_set = crate::domain::JavaSourceSet::Main {
+        module_root: "m".repeat(32_765),
+    };
+    assert_eq!(current.projected_name_bytes(), None);
+    current.source_set = crate::domain::JavaSourceSet::Repository;
+    assert_eq!(current.projected_name_bytes(), Some(25));
 }

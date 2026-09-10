@@ -27,11 +27,25 @@ pub(super) fn code_schema_capability_markers_are_current(
         ("code_repository_files", &["java_namespace_json"][..]),
         (
             "code_repository_java_namespaces",
-            &["source_scope", "path", "package", "complete"][..],
+            &[
+                "source_scope",
+                "path",
+                "package",
+                "complete",
+                "source_set_kind",
+                "module_root",
+            ][..],
         ),
         (
             "code_repository_java_types",
-            &["source_scope", "path", "package", "type_name"][..],
+            &[
+                "source_scope",
+                "path",
+                "package",
+                "type_name",
+                "source_set_kind",
+                "module_root",
+            ][..],
         ),
     ] {
         if !table_has_columns(connection, table, columns)? {

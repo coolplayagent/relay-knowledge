@@ -228,8 +228,8 @@ fn feature_flag_key_index_upgrade_changes_scope_for_the_same_tree() {
 #[test]
 fn python_overload_upgrade_invalidates_the_previous_completed_scope() {
     let previous = CODE_SNAPSHOT_FACT_VERSION.replace(
-        "python-overload-declarations-v13",
-        "python-overload-declarations-v12",
+        "python-overload-declarations-v15",
+        "python-overload-declarations-v14",
     );
     assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
     let mut input = Vec::new();
@@ -254,7 +254,7 @@ fn python_overload_upgrade_invalidates_the_previous_completed_scope() {
 
 #[test]
 fn configuration_semantic_upgrade_invalidates_the_previous_completed_scope() {
-    let previous = CODE_SNAPSHOT_FACT_VERSION.replace("config-registry-v5", "config-registry-v4");
+    let previous = CODE_SNAPSHOT_FACT_VERSION.replace("config-registry-v6", "config-registry-v5");
     assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
     let mut input = Vec::new();
     for value in ["git_snapshot", "repo-upgrade", "tree-unchanged"] {

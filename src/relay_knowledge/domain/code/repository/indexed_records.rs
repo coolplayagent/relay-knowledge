@@ -40,10 +40,21 @@ impl RepositoryCodeFileRecord {
             .as_ref()
             .filter(|namespace| namespace.complete)
         else {
-            return (1, common);
+            return (
+                1,
+                common.saturating_add(
+                    self.java_namespace
+                        .as_ref()
+                        .map_or(7, |evidence| evidence.source_set.projected_bytes().max(7)),
+                ),
+            );
         };
         let bytes = namespace.top_level_types.iter().fold(
-            rows.saturating_mul(common.saturating_add(namespace.package.len())),
+            rows.saturating_mul(
+                common
+                    .saturating_add(namespace.package.len())
+                    .saturating_add(namespace.source_set.projected_bytes()),
+            ),
             |bytes, name| bytes.saturating_add(name.len()),
         );
         (rows, bytes)

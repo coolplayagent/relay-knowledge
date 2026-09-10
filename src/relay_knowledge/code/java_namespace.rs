@@ -12,6 +12,7 @@ pub(super) struct JavaFileNamespace {
 pub(super) fn collect(root: Node<'_>, source: &str) -> JavaFileNamespace {
     let mut result = JavaFileNamespace {
         evidence: JavaNamespaceEvidence {
+            source_set: Default::default(),
             package: String::new(),
             top_level_types: Vec::new(),
             complete: !root.has_error(),
@@ -34,8 +35,7 @@ pub(super) fn collect(root: Node<'_>, source: &str) -> JavaFileNamespace {
                     result.evidence.complete = false;
                 }
                 package_seen = true;
-                let name = declaration_name(child, &mut remaining).and_then(|(name, _)| name);
-                match name.and_then(|node| spelling(node, source, &mut remaining, &mut bytes)) {
+                match declared_name(child, source, &mut remaining, &mut bytes) {
                     Some(name) => result.evidence.package = name,
                     None => result.evidence.complete = false,
                 }
@@ -90,6 +90,17 @@ pub(super) fn collect(root: Node<'_>, source: &str) -> JavaFileNamespace {
         result.evidence.top_level_types.clear();
     }
     result
+}
+
+/// Resolve a declaration's qualified identifier using the caller's shared work budget.
+pub(in crate::code) fn declared_name(
+    declaration: Node<'_>,
+    source: &str,
+    nodes: &mut usize,
+    bytes: &mut usize,
+) -> Option<String> {
+    let (name, _) = declaration_name(declaration, nodes)?;
+    spelling(name?, source, nodes, bytes)
 }
 
 fn spelling(node: Node<'_>, source: &str, nodes: &mut usize, bytes: &mut usize) -> Option<String> {

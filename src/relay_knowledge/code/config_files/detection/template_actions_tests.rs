@@ -94,3 +94,23 @@ fn numeric_syntax_errors_are_not_promoted_to_valid_go_actions() {
     assert!(!balanced("{{ key \"flag\" }}{{ 123abc }}"));
     assert!(balanced("{{ key \"flag\" }}{{ 123 }}{{ .Values.enabled }}"));
 }
+
+#[test]
+fn range_allows_two_declaration_names_but_other_pipeline_heads_do_not() {
+    for source in [
+        "{{ range $i, $value := .Items }}{{ key \"range_key\" }}{{ end }}",
+        "{{ range $value := .Items }}{{ key \"one_key\" }}{{ end }}",
+    ] {
+        assert!(balanced(source), "{source}");
+    }
+    for source in [
+        "{{ if $i, $value := .Items }}x{{ end }}",
+        "{{ with $i, $value := .Items }}x{{ end }}",
+        "{{ range $i, $value, $third := .Items }}x{{ end }}",
+        "{{ range $i, value := .Items }}x{{ end }}",
+        "{{ range $i, $value := }}x{{ end }}",
+        "{{ $missing }}",
+    ] {
+        assert!(!balanced(source), "{source}");
+    }
+}

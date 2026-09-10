@@ -8,6 +8,7 @@ pub(in crate::code) enum Kind<'a> {
     Pipe,
     Assign,
     Declare,
+    Comma,
     Comment,
     Other,
 }
@@ -86,7 +87,8 @@ pub(in crate::code) fn tokens(action: &str) -> Vec<Token<'_>> {
                 offset += 1;
                 Kind::Declare
             }
-            b',' | b'-' => Kind::Other,
+            b',' => Kind::Comma,
+            b'-' => Kind::Other,
             b'"' | b'`' | b'\'' => {
                 while offset < bytes.len() {
                     let next = bytes[offset];
@@ -216,28 +218,50 @@ fn valid_action(tokens: &[Token<'_>], blocks: &mut Vec<(String, bool)>) -> bool 
             _ => {}
         }
     }
-    // A declaration binds its name without evaluating that token. Recognize
-    // only a single pipeline declaration head; variable uses still require
-    // lexical-scope evidence that this conservative recovery does not provide.
-    if let [
-        Token {
-            kind: Kind::Word(name),
-            ..
-        },
-        Token {
-            kind: Kind::Declare,
-            ..
-        },
-        ..,
-    ] = &tokens[expression_start..]
-    {
-        if !name
-            .strip_prefix('$')
-            .is_some_and(|name| name.chars().all(|ch| ch == '_' || ch.is_alphanumeric()))
-        {
-            return false;
+    // Declaration heads bind names without evaluating those tokens. Go range
+    // permits two names; other pipelines permit one. Variable uses still need
+    // lexical-scope evidence beyond this conservative recovery proof.
+    match &tokens[expression_start..] {
+        [
+            Token {
+                kind: Kind::Word(first),
+                ..
+            },
+            Token {
+                kind: Kind::Comma, ..
+            },
+            Token {
+                kind: Kind::Word(second),
+                ..
+            },
+            Token {
+                kind: Kind::Declare,
+                ..
+            },
+            ..,
+        ] if expression_start == 1 && matches!(tokens[0].kind, Kind::Word("range")) => {
+            if !declaration_name(first) || !declaration_name(second) {
+                return false;
+            }
+            expression_start += 4;
         }
-        expression_start += 2;
+        [
+            Token {
+                kind: Kind::Word(name),
+                ..
+            },
+            Token {
+                kind: Kind::Declare,
+                ..
+            },
+            ..,
+        ] => {
+            if !declaration_name(name) {
+                return false;
+            }
+            expression_start += 2;
+        }
+        _ => {}
     }
     let mut parentheses = 0usize;
     let mut need_operand = true;
@@ -290,11 +314,16 @@ fn valid_action(tokens: &[Token<'_>], blocks: &mut Vec<(String, bool)>) -> bool 
                 }
                 need_operand = false;
             }
-            Kind::Other | Kind::Declare => return false,
+            Kind::Other | Kind::Declare | Kind::Comma => return false,
             Kind::Comment => return false,
         }
     }
     parentheses == 0 && !need_operand
+}
+
+fn declaration_name(name: &str) -> bool {
+    name.strip_prefix('$')
+        .is_some_and(|name| name.chars().all(|ch| ch == '_' || ch.is_alphanumeric()))
 }
 
 #[cfg(test)]

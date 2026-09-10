@@ -56,3 +56,37 @@ fn c_family_candidates_expose_include_roots() {
             .contains(&"session_client.hpp".to_owned())
     );
 }
+
+#[test]
+fn java_source_sets_preserve_repository_layout_and_isolate_conventional_modules() {
+    use crate::domain::JavaSourceSet;
+    for path in ["App.java", "src/p/Odd.java", "not-src/main/java/App.java"] {
+        assert_eq!(super::java_source_set(path), JavaSourceSet::Repository);
+    }
+    assert_eq!(
+        super::java_source_set("src/main/java/p/App.java"),
+        JavaSourceSet::Main {
+            module_root: String::new()
+        }
+    );
+    assert_eq!(
+        super::java_source_set("./module-a/src/test/java/p/Test.java"),
+        JavaSourceSet::Test {
+            module_root: "module-a".into()
+        }
+    );
+    assert_eq!(
+        super::java_source_set("module-b/src/main/java/p/App.java"),
+        JavaSourceSet::Main {
+            module_root: "module-b".into()
+        }
+    );
+    assert_eq!(
+        super::java_source_set("src/main/java/nested/src/test/java/App.java"),
+        JavaSourceSet::Unknown
+    );
+    assert_eq!(
+        super::java_source_set(&"x".repeat(65_537)),
+        JavaSourceSet::Unknown
+    );
+}

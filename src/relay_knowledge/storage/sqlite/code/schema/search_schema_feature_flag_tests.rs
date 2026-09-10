@@ -7,7 +7,7 @@ fn populated_feature_key_index_is_deferred_until_its_durable_unit() {
     ensure_search_query_indexes(&connection).unwrap();
     connection
         .execute_batch(
-            "PRAGMA foreign_keys=OFF; DROP INDEX code_repository_feature_flags_source_key; DROP INDEX code_repository_java_namespace_completeness_lookup; DROP INDEX code_repository_java_type_lookup;",
+            "PRAGMA foreign_keys=OFF; DROP INDEX code_repository_feature_flags_source_key; DROP INDEX code_repository_java_namespace_completeness_lookup; DROP INDEX code_repository_java_type_lookup; DROP INDEX code_repository_java_source_type_lookup;",
         )
         .unwrap();
     let tx = connection.transaction().unwrap();
@@ -39,18 +39,18 @@ fn populated_feature_key_index_is_deferred_until_its_durable_unit() {
             plan_complete: false
         }
     );
-    for unit in [21, 22] {
+    for unit in [21, 22, 23] {
         assert_eq!(
             advance_search_query_indexes(&connection, Some(unit - 1), false).unwrap(),
             SearchQueryIndexAdvance::Created {
                 completed_unit: unit,
-                plan_complete: unit == 22
+                plan_complete: unit == 23
             }
         );
     }
     require_feature_flag_query_index(&connection).unwrap();
     assert_eq!(
-        advance_search_query_indexes(&connection, Some(22), false).unwrap(),
+        advance_search_query_indexes(&connection, Some(23), false).unwrap(),
         SearchQueryIndexAdvance::Complete
     );
     connection.execute_batch("DROP INDEX code_repository_feature_flags_source_key; CREATE INDEX code_repository_feature_flags_source_key ON code_repository_feature_flags(source_scope,source_key)").unwrap();

@@ -33,13 +33,22 @@ pub(super) fn expression_rebinds_with_budget(
             "as_pattern" => current.child_by_field_name("alias"),
             "delete_statement" => current.named_child(0),
             "augmented_assignment" => current.child_by_field_name("left"),
-            "named_expression" => current.child_by_field_name("name"),
+            "named_expression" | "function_definition" | "class_definition" => {
+                current.child_by_field_name("name")
+            }
             _ => None,
         };
         let class_scope = lexical_scope(current, remaining)
             .filter(|scope| scope.kind() == "class_definition" && Some(*scope) != origin_scope);
-        let foreign_class =
-            class_scope.is_some_and(|scope| !class_global(content, scope, name, remaining));
+        let foreign_class = class_scope.is_some_and(|scope| {
+            !super::mutation_scopes::redirects_to_origin(
+                content,
+                scope,
+                origin_scope,
+                name,
+                remaining,
+            )
+        });
         if target.is_some_and(|target| {
             if foreign_class {
                 return module && member_target(content, target, name, remaining);
@@ -48,9 +57,9 @@ pub(super) fn expression_rebinds_with_budget(
         }) {
             return true;
         }
-        if current.kind() == "class_definition"
-            && (module || class_global(content, current, name, remaining))
-        {
+        // Class bodies execute immediately, including nested classes. Their
+        // local names stay isolated unless a directive redirects the binding.
+        if current.kind() == "class_definition" {
             if let Some(body) = current.child_by_field_name("body") {
                 stack.push(body);
             }
@@ -255,39 +264,6 @@ pub(super) fn unknown_eager_call(
         }
         if !super::expressions::eager_children(node, &mut stack, remaining, deferred) {
             return true;
-        }
-    }
-    false
-}
-
-fn class_global(content: &str, node: Node<'_>, name: &str, remaining: &mut usize) -> bool {
-    let Some(body) = node.child_by_field_name("body") else {
-        return false;
-    };
-    let mut stack = vec![body];
-    while let Some(current) = stack.pop() {
-        let Some(left) = remaining.checked_sub(1) else {
-            return true;
-        };
-        *remaining = left;
-        if current.kind() == "global_statement"
-            && assignment_binds(content, current, name, false, remaining)
-        {
-            return true;
-        }
-        if matches!(
-            current.kind(),
-            "function_definition" | "class_definition" | "decorated_definition" | "lambda"
-        ) {
-            continue;
-        }
-        let mut cursor = current.walk();
-        for child in current.named_children(&mut cursor) {
-            let Some(left) = remaining.checked_sub(1) else {
-                return true;
-            };
-            *remaining = left;
-            stack.push(child);
         }
     }
     false

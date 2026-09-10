@@ -134,30 +134,36 @@ pub(super) fn build_incremental_snapshot(
                 GitChange::Deleted { .. } => None,
             })
             .collect::<BTreeSet<_>>();
+        let mut forced_files = 0usize;
         for entry in &head_entries {
             if crate::code::language_metadata::language_id(&entry.path) == Some("python")
                 && path_is_selected_with_layout(&entry.path, registration, selector, &source_layout)
             {
+                forced_files += 1;
+                validate_changed_path_budget(forced_files)?;
                 if scheduled.insert(entry.path.clone()) {
                     changes.push(GitChange::AddedOrModified {
                         path: entry.path.clone(),
                     });
                 }
-                validate_changed_path_budget(changes.len())?;
             }
         }
     }
-    let prefetched_bytes = prefetch_changed_path_bytes(ChangedPathPrefetchRequest {
-        reparse_python,
-        registration,
-        selector,
-        root,
-        commit: &commit,
-        changes: &changes,
-        head_entries: &head_entries,
-        source_layout: &source_layout,
-        previous_source_layout: &previous_source_layout,
-    })?;
+    let prefetched_bytes = if reparse_python {
+        BTreeMap::new()
+    } else {
+        prefetch_changed_path_bytes(ChangedPathPrefetchRequest {
+            reparse_python,
+            registration,
+            selector,
+            root,
+            commit: &commit,
+            changes: &changes,
+            head_entries: &head_entries,
+            source_layout: &source_layout,
+            previous_source_layout: &previous_source_layout,
+        })?
+    };
     let mut build = SnapshotBuild::new_with_scope_filters(
         registration,
         commit,
@@ -182,6 +188,8 @@ pub(super) fn build_incremental_snapshot(
 
     let parse_context = ChangedPathParseContext {
         reparse_python,
+        origin_plan: std::cell::RefCell::new(reparse_python.then(BTreeSet::new)),
+        visited_origin_paths: Default::default(),
         origin_budget: std::cell::RefCell::new(
             super::origin_reparse_budget::OriginReparseBudget::default(),
         ),
@@ -289,6 +297,35 @@ pub(super) fn build_incremental_snapshot(
         }
     }
 
+    let origin_paths = parse_context.origin_plan.borrow_mut().take();
+    if let Some(paths) = origin_paths {
+        // The existing Gitlink expansion above is the sole planner: containers and
+        // unaffected descendants never enter this exact, authorized file set.
+        let planned_changes = paths
+            .iter()
+            .cloned()
+            .map(|path| GitChange::AddedOrModified { path })
+            .collect::<Vec<_>>();
+        let origin_bytes = prefetch_changed_path_bytes(ChangedPathPrefetchRequest {
+            reparse_python: true,
+            registration,
+            selector,
+            root,
+            commit: &build.commit,
+            changes: &planned_changes,
+            head_entries: &head_entries,
+            source_layout: &source_layout,
+            previous_source_layout: &previous_source_layout,
+        })?;
+        let execution = ChangedPathParseContext {
+            prefetched_bytes: &origin_bytes,
+            origin_budget: Default::default(),
+            ..parse_context
+        };
+        for path in paths {
+            parse_changed_path(&mut build, &execution, &path)?;
+        }
+    }
     Ok(build.finish())
 }
 
@@ -494,6 +531,8 @@ fn delete_previous_paths_under_except(
 
 struct ChangedPathParseContext<'a> {
     reparse_python: bool,
+    origin_plan: std::cell::RefCell<Option<BTreeSet<String>>>,
+    visited_origin_paths: std::cell::RefCell<BTreeSet<String>>,
     origin_budget: std::cell::RefCell<super::origin_reparse_budget::OriginReparseBudget>,
     registration: &'a CodeRepositoryRegistration,
     selector: &'a CodeRepositorySelector,
@@ -522,6 +561,21 @@ fn parse_changed_path(
         context.selector,
         context.previous_source_layout,
     ) {
+        return Ok(());
+    }
+    if let Some(paths) = context.origin_plan.borrow_mut().as_mut() {
+        if paths.insert(path.to_owned()) {
+            // Bound the queue before reading any blobs, independently of raw changes.
+            context.origin_budget.borrow_mut().charge(0)?;
+        }
+        return Ok(());
+    }
+    if context.reparse_python
+        && !context
+            .visited_origin_paths
+            .borrow_mut()
+            .insert(path.to_owned())
+    {
         return Ok(());
     }
     let bytes = match context.prefetched_bytes.get(path) {
@@ -568,3 +622,7 @@ mod budget_tests {
         assert!(error.to_string().contains("run a full code index"));
     }
 }
+
+#[cfg(test)]
+#[path = "origin_duplicates_tests.rs"]
+mod origin_duplicates_tests;

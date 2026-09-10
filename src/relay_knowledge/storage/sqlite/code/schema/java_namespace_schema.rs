@@ -9,16 +9,27 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), StorageError> {
         "java_namespace_json",
         "TEXT",
     )?;
+    let source_set_upgrade = !super::migrations::table_has_columns(
+        connection,
+        "code_repository_java_namespaces",
+        &["source_set_kind", "module_root"],
+    )? || !super::migrations::table_has_columns(
+        connection,
+        "code_repository_java_types",
+        &["source_set_kind", "module_root"],
+    )?;
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS code_repository_java_namespaces (
             source_scope TEXT NOT NULL, path TEXT NOT NULL,
             package TEXT NOT NULL, complete INTEGER NOT NULL,
+            source_set_kind TEXT NOT NULL DEFAULT 'unknown', module_root TEXT NOT NULL DEFAULT '',
             PRIMARY KEY(source_scope, path),
             FOREIGN KEY(source_scope,path) REFERENCES code_repository_files(source_scope,path) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS code_repository_java_types (
             source_scope TEXT NOT NULL, path TEXT NOT NULL,
             package TEXT NOT NULL, type_name TEXT NOT NULL,
+            source_set_kind TEXT NOT NULL DEFAULT 'unknown', module_root TEXT NOT NULL DEFAULT '',
             PRIMARY KEY(source_scope,path,type_name),
             FOREIGN KEY(source_scope,path) REFERENCES code_repository_files(source_scope,path) ON DELETE CASCADE
         );
@@ -28,6 +39,26 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), StorageError> {
             DELETE FROM code_repository_java_namespaces WHERE source_scope=OLD.source_scope AND path=OLD.path;
         END;",
     )?;
+    for table in [
+        "code_repository_java_namespaces",
+        "code_repository_java_types",
+    ] {
+        super::super::super::schema::columns::ensure_column(
+            connection,
+            table,
+            "source_set_kind",
+            "TEXT NOT NULL DEFAULT 'unknown'",
+        )?;
+        super::super::super::schema::columns::ensure_column(
+            connection,
+            table,
+            "module_root",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+    }
+    if source_set_upgrade {
+        connection.execute_batch("DROP TRIGGER IF EXISTS code_repository_java_namespace_insert; DROP TRIGGER IF EXISTS code_repository_java_namespace_update;")?;
+    }
     // Coarse legacy owners are not reinterpreted as complete file evidence.
     if !super::migrations::table_has_columns(
         connection,
@@ -39,8 +70,15 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), StorageError> {
     // The payload and list bounds are enforced even for imported legacy facts.
     // Invalid/absent evidence creates an Unknown row rather than proving absence.
     let evidence = "CASE WHEN length(NEW.java_namespace_json)<=65536 AND json_valid(NEW.java_namespace_json) THEN NEW.java_namespace_json ELSE '{}' END";
+    let source_known = format!(
+        "json_extract({evidence},'$.source_set.kind') IN ('repository','main','test')
+        AND (json_extract({evidence},'$.source_set.kind')='repository' OR
+            (json_type({evidence},'$.source_set.module_root')='text'
+             AND length(CAST(json_extract({evidence},'$.source_set.module_root') AS BLOB))<=4096))"
+    );
     let complete = format!(
         "NEW.parse_status='parsed' AND json_extract({evidence},'$.complete')=1
+         AND {source_known}
          AND json_type({evidence},'$.package')='text'
          AND length(json_extract({evidence},'$.package'))<=4096
          AND json_type({evidence},'$.top_level_types')='array'
@@ -49,7 +87,9 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), StorageError> {
              WHERE type<>'text' OR length(value)>1024 OR length(value)=0)
          AND (1+json_array_length({evidence},'$.top_level_types')) *
              (length(CAST(NEW.source_scope AS BLOB))+length(CAST(NEW.path AS BLOB))
-              +length(CAST(json_extract({evidence},'$.package') AS BLOB))+128)
+              +length(CAST(json_extract({evidence},'$.package') AS BLOB))
+              +length(CAST(json_extract({evidence},'$.source_set.kind') AS BLOB))
+              +length(CAST(COALESCE(json_extract({evidence},'$.source_set.module_root'),'') AS BLOB))+128)
              +COALESCE((SELECT sum(length(CAST(value AS BLOB))) FROM json_each({evidence},'$.top_level_types')),0)<=65536"
     );
     for (name, event) in [
@@ -71,11 +111,13 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), StorageError> {
              {old_owner}
              DELETE FROM code_repository_java_types WHERE source_scope=NEW.source_scope AND path=NEW.path;
              DELETE FROM code_repository_java_namespaces WHERE source_scope=NEW.source_scope AND path=NEW.path;
-             INSERT INTO code_repository_java_namespaces(source_scope,path,package,complete)
+             INSERT INTO code_repository_java_namespaces(source_scope,path,package,complete,source_set_kind,module_root)
              SELECT NEW.source_scope,NEW.path,CASE WHEN {complete} THEN json_extract({evidence},'$.package') ELSE '' END,
-                    CASE WHEN {complete} THEN 1 ELSE 0 END WHERE NEW.language_id='java';
-             INSERT OR IGNORE INTO code_repository_java_types(source_scope,path,package,type_name)
-             SELECT NEW.source_scope,NEW.path,namespace.package,types.value
+                    CASE WHEN {complete} THEN 1 ELSE 0 END,
+                    CASE WHEN {source_known} THEN json_extract({evidence},'$.source_set.kind') ELSE 'unknown' END,
+                    CASE WHEN {source_known} AND json_extract({evidence},'$.source_set.kind')<>'repository' THEN json_extract({evidence},'$.source_set.module_root') ELSE '' END WHERE NEW.language_id='java';
+             INSERT OR IGNORE INTO code_repository_java_types(source_scope,path,package,type_name,source_set_kind,module_root)
+             SELECT NEW.source_scope,NEW.path,namespace.package,types.value,namespace.source_set_kind,namespace.module_root
              FROM code_repository_java_namespaces namespace
              CROSS JOIN json_each({evidence},'$.top_level_types') types
              WHERE namespace.source_scope=NEW.source_scope AND namespace.path=NEW.path AND namespace.complete=1;

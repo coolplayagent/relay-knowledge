@@ -18,15 +18,19 @@ pub(super) fn qualify(node: Node<'_>, name: &str, content: &str) -> String {
     let lexical_name =
         visible.map(|owner| suffix.map_or(owner.clone(), |suffix| format!("{owner}.{suffix}")));
     let root = root(node);
-    let mut package = "";
+    let mut package = String::new();
+    let mut namespace_nodes = 1024usize;
+    let mut namespace_bytes = crate::domain::JavaNamespaceEvidence::MAX_PROJECTED_NAME_BYTES;
     let mut cursor = root.walk();
     for child in root.named_children(&mut cursor) {
         if child.kind() == "package_declaration" {
-            package = text(child, content)
-                .trim_start_matches("package")
-                .trim()
-                .trim_end_matches(';')
-                .trim();
+            package = crate::code::java_namespace::declared_name(
+                child,
+                content,
+                &mut namespace_nodes,
+                &mut namespace_bytes,
+            )
+            .unwrap_or_default();
         }
         if lexical_name.is_none() && child.kind() == "import_declaration" {
             let import = text(child, content)

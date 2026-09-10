@@ -76,3 +76,27 @@ fn declared_go_variables_recover_without_accepting_unbound_uses() {
         assert_recovery_status(&format!("{COMPLEX_TEMPLATE}{action}"), status);
     }
 }
+
+#[test]
+fn two_variable_range_recovers_without_accepting_invalid_declaration_heads() {
+    for (action, status) in [
+        (
+            "{{ range $i, $value := .Items }}{{ key \"range_key\" }}{{ end }}",
+            CodeParseStatus::Parsed,
+        ),
+        (
+            "{{ range $value := .Items }}{{ key \"one_key\" }}{{ end }}",
+            CodeParseStatus::Parsed,
+        ),
+        (
+            "{{ if $i, $value := .Items }}x{{ end }}",
+            CodeParseStatus::Partial,
+        ),
+        (
+            "{{ range $i, $value, $third := .Items }}x{{ end }}",
+            CodeParseStatus::Partial,
+        ),
+    ] {
+        assert_recovery_status(&format!("{COMPLEX_TEMPLATE}{action}"), status);
+    }
+}

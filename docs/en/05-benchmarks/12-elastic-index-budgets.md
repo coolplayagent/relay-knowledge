@@ -260,3 +260,5 @@ jq --arg repository "$repository" -e '
 ---
 
 Navigation: [Benchmark and Evaluation Records](README.md) | Previous: [11. Coding-Agent E2E Evaluation Gate](11-coding-agent-e2e-evaluation.md)
+
+The existing `feature_flag_query_work_budget` fast/performance test filter also covers 1,100 metadata-only seed distractors. The case requires the real text match to remain reachable within the unchanged candidate and SQL budgets, while decoded binding/reference fields retain Unicode and literal underscore matching. This is a query-admission regression gate, not a wall-time improvement claim.

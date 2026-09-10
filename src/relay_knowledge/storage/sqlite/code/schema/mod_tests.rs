@@ -757,7 +757,7 @@ fn schema_open_does_not_backfill_legacy_edge_languages() {
             INSERT INTO code_repositories
             VALUES ('repo', 'fixture', '/tmp/repo', '[]', '[]', NULL, NULL, NULL, 'fresh',
                     0, 0, 0, 0, 0, NULL);
-            INSERT INTO code_repository_files
+            INSERT INTO code_repository_files(repository_id,source_scope,file_id,path,language_id,blob_hash,byte_len,line_count,parse_status,is_generated,degraded_reason)
             VALUES ('repo', 'scope', 'import-file', 'src/lib.rs', 'rust', 'hash',
                     20, 1, 'parsed', 0, NULL);
             INSERT INTO code_repository_search (

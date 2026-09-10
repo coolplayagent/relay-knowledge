@@ -5,7 +5,7 @@ fn file_clone_page_accounts_for_triggered_namespace_rows_and_bytes() {
     let store = crate::storage::SqliteGraphStore::open_in_memory().unwrap();
     let mut connection = store.connection.lock().unwrap();
     connection.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
-    let payload=serde_json::json!({"package":"demo", "complete":true, "top_level_types":(0..10).map(|i|format!("Type{i}")).collect::<Vec<_>>()}).to_string();
+    let payload=serde_json::json!({"package":"demo", "complete":true,"source_set":{"kind":"repository"}, "top_level_types":(0..10).map(|i|format!("Type{i}")).collect::<Vec<_>>()}).to_string();
     for path in ["a.java", "b.java"] {
         connection.execute("INSERT INTO code_repository_files(repository_id,source_scope,file_id,path,language_id,blob_hash,byte_len,line_count,parse_status,java_namespace_json) VALUES('repo','base',?1,?1,'java','blob',1,1,'parsed',?2)",rusqlite::params![path,payload]).unwrap();
     }

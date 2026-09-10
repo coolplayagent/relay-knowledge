@@ -390,7 +390,7 @@ fn excerpt_for_range(content: &str, range: ConfigRange) -> String {
 
 fn feature_flag_name(source_key: &str) -> String {
     let normalized = source_key
-        .trim_matches(|character: char| !character.is_ascii_alphanumeric())
+        .trim_matches(|character: char| !character.is_alphanumeric())
         .replace(['-', '.', ':'], "_")
         .to_ascii_lowercase();
     if normalized.is_empty() {

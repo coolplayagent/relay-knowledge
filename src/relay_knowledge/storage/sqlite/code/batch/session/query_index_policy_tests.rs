@@ -72,7 +72,7 @@ async fn restart_leaves_populated_missing_owner_to_durable_finalization() {
     assert!(matches!(
         advance,
         super::finalization::CodeIndexFinalizationAdvance::Pending { checkpoint_state }
-            if checkpoint_state == "finalizing:build_query_indexes:v6:0"
+            if checkpoint_state == "finalizing:build_query_indexes:v7:0"
     ));
     assert!(query_index_exists(&store, "code_repository_search_metadata_scope_path").await);
 }

@@ -12,6 +12,7 @@ mod expressions;
 use bindings::{contains_identifier, statement_binding};
 mod aliases;
 mod class_creation;
+mod mutation_scopes;
 mod mutations;
 
 struct Proof {

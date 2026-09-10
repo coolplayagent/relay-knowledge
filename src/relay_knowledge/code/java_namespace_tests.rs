@@ -76,7 +76,10 @@ fn repeated_package_bytes_bound_namespace_projection_before_storage() {
     assert!(source(130).len() < JavaNamespaceEvidence::MAX_PROJECTED_NAME_BYTES);
     assert!(!over.evidence.complete);
     assert!(over.evidence.top_level_types.is_empty());
-    assert_eq!(over.evidence.projected_name_bytes(), Some(package.len()));
+    assert_eq!(
+        over.evidence.projected_name_bytes(),
+        Some(package.len() + 7)
+    );
 }
 
 #[test]

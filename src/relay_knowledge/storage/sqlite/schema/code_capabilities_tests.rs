@@ -84,7 +84,7 @@ fn warm_open_upgrades_legacy_namespace_columns_without_backfill_or_deferred_inde
     connection
         .execute(
             "UPDATE code_repository_files SET java_namespace_json=?1 WHERE path='App.java'",
-            [r#"{"package":"demo","top_level_types":["App"],"complete":true}"#],
+            [r#"{"package":"demo","top_level_types":["App"],"complete":true,"source_set":{"kind":"repository"}}"#],
         )
         .unwrap();
     assert_eq!(

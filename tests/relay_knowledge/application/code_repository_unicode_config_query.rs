@@ -3,6 +3,48 @@ use super::*;
 use relay_knowledge::domain::CodeFeatureFlagRequest;
 
 #[tokio::test]
+async fn configuration_query_ignores_metadata_only_distractors_before_the_seed_limit() {
+    let repo = FixtureRepo::create("configuration-query-seed-fields");
+    let mut content = (0..1100)
+        .map(|n| format!("# @config domain=needle\naaa{n:04}=true\n"))
+        .collect::<String>();
+    content.push_str("zzzneedle=true\n");
+    repo.write("src/settings.properties", &content);
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Metadata-only configuration distractors"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    let indexed = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-metadata-distractors"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(indexed.summary.degraded_file_count, 0);
+    let request = CodeFeatureFlagRequest::new(
+        Some("needle".into()),
+        selector("fixture", "HEAD"),
+        1,
+        FreshnessPolicy::WaitUntilFresh,
+    )
+    .unwrap();
+    let result = service
+        .query_code_repository_feature_flags(request, context("query-metadata-distractors"))
+        .await
+        .unwrap();
+    assert_eq!(result.flags.len(), 1);
+    assert_eq!(result.flags[0].source_key, "zzzneedle");
+    assert_eq!(result.flags[0].usages[0].excerpt, "zzzneedle=true");
+}
+
+#[tokio::test]
 async fn invalid_configuration_query_precedes_freshness_and_missing_index_shortcuts() {
     let repo = FixtureRepo::create("configuration-query-admission");
     repo.write("flags.properties", "feature_x=true\n");

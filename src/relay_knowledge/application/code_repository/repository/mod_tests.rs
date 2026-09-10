@@ -1,4 +1,4 @@
-use std::{fs, sync::Arc};
+use std::{fs, path::PathBuf, sync::Arc};
 
 use crate::{
     api::{
@@ -31,10 +31,8 @@ async fn git_fresh_full_index_skips_tracked_entry_plan_build() {
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
     let service = service_with_memory_store().await;
-    let observed_root = repo
-        .path
-        .canonicalize()
-        .expect("repo path should canonicalize");
+    // Match the registered Git spelling; Windows canonicalization adds a verbatim prefix.
+    let observed_root = PathBuf::from(repo.git_text(["rev-parse", "--show-toplevel"]));
 
     register_fixture_repo(&service, &repo, "register-git-full-noop-fast-path").await;
     reset_tracked_entries_call_count_for_root(observed_root.clone());
@@ -70,10 +68,8 @@ async fn git_fresh_filtered_full_index_uses_scope_generated_symbol_counts() {
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
     let service = service_with_memory_store().await;
-    let observed_root = repo
-        .path
-        .canonicalize()
-        .expect("repo path should canonicalize");
+    // Match the registered Git spelling; Windows canonicalization adds a verbatim prefix.
+    let observed_root = PathBuf::from(repo.git_text(["rev-parse", "--show-toplevel"]));
     let narrow_request = CodeIndexRequest {
         repository: CodeRepositorySelector::new(
             "fixture",
@@ -128,10 +124,8 @@ async fn duplicate_active_full_index_start_skips_tracked_entry_plan_build() {
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
     let service = service_with_memory_store().await;
-    let observed_root = repo
-        .path
-        .canonicalize()
-        .expect("repo path should canonicalize");
+    // Match the registered Git spelling; Windows canonicalization adds a verbatim prefix.
+    let observed_root = PathBuf::from(repo.git_text(["rev-parse", "--show-toplevel"]));
     let request = CodeIndexRequest {
         repository: selector("fixture", "HEAD"),
         mode: CodeIndexMode::Full,

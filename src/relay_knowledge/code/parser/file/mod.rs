@@ -225,8 +225,13 @@ pub(in crate::code::parser) fn parse_syntax_file(
     build.symbols.extend(output.symbols);
     if input.language.id == "java" {
         if let Some(file) = build.files.last_mut() {
-            file.java_namespace =
-                Some(crate::code::java_namespace::collect(root, input.content).evidence);
+            let mut evidence = crate::code::java_namespace::collect(root, input.content).evidence;
+            evidence.source_set = crate::code::source_roots::java_source_set(input.path);
+            if evidence.projected_name_bytes().is_none() {
+                evidence.complete = false;
+                evidence.top_level_types.clear();
+            }
+            file.java_namespace = Some(evidence);
         }
     }
     build.references.extend(output.references);

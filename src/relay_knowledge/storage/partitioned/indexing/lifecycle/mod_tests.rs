@@ -304,7 +304,7 @@ async fn fenced_finalization_advances_one_durable_staged_shard_checkpoint_per_ca
     else {
         panic!("first finalization quantum must remain pending");
     };
-    assert_eq!(first_state, "finalizing:build_query_indexes:v6:0");
+    assert_eq!(first_state, "finalizing:build_query_indexes:v7:0");
     assert_eq!(
         shard
             .code_index_checkpoint(source_scope.clone())
@@ -325,7 +325,7 @@ async fn fenced_finalization_advances_one_durable_staged_shard_checkpoint_per_ca
     else {
         panic!("second finalization quantum must remain pending");
     };
-    assert_eq!(second_state, "finalizing:build_query_indexes:v6:2");
+    assert_eq!(second_state, "finalizing:build_query_indexes:v7:2");
     assert_eq!(
         shard
             .code_index_checkpoint(source_scope)

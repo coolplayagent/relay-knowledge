@@ -4,7 +4,7 @@ mod dependencies;
 mod framework;
 mod graph_records;
 mod repository;
-pub use repository::{JavaImplicitPlatformRead, JavaNamespaceEvidence};
+pub use repository::{JavaImplicitPlatformRead, JavaNamespaceEvidence, JavaSourceSet};
 mod repository_graph;
 mod repository_index;
 mod repository_set;

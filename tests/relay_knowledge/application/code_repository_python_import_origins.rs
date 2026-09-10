@@ -274,3 +274,6 @@ async fn python_restricted_scope_does_not_guess_unseen_standard_module_identity(
 
 #[path = "code_repository_python_origin_budgets.rs"]
 mod origin_budgets;
+
+#[path = "code_repository_python_inventory.rs"]
+mod inventory;

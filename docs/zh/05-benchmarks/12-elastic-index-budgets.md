@@ -216,3 +216,5 @@ jq --arg repository "$repository" -e '
         $cold.scope.language_filters == $cold.status.language_filters)))
 ' "$report_path"
 ```
+
+既有 `feature_flag_query_work_budget` fast/performance 测试过滤器同时覆盖 1,100 条仅元数据匹配的候选干扰。该用例要求真实文本匹配在原候选及 SQL 预算内仍可返回，并保留解码后的绑定和引用字段的 Unicode 与下划线字面匹配。这是查询准入回归门禁，不作为耗时提升声明。

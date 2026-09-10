@@ -152,19 +152,19 @@ fn ranked_keys(
     if let Some(query) = &request.query {
         for term in CodeFeatureFlagRequest::query_terms(query) {
             let fields = [
-                "name",
-                "source_kind",
-                "source_key",
-                "edge_kind",
-                "path",
-                "excerpt",
-                "metadata_json",
+                "flag.name",
+                "flag.source_kind",
+                "flag.source_key",
+                "flag.edge_kind",
+                "flag.path",
+                "flag.excerpt",
+                "json_extract(flag.metadata_json, '$.referenced_symbol')",
             ];
             query_clauses.push(format!(
-                "({})",
+                "({} OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json, '$.bindings') query_binding WHERE lower(query_binding.value) LIKE ? ESCAPE '\\'))",
                 fields
                     .iter()
-                    .map(|field| format!("lower(flag.{field}) LIKE ? ESCAPE '\\'"))
+                    .map(|field| format!("lower({field}) LIKE ? ESCAPE '\\'"))
                     .collect::<Vec<_>>()
                     .join(" OR ")
             ));
@@ -176,6 +176,7 @@ fn ranked_keys(
                     .replace('_', "\\_")
             );
             values.extend(fields.iter().map(|_| Value::Text(pattern.clone())));
+            values.push(Value::Text(pattern));
         }
     }
     // Any term may seed an alias whose other terms and metadata live on a

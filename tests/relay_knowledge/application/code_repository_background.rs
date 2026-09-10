@@ -922,3 +922,9 @@ mod java_proof_boundaries;
 
 #[path = "code_repository_java_package_evidence.rs"]
 mod java_package_evidence;
+
+#[path = "code_repository_java_package_bindings.rs"]
+mod java_package_bindings;
+
+#[path = "code_repository_java_source_sets.rs"]
+mod java_source_sets;

@@ -9,6 +9,12 @@ async fn go_variable_declarations_preserve_freshness_and_literal_config_reads() 
             false,
         ),
         ("{{ $missing }}", true),
+        (
+            "{{ range $i, $value := .Items }}{{ key \"feature_x\" }}{{ key \"digit_name\" }}{{ end }}",
+            false,
+        ),
+        ("{{ if $i, $value := .Items }}x{{ end }}", true),
+        ("{{ range $i, $value, $third := .Items }}x{{ end }}", true),
     ] {
         let repo = FixtureRepo::create("template-variable-declarations");
         repo.git(["config", "core.autocrlf", "false"]);
@@ -340,6 +346,62 @@ async fn numeric_template_diagnostics_and_tilde_defaults_survive_git_indexing() 
         assert_eq!(
             definition.metadata.value_type.as_deref(),
             expected.map(|_| "string")
+        );
+    }
+}
+
+#[tokio::test]
+async fn mixed_script_config_keys_keep_distinct_display_names_after_git_indexing() {
+    let repo = FixtureRepo::create("mixed-script-config-display");
+    repo.write("src/App.java", "class App { void read(String dynamic) { java.lang.System.getProperty(\"功能.flag\"); java.lang.System.getProperty(\"flag.功能\"); java.lang.System.getProperty(\"flag\"); java.lang.System.getProperty(\"功能\"); java.lang.System.getProperty(dynamic); } }");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "Mixed script configuration names"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "fixture").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-mixed-script-names"),
+        )
+        .await
+        .unwrap();
+    let response = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                selector("fixture", "HEAD"),
+                20,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap(),
+            context("query-mixed-script-names"),
+        )
+        .await
+        .unwrap();
+    assert!(response.degraded_reason.is_none());
+    assert_eq!(response.flags.len(), 4);
+    for (key, name) in [
+        ("功能.flag", "功能_flag"),
+        ("flag.功能", "flag_功能"),
+        ("flag", "flag"),
+        ("功能", "功能"),
+    ] {
+        let flag = response
+            .flags
+            .iter()
+            .find(|flag| flag.source_key == key)
+            .unwrap();
+        assert_eq!(flag.name, name);
+        assert!(
+            flag.usages
+                .iter()
+                .any(|usage| usage.edge_kind == "reads_config")
         );
     }
 }

@@ -274,7 +274,8 @@ async fn code_index_task_finalization_driver_renews_before_and_after_every_step(
 
 #[tokio::test]
 async fn reloaded_finalization_bound_covers_pages_added_after_zero_count_begin() {
-    let pending_page_count = 40usize;
+    let pending_page_count =
+        code_index_finalization_max_steps(0).expect("initial finalization bound is finite");
     let session = finalization_session();
     let begin_checkpoint = finalization_checkpoint(&session, 0, 0);
     let latest_checkpoint = finalization_checkpoint(&session, 1, 17);

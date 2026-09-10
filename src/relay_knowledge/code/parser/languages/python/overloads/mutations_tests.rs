@@ -93,3 +93,49 @@ fn unknown_calls_preserve_only_proven_unrelated_member_writes() {
         );
     }
 }
+
+#[test]
+fn eager_class_binders_observe_redirected_names_with_shared_work_limits() {
+    for (body, expected) in [
+        ("nonlocal overload\n  def overload(fn): return fn", true),
+        ("global overload\n  def overload(fn): return fn", false),
+        ("nonlocal overload\n  class overload: pass", true),
+        ("nonlocal overload\n  overload = custom", true),
+        ("def overload(fn): return fn", false),
+        ("nonlocal other\n  def other(fn): return fn", false),
+        ("nonlocal overload\n  def unrelated(fn): return fn", false),
+        (
+            "def later():\n   nonlocal overload\n   overload = custom",
+            false,
+        ),
+        (
+            "class Inner:\n   nonlocal overload\n   def overload(fn): return fn",
+            true,
+        ),
+    ] {
+        let source = format!("def outer():\n overload = original\n class Change:\n  {body}\n");
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_python::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(&source, None).unwrap();
+        assert!(!tree.root_node().has_error(), "{source}");
+        let class = tree
+            .root_node()
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap()
+            .named_child(1)
+            .unwrap();
+        assert_eq!(class.kind(), "class_definition");
+        assert_eq!(
+            expression_rebinds(&source, class, "overload", false),
+            expected,
+            "{source}"
+        );
+        assert!(expression_rebinds_with_budget(
+            &source, class, "overload", false, &mut 1
+        ));
+    }
+}
