@@ -254,18 +254,32 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Vec<Node<'a>> {
             guards.push(current);
             return guards;
         }
-        if parent.kind() == "variable_declarator"
+        let assigned = if parent.kind() == "variable_declarator"
             && parent.child_by_field_name("value") == Some(current)
         {
-            let Some(name) = parent.child_by_field_name("name") else {
-                return guards;
-            };
-            let Some(declaration) = parent
-                .parent()
-                .filter(|p| p.kind() == "local_variable_declaration")
-            else {
-                return guards;
-            };
+            parent.child_by_field_name("name").zip(
+                parent
+                    .parent()
+                    .filter(|p| p.kind() == "local_variable_declaration"),
+            )
+        } else if parent.kind() == "assignment_expression"
+            && parent.child_by_field_name("right") == Some(current)
+            && parent
+                .child_by_field_name("operator")
+                .is_some_and(|op| text(op, content) == "=")
+        {
+            parent
+                .child_by_field_name("left")
+                .filter(|name| name.kind() == "identifier")
+                .zip(
+                    parent
+                        .parent()
+                        .filter(|p| p.kind() == "expression_statement"),
+                )
+        } else {
+            None
+        };
+        if let Some((name, declaration)) = assigned {
             let mut next = declaration.next_named_sibling();
             let mut budget = 2048;
             while let Some(statement) = next {

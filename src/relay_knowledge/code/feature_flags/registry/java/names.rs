@@ -17,6 +17,22 @@ fn is_type(node: Node<'_>) -> bool {
 }
 
 pub(super) fn qualified(node: Node<'_>, name: &str, content: &str) -> String {
+    let mut depth = 0usize;
+    let erased = name
+        .chars()
+        .filter(|ch| match ch {
+            '<' => {
+                depth += 1;
+                false
+            }
+            '>' => {
+                depth = depth.saturating_sub(1);
+                false
+            }
+            _ => depth == 0 && !ch.is_whitespace(),
+        })
+        .collect::<String>();
+    let name = erased.as_str();
     if name.contains('.') {
         return name.to_owned();
     }
@@ -412,7 +428,12 @@ pub(super) fn getter_bindings(method: Node<'_>, content: &str) -> Vec<String> {
             }) {
                 let mut pending = vec![clause];
                 while let Some(parent) = pending.pop() {
-                    if parent.kind() == "type_identifier" {
+                    if parent.kind() == "generic_type" {
+                        if let Some(owner) = parent.named_child(0) {
+                            pending.push(owner);
+                        }
+                    } else if matches!(parent.kind(), "type_identifier" | "scoped_type_identifier")
+                    {
                         result.push(format!(
                             "{}.{name}",
                             qualified(node, text(parent, content), content)
@@ -432,7 +453,8 @@ pub(super) fn getter_bindings(method: Node<'_>, content: &str) -> Vec<String> {
 
 /// Static platform imports must name the real Java owner and have no local method shadow.
 pub(super) fn static_owner(node: Node<'_>, method: &str, content: &str) -> Option<&'static str> {
-    let mut imported = None;
+    let mut single = std::collections::BTreeSet::new();
+    let mut wildcard = std::collections::BTreeSet::new();
     let mut pending = vec![root(node)];
     let mut budget = 4096;
     while let Some(current) = pending.pop() {
@@ -454,12 +476,12 @@ pub(super) fn static_owner(node: Node<'_>, method: &str, content: &str) -> Optio
                 .strip_prefix("import static ")
                 .map(|v| v.trim_end_matches(';').trim())
             {
-                for owner in ["java.lang.System", "java.lang.Boolean"] {
-                    if path == format!("{owner}.{method}") || path == format!("{owner}.*") {
-                        if imported.is_some_and(|previous| previous != owner) {
-                            return None;
-                        }
-                        imported = Some(owner);
+                if let Some((owner, member)) = path.rsplit_once('.') {
+                    if member == method {
+                        single.insert(owner.to_owned());
+                    }
+                    if member == "*" {
+                        wildcard.insert(owner.to_owned());
                     }
                 }
             }
@@ -469,7 +491,15 @@ pub(super) fn static_owner(node: Node<'_>, method: &str, content: &str) -> Optio
             pending.extend(current.named_children(&mut cursor));
         }
     }
-    imported
+    let candidates = if single.is_empty() { wildcard } else { single };
+    if candidates.len() != 1 {
+        return None;
+    }
+    match candidates.first()?.as_str() {
+        "java.lang.System" => Some("java.lang.System"),
+        "java.lang.Boolean" => Some("java.lang.Boolean"),
+        _ => None,
+    }
 }
 
 fn pattern_binding<'a>(

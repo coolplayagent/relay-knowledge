@@ -555,7 +555,8 @@ fn seed_view_rows(connection: &Connection) {
             INSERT INTO code_repository_feature_flags VALUES
                 ('repo', 'scope', 'flag:api', 'usage:api', 'file:api', 'src/api/users.rs', 'rust', 'users_enabled', 'config', 'users.enabled', 'guards', 8500, 'extracted', 10, 20, 7, 7, 'users_enabled', '{}'),
                 ('repo', 'scope', 'flag:js', 'usage:js', 'file:js', 'src/js/app.js', 'javascript', 'js_enabled', 'config', 'js.enabled', 'guards', 8500, 'extracted', 10, 20, 7, 7, 'js_enabled', '{}'),
-                ('repo', 'scope', 'internal', 'internal', 'file:api', 'src/api/users.rs', 'rust', 'internal', 'config_key', 'internal', 'declares_string_constant', 8500, 'extracted', 10, 20, 7, 7, 'internal', '{}');
+                ('repo', 'scope', 'internal', 'internal', 'file:api', 'src/api/users.rs', 'rust', 'internal', 'config_key', 'internal', 'declares_string_constant', 8500, 'extracted', 10, 20, 7, 7, 'internal', '{}'),
+                ('repo', 'scope', 'unresolved', 'unresolved', 'file:api', 'src/api/users.rs', 'rust', 'orders_enabled', 'config_symbol', 'OrdersConfig.getOrdersEnabled', 'reads_config', 8500, 'extracted', 10, 20, 7, 7, 'orders', '{}');
             ",
         )
         .unwrap();

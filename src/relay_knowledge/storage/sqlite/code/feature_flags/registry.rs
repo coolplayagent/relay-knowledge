@@ -58,21 +58,8 @@ fn search_bounded(
         .as_deref()
         .map(query_terms)
         .unwrap_or_default();
-    let mut rows = if request.filters.consistency {
-        let filter = feature_flag_sql_filter(scope, status, request, &[]);
-        load(
-            connection,
-            &format!(
-                "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE {} LIMIT {}",
-                filter.where_clause,
-                MAX_ROWS + 1
-            ),
-            &filter.params,
-        )?
-    } else {
-        let query = feature_flag_sql_query(scope, status, request, &terms);
-        load(connection, &query.sql, &query.params)?
-    };
+    let query = feature_flag_sql_query(scope, status, request, &terms);
+    let mut rows = load(connection, &query.sql, &query.params)?;
     let mut seen = rows
         .iter()
         .map(|row| row.usage_id.clone())
@@ -147,17 +134,19 @@ fn search_bounded(
                     }))
                 && resolve(row, &rows, &providers, &mut BTreeSet::new(), 0).is_none()
         });
+    let referenced_bindings = rows
+        .iter()
+        .filter(|row| row.metadata.target_kind.is_some())
+        .filter_map(|row| row.metadata.reference.as_ref())
+        .collect::<BTreeSet<_>>();
     let mut groups = BTreeMap::<(String, String), CodeFeatureFlagGraph>::new();
     for row in &rows {
         if row.edge_kind == "declares_string_constant"
-            && !rows.iter().any(|read| {
-                read.metadata.target_kind.is_some()
-                    && read
-                        .metadata
-                        .reference
-                        .as_ref()
-                        .is_some_and(|r| row.metadata.bindings.contains(r))
-            })
+            && !row
+                .metadata
+                .bindings
+                .iter()
+                .any(|binding| referenced_bindings.contains(binding))
         {
             continue;
         }

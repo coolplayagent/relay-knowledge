@@ -393,7 +393,7 @@ fn feature_flags(
                confidence_basis_points, confidence_tier, byte_start, byte_end,
                line_start, line_end, excerpt, metadata_json
         FROM code_repository_feature_flags
-        WHERE source_scope = ?1 AND edge_kind NOT IN ('declares_string_constant','declares_config_getter')
+        WHERE source_scope = ?1 AND source_kind != 'config_symbol' AND edge_kind NOT IN ('declares_string_constant','declares_config_getter')
         ",
         source_scope,
         request,

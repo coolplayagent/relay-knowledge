@@ -390,3 +390,69 @@ fn later_export_retains_only_the_latest_unconditional_shell_assignment() {
             .any(|r| r.source_key == "FLAG" && r.edge_kind == "reads_config")
     );
 }
+
+#[test]
+fn generic_receivers_and_simple_assignments_keep_config_guards() {
+    let rows = facts(
+        "java",
+        r#"package demo;
+      interface FooConfig<T> { boolean getX(); }
+      class DefaultFooConfig implements FooConfig<Prod> { public boolean getX() { return Boolean.getBoolean("feature_x"); } }
+      class App { void run(FooConfig<Prod> config) {
+        if(config.getX()) {} boolean enabled;
+        enabled = Boolean.getBoolean("feature_y"); if(enabled) {}
+        enabled = false; if(enabled) {}
+      }}"#,
+    );
+    assert!(rows.iter().any(|r| r.edge_kind == "guards_code"
+        && r.metadata.reference.as_deref() == Some("demo.FooConfig.getX")));
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.metadata.bindings.contains(&"demo.Prod.getX".into()))
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.source_key == "feature_y" && r.edge_kind == "guards_code")
+            .count(),
+        1
+    );
+}
+#[test]
+fn explicit_static_imports_take_precedence_over_wildcards() {
+    let rows = facts(
+        "java",
+        r#"import static java.lang.System.*; import static custom.Env.getenv;
+      class App { void run() { getenv("NOT_ENV"); } }"#,
+    );
+    assert!(!rows.iter().any(|r| r.source_key == "NOT_ENV"));
+    let rows = facts(
+        "java",
+        r#"import static custom.Env.*; import static java.lang.System.getenv;
+      class App { void run() { getenv("REAL_ENV"); } }"#,
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "REAL_ENV" && r.source_kind == "env_var")
+    );
+}
+#[test]
+fn allexport_enables_definitions_and_survives_disable_for_existing_exports() {
+    for enable in ["set -a", "set -o allexport"] {
+        let code =
+            format!("{enable}\nFLAG=yes\nset +a\necho \"$FLAG\"\nLOCAL=no\necho \"$LOCAL\"\n");
+        let rows = facts("bash", &code);
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == "FLAG" && r.edge_kind == "defines_config"),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == "FLAG" && r.edge_kind == "reads_config")
+        );
+        assert!(!rows.iter().any(|r| r.source_key == "LOCAL"));
+    }
+    let rows = facts("bash", "(set -a)\nLOCAL=no\necho \"$LOCAL\"\n");
+    assert!(!rows.iter().any(|r| r.source_key == "LOCAL"));
+}

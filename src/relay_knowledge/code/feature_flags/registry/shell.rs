@@ -2,6 +2,7 @@
 use super::files::quoted;
 use super::*;
 use tree_sitter::Node;
+mod options;
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
@@ -16,10 +17,11 @@ pub(super) fn extract(
     let mut rows = Vec::new();
     while let Some(node) = pending.pop() {
         if node.kind() == "variable_assignment"
-            && node
+            && (node
                 .parent()
                 .and_then(|parent| export_mode(parent, input.content))
                 == Some(true)
+                || options::allexport(node, input.content))
         {
             if let Some(row) = definition(input, node)? {
                 rows.push(row);
@@ -130,6 +132,9 @@ fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> bool {
                     {
                         if conditional {
                             return false;
+                        }
+                        if options::allexport(candidate, content) {
+                            return true;
                         }
                         assigned = true;
                         continue;

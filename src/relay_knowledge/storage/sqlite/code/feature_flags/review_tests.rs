@@ -115,3 +115,43 @@ fn interrupted_sql_reports_actionable_incomplete_analysis() {
     .expect_err("query should fail");
     assert!(matches!(error, StorageError::Sqlite(_)));
 }
+
+#[test]
+fn exact_consistency_query_ignores_unrelated_rows_beyond_the_global_budget() {
+    let db = fixture();
+    db.execute_batch("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<10001)
+      INSERT INTO code_repository_feature_flags SELECT 'unused:'||x,'usage:'||x,'file','src/unused','java','unrelated_'||x,'config_key','unrelated_'||x,'declares_string_constant',9000,'extracted',0,1,1,1,'unrelated','{}','scope' FROM n;").unwrap();
+    add(
+        &db,
+        "selected_key",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            ..Default::default()
+        },
+    );
+    db.execute_batch(
+        "INSERT INTO code_repository_files VALUES ('scope','empty.ctmpl','gotemplate');",
+    )
+    .unwrap();
+    let groups = search(
+        &db,
+        &status(),
+        &request(
+            Some("selected_key"),
+            CodeConfigFilter {
+                consistency: true,
+                ..Default::default()
+            },
+        ),
+    )
+    .unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].source_key, "selected_key");
+    assert!(
+        groups[0]
+            .consistency_diagnostics
+            .contains(&"missing_from_format: ctmpl".into())
+    );
+}
