@@ -108,15 +108,27 @@ pub(super) fn field_symbol(mut node: Node<'_>, name: &str, content: &str) -> Str
     format!("{}{}", qualified_head, &suffix[head.len()..])
 }
 pub(super) fn literal(node: Node<'_>, content: &str, depth: usize) -> Option<String> {
+    let mut budget = 256;
+    literal_bounded(node, content, depth, &mut budget)
+}
+fn literal_bounded(
+    node: Node<'_>,
+    content: &str,
+    depth: usize,
+    budget: &mut usize,
+) -> Option<String> {
+    *budget = budget.checked_sub(1)?;
     if depth >= 16 {
         return None;
     }
-    match node.kind() {
+    let value = match node.kind() {
         "string_literal" => {
             let raw = text(node, content).strip_prefix('"')?.strip_suffix('"')?;
             super::super::files::decode(raw)
         }
-        "parenthesized_expression" => literal(node.named_child(0)?, content, depth + 1),
+        "parenthesized_expression" => {
+            literal_bounded(node.named_child(0)?, content, depth + 1, budget)
+        }
         "binary_expression"
             if node
                 .child_by_field_name("operator")
@@ -124,15 +136,77 @@ pub(super) fn literal(node: Node<'_>, content: &str, depth: usize) -> Option<Str
         {
             Some(format!(
                 "{}{}",
-                literal(node.child_by_field_name("left")?, content, depth + 1)?,
-                literal(node.child_by_field_name("right")?, content, depth + 1)?
+                literal_bounded(
+                    node.child_by_field_name("left")?,
+                    content,
+                    depth + 1,
+                    budget
+                )?,
+                literal_bounded(
+                    node.child_by_field_name("right")?,
+                    content,
+                    depth + 1,
+                    budget
+                )?
             ))
         }
         "true" | "false" | "decimal_integer_literal" | "decimal_floating_point_literal" => {
             Some(text(node, content).to_owned())
         }
+        "identifier" | "field_access" if depth > 0 => {
+            let declaration = constant_binding(node, content)?;
+            let owner = declaration.parent()?;
+            let mut cursor = owner.walk();
+            let is_final = owner.kind() == "constant_declaration"
+                || owner.named_children(&mut cursor).any(|n| {
+                    n.kind() == "modifiers"
+                        && text(n, content)
+                            .split_whitespace()
+                            .any(|word| word == "final")
+                });
+            if !is_final
+                || !owner
+                    .child_by_field_name("type")
+                    .is_some_and(|ty| matches!(text(ty, content), "String" | "java.lang.String"))
+            {
+                return None;
+            }
+            literal_bounded(
+                declaration.child_by_field_name("value")?,
+                content,
+                depth + 1,
+                budget,
+            )
+        }
         _ => None,
+    }?;
+    (value.len() <= 65_536).then_some(value)
+}
+fn constant_binding<'a>(node: Node<'a>, content: &str) -> Option<Node<'a>> {
+    if node.kind() == "identifier" {
+        return binding(node, text(node, content), content);
     }
+    let symbol = key_symbol(node, content)?;
+    let mut cursor = root(node).walk();
+    for _ in 0..4096 {
+        let candidate = cursor.node();
+        if candidate.kind() == "variable_declarator" {
+            if let Some(name) = candidate.child_by_field_name("name") {
+                if field_symbol(candidate, text(name, content), content) == symbol {
+                    return Some(candidate);
+                }
+            }
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return None;
+            }
+        }
+    }
+    None
 }
 fn binding<'a>(mut node: Node<'a>, name: &str, content: &str) -> Option<Node<'a>> {
     let explicit_field = node.parent().is_some_and(|parent| {
@@ -149,6 +223,15 @@ fn binding<'a>(mut node: Node<'a>, name: &str, content: &str) -> Option<Node<'a>
             return None;
         }
         budget -= 1;
+        if !explicit_field
+            && parent.kind() == "enhanced_for_statement"
+            && parent.child_by_field_name("body") == Some(node)
+            && parent
+                .child_by_field_name("name")
+                .is_some_and(|n| text(n, content) == name)
+        {
+            return Some(parent);
+        }
         if let Some(parameters) = parent
             .child_by_field_name("parameters")
             .filter(|_| !explicit_field)

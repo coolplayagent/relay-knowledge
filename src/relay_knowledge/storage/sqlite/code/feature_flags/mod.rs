@@ -385,7 +385,7 @@ fn row_matches_terms(row: &FeatureFlagRow, terms: &[String]) -> bool {
         "{} {} {} {} {} {}",
         row.name, row.source_kind, row.source_key, row.edge_kind, row.path, row.excerpt
     )
-    .to_ascii_lowercase();
+    .to_lowercase();
     terms.iter().all(|term| haystack.contains(term))
 }
 

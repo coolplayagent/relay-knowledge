@@ -91,7 +91,7 @@ pub(super) fn extract(
                     node.child_by_field_name("value"),
                 ) {
                     if let Some(key) =
-                        literal(value, input.content, 0).filter(|key| !key.is_empty())
+                        literal(value, input.content, 1).filter(|key| !key.is_empty())
                     {
                         let mut row = record(
                             input,
@@ -231,7 +231,7 @@ fn read(
         );
         row.metadata.default_value = arguments
             .named_child(1)
-            .and_then(|value| literal(value, input.content, 0));
+            .and_then(|value| literal(value, input.content, 1));
         if method == "getBoolean" {
             row.metadata.default_value = Some("false".to_owned());
         }

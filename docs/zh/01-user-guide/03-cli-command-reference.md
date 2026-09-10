@@ -200,6 +200,8 @@ Kind 取值按命令家族隔离：
 
 Unicode 领域注释与过滤值使用相同的小写规范化。Properties 在 EOF 处理尚未结束的续行。隐式 lambda 参数阻止向外层字段回退，无关嵌套类型不遮蔽 Java 平台 API。Shell 默认值按解析后的引号和转义处理；词法扫描超限明确报告分析不完整。行加载在保留每条记录之前检查累计字节，包括字符串及元数据，避免先分配整个结果再检查 16 MiB 事实预算。操作 payload 的 domain/source 字段接受字符串或 null（视为未提供），拒绝其他值类型。
 
+增强 for 变量在循环体内绑定 getter 接收者，未知推断类型不回退到外层字段。Java key 拼接可跟随同文件内受界的 final 字符串引用，并受深度、节点数量和值大小限制；可变或循环表达式保持未解析。模板控制动作和嵌套管道可抽取 key/env 调用，保留独立调用位置并执行每动作 token 预算。Properties 保留分号前缀及转义空白 key。Unicode 匹配在选择和排序阶段采用相同的小写规范化。
+
 `repo framework` 读取索引阶段写入的独立 Angular/Vue component-template graph。重复传入 `--framework`、`--kind` 或 `--path` 可以取交集过滤；省略时在所选 scope 内受界枚举。Graph 包含 component、template、binding、slot、template variable 和 control flow 等类型化 node，以及 ownership、render、binding、event、read/write、directive 和 slot edge。Vue SFC 的 script symbol/import 仍可通过普通 `repo query` 查询。该命令不在查询期扫描源码，也不启动索引；`wait-until-fresh` 要求 durable indexed snapshot 已包含当前 framework fact。
 
 `repo software` 读取所选 repository scope 的软件全域模型。旧 kind 继续返回兼容投影：`dependencies` 返回 manifest/lockfile package component 和 dependency usage，`sdks` 返回 unresolved/ambiguous/external target，`files`、`topics`、`relationships`、`build`、`iac`、`design` 返回各自旧切片。Dockerfile/Containerfile 现在属于 build definition，CI workflow job 属于 pipeline/build job；只有 Compose、Kubernetes、Helm、Terraform、systemd、launchd 等明确部署证据进入 IaC。普通 README heading 只生成 documentation topic；只有显式 frontmatter、受控 manifest/schema 或结构化代码证据才能晋升为 system/component/API/resource。

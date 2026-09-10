@@ -1,5 +1,105 @@
 //! Scope, truncation and literal-preservation review regressions.
 use super::*;
+#[test]
+fn enhanced_for_receivers_use_loop_types_and_stop_outer_field_fallback() {
+    let rows = facts(
+        "java",
+        r#"class App { WrongConfig config; void run() {
+        for (FooConfig config : configs) { if(config.getX()) {} }
+        for (var config : unknown) { config.getX(); }
+    }}"#,
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.metadata.reference.as_deref() == Some("FooConfig.getX"))
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.metadata.reference.as_deref() == Some("WrongConfig.getX"))
+    );
+}
+
+#[test]
+fn properties_semicolons_are_key_content_while_ini_semicolons_are_comments() {
+    let rows = facts("properties", ";feature.enabled=true\n");
+    assert_eq!(rows[0].source_key, ";feature.enabled");
+    assert!(facts("ini", ";feature.enabled=true\n").is_empty());
+}
+
+#[test]
+fn properties_escaped_trailing_key_spaces_survive_assignment_splitting() {
+    let rows = facts("properties", "feature\\ =on\nbare\\ \n");
+    assert_eq!(rows[0].source_key, "feature ");
+    assert_eq!(rows[0].metadata.default_value.as_deref(), Some("on"));
+    assert_eq!(rows[1].source_key, "bare ");
+}
+
+#[test]
+fn composed_java_keys_resolve_bounded_final_string_references() {
+    let rows = facts(
+        "java",
+        r#"class Keys {
+        static final String PREFIX="feature.";
+        static final String KEY=PREFIX+"x";
+        static final String ALIAS=KEY;
+        static String mutable="feature.";
+        static final String BAD=mutable+"bad";
+        static final String CYCLE=CYCLE+"loop";
+    }
+    class Reader { void run() { System.getProperty(Keys.KEY); } }
+    class Local { static final String KEY=Keys.PREFIX+"local"; }"#,
+    );
+    assert!(
+        rows.iter().any(
+            |r| r.source_key == "feature.x" && r.metadata.bindings.contains(&"Keys.KEY".into())
+        )
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "feature.x"
+                && r.metadata.bindings.contains(&"Keys.ALIAS".into()))
+    );
+    assert!(rows.iter().any(|r| r.source_key == "feature.local"));
+    assert!(!rows.iter().any(|r| r.source_key == "feature.bad"));
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.metadata.bindings.contains(&"Keys.CYCLE".into()))
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.metadata.reference.as_deref() == Some("Keys.KEY"))
+    );
+}
+
+#[test]
+fn template_control_pipelines_extract_nested_calls_without_reading_quoted_text() {
+    let rows = facts(
+        "gotemplate",
+        r#"{{ with key "feature_x" }}
+        {{ if (keyOrDefault "enabled" "false") }}
+        {{ if eq (env "FLAG") "yes" }}
+        {{ printf "key \"not_a_read\"" }}
+        {{ if and (key "same") (key "same") }}"#,
+    );
+    assert_eq!(rows.len(), 5);
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "enabled"
+                && r.metadata.default_value.as_deref() == Some("false"))
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_kind == "env_var" && r.source_key == "FLAG")
+    );
+    let repeated = rows
+        .iter()
+        .filter(|r| r.source_key == "same")
+        .collect::<Vec<_>>();
+    assert_eq!(repeated.len(), 2);
+    assert_ne!(repeated[0].usage_id, repeated[1].usage_id);
+}
 
 #[test]
 fn inferred_lambda_parameters_do_not_resolve_to_outer_config_fields() {

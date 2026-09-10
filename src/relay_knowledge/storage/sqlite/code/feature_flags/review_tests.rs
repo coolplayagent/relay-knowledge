@@ -1,6 +1,25 @@
 //! Regression cases from the configuration registry code review.
 use super::*;
 #[test]
+fn unicode_case_variants_receive_identical_query_scores() {
+    let db = fixture();
+    for key in ["ÜBER", "über"] {
+        add(
+            &db,
+            key,
+            "config_key",
+            "defines_config",
+            CodeConfigMetadata::default(),
+        );
+    }
+    let mut query = request(Some("über"), CodeConfigFilter::default());
+    query.limit = 2;
+    let groups = search(&db, &status(), &query).unwrap();
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0].score, groups[1].score);
+    assert_eq!(groups[0].score, 33.0);
+}
+#[test]
 fn loading_stops_at_byte_budget_before_later_malformed_rows() {
     let db = fixture();
     let metadata = CodeConfigMetadata {

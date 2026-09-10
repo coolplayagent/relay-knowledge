@@ -1,5 +1,6 @@
 //! Properties/INI/template values and exported shell configuration facts.
 use super::*;
+mod pipelines;
 
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
@@ -38,7 +39,10 @@ pub(super) fn extract(
         };
         if input.language_id == "ini" && line.starts_with('[') && line.ends_with(']') {
             section = line[1..line.len() - 1].trim().to_owned();
-        } else if !line.is_empty() && !line.starts_with(['#', '!', ';']) && !line.starts_with("{{")
+        } else if !line.is_empty()
+            && !line.starts_with(['#', '!'])
+            && !(input.language_id == "ini" && line.starts_with(';'))
+            && !line.starts_with("{{")
         {
             if let Some((key, raw)) = assignment(line, input.language_id == "properties") {
                 let key = if input.language_id == "properties" {
@@ -104,7 +108,14 @@ fn assignment(line: &str, properties: bool) -> Option<(&str, &str)> {
         if ch == '=' || ch == ':' || (properties && ch.is_whitespace()) {
             let tail = line[index..].trim_start();
             let tail = tail.strip_prefix(['=', ':']).unwrap_or(tail).trim_start();
-            return Some((line[..index].trim(), tail));
+            return Some((
+                if properties {
+                    &line[..index]
+                } else {
+                    line[..index].trim()
+                },
+                tail,
+            ));
         }
     }
     // A bare properties key is an explicit empty string.
@@ -151,38 +162,10 @@ fn template_reads(
         let Some(end) = action_end(input.content, start + 2) else {
             break;
         };
-        let action = input.content[start + 2..end]
-            .trim()
-            .trim_matches('-')
-            .trim();
+        let raw = &input.content[start + 2..end];
+        let action = raw.trim_start().trim_start_matches('-').trim_start();
         if !action.starts_with("/*") {
-            let mut tokens = action.splitn(2, char::is_whitespace);
-            let command = tokens.next().unwrap_or_default();
-            let argument = tokens.next().unwrap_or_default().trim();
-            if matches!(command, "key" | "keyOrDefault" | "env") {
-                if let Some((key, consumed)) = quoted(argument) {
-                    check_fact_budget(rows.len())?;
-                    let mut row = record(
-                        input,
-                        if command == "env" {
-                            "env_var"
-                        } else {
-                            "config_key"
-                        },
-                        &key,
-                        "reads_config",
-                        start,
-                        end + 2,
-                    )?;
-                    if command == "keyOrDefault" {
-                        if let Some((fallback, _)) = quoted(argument[consumed..].trim_start()) {
-                            row.metadata.value_type = Some(value_type(&fallback).into());
-                            row.metadata.default_value = Some(fallback);
-                        }
-                    }
-                    rows.push(row);
-                }
-            }
+            pipelines::extract(input, action, start + 2 + raw.len() - action.len(), rows)?;
         }
         offset = end + 2;
     }
