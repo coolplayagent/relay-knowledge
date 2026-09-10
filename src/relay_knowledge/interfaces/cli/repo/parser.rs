@@ -301,6 +301,9 @@ fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
                     "--source"
                 };
                 let value = value_after(tokens, index, option)?;
+                if value.starts_with('-') {
+                    return Err(CliError::MissingValue(option));
+                }
                 if option == "--domain" {
                     filters.domain = Some(value);
                 } else {

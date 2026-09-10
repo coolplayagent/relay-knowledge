@@ -1,5 +1,52 @@
 use super::*;
 #[test]
+fn this_qualified_key_uses_the_field_despite_a_shadowing_parameter() {
+    let rows = facts(
+        "java",
+        r#"package demo; class Config {
+        static final String FEATURE_KEY="feature_x";
+        String getX(String FEATURE_KEY) { return System.getProperty(this.FEATURE_KEY); }
+    }"#,
+    );
+    let read = rows.iter().find(|r| r.edge_kind == "reads_config").unwrap();
+    assert_eq!(
+        read.metadata.reference.as_deref(),
+        Some("demo.Config.FEATURE_KEY")
+    );
+}
+
+#[test]
+fn template_output_and_ini_bare_lines_are_not_configuration_definitions() {
+    for language in ["ini", "gotemplate"] {
+        let rows = facts(language, "server {\n}\nbare\nvalid = true\nother: false\n");
+        let keys = rows
+            .iter()
+            .map(|r| r.source_key.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(keys, vec!["valid", "other"]);
+    }
+    let rows = facts("properties", "bare\nspace value\n");
+    assert_eq!(rows[0].metadata.default_value.as_deref(), Some(""));
+    assert_eq!(rows[1].metadata.default_value.as_deref(), Some("value"));
+}
+
+#[test]
+fn template_key_or_default_retains_literal_fallback_and_type() {
+    let rows = facts(
+        "gotemplate",
+        r#"{{ keyOrDefault "feature_x" "off" }}
+        {{ keyOrDefault "enabled" "true" }}
+        {{ keyOrDefault "dynamic" $fallback }}
+        {{ key "without" }}"#,
+    );
+    assert_eq!(rows[0].metadata.default_value.as_deref(), Some("off"));
+    assert_eq!(rows[0].metadata.value_type.as_deref(), Some("string"));
+    assert_eq!(rows[1].metadata.default_value.as_deref(), Some("true"));
+    assert_eq!(rows[1].metadata.value_type.as_deref(), Some("boolean"));
+    assert!(rows[2..].iter().all(|r| r.metadata.default_value.is_none()));
+}
+
+#[test]
 fn return_only_getters_ignore_comments_but_not_executable_statements() {
     let rows = facts(
         "java",

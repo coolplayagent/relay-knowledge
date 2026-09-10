@@ -151,6 +151,8 @@ fn feature_flag_sql_query(
         where_clause.push_str(" AND (flag.source_kind != 'config_symbol' OR json_extract(flag.metadata_json,'$.target_kind') IS NOT NULL)");
     }
     where_clause.push_str(" AND (flag.edge_kind != 'declares_string_constant' OR EXISTS (SELECT 1 FROM code_repository_feature_flags evidence, json_each(flag.metadata_json,'$.bindings') binding WHERE evidence.source_scope=flag.source_scope AND json_extract(evidence.metadata_json,'$.target_kind') IS NOT NULL AND json_extract(evidence.metadata_json,'$.reference')=binding.value))");
+    let usage_filter = feature_flag_sql_filter(source_scope, status, request, &[]);
+    let usage_where = &usage_filter.where_clause;
     let query_bonus = if terms.is_empty() { "0.0" } else { "8.0" };
     let sql = format!(
         "
@@ -197,7 +199,7 @@ fn feature_flag_sql_query(
                ) AS related_symbol_name
         FROM code_repository_feature_flags flag
         JOIN filtered_flags selected ON selected.feature_flag_id = flag.feature_flag_id
-        WHERE {where_clause}
+        WHERE {usage_where}
         ORDER BY flag.name ASC,
                  CASE flag.edge_kind
                    WHEN 'guards_code' THEN 0
@@ -210,7 +212,7 @@ fn feature_flag_sql_query(
     );
     let mut params = filter_params.clone();
     params.push(Value::Integer(registry::MAX_ROWS as i64 + 1));
-    params.extend(filter_params);
+    params.extend(usage_filter.params);
 
     FeatureFlagSqlQuery { sql, params }
 }

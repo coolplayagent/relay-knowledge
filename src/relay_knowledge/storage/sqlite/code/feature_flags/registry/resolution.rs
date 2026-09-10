@@ -1,5 +1,14 @@
 //! Depth-keyed memoization bounds provider work across repeated getter usages.
 use super::*;
+pub(super) fn providers(rows: &[FeatureFlagRow]) -> HashMap<String, Vec<usize>> {
+    let mut providers = HashMap::<String, Vec<usize>>::new();
+    for (index, row) in rows.iter().enumerate() {
+        for binding in &row.metadata.bindings {
+            providers.entry(binding.clone()).or_default().push(index);
+        }
+    }
+    providers
+}
 type Target = Option<(String, String)>;
 pub(super) struct Resolver<'a> {
     pub rows: &'a [FeatureFlagRow],

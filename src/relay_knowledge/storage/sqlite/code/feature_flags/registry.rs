@@ -2,6 +2,7 @@
 use super::*;
 mod connectivity;
 mod consistency;
+mod evidence;
 mod resolution;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub(super) const MAX_ROWS: usize = 10_000;
@@ -74,6 +75,7 @@ fn search_bounded(
         .map(|row| row.usage_id.clone())
         .collect::<BTreeSet<_>>();
     let mut queried = BTreeSet::new();
+    let mut evidence_groups = BTreeSet::new();
     for round in 0..4 {
         let keys = rows
             .iter()
@@ -112,6 +114,15 @@ fn search_bounded(
             check_size(&rows)?;
         }
         queried.extend(keys);
+        evidence::complete_groups(
+            connection,
+            scope,
+            status,
+            request,
+            &mut rows,
+            &mut seen,
+            &mut evidence_groups,
+        )?;
         if round == 3
             && rows.iter().any(|row| {
                 row.metadata
@@ -124,12 +135,7 @@ fn search_bounded(
             return Err(incomplete("symbol binding depth exceeded"));
         }
     }
-    let mut providers = HashMap::<String, Vec<usize>>::new();
-    for (index, row) in rows.iter().enumerate() {
-        for binding in &row.metadata.bindings {
-            providers.entry(binding.clone()).or_default().push(index);
-        }
-    }
+    let providers = resolution::providers(&rows);
     let formats = if request.filters.consistency {
         consistency::formats(connection, scope, status, request)?
     } else {

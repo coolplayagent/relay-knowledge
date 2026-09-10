@@ -386,6 +386,11 @@ pub(super) fn key_symbol(node: Node<'_>, content: &str) -> Option<String> {
             let object = node.child_by_field_name("object")?;
             let field = node.child_by_field_name("field")?;
             let owner = text(object, content);
+            if object.kind() == "this" {
+                let name = text(field, content);
+                let declaration = binding(field, name, content)?;
+                return Some(field_symbol(declaration, name, content));
+            }
             if object.kind() == "identifier" && binding(object, owner, content).is_some() {
                 return None;
             }

@@ -38,7 +38,7 @@ pub(super) fn extract(
             section = line[1..line.len() - 1].trim().to_owned();
         } else if !line.is_empty() && !line.starts_with(['#', '!', ';']) && !line.starts_with("{{")
         {
-            if let Some((key, raw)) = assignment(line) {
+            if let Some((key, raw)) = assignment(line, input.language_id == "properties") {
                 let key = if input.language_id == "properties" {
                     decode(key).unwrap_or_default()
                 } else {
@@ -85,7 +85,7 @@ pub(super) fn extract(
     Ok(records)
 }
 
-fn assignment(line: &str) -> Option<(&str, &str)> {
+fn assignment(line: &str, properties: bool) -> Option<(&str, &str)> {
     if line.is_empty() {
         return None;
     }
@@ -99,14 +99,14 @@ fn assignment(line: &str) -> Option<(&str, &str)> {
             escape = true;
             continue;
         }
-        if ch == '=' || ch == ':' || ch.is_whitespace() {
+        if ch == '=' || ch == ':' || (properties && ch.is_whitespace()) {
             let tail = line[index..].trim_start();
             let tail = tail.strip_prefix(['=', ':']).unwrap_or(tail).trim_start();
             return Some((line[..index].trim(), tail));
         }
     }
     // A bare properties key is an explicit empty string.
-    Some((line, ""))
+    properties.then_some((line, ""))
 }
 
 pub(super) fn decode(raw: &str) -> Option<String> {
@@ -158,9 +158,9 @@ fn template_reads(
             let command = tokens.next().unwrap_or_default();
             let argument = tokens.next().unwrap_or_default().trim();
             if matches!(command, "key" | "keyOrDefault" | "env") {
-                if let Some((key, _)) = quoted(argument) {
+                if let Some((key, consumed)) = quoted(argument) {
                     check_fact_budget(rows.len())?;
-                    rows.push(record(
+                    let mut row = record(
                         input,
                         if command == "env" {
                             "env_var"
@@ -171,7 +171,14 @@ fn template_reads(
                         "reads_config",
                         start,
                         end + 2,
-                    )?);
+                    )?;
+                    if command == "keyOrDefault" {
+                        if let Some((fallback, _)) = quoted(argument[consumed..].trim_start()) {
+                            row.metadata.value_type = Some(value_type(&fallback).into());
+                            row.metadata.default_value = Some(fallback);
+                        }
+                    }
+                    rows.push(row);
                 }
             }
         }

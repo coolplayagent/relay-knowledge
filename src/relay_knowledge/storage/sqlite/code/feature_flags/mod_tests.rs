@@ -43,7 +43,7 @@ fn feature_flag_sql_applies_scope_and_bounded_candidate_budget() {
             .sql
             .contains("config_casefold(flag.source_key) LIKE ?")
     );
-    assert_eq!(query.params.len(), 29);
+    assert_eq!(query.params.len(), 22);
     assert!(
         query
             .params

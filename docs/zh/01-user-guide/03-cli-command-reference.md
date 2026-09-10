@@ -196,6 +196,8 @@ Kind 取值按命令家族隔离：
 
 文本查询可从匹配的 getter 路径或 excerpt 开始解析，再应用分组元数据过滤。getter 单一返回值分析忽略注释；支持单一类型通配导入，多个竞争通配导入保持未解析。Java key 常量声明按实际读取归入属性或环境变量命名空间；同一常量用于两者时分别保留声明证据。Properties 默认值保留末尾空白。Properties、INI、模板和 Shell 每文件最多抽取 10,000 条事实，模板读取动作也计入预算。
 
+查询词用于选择分组，一致性分析前加载所选分组及符号解析所得 key 在已选范围内的全部证据。`--domain`、`--source` 缺值时，即使后面紧跟另一选项也报错。Java `this.KEY` 关联声明字段。裸 key 和空白分隔赋值仅适用于 Properties；INI/模板定义必须包含 `=` 或 `:`。模板 `keyOrDefault` 的带引号回退值及类型计入默认值冲突检查。
+
 `repo framework` 读取索引阶段写入的独立 Angular/Vue component-template graph。重复传入 `--framework`、`--kind` 或 `--path` 可以取交集过滤；省略时在所选 scope 内受界枚举。Graph 包含 component、template、binding、slot、template variable 和 control flow 等类型化 node，以及 ownership、render、binding、event、read/write、directive 和 slot edge。Vue SFC 的 script symbol/import 仍可通过普通 `repo query` 查询。该命令不在查询期扫描源码，也不启动索引；`wait-until-fresh` 要求 durable indexed snapshot 已包含当前 framework fact。
 
 `repo software` 读取所选 repository scope 的软件全域模型。旧 kind 继续返回兼容投影：`dependencies` 返回 manifest/lockfile package component 和 dependency usage，`sdks` 返回 unresolved/ambiguous/external target，`files`、`topics`、`relationships`、`build`、`iac`、`design` 返回各自旧切片。Dockerfile/Containerfile 现在属于 build definition，CI workflow job 属于 pipeline/build job；只有 Compose、Kubernetes、Helm、Terraform、systemd、launchd 等明确部署证据进入 IaC。普通 README heading 只生成 documentation topic；只有显式 frontmatter、受控 manifest/schema 或结构化代码证据才能晋升为 system/component/API/resource。

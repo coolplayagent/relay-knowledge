@@ -1,6 +1,80 @@
 //! Regression cases from the configuration registry code review.
 use super::*;
 #[test]
+fn path_queries_load_all_selected_key_evidence_before_consistency() {
+    for symbolic in [false, true] {
+        let db = fixture();
+        add(
+            &db,
+            "feature_x",
+            "config_key",
+            "reads_config",
+            CodeConfigMetadata {
+                source_format: "java".into(),
+                default_value: Some("false".into()),
+                bindings: if symbolic {
+                    vec!["Config.getX".into()]
+                } else {
+                    vec![]
+                },
+                ..Default::default()
+            },
+        );
+        if symbolic {
+            add(
+                &db,
+                "Config.getX",
+                "config_symbol",
+                "guards_code",
+                CodeConfigMetadata {
+                    reference: Some("Config.getX".into()),
+                    ..Default::default()
+                },
+            );
+        }
+        db.execute("UPDATE code_repository_feature_flags SET path='src/Reader.java' WHERE rowid=(SELECT MAX(rowid) FROM code_repository_feature_flags)", []).unwrap();
+        add(
+            &db,
+            "feature_x",
+            "config_key",
+            "defines_config",
+            CodeConfigMetadata {
+                source_format: "properties".into(),
+                default_value: Some("true".into()),
+                ..Default::default()
+            },
+        );
+        let groups = search(
+            &db,
+            &status(),
+            &request(
+                Some("Reader"),
+                CodeConfigFilter {
+                    consistency: true,
+                    ..Default::default()
+                },
+            ),
+        )
+        .unwrap();
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].analysis_complete);
+        assert!(
+            groups[0]
+                .usages
+                .iter()
+                .any(|u| u.edge_kind == "defines_config")
+        );
+        assert_eq!(groups[0].conflicting_default_sources.len(), 2);
+        assert!(
+            !groups[0]
+                .consistency_diagnostics
+                .iter()
+                .any(|d| d == "read_without_definition")
+        );
+    }
+}
+
+#[test]
 fn getter_usage_paths_seed_queries_before_group_metadata_filters() {
     let db = fixture();
     add(

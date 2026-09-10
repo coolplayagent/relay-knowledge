@@ -254,7 +254,7 @@
 | `code.repo.query` / `code.repo.context` | 查询代码仓库 / 打包 one-call codegraph context | `alias`, `query`, `kind` 或 context budget, `freshness`, `limit` |
 | `code.repo.business` | 读取 authored 业务术语与技术映射 | `alias`, `kind`, `freshness`, `limit`；可选 `query`, `domain`, `ref` |
 | `code.repo.view` | 从已索引代码图派生有界代码库理解视图 | `alias`, `kind`；可选 `ref`, `freshness`, `limit`, `changed_paths` |
-| `code.repo.feature_flags` | 特性标志查询 | `alias`, `freshness`, `limit`；可选 `query` |
+| `code.repo.feature_flags` | 特性标志查询 | `alias`, `freshness`, `limit`；可选 `query`, `domain`, `source`, `hot_reload`, `consistency` |
 | `code.repo.impact` | 变更影响分析 | `alias`, `base_ref`, `head_ref`, `limit` |
 | `code.repo.software` | 软件全域兼容投影、ontology entity、statement 或 conflict | `alias`, `kind`, `freshness`, `limit` |
 | `code.repo.software_export` | 从同一 snapshot-bound statement 视图导出标准文档 | `alias`, `profile`, `freshness`, `limit`；profile 为 `spdx-3`、`cyclonedx-1.7` 或 `prov-o` |
@@ -268,6 +268,8 @@
 | `service.doctor` | 服务诊断 | 无 |
 | `service.run.streamable_http` | 兼容的服务状态快照；不会从 Web request 启动常驻进程 | 无 |
 | `provider.embedding.probe` | 嵌入提供者探测 | 无 |
+
+`code.repo.feature_flags` 的过滤字段直接位于操作 payload：`domain` 为显式领域字符串，`source` 为 `java`、`properties`、`ini`、`ctmpl` 或 `shell`，`hot_reload` 为布尔值，`consistency` 为布尔值（默认 `false`）。未知元数据不匹配显式过滤条件。`query` 用于选择配置分组；响应保留已选范围内该分组的全部定义、声明、读取和守卫证据，再执行一致性检查。
 
 **freshness 枚举值**：`allow-stale`、`wait-until-fresh`、`graph-only`
 **code query kind 枚举值**：`hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`、`sbom`

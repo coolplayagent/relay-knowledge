@@ -1,4 +1,13 @@
 use super::*;
+#[test]
+fn feature_flags_rejects_missing_filter_values_before_following_options() {
+    for option in ["--domain", "--source"] {
+        let tokens = ["feature-flags", "repo", option, "--consistency"].map(str::to_owned);
+        assert!(
+            matches!(parse_repo(&tokens), Err(CliError::MissingValue(value)) if value == option)
+        );
+    }
+}
 
 #[test]
 fn parses_software_export_profile_and_bounded_scope() {
