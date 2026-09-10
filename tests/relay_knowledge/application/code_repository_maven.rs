@@ -21,7 +21,15 @@ async fn maven_modules_propagate_downstream_and_incremental_removes_old_edges() 
     assert_eq!(indexed.summary.indexed_file_count, 7);
     let projection = modules(&service).await;
     assert_eq!(projection.build_targets.len(), 4);
-    assert_eq!(projection.relationships.len(), 5);
+    assert_eq!(projection.relationships.len(), 8);
+    assert_eq!(
+        projection
+            .relationships
+            .iter()
+            .filter(|edge| edge.relationship_kind == "inherits_from")
+            .count(),
+        3
+    );
     assert!(
         projection
             .relationships
@@ -143,6 +151,7 @@ async fn maven_152_modules_preserve_all_direct_dependency_edges() {
         let mut nodes = std::collections::BTreeSet::new();
         let mut edges = std::collections::BTreeSet::new();
         let mut artifacts = 0;
+        let mut parents = 0;
         let mut pages = 0;
         loop {
             let graph = service
@@ -160,6 +169,10 @@ async fn maven_152_modules_preserve_all_direct_dependency_edges() {
                 assert!(nodes.insert(node.target_id));
             }
             for edge in graph.relationships {
+                if edge.relationship_kind == "inherits_from" {
+                    parents += 1;
+                    assert_eq!(edge.target_hint.as_deref(), Some("demo:root:1"));
+                }
                 assert!(edges.insert(edge.relationship_id));
                 if edge.target_kind == "artifact" {
                     artifacts += 1;
@@ -177,7 +190,8 @@ async fn maven_152_modules_preserve_all_direct_dependency_edges() {
         }
         assert!(pages >= 2);
         assert_eq!(nodes.len(), 153);
-        assert_eq!(edges.len(), 455);
+        assert_eq!(edges.len(), 607);
+        assert_eq!(parents, 152);
         assert_eq!(artifacts, 152);
     }
 }

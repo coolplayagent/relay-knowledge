@@ -29,7 +29,17 @@ fn maven_original_dependencies_command_returns_modules_declarations_and_pages() 
         ],
     );
     assert_eq!(original["build_targets"].as_array().unwrap().len(), 3);
-    assert_eq!(original["relationships"].as_array().unwrap().len(), 4);
+    assert_eq!(original["relationships"].as_array().unwrap().len(), 6);
+    assert_eq!(
+        original["relationships"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|edge| edge["relationship_kind"] == "inherits_from"
+                && edge["resolution_state"] == "resolved")
+            .count(),
+        2
+    );
     assert!(original["dependency_usages"].as_array().unwrap().is_empty());
     assert!(
         original["relationships"]

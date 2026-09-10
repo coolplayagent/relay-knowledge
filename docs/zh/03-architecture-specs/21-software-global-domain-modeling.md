@@ -146,7 +146,7 @@ ref 的 spec context 和 commit 后的一致性恢复由
 
 Workspace detector 可显式启用 `maven`，从授权 snapshot 的根 POM 递归读取 modules，识别声明的 group/artifact（包括 parent groupId）。它保持独立于始终执行的 effective module graph projection；`workspace_detection.enabled=false` 不表示 Maven 事实禁用。原命令 `--kind dependencies` 现在同时返回 `build_targets` 中的 reactor 模块和 `relationships` 中的 POM 声明依赖，保留组件及源码使用证据。`dependency_usages` 仍表示源码使用次数，不表示声明数量；`--kind build` 与其全局状态计数仍是构建事实，不能用作模块总数。
 
-回归覆盖缺少 reactor 表的旧数据库导入、父 POM 与 BOM 影响、system 制品、默认 profile 聚合、XML 前缀与 CDATA、两模块以上的多跳传播、循环与预算、坐标歧义、外部依赖、profile 变体、增量删除依赖、稳定身份，原 dependencies 命令在没有 Java import 时的声明依赖输出、游标校验，以及包含 153 个节点和 455 条关系的 152 子模块跨页读取。Maven 语义参考 [reactor 文档](https://maven.apache.org/guides/mini/guide-multiple-modules.html) 和 [依赖机制](https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html)。
+回归覆盖缺少 reactor 表的旧数据库导入、父 POM 与 BOM 影响、system 制品、默认 profile 聚合、XML 前缀与 CDATA、两模块以上的多跳传播、循环与预算、坐标歧义、外部依赖、profile 变体、增量删除依赖、稳定身份，原 dependencies 命令在没有 Java import 时的声明依赖输出、游标校验，以及包含 153 个节点和 607 条关系（含 152 条父 POM 继承边）的 152 子模块跨页读取。Maven 语义参考 [reactor 文档](https://maven.apache.org/guides/mini/guide-multiple-modules.html) 和 [依赖机制](https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html)。
 
 ---
 
