@@ -21,7 +21,10 @@ pub(in crate::storage::sqlite::code) fn import_repository_from_database(
     repository_id: &str,
     source_scope: Option<&str>,
 ) -> Result<(), StorageError> {
-    crate::storage::sqlite::validate_new_database_access(source_path)?;
+    crate::storage::sqlite::validate_new_database_access(
+        source_path,
+        crate::paths::StorageDirectoryAccess::ExistingOnly,
+    )?;
     connection.execute(
         &format!("ATTACH DATABASE ?1 AS {IMPORT_SCHEMA}"),
         params![source_path.display().to_string()],

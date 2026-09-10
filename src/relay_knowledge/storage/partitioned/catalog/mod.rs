@@ -29,6 +29,7 @@ mod schema;
 mod store_access;
 
 use store_access::open_cached_repository_store;
+pub(super) use store_access::open_control_store;
 
 pub(super) use schema::initialize_catalog_schema;
 
@@ -283,24 +284,6 @@ impl SqliteShardCatalog {
                     params![repository_id, source_scope],
                 )
                 .map_err(StorageError::from)
-        })
-        .await?
-    }
-
-    pub(super) async fn active_repository_database_paths(
-        &self,
-    ) -> Result<Vec<(String, PathBuf)>, StorageError> {
-        let control_path = self.control_path.clone();
-        let paths = self.paths.clone();
-        tokio::task::spawn_blocking(move || {
-            let repository_ids = catalog_repository_ids(&control_path)?;
-            Ok(repository_ids
-                .into_iter()
-                .map(|repository_id| {
-                    let db_path = paths.repository_shard_database_file(&repository_id);
-                    (repository_id, db_path)
-                })
-                .collect())
         })
         .await?
     }
@@ -652,21 +635,6 @@ fn catalog_active_repository_for_scope(
         .map_err(StorageError::from)
 }
 
-fn catalog_repository_ids(control_path: &Path) -> Result<Vec<String>, StorageError> {
-    let connection = open_catalog_readonly_connection(control_path)?;
-    let mut statement = connection.prepare(
-        "
-        SELECT repository_id
-        FROM storage_repository_shards
-        WHERE state = 'active'
-        ORDER BY repository_id ASC
-        ",
-    )?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
-}
-
 pub(super) fn catalog_has_active_repositories(control_path: &Path) -> Result<bool, StorageError> {
     if !control_path.exists() {
         return Ok(false);
@@ -788,14 +756,20 @@ fn remove_catalog_repository(control_path: &Path, repository_id: &str) -> Result
 }
 
 fn open_catalog_connection(control_path: &Path) -> Result<Connection, StorageError> {
-    crate::storage::sqlite::validate_new_database_access(control_path)?;
+    crate::storage::sqlite::validate_new_database_access(
+        control_path,
+        crate::paths::StorageDirectoryAccess::ExistingOnly,
+    )?;
     let connection = Connection::open(control_path)?;
     configure_connection(&connection)?;
     Ok(connection)
 }
 
 fn open_catalog_readonly_connection(control_path: &Path) -> Result<Connection, StorageError> {
-    crate::storage::sqlite::validate_new_database_access(control_path)?;
+    crate::storage::sqlite::validate_new_database_access(
+        control_path,
+        crate::paths::StorageDirectoryAccess::ExistingOnly,
+    )?;
     let connection = Connection::open_with_flags(control_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     configure_connection(&connection)?;
     connection.busy_timeout(CATALOG_READ_BUSY_TIMEOUT)?;

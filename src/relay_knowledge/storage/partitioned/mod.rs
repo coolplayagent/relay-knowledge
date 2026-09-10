@@ -32,7 +32,7 @@ use crate::{
     },
 };
 
-use catalog::{SqliteShardCatalog, initialize_catalog_schema};
+use catalog::SqliteShardCatalog;
 use routing::{report_matches_active_control, repository_store_for_report, source_scope_store};
 
 /// SQLite topology that keeps global control state in one DB and code facts in
@@ -47,8 +47,7 @@ impl PartitionedSqliteKnowledgeStore {
     /// Blocking open; async applications should use `SqliteKnowledgeStoreFactory`.
     pub fn open(control_path: impl AsRef<Path>, paths: RuntimePaths) -> Result<Self, StorageError> {
         let control_path = control_path.as_ref().to_path_buf();
-        let control = Arc::new(SqliteGraphStore::open(&control_path)?);
-        initialize_catalog_schema(&control_path)?;
+        let control = catalog::open_control_store(&control_path)?;
         Ok(Self {
             control: Arc::clone(&control),
             catalog: Arc::new(SqliteShardCatalog::new(control_path, paths, control)),

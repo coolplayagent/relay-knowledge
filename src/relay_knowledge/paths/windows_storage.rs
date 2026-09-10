@@ -155,6 +155,26 @@ pub(super) async fn validate_service_database_path(
 }
 
 #[cfg(windows)]
+pub(super) async fn validate_service_inspection_tree(database: &Path) -> Result<(), PathError> {
+    let database = database
+        .to_str()
+        .filter(|value| !value.contains('\0') && value.len() <= 4096)
+        .ok_or_else(|| {
+            security_error("Windows database path must be Unicode and at most 4096 bytes")
+        })?;
+    let command = format!(
+        "$database = [System.IO.FileInfo]::new('{}'); Assert-RelayServiceDatabasePath $database.FullName -ExistingOnly; Assert-RelayStoragePayloadTree $database.Directory '' -ReparseOnly; 'secured'",
+        database.replace('\'', "''")
+    );
+    if run_security_script(&command, SECURITY_COMMAND_TIMEOUT).await? != "secured" {
+        return Err(security_error(
+            "unexpected service inspection validation response",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
 pub(super) async fn probe_path(path: &Path) -> Result<Option<bool>, PathError> {
     let path = path
         .to_str()

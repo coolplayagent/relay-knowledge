@@ -130,6 +130,7 @@ jobs:
           paths::service_storage
           application::service::lifecycle_plan::checkpoint_storage_tests
           storage::sqlite::connection_runtime::path_access
+          storage::sqlite::connection_runtime::maintenance::tests::inspection_batch
           storage::partitioned::catalog::path_access_tests
           storage::sqlite::code::snapshot::repository_import::path_tests
 

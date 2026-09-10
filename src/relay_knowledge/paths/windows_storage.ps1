@@ -171,7 +171,7 @@ function Assert-RelayStoragePayload {
 }
 
 function Assert-RelayStoragePayloadTree {
-    param([System.IO.DirectoryInfo]$Data, [string]$Sid)
+    param([System.IO.DirectoryInfo]$Data, [string]$Sid, [switch]$ReparseOnly)
     # Enumerate lazily without following links. The process deadline bounds slow
     # ACL reads; explicit limits also bound memory and total work.
     $pending = [System.Collections.Stack]::new()
@@ -186,7 +186,12 @@ function Assert-RelayStoragePayloadTree {
                 $visited++
                 if ($visited -gt 65536) { throw 'Storage payload entry limit exceeded' }
                 $item = $iterator.Current
-                Assert-RelayStoragePayload $item $Sid
+                if ($ReparseOnly) {
+                    $item.Refresh()
+                    if (-not $item.Exists -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                        throw "Service payload must exist without reparse points: $($item.FullName)"
+                    }
+                } else { Assert-RelayStoragePayload $item $Sid }
                 if ($item -is [System.IO.DirectoryInfo]) {
                     $pending.Push(@{ Directory = $item; Depth = $entry.Depth + 1 })
                 }

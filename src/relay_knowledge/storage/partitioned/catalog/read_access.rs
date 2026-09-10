@@ -44,6 +44,21 @@ impl SqliteShardCatalog {
         }).await
     }
 
+    pub(in crate::storage::partitioned) async fn diagnostic_repository_ids(
+        &self,
+    ) -> Result<Vec<String>, StorageError> {
+        self.control.run_read(|connection| {
+            let limit = crate::storage::sqlite::MAX_SQLITE_DIAGNOSTIC_SHARDS;
+            let mut statement = connection.prepare("SELECT repository_id FROM storage_repository_shards WHERE state = 'active' ORDER BY repository_id ASC LIMIT ?1")?;
+            let ids = statement.query_map([limit + 1], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            if ids.len() > limit {
+                return Err(StorageError::InvalidInput("SQLite inspection exceeds 1024 active shards".to_owned()));
+            }
+            Ok(ids)
+        }).await
+    }
+
     pub(in crate::storage::partitioned) async fn existing_repository_store(
         &self,
         repository_id: String,

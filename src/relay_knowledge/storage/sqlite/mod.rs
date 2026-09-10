@@ -25,7 +25,7 @@ mod table_stats;
 
 pub(in crate::storage) use code::{preserve_existing_scope_commit, record_commit_scope};
 pub(in crate::storage) use connection_runtime::maintenance::{
-    configure_connection, read_only_database_diagnostics,
+    MAX_SQLITE_DIAGNOSTIC_SHARDS, configure_connection, read_only_shard_diagnostics,
 };
 pub(in crate::storage) use connection_runtime::path_access::validate_new_database_access;
 pub use store::SqliteGraphStore;

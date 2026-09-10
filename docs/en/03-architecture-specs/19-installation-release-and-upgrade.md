@@ -102,7 +102,9 @@ for topology snapshots; it never treats a cached permission result as authorizat
 for another pathname open. Cold topology reads validate their control database,
 recovery files, and ancestors before each fresh connection. Missing managed control
 files fail visibly on those path opens. This targeted check avoids unrelated shards.
-Immediately before SQLite opens, its factory creates the SID directory and `data`
+The synchronous partitioned entry point validates its control pathname with
+open-or-create policy before creating directories, opening SQLite, or running any
+schema migration. Immediately before SQLite opens, its factory creates the SID directory and `data`
 child with a protected DACL owned by the creating account, LocalSystem, or the
 Administrators group for delegated provisioning. It grants inheritable full
 control only to the account, SYSTEM, and Administrators. ACLs apply atomically at directory
@@ -125,7 +127,16 @@ first shard open additionally validates its own path components and sidecars in
 the existing blocking worker, owned by `catalog::store_access` and using the bounded async child process; cached
 shard handles skip that extra launch. The shared cache lock is released during
 security checks so unrelated cached repositories are not held behind them. Fresh shard diagnostic connections perform
-one batched tree validation for full graph inspection. The 500 ms health path instead
+one request-scoped tree validation for full graph inspection. The active-shard
+list comes from the retained control handle with a 1,024-shard cap, checked before
+filesystem work; exceeding it fails explicitly. Once its worker is admitted, the
+request validates the tree exactly once and consumes its read-only shard opens
+there, without another PowerShell process per shard. Managed trees retain full
+ACL checks; LocalSystem legacy/custom trees receive bounded reparse checks.
+The result never authorizes another request or writable open. Missing shards
+remain labeled errors and are never created. Cancellation terminates an active
+security child or stops before the next shard; only one SQLite reader is open
+at a time. The 500 ms health path instead
 reads the retained control pool and cached shard handles, preserving aggregate WAL,
 maintenance diagnostics and repository totals for warm shards. If any active shard
 has no cached handle, health returns stale, unhealthy `storage_cold` diagnostics
@@ -137,16 +148,17 @@ revalidates the control database, sidecars, and ancestors immediately before SQL
 attaches it; subsequent fenced mutations reuse the attached handle.
 Every fresh catalog read/write connection also recovers the reserved SID policy
 from its pathname and rechecks the database, sidecars, and ancestors immediately
-before opening. The same worker boundary guards repository-import attachments
-and fresh full-inspection connections. Cold factory topology reads keep their
+before opening. The same worker boundary guards repository-import attachments;
+full inspection uses the request-scoped batch above. Cold factory topology reads keep their
 cancellable async validation immediately before the read-only worker open; they
 do not launch a second security process inside that worker. Path decoding is capped at 4096
 bytes; security checks remain bounded child processes. Retained connections do
 not authorize later pathname opens, and health continues to use cached handles.
 Synchronous entry points do not require an ambient Tokio runtime: a scoped
 security thread owns its current-thread runtime and joins before return. Only
-one such worker/child is admitted; contention returns observable `Busy` rather
-than creating an unbounded queue. These APIs remain blocking; async applications
+one such worker/child is admitted. Up to 16 waiters use a condition variable
+with an 11-second admission deadline; ordinary overlap waits for the active
+check. Queue overflow or admission timeout returns observable `Busy`. These APIs remain blocking; async applications
 use the factory/SQLite worker boundaries. Cold topology diagnostics retain
 cancellable async admission; health never uses this synchronous worker to warm shards.
 Read-only checks never provision directories or repair existing ACLs.
@@ -201,7 +213,10 @@ uninstall remain storage-free; a missing directory can still be provisioned late
 The native Windows CI gate also runs restored-definition parsing and old/checkpointed
 storage preflight regressions, including Windows drive paths, SID recovery, shared-owner
 stability across principals, alias rejection, synchronous runtime independence,
-and replacement of a retained legacy directory by a link.
+replacement of a retained legacy directory by a link, validation before the first
+control open, bounded concurrent admission, and read-only inspection capacity
+and cancellation. Inspection also tests retained catalog reads without path
+reopening and preserves shard-specific missing-database errors.
 Native ACL regressions restore disposable fixtures from saved SDDL and verify
 the persisted permissions and protection before later cases, independent of
 Windows SDDL control-flag normalization, so injected permissions cannot leak.

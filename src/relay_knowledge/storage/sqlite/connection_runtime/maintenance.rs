@@ -114,10 +114,73 @@ pub(in crate::storage::sqlite) fn diagnostics(
     Ok(diagnostics)
 }
 
-pub(in crate::storage) fn read_only_database_diagnostics(
+pub(in crate::storage) const MAX_SQLITE_DIAGNOSTIC_SHARDS: usize = 1024;
+
+type ShardDiagnostic = (String, Result<SqliteStorageDiagnostics, StorageError>);
+
+/// Validates once, then consumes a bounded set of read-only shard opens within
+/// this request. Individual unvalidated opens stay private to this module.
+pub(in crate::storage) async fn read_only_shard_diagnostics(
+    paths: crate::paths::RuntimePaths,
+    repository_ids: Vec<String>,
+) -> Result<Vec<ShardDiagnostic>, StorageError> {
+    if repository_ids.len() > MAX_SQLITE_DIAGNOSTIC_SHARDS {
+        return Err(StorageError::InvalidInput(
+            "SQLite inspection exceeds 1024 active shards".to_owned(),
+        ));
+    }
+    // Dropping the request closes this receiver. The worker then stops before
+    // its next shard rather than finishing the remaining batch after cancellation.
+    let (mut request_alive, lifetime) = tokio::sync::oneshot::channel::<()>();
+    let result = tokio::task::spawn_blocking(move || {
+        // Validate after worker admission, immediately before this batch opens.
+        // Cancellation drops the validation future and terminates its child.
+        tokio::runtime::Handle::current().block_on(async {
+            tokio::select! {
+                biased;
+                _ = request_alive.closed() => Err(StorageError::Io(std::io::Error::new(std::io::ErrorKind::Interrupted, "SQLite inspection cancelled"))),
+                result = paths.ensure_storage_inspection_access() => result.map_err(|error| StorageError::InvalidInput(error.to_string())),
+            }
+        })?;
+        inspect_shards(&paths, repository_ids, request_alive)
+    }).await?;
+    drop(lifetime);
+    result
+}
+
+fn inspect_shards(
+    paths: &crate::paths::RuntimePaths,
+    repository_ids: Vec<String>,
+    request_alive: tokio::sync::oneshot::Sender<()>,
+) -> Result<Vec<ShardDiagnostic>, StorageError> {
+    let mut results = Vec::with_capacity(repository_ids.len());
+    for id in repository_ids {
+        if request_alive.is_closed() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "SQLite inspection cancelled",
+            )
+            .into());
+        }
+        let path = paths.repository_shard_database_file(&id);
+        let result = match std::fs::metadata(&path) {
+            Ok(_) => read_only_database_diagnostics(&path),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Err(StorageError::InvalidInput(format!(
+                    "repository shard '{}' is missing",
+                    path.display()
+                )))
+            }
+            Err(error) => Err(error.into()),
+        };
+        results.push((id, result));
+    }
+    Ok(results)
+}
+
+fn read_only_database_diagnostics(
     database_path: &Path,
 ) -> Result<SqliteStorageDiagnostics, StorageError> {
-    super::path_access::validate_new_database_access(database_path)?;
     let connection = Connection::open_with_flags(
         database_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,

@@ -118,7 +118,13 @@ with ambiguous Win32 spellings, are rejected; use an absolute local drive-letter
 paths keep operator-managed ACLs, but service preflight/startup and LocalSystem
 fresh opens reject reparse points in ancestors and SQLite/recovery files.
 Synchronous storage APIs use a bounded owned security worker; async callers use
-the factory. A busy security worker reports `Busy` without starting another worker.
+the factory. Up to 16 callers may wait for the single security worker, for at most
+11 seconds; only queue overflow or timeout reports `Busy`. A synchronous
+partitioned open validates the control path before directory creation, SQLite
+opening, or schema migration. Full graph inspection supports at most 1,024 active
+shards: it reads the existing control handle, validates the tree once on its worker,
+and reads each shard without initializing schema. Cancellation stops the security
+child or the remaining shard opens; health probes still reuse cached handles.
 Legacy directory discovery uses native Windows APIs and does not require PowerShell. This layout requires Windows PowerShell 5.1 and an ACL-capable local volume;
 use an explicitly configured private directory if D: cannot meet these conditions. `status --format json`
 shows the resolved directory. Config, logs, and other runtime directories retain

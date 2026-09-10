@@ -196,6 +196,19 @@ async fn privileged_storage_rejects_a_legacy_directory_replaced_by_a_link() {
         .ensure_privileged_service_storage(StorageDirectoryAccess::ExistingOnly)
         .await
         .unwrap();
+    windows_storage::validate_service_inspection_tree(&paths.database_file())
+        .await
+        .unwrap();
+    let payload_link = paths.data_dir.join("linked.sqlite");
+    std::os::windows::fs::symlink_file(paths.database_file(), &payload_link).unwrap();
+    assert!(
+        windows_storage::validate_service_inspection_tree(&paths.database_file())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("reparse")
+    );
+    std::fs::remove_file(payload_link).unwrap();
     let moved = root.join("moved-legacy-data");
     std::fs::rename(&paths.data_dir, &moved).unwrap();
     std::os::windows::fs::symlink_dir(&moved, &paths.data_dir).unwrap();

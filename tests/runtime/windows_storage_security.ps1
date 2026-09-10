@@ -173,6 +173,7 @@ try {
     New-Item -ItemType SymbolicLink -Path $fileLink -Target $database | Out-Null
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid } 'reparse points'
     Assert-Rejected { Assert-RelayServiceDatabasePath $fileLink } 'regular file'
+    Assert-Rejected { Assert-RelayStoragePayloadTree ([System.IO.DirectoryInfo]::new($data)) '' -ReparseOnly } 'reparse points'
     Assert-Rejected { Initialize-RelayPrivateStorage $data $sid -DatabasePath $fileLink } 'regular file'
     [System.IO.File]::Delete($fileLink)
     $removed = "$data\removed.sqlite"

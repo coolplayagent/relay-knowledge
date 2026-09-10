@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::paths::{RuntimePaths, StorageDirectoryAccess};
-use crate::storage::sqlite::read_only_database_diagnostics;
+use crate::paths::RuntimePaths;
+use crate::storage::sqlite::read_only_shard_diagnostics;
 use crate::storage::{
     CodeQueryReadStore, GraphInspection, GraphStore, HealthStorageSnapshot,
     SqliteStorageDiagnostics, StorageError, StorageTopologySnapshot,
@@ -102,39 +102,18 @@ async fn aggregate_sqlite_diagnostics(
     store: &PartitionedSqliteKnowledgeStore,
     control_sqlite: SqliteStorageDiagnostics,
 ) -> Result<SqliteStorageDiagnostics, StorageError> {
-    // Validate the existing payload set once before opening fresh diagnostic
-    // connections, instead of spawning one security process per repository.
-    store
-        .catalog
-        .paths
-        .ensure_storage_access(StorageDirectoryAccess::ExistingOnly)
-        .await
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let ids = store.catalog.diagnostic_repository_ids().await?;
+    let diagnostics = read_only_shard_diagnostics(store.catalog.paths.clone(), ids).await?;
     let mut aggregate = SqliteDiagnosticsAggregate::new();
     aggregate.push("control", control_sqlite);
-    for (repository_id, shard_path) in store.catalog.active_repository_database_paths().await? {
+    for (repository_id, result) in diagnostics {
         let label = format!("shard {repository_id}");
-        let diagnostics =
-            tokio::task::spawn_blocking(move || shard_sqlite_diagnostics(&shard_path)).await?;
-        match diagnostics {
-            Ok(diagnostics) => aggregate.push(format!("shard {repository_id}"), diagnostics),
+        match result {
+            Ok(diagnostics) => aggregate.push(label, diagnostics),
             Err(error) => aggregate.push_error(label, error),
         }
     }
     Ok(aggregate.finish())
-}
-
-fn shard_sqlite_diagnostics(shard_path: &Path) -> Result<SqliteStorageDiagnostics, StorageError> {
-    match std::fs::metadata(shard_path) {
-        Ok(_) => read_only_database_diagnostics(shard_path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err(StorageError::InvalidInput(format!(
-                "repository shard '{}' is missing",
-                shard_path.display()
-            )))
-        }
-        Err(error) => Err(error.into()),
-    }
 }
 
 struct SqliteDiagnosticsAggregate {

@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -10,6 +10,18 @@ use crate::{
     paths::{RuntimePaths, StorageDirectoryAccess},
     storage::{SqliteGraphStore, StorageError},
 };
+
+pub(in crate::storage::partitioned) fn open_control_store(
+    path: &Path,
+) -> Result<Arc<SqliteGraphStore>, StorageError> {
+    crate::storage::sqlite::validate_new_database_access(
+        path,
+        StorageDirectoryAccess::OpenOrCreate,
+    )?;
+    let control = Arc::new(SqliteGraphStore::open(path)?);
+    super::initialize_catalog_schema(path)?;
+    Ok(control)
+}
 
 pub(super) fn open_cached_repository_store(
     cache: &Arc<Mutex<HashMap<String, Arc<SqliteGraphStore>>>>,
