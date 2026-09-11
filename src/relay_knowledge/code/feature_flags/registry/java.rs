@@ -46,16 +46,17 @@ pub(super) fn extract(
         }
         if node.kind() == "method_invocation" {
             if let Some(mut row) = read(input, node)? {
-                if let Some(method) = flow::returning_method(node, input.content) {
+                if let Some((method, shadows)) = flow::returning_method(node, input.content) {
                     row.metadata.bindings = hierarchy.bindings(method, input.content)?;
+                    row.metadata.conversion_platform_owners = shadows;
+                    row.metadata.getter_overridable =
+                        Some(types::overridable(method, input.content));
                 } else if flow::inside_getter(node, input.content) {
                     row.metadata.flow_incomplete = Some("unsupported_getter_value_flow".into());
                 }
                 let (guards, conditional) = guard_sites(node, input.content)?;
-                if conditional {
-                    row.metadata
-                        .flow_incomplete
-                        .get_or_insert("conditional_reassignment".into());
+                if let Some(reason) = conditional {
+                    row.metadata.flow_incomplete.get_or_insert(reason.into());
                 }
                 for guard in guards {
                     let mut usage = record(
@@ -176,6 +177,8 @@ pub(super) fn extract(
                         method.end_byte(),
                     )?;
                     marker.metadata.reference = Some(own.clone());
+                    marker.metadata.getter_overridable =
+                        Some(types::overridable(method, input.content));
                     marker.metadata.bindings = bindings;
                     rows.push(marker);
                 }
@@ -298,10 +301,13 @@ fn read(
     row.metadata.reference = Some(key);
     Ok(Some(row))
 }
-fn guard_sites<'a>(node: Node<'a>, content: &str) -> Result<(Vec<Node<'a>>, bool), DomainError> {
+fn guard_sites<'a>(
+    node: Node<'a>,
+    content: &str,
+) -> Result<(Vec<Node<'a>>, Option<&'static str>), DomainError> {
     let mut current = node;
     let mut guards = Vec::new();
-    let mut incomplete = false;
+    let mut incomplete = None;
     while let Some(parent) = current.parent() {
         if parent.child_by_field_name("condition") == Some(current)
             && matches!(
@@ -384,7 +390,19 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Result<(Vec<Node<'a>>, bool
                         if definite_write(candidate, statement) {
                             return Ok((guards, incomplete));
                         }
-                        incomplete = true;
+                        incomplete = Some("conditional_reassignment");
+                    } else if matches!(
+                        candidate.kind(),
+                        "assignment_expression" | "variable_declarator"
+                    ) {
+                        let value = candidate
+                            .child_by_field_name("right")
+                            .or_else(|| candidate.child_by_field_name("value"));
+                        if let Some(value) = value {
+                            if contains_name(value, text(name, content), content, &mut budget)? {
+                                incomplete = Some("unsupported_local_alias");
+                            }
+                        }
                     }
                     if let Some(condition) = candidate.child_by_field_name("condition") {
                         if contains_name(condition, text(name, content), content, &mut budget)? {

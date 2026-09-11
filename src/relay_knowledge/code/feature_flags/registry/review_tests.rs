@@ -1,6 +1,106 @@
 //! Scope, truncation and literal-preservation review regressions.
 use super::*;
 #[test]
+fn numeric_addition_is_not_misreported_as_string_concatenation() {
+    let rows = facts(
+        "java",
+        r#"class App { void run() {
+        System.getProperty("port." + (1 + 2)); System.getProperty(1 + 2 + ".port");
+        System.getProperty("port." + 1 + 2); System.getProperty("port." + ("a" + "b"));
+    }}"#,
+    );
+    let keys = rows
+        .iter()
+        .filter(|r| r.edge_kind == "reads_config")
+        .map(|r| r.source_key.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(keys, ["port.12", "port.ab"]);
+}
+#[test]
+fn local_value_aliases_mark_guard_flow_incomplete() {
+    for alias in [
+        "boolean active = enabled;",
+        "active = enabled;",
+        "boolean active = !enabled;",
+    ] {
+        let source = format!(
+            "class App {{ void run() {{ boolean enabled = config.getBoolean(\"flag\"); {alias} if(active) {{}} }} }}"
+        );
+        let rows = facts("java", &source);
+        assert!(
+            rows.iter().any(|r| r.source_key == "flag"
+                && r.metadata.flow_incomplete.as_deref() == Some("unsupported_local_alias")),
+            "{rows:?}"
+        );
+    }
+}
+#[test]
+fn implicit_conversion_owners_carry_snapshot_shadow_requirements() {
+    for (owner, method) in [
+        ("Boolean", "parseBoolean"),
+        ("Integer", "parseInt"),
+        ("Long", "parseLong"),
+        ("Double", "parseDouble"),
+    ] {
+        let source = format!(
+            "package app; class Config {{ Object getX() {{ return {owner}.{method}(System.getProperty(\"flag\")); }} }}"
+        );
+        let rows = facts("java", &source);
+        let read = rows.iter().find(|r| r.source_key == "flag").unwrap();
+        assert_eq!(
+            read.metadata.conversion_platform_owners,
+            [format!("app.{owner}")]
+        );
+        for source in [
+            source.replace(
+                &format!("return {owner}."),
+                &format!("return java.lang.{owner}."),
+            ),
+            source.replace(
+                "package app;",
+                &format!("package app; import java.lang.{owner};"),
+            ),
+        ] {
+            let rows = facts("java", &source);
+            assert!(
+                rows.iter()
+                    .filter(|r| r.source_key == "flag")
+                    .all(|r| r.metadata.conversion_platform_owners.is_empty())
+            );
+        }
+        assert!(
+            facts("java", &format!("package app; class {owner} {{}}"))
+                .iter()
+                .any(|r| r.source_key == format!("app.{owner}")
+                    && r.edge_kind == "config_type_declaration")
+        );
+    }
+}
+#[test]
+fn static_and_private_getters_do_not_provide_ancestor_bindings() {
+    for modifier in ["static", "private"] {
+        let rows = facts(
+            "java",
+            &format!(
+                "class Base {{}} class Child extends Base {{ {modifier} String getX() {{ return System.getProperty(\"flag\"); }} {modifier} String getUnknown() {{ return arbitrary(); }} }}"
+            ),
+        );
+        for row in rows
+            .iter()
+            .filter(|r| r.source_key == "flag" || r.edge_kind == "declares_config_getter")
+        {
+            assert_eq!(row.metadata.getter_overridable, Some(false));
+            assert!(
+                row.metadata
+                    .bindings
+                    .iter()
+                    .all(|b| b.starts_with("Child.")),
+                "{row:?}"
+            );
+        }
+    }
+}
+#[test]
 fn annotation_blank_lines_are_boundaries_for_all_natural_line_endings() {
     // Exercise natural-line metadata boundaries independently of parser newline rules.
     let annotation = |source: &str| {

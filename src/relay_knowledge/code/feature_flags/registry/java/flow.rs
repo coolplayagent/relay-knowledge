@@ -2,15 +2,20 @@
 use super::names;
 use tree_sitter::Node;
 
-pub(super) fn returning_method<'a>(mut node: Node<'a>, content: &str) -> Option<Node<'a>> {
+pub(super) fn returning_method<'a>(
+    mut node: Node<'a>,
+    content: &str,
+) -> Option<(Node<'a>, Vec<String>)> {
+    let mut shadows = std::collections::BTreeSet::new();
     for _ in 0..32 {
         let parent = node.parent()?;
         match parent.kind() {
             "parenthesized_expression" | "cast_expression" => node = parent,
             "argument_list" if parent.named_child_count() == 1 => {
                 let call = parent.parent()?;
-                if !conversion(call, content) {
-                    return None;
+                let owner = conversion(call, content)?;
+                if let Some(shadow) = super::types::platform_shadow(call, owner, content) {
+                    shadows.insert(shadow);
                 }
                 node = call;
             }
@@ -26,33 +31,32 @@ pub(super) fn returning_method<'a>(mut node: Node<'a>, content: &str) -> Option<
                             .count()
                             == 1
                 })?;
-                return body.parent().filter(|method| {
-                    method.kind() == "method_declaration"
-                        && method
-                            .child_by_field_name("parameters")
-                            .is_some_and(|p| p.named_child_count() == 0)
-                });
+                return body
+                    .parent()
+                    .filter(|method| {
+                        method.kind() == "method_declaration"
+                            && method
+                                .child_by_field_name("parameters")
+                                .is_some_and(|p| p.named_child_count() == 0)
+                    })
+                    .map(|method| (method, shadows.into_iter().collect()));
             }
             _ => return None,
         }
     }
     None
 }
-fn conversion(call: Node<'_>, content: &str) -> bool {
+fn conversion<'a>(call: Node<'_>, content: &'a str) -> Option<&'a str> {
     if call.kind() != "method_invocation" {
-        return false;
+        return None;
     }
-    let Some(name) = call.child_by_field_name("name") else {
-        return false;
-    };
+    let name = call.child_by_field_name("name")?;
     let method = names::text(name, content);
     let owner = call
         .child_by_field_name("object")
         .map(|n| names::text(n, content))
         .or_else(|| names::static_owner(call, method, content));
-    let Some(owner) = owner else {
-        return false;
-    };
+    let owner = owner?;
     let simple = owner.strip_prefix("java.lang.").unwrap_or(owner);
     let supported = matches!(
         (simple, method),
@@ -61,7 +65,9 @@ fn conversion(call: Node<'_>, content: &str) -> bool {
             | ("Long", "parseLong" | "valueOf")
             | ("Double", "parseDouble" | "valueOf")
     );
-    supported && (owner.starts_with("java.lang.") || names::platform_visible(call, simple, content))
+    (supported
+        && (owner.starts_with("java.lang.") || names::platform_visible(call, simple, content)))
+    .then_some(owner)
 }
 pub(super) fn inside_getter(mut node: Node<'_>, content: &str) -> bool {
     while let Some(parent) = node.parent() {

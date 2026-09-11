@@ -10,6 +10,12 @@ pub struct CodeConfigMetadata {
     /// Same-package type whose presence invalidates an implicit java.lang read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub implicit_platform_owner: Option<String>,
+    /// Same-package types that would invalidate transparent getter conversions.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub conversion_platform_owners: Vec<String>,
+    /// Whether a proven getter participates in Java overriding; absent for other facts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub getter_overridable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

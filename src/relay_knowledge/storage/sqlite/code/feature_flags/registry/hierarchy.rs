@@ -57,6 +57,17 @@ impl Hierarchy {
                 .as_ref()
                 .is_none_or(|owner| !self.declarations.contains(owner))
         });
+        for row in rows {
+            if row
+                .metadata
+                .conversion_platform_owners
+                .iter()
+                .any(|owner| self.declarations.contains(owner))
+            {
+                row.metadata.bindings.clear();
+                row.metadata.flow_incomplete = Some("shadowed_platform_conversion".into());
+            }
+        }
     }
     fn related(&self, symbol: &str, descendants: bool) -> Result<BTreeSet<String>, StorageError> {
         let Some((owner, method)) = symbol.rsplit_once('.') else {
@@ -106,6 +117,7 @@ impl Hierarchy {
         let mut retained_bytes = rows.iter().map(row_size).sum::<usize>();
         for row in rows {
             if row.language_id != "java"
+                || row.metadata.getter_overridable == Some(false)
                 || matches!(
                     row.edge_kind.as_str(),
                     "declares_config_key" | "declares_string_constant"

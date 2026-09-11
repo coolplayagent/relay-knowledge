@@ -139,7 +139,10 @@ impl Hierarchy {
             row.metadata.bindings = parents.clone();
             facts.push(row);
         }
-        if matches!(names::text(name, input.content), "System" | "Boolean") {
+        if matches!(
+            names::text(name, input.content),
+            "System" | "Boolean" | "Integer" | "Long" | "Double"
+        ) {
             facts.push(super::super::record(
                 input,
                 "config_symbol",
@@ -164,6 +167,9 @@ impl Hierarchy {
             .trim_end_matches('.')
             .to_owned();
         let mut result = vec![format!("{owner}.{name}")];
+        if !overridable(method, content) {
+            return Ok(result);
+        }
         let mut seen = BTreeSet::from([owner.clone()]);
         let mut pending = vec![owner];
         while let Some(owner) = pending.pop() {
@@ -184,6 +190,15 @@ impl Hierarchy {
     }
 }
 
+pub(super) fn overridable(method: Node<'_>, content: &str) -> bool {
+    let mut cursor = method.walk();
+    !method.named_children(&mut cursor).any(|child| {
+        child.kind() == "modifiers"
+            && names::text(child, content)
+                .split_whitespace()
+                .any(|word| matches!(word, "static" | "private"))
+    })
+}
 pub(super) fn static_receiver(node: Node<'_>, content: &str) -> Option<String> {
     let raw = names::text(node, content);
     let head = raw.split('.').next()?;
@@ -226,7 +241,7 @@ pub(super) fn static_receiver(node: Node<'_>, content: &str) -> Option<String> {
     Some(names::qualified(node, raw, content))
 }
 pub(super) fn platform_shadow(mut node: Node<'_>, owner: &str, content: &str) -> Option<String> {
-    if !matches!(owner, "System" | "Boolean") {
+    if !matches!(owner, "System" | "Boolean" | "Integer" | "Long" | "Double") {
         return None;
     }
     while let Some(parent) = node.parent() {

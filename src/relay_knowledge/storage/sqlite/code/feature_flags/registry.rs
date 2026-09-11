@@ -72,10 +72,10 @@ fn search_bounded(
     let query = feature_flag_sql_query(scope, status, request, &terms);
     let mut rows = load(connection, &query.sql, &query.params)?;
     let mut type_hierarchy = None;
-    if rows
-        .iter()
-        .any(|row| row.metadata.implicit_platform_owner.is_some())
-    {
+    if rows.iter().any(|row| {
+        row.metadata.implicit_platform_owner.is_some()
+            || !row.metadata.conversion_platform_owners.is_empty()
+    }) {
         let hierarchy = hierarchy::Hierarchy::load(connection, scope, status, request)?;
         hierarchy.filter_platform_reads(&mut rows);
         type_hierarchy = Some(hierarchy);
@@ -418,6 +418,7 @@ fn row_size(row: &FeatureFlagRow) -> usize {
             .map_or(0, String::len)
         + row.related_symbol_name.as_ref().map_or(0, String::len)
         + row.metadata.bindings.capacity() * std::mem::size_of::<String>()
+        + row.metadata.conversion_platform_owners.capacity() * std::mem::size_of::<String>()
         + serde_json::to_vec(&row.metadata).map_or(MAX_BYTES, |value| value.len())
 }
 

@@ -198,6 +198,30 @@ async fn feature_flags_resolve_platform_shadows_and_static_getters_across_files(
     let repo = FixtureRepo::create("cross-file-platform-shadows");
     for (path, source) in [
         (
+            "src/Integer.java",
+            "package app; class Integer { static int parseInt(String key) { return 7; } }",
+        ),
+        (
+            "src/ConversionConfig.java",
+            "package app; class ConversionConfig { int getPort() { return Integer.parseInt(java.lang.System.getProperty(\"port\")); } int getRealPort() { return java.lang.Integer.parseInt(java.lang.System.getProperty(\"real_port\")); } }",
+        ),
+        (
+            "src/ConversionCaller.java",
+            "package app; class ConversionCaller { void run(ConversionConfig config) { if(config.getPort() > 0) {} if(config.getRealPort() > 0) {} } }",
+        ),
+        (
+            "src/Base.java",
+            "package app; class Base { static boolean isX() { return java.lang.Boolean.getBoolean(\"base_flag\"); } }",
+        ),
+        (
+            "src/Child.java",
+            "package app; class Child extends Base { static boolean isX() { return java.lang.Boolean.getBoolean(\"child_flag\"); } }",
+        ),
+        (
+            "src/StaticCaller.java",
+            "package app; class StaticCaller { void run() { if(app.Base.isX()) {} } }",
+        ),
+        (
             "src/System.java",
             "package app; class System { static String getProperty(String key) { return key; } }",
         ),
@@ -263,6 +287,50 @@ async fn feature_flags_resolve_platform_shadows_and_static_getters_across_files(
                 .any(|f| f.source_key.starts_with("fake_"))
         );
         if path == "src" {
+            let port = response
+                .flags
+                .iter()
+                .find(|f| f.source_key == "port")
+                .unwrap();
+            assert!(!port.analysis_complete);
+            assert!(
+                !port
+                    .usages
+                    .iter()
+                    .any(|u| u.path == "src/ConversionCaller.java")
+            );
+            let real_port = response
+                .flags
+                .iter()
+                .find(|f| f.source_key == "real_port")
+                .unwrap();
+            assert!(
+                real_port
+                    .usages
+                    .iter()
+                    .any(|u| u.path == "src/ConversionCaller.java" && u.edge_kind == "guards_code")
+            );
+            let base = response
+                .flags
+                .iter()
+                .find(|f| f.source_key == "base_flag")
+                .unwrap();
+            assert!(
+                base.usages
+                    .iter()
+                    .any(|u| u.path == "src/StaticCaller.java" && u.edge_kind == "guards_code")
+            );
+            let child = response
+                .flags
+                .iter()
+                .find(|f| f.source_key == "child_flag")
+                .unwrap();
+            assert!(
+                !child
+                    .usages
+                    .iter()
+                    .any(|u| u.path == "src/StaticCaller.java")
+            );
             assert!(response.flags.iter().any(|f| f.source_key == "explicit"));
             assert!(response.flags.iter().any(|f| {
                 f.source_key == "static_flag"

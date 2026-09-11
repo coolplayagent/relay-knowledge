@@ -1,6 +1,92 @@
 //! Regression cases from the configuration registry code review.
 use super::*;
 #[test]
+fn snapshot_conversion_shadows_clear_getter_bindings_but_keep_reads() {
+    let db = fixture();
+    add(
+        &db,
+        "app.Integer",
+        "config_symbol",
+        "config_type_declaration",
+        CodeConfigMetadata::default(),
+    );
+    db.execute(
+        "UPDATE code_repository_feature_flags SET path='src/Integer.java'",
+        [],
+    )
+    .unwrap();
+    add(
+        &db,
+        "port",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            bindings: vec!["app.Config.getPort".into()],
+            conversion_platform_owners: vec!["app.Integer".into()],
+            ..Default::default()
+        },
+    );
+    db.execute(
+        "UPDATE code_repository_feature_flags SET path='src/Config.java' WHERE source_key='port'",
+        [],
+    )
+    .unwrap();
+    let mut query = request(None, CodeConfigFilter::default());
+    query.repository.path_filters = vec!["src/Config.java".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert_eq!(groups.len(), 1);
+    assert!(!groups[0].analysis_complete);
+    assert!(
+        groups[0]
+            .usages
+            .iter()
+            .all(|u| u.metadata.bindings.is_empty())
+    );
+    db.execute("UPDATE code_repository_feature_flags SET source_scope='old' WHERE edge_kind='config_type_declaration'", []).unwrap();
+    let groups = search(&db, &status(), &query).unwrap();
+    assert!(
+        groups[0]
+            .usages
+            .iter()
+            .any(|u| u.metadata.bindings.contains(&"app.Config.getPort".into()))
+    );
+}
+#[test]
+fn snapshot_hierarchy_does_not_expand_nonvirtual_getter_providers() {
+    let db = fixture();
+    add(
+        &db,
+        "Child",
+        "config_symbol",
+        "config_type_hierarchy",
+        CodeConfigMetadata {
+            bindings: vec!["Base".into()],
+            ..Default::default()
+        },
+    );
+    for (key, owner) in [("base", "Base"), ("child", "Child")] {
+        add(
+            &db,
+            key,
+            "config_key",
+            "reads_config",
+            CodeConfigMetadata {
+                bindings: vec![format!("{owner}.getX")],
+                getter_overridable: Some(false),
+                ..Default::default()
+            },
+        );
+    }
+    let groups = search(
+        &db,
+        &status(),
+        &request(Some("Base.getX"), CodeConfigFilter::default()),
+    )
+    .unwrap();
+    assert_eq!(groups.len(), 1, "{groups:?}");
+    assert_eq!(groups[0].source_key, "base");
+}
+#[test]
 fn unicode_case_variants_receive_identical_query_scores() {
     let db = fixture();
     for key in ["ÜBER", "über"] {

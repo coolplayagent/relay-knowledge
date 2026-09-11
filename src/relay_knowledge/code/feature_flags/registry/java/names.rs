@@ -167,7 +167,8 @@ fn literal_bounded(
         "binary_expression"
             if node
                 .child_by_field_name("operator")
-                .is_some_and(|op| text(op, content) == "+") =>
+                .is_some_and(|op| text(op, content) == "+")
+                && string_expression(node, content, depth) =>
         {
             Some(format!(
                 "{}{}",
