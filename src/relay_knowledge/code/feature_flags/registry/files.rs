@@ -1,6 +1,7 @@
 //! Properties/INI/template values and exported shell configuration facts.
 use super::*;
 mod go_strings;
+pub(super) const PROPERTY_WHITESPACE: [char; 3] = [' ', '\t', '\u{c}'];
 mod pipelines;
 
 pub(super) fn extract(
@@ -28,10 +29,12 @@ pub(super) fn extract(
         logical.push_str(if logical.is_empty() {
             line
         } else {
-            line.trim_start()
+            line.trim_start_matches(PROPERTY_WHITESPACE)
         });
         if input.language_id == "properties"
-            && !logical.trim_start().starts_with(['#', '!'])
+            && !logical
+                .trim_start_matches(PROPERTY_WHITESPACE)
+                .starts_with(['#', '!'])
             && logical.chars().rev().take_while(|c| *c == '\\').count() % 2 == 1
         {
             logical.pop();
@@ -40,7 +43,7 @@ pub(super) fn extract(
             }
         }
         let line = if input.language_id == "properties" {
-            logical.trim_start()
+            logical.trim_start_matches(PROPERTY_WHITESPACE)
         } else {
             logical.trim()
         };
@@ -112,9 +115,19 @@ fn assignment(line: &str, properties: bool) -> Option<(&str, &str)> {
             escape = true;
             continue;
         }
-        if ch == '=' || ch == ':' || (properties && ch.is_whitespace()) {
-            let tail = line[index..].trim_start();
-            let tail = tail.strip_prefix(['=', ':']).unwrap_or(tail).trim_start();
+        if ch == '=' || ch == ':' || (properties && PROPERTY_WHITESPACE.contains(&ch)) {
+            let whitespace = |ch: char| {
+                if properties {
+                    PROPERTY_WHITESPACE.contains(&ch)
+                } else {
+                    ch.is_whitespace()
+                }
+            };
+            let tail = line[index..].trim_start_matches(whitespace);
+            let tail = tail
+                .strip_prefix(['=', ':'])
+                .unwrap_or(tail)
+                .trim_start_matches(whitespace);
             return Some((
                 if properties {
                     &line[..index]

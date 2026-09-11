@@ -79,13 +79,34 @@ fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadat
     let line_start = input.content[..start]
         .rfind(['\r', '\n'])
         .map_or(0, |i| i + 1);
-    for line in input.content[..line_start]
-        .split(['\r', '\n'])
-        .rev()
-        .filter(|line| !line.is_empty())
-        .take(3)
-    {
-        let line = line.trim();
+    let prefix = &input.content[..line_start];
+    let block = if input.language_id == "java" && prefix.trim_end().ends_with("*/") {
+        prefix
+            .rfind("/*")
+            .filter(|begin| {
+                prefix.len() - begin <= 8192
+                    && prefix[*begin..].lines().count() <= 32
+                    && prefix[..*begin]
+                        .rsplit(['\r', '\n'])
+                        .next()
+                        .is_some_and(|line| line.trim().is_empty())
+            })
+            .map(|begin| &prefix[begin..])
+    } else {
+        None
+    };
+    for line in block.into_iter().chain(
+        prefix
+            .split(['\r', '\n'])
+            .rev()
+            .filter(|line| !line.is_empty())
+            .take(3),
+    ) {
+        let line = if input.language_id == "properties" {
+            line.trim_matches(files::PROPERTY_WHITESPACE)
+        } else {
+            line.trim()
+        };
         let comment = match input.language_id {
             "java" => line
                 .strip_prefix("//")

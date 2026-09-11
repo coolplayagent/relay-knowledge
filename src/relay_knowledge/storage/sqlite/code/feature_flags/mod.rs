@@ -146,7 +146,8 @@ fn feature_flag_sql_query(
             filter_params.push(value);
         }
     }
-    where_clause.push_str(" AND flag.edge_kind != 'declares_config_getter'");
+    where_clause
+        .push_str(" AND flag.edge_kind NOT IN ('declares_config_getter','config_type_hierarchy')");
     if terms.is_empty()
         && request.filters.domain.is_none()
         && request.filters.source.is_none()

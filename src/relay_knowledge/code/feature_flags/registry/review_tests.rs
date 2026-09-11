@@ -495,3 +495,114 @@ fn direct_java_config_readers_retain_legacy_keys_and_guards() {
             .any(|r| matches!(r.source_key.as_str(), "fake" | "comment"))
     );
 }
+
+#[test]
+fn java_emits_snapshot_hierarchy_facts_for_parent_only_files() {
+    let rows = facts("java", "package app; interface Child extends Base {}");
+    let row = rows
+        .iter()
+        .find(|r| r.edge_kind == "config_type_hierarchy")
+        .unwrap();
+    assert_eq!(row.source_key, "app.Child");
+    assert_eq!(row.metadata.bindings, ["app.Base"]);
+}
+#[test]
+fn conditional_reassignment_retains_possible_guards_as_incomplete_flow() {
+    let rows = facts(
+        "java",
+        r#"class App { void run(Config config) {
+      boolean enabled=config.getX(); if(override) enabled=false; if(enabled) {}
+    }}"#,
+    );
+    assert!(
+        rows.iter().any(|r| r.edge_kind == "guards_code"
+            && r.metadata.reference.as_deref() == Some("Config.getX"))
+    );
+    assert!(rows.iter().any(|r| r.edge_kind == "reads_config"
+        && r.metadata.flow_incomplete.as_deref() == Some("conditional_reassignment")));
+}
+#[test]
+fn boolean_reader_methods_provide_boolean_type_evidence() {
+    for method in [
+        "getBoolean",
+        "get_bool",
+        "get_boolean",
+        "enabled",
+        "is_enabled",
+    ] {
+        let rows = facts(
+            "java",
+            &format!("class App {{ void run() {{ config.{method}(\"flag\"); }} }}"),
+        );
+        assert_eq!(rows[0].metadata.value_type.as_deref(), Some("boolean"));
+    }
+}
+#[test]
+fn properties_non_java_whitespace_remains_key_and_value_content() {
+    let rows = facts(
+        "properties",
+        "\u{a0}feature\u{a0}name=\u{a0}value\n\tother\u{c}=\ttrue\n",
+    );
+    assert_eq!(rows[0].source_key, "\u{a0}feature\u{a0}name");
+    assert_eq!(
+        rows[0].metadata.default_value.as_deref(),
+        Some("\u{a0}value")
+    );
+    assert_eq!(rows[1].source_key, "other");
+    assert_eq!(rows[1].metadata.default_value.as_deref(), Some("true"));
+    let rows = facts("properties", "\u{a0}# @config domain=fake\nflag=true\n");
+    assert!(rows.iter().all(|row| row.metadata.domain.is_none()));
+}
+#[test]
+fn shell_tilde_expansion_defaults_remain_unknown() {
+    let rows = facts(
+        "bash",
+        "export A=~/cache; export B=first:~user/cache; export C='~/cache'; export D=literal~suffix",
+    );
+    for key in ["A", "B"] {
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == key && r.metadata.default_value.is_none())
+        );
+    }
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "C" && r.metadata.default_value.as_deref() == Some("~/cache"))
+    );
+    assert!(
+        rows.iter().any(|r| r.source_key == "D"
+            && r.metadata.default_value.as_deref() == Some("literal~suffix"))
+    );
+}
+#[test]
+fn java_multiline_block_comments_supply_explicit_metadata() {
+    for begin in ["/*", "/**"] {
+        let rows = facts(
+            "java",
+            &format!(
+                "class App {{ void run() {{\n{begin}\n * @config domain=payments hot-reload=true\n */\nSystem.getProperty(\"flag\"); }} }}"
+            ),
+        );
+        assert_eq!(rows[0].metadata.domain.as_deref(), Some("payments"));
+        assert_eq!(rows[0].metadata.hot_reload, Some(true));
+    }
+}
+#[test]
+fn shell_prior_assignment_budget_exhaustion_is_explicit() {
+    let source = format!("FLAG=value; {}export FLAG", "echo ignored; ".repeat(1100));
+    let error = extract(&FeatureFlagFileInput {
+        repository_id: "repo",
+        source_scope: "scope",
+        file_id: "file",
+        path: "config.sh",
+        language_id: "bash",
+        content: &source,
+        config_facts: &[],
+    })
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("prior assignment analysis incomplete")
+    );
+}

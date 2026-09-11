@@ -108,6 +108,35 @@ impl Hierarchy {
             }
         }
     }
+    pub(super) fn fact(
+        &self,
+        input: &super::FeatureFlagFileInput<'_>,
+        node: Node<'_>,
+    ) -> Result<Option<crate::domain::CodeFeatureFlagRecord>, DomainError> {
+        if !is_type(node) {
+            return Ok(None);
+        }
+        let Some(name) = node.child_by_field_name("name") else {
+            return Ok(None);
+        };
+        let owner = names::field_symbol(node, names::text(name, input.content), input.content);
+        let Some(parents) = self.0.get(&owner).filter(|parents| !parents.is_empty()) else {
+            return Ok(None);
+        };
+        let end = node
+            .child_by_field_name("body")
+            .map_or(name.end_byte(), |body| body.start_byte());
+        let mut row = super::super::record(
+            input,
+            "config_symbol",
+            &owner,
+            "config_type_hierarchy",
+            node.start_byte(),
+            end,
+        )?;
+        row.metadata.bindings = parents.clone();
+        Ok(Some(row))
+    }
     pub(super) fn bindings(
         &self,
         method: Node<'_>,

@@ -3,6 +3,7 @@ use super::*;
 mod connectivity;
 mod consistency;
 mod evidence;
+mod hierarchy;
 mod resolution;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub(super) const MAX_ROWS: usize = 10_000;
@@ -76,6 +77,7 @@ fn search_bounded(
         .collect::<BTreeSet<_>>();
     let mut queried = BTreeSet::new();
     let mut evidence_groups = BTreeSet::new();
+    let mut type_hierarchy = None;
     for round in 0..4 {
         let keys = rows
             .iter()
@@ -91,6 +93,19 @@ fn search_bounded(
         if keys.is_empty() {
             break;
         }
+        if type_hierarchy.is_none() {
+            type_hierarchy = Some(hierarchy::Hierarchy::load(
+                connection, scope, status, request,
+            )?);
+        }
+        let hierarchy = type_hierarchy.as_ref().unwrap();
+        let keys = hierarchy
+            .expand(&keys)?
+            .difference(&queried)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        hierarchy.augment(&mut rows)?;
+        check_size(&rows)?;
         if keys.len() + queried.len() > 1000 {
             return Err(incomplete("symbol binding budget exceeded"));
         }
@@ -113,6 +128,8 @@ fn search_bounded(
             }
             check_size(&rows)?;
         }
+        hierarchy.augment(&mut rows)?;
+        check_size(&rows)?;
         queried.extend(keys);
         evidence::complete_groups(
             connection,
@@ -123,6 +140,8 @@ fn search_bounded(
             &mut seen,
             &mut evidence_groups,
         )?;
+        hierarchy.augment(&mut rows)?;
+        check_size(&rows)?;
         if round == 3
             && rows.iter().any(|row| {
                 row.metadata

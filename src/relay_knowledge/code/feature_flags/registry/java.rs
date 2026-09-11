@@ -25,6 +25,9 @@ pub(super) fn extract(
     let mut methods = Vec::new();
     loop {
         let node = cursor.node();
+        if let Some(row) = hierarchy.fact(input, node)? {
+            rows.push(row);
+        }
         if node.kind() == "method_declaration"
             && node.child_by_field_name("name").is_some_and(|name| {
                 let name = text(name, input.content);
@@ -50,7 +53,12 @@ pub(super) fn extract(
                 } else if flow::inside_getter(node, input.content) {
                     row.metadata.flow_incomplete = Some("unsupported_getter_value_flow".into());
                 }
-                let guards = guard_sites(node, input.content)?;
+                let (guards, conditional) = guard_sites(node, input.content)?;
+                if conditional {
+                    row.metadata
+                        .flow_incomplete
+                        .get_or_insert("conditional_reassignment".into());
+                }
                 for guard in guards {
                     let mut usage = record(
                         input,
@@ -235,7 +243,10 @@ fn read(
         )?;
         row.metadata.reference = reference;
         row.metadata.value_type = Some(
-            if method == "getBoolean" && is_boolean {
+            if matches!(
+                method,
+                "getBoolean" | "get_bool" | "get_boolean" | "enabled" | "is_enabled"
+            ) {
                 "boolean"
             } else {
                 "string"
@@ -279,9 +290,10 @@ fn read(
     row.metadata.reference = Some(key);
     Ok(Some(row))
 }
-fn guard_sites<'a>(node: Node<'a>, content: &str) -> Result<Vec<Node<'a>>, DomainError> {
+fn guard_sites<'a>(node: Node<'a>, content: &str) -> Result<(Vec<Node<'a>>, bool), DomainError> {
     let mut current = node;
     let mut guards = Vec::new();
+    let mut incomplete = false;
     while let Some(parent) = current.parent() {
         if parent.child_by_field_name("condition") == Some(current)
             && matches!(
@@ -294,7 +306,7 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Result<Vec<Node<'a>>, Domai
             )
         {
             guards.push(current);
-            return Ok(guards);
+            return Ok((guards, incomplete));
         }
         let assigned = if parent.kind() == "variable_declarator"
             && parent.child_by_field_name("value") == Some(current)
@@ -359,7 +371,10 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Result<Vec<Node<'a>>, Domai
                         _ => None,
                     };
                     if write.is_some_and(|write| text(write, content) == text(name, content)) {
-                        return Ok(guards);
+                        if definite_write(candidate, statement) {
+                            return Ok((guards, incomplete));
+                        }
+                        incomplete = true;
                     }
                     if let Some(condition) = candidate.child_by_field_name("condition") {
                         if contains_name(condition, text(name, content), content, &mut budget)? {
@@ -381,7 +396,7 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Result<Vec<Node<'a>>, Domai
                 }
                 next = statement.next_named_sibling();
             }
-            return Ok(guards);
+            return Ok((guards, incomplete));
         }
         if matches!(
             parent.kind(),
@@ -392,11 +407,37 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Result<Vec<Node<'a>>, Domai
                 | "method_declaration"
                 | "lambda_expression"
         ) {
-            return Ok(guards);
+            return Ok((guards, incomplete));
         }
         current = parent;
     }
-    Ok(guards)
+    Ok((guards, incomplete))
+}
+fn definite_write(mut node: Node<'_>, statement: Node<'_>) -> bool {
+    for _ in 0..64 {
+        if matches!(
+            node.kind(),
+            "if_statement"
+                | "switch_expression"
+                | "switch_statement"
+                | "for_statement"
+                | "enhanced_for_statement"
+                | "while_statement"
+                | "do_statement"
+                | "ternary_expression"
+                | "try_statement"
+        ) {
+            return false;
+        }
+        if node == statement {
+            return true;
+        }
+        let Some(parent) = node.parent() else {
+            return false;
+        };
+        node = parent;
+    }
+    false
 }
 fn contains_name(
     node: Node<'_>,

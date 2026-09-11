@@ -681,3 +681,138 @@ fn directly_stale_or_degraded_scopes_suppress_loaded_default_conflicts() {
         );
     }
 }
+
+#[test]
+fn sdk_owned_reads_do_not_require_repository_definitions() {
+    let db = fixture();
+    add(
+        &db,
+        "flag",
+        "sdk_flag_key",
+        "reads_config",
+        CodeConfigMetadata::default(),
+    );
+    let groups = search(
+        &db,
+        &status(),
+        &request(
+            None,
+            CodeConfigFilter {
+                consistency: true,
+                ..Default::default()
+            },
+        ),
+    )
+    .unwrap();
+    assert_eq!(groups.len(), 1);
+    assert!(
+        !groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d == "read_without_definition")
+    );
+}
+#[test]
+fn snapshot_hierarchy_resolves_cross_file_getter_evidence_and_respects_scope() {
+    let db = fixture();
+    for (owner, parent) in [("app.Impl", "app.Child"), ("app.Child", "app.Base")] {
+        add(
+            &db,
+            owner,
+            "config_symbol",
+            "config_type_hierarchy",
+            CodeConfigMetadata {
+                bindings: vec![parent.into()],
+                ..Default::default()
+            },
+        );
+    }
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            bindings: vec!["app.Impl.getX".into()],
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "app.Base.getX",
+        "config_symbol",
+        "guards_code",
+        CodeConfigMetadata {
+            reference: Some("app.Base.getX".into()),
+            domain: Some("business".into()),
+            ..Default::default()
+        },
+    );
+    for term in [None, Some("Base")] {
+        let groups = search(
+            &db,
+            &status(),
+            &request(
+                term,
+                CodeConfigFilter {
+                    domain: Some("business".into()),
+                    ..Default::default()
+                },
+            ),
+        )
+        .unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].source_key, "flag");
+        assert!(groups[0].analysis_complete);
+        assert!(
+            groups[0]
+                .usages
+                .iter()
+                .any(|u| u.edge_kind == "guards_code")
+        );
+        assert!(
+            !groups[0]
+                .usages
+                .iter()
+                .any(|u| u.edge_kind == "config_type_hierarchy")
+        );
+    }
+    db.execute("UPDATE code_repository_feature_flags SET source_scope='historical' WHERE edge_kind='config_type_hierarchy'", []).unwrap();
+    assert!(
+        search(
+            &db,
+            &status(),
+            &request(Some("Base"), CodeConfigFilter::default())
+        )
+        .unwrap()
+        .is_empty()
+    );
+}
+#[test]
+fn snapshot_hierarchy_closure_budget_is_enforced() {
+    let db = fixture();
+    for index in 0..65 {
+        add(
+            &db,
+            &format!("T{index}"),
+            "config_symbol",
+            "config_type_hierarchy",
+            CodeConfigMetadata {
+                bindings: vec![format!("T{}", index + 1)],
+                ..Default::default()
+            },
+        );
+    }
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            bindings: vec!["T0.getX".into()],
+            ..Default::default()
+        },
+    );
+    let error = search(&db, &status(), &request(None, CodeConfigFilter::default())).unwrap_err();
+    assert!(error.to_string().contains("type closure budget exceeded"));
+}

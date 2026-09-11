@@ -119,3 +119,76 @@ async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_a
             .all(|usage| usage.path == "src/a.rs")
     );
 }
+
+#[tokio::test]
+async fn feature_flags_resolve_transitive_getters_across_indexed_java_files() {
+    let repo = FixtureRepo::create("cross-file-config-hierarchy");
+    for (path, source) in [
+        (
+            "src/Base.java",
+            "package app; interface Base { boolean getX(); }",
+        ),
+        (
+            "src/Child.java",
+            "package app; interface Child extends Base {}",
+        ),
+        (
+            "src/Impl.java",
+            "package app; class Impl implements Child { public boolean getX() { return Boolean.getBoolean(\"flag\"); } }",
+        ),
+        (
+            "src/Reader.java",
+            "package app; class Reader { void run(Base config) {\n// @config domain=business\nif(config.getX()) {} } }",
+        ),
+        ("src/flags.properties", "flag=false\n"),
+    ] {
+        repo.write(path, source);
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "fixture"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-cross-file-config").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-cross-file-config"),
+        )
+        .await
+        .unwrap();
+    for term in [None, Some("Reader".to_owned())] {
+        let response = service
+            .query_code_repository_feature_flags(
+                CodeFeatureFlagRequest::new(
+                    term,
+                    filtered_selector("fixture", "HEAD", "src"),
+                    10,
+                    FreshnessPolicy::WaitUntilFresh,
+                )
+                .unwrap()
+                .with_filters(relay_knowledge::domain::CodeConfigFilter {
+                    domain: Some("business".into()),
+                    consistency: true,
+                    ..Default::default()
+                })
+                .unwrap(),
+                context("query-cross-file-config"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.flags.len(), 1);
+        assert_eq!(response.flags[0].source_key, "flag");
+        assert!(response.flags[0].analysis_complete);
+        assert!(
+            response.flags[0]
+                .usages
+                .iter()
+                .any(|u| u.path == "src/Reader.java" && u.edge_kind == "guards_code")
+        );
+    }
+}

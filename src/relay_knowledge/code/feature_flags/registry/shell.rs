@@ -44,7 +44,7 @@ pub(super) fn extract(
                 .filter(|n| matches!(n.kind(), "word" | "variable_name"))
             {
                 let key = &input.content[name.byte_range()];
-                if let Some(assignment) = prior_assignment(node, key, input.content) {
+                if let Some(assignment) = prior_assignment(node, key, input.content)? {
                     if let Some(row) = definition(input, assignment)? {
                         check_fact_budget(rows.len())?;
                         rows.push(row);
@@ -236,26 +236,35 @@ fn definition(
     }
     Ok(Some(row))
 }
-fn prior_assignment<'a>(export: Node<'a>, key: &str, content: &str) -> Option<Node<'a>> {
+fn prior_assignment<'a>(
+    export: Node<'a>,
+    key: &str,
+    content: &str,
+) -> Result<Option<Node<'a>>, DomainError> {
     let mut previous = export.prev_named_sibling();
     let mut budget = 1024_usize;
     while let Some(statement) = previous {
         let mut pending = vec![(statement, false)];
         while let Some((node, conditional)) = pending.pop() {
-            budget = budget.checked_sub(1)?;
+            budget = budget.checked_sub(1).ok_or_else(|| {
+                DomainError::invalid(
+                    "configuration",
+                    "shell prior assignment analysis incomplete: node budget exceeded",
+                )
+            })?;
             if node.kind() == "variable_assignment"
                 && node
                     .child_by_field_name("name")
                     .is_some_and(|n| &content[n.byte_range()] == key)
             {
-                return (!conditional).then_some(node);
+                return Ok((!conditional).then_some(node));
             }
             if node.kind() == "unset_command"
                 && content[node.byte_range()]
                     .split_whitespace()
                     .any(|word| word == key)
             {
-                return None;
+                return Ok(None);
             }
             let conditional = match node.kind() {
                 "compound_statement" | "declaration_command" => conditional,
@@ -265,11 +274,16 @@ fn prior_assignment<'a>(export: Node<'a>, key: &str, content: &str) -> Option<No
             };
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
-                budget = budget.checked_sub(1)?;
+                budget = budget.checked_sub(1).ok_or_else(|| {
+                    DomainError::invalid(
+                        "configuration",
+                        "shell prior assignment analysis incomplete: node budget exceeded",
+                    )
+                })?;
                 pending.push((child, conditional));
             }
         }
         previous = statement.prev_named_sibling();
     }
-    None
+    Ok(None)
 }

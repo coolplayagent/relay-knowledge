@@ -15,7 +15,7 @@ pub struct CodeConfigMetadata {
     pub domain: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hot_reload: Option<bool>,
-    /// Fully qualified constants or zero-argument getters provided by this fact.
+    /// Fully qualified constants/getters, or parent types on internal hierarchy facts.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub bindings: Vec<String>,
     /// A symbolic key/getter dependency, resolved only in the served snapshot.

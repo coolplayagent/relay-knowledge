@@ -32,6 +32,9 @@ pub(super) fn static_value(
     let mut value = String::new();
     let mut chars = content[node.byte_range()].chars().peekable();
     while let Some(ch) = chars.next() {
+        if quote.is_none() && ch == '~' && (value.is_empty() || value.ends_with(':')) {
+            return Ok(None);
+        }
         if quote == Some('\'') {
             if ch == '\'' {
                 quote = None;

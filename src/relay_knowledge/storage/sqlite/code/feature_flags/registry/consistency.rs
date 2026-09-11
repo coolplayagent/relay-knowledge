@@ -58,7 +58,10 @@ pub(super) fn check(group: &mut CodeFeatureFlagGraph, formats: &BTreeSet<String>
         return;
     }
     let definitions = group.usages.iter().any(|u| u.edge_kind == "defines_config");
-    if !definitions && group.usages.iter().any(|u| u.edge_kind == "reads_config") {
+    if matches!(group.source_kind.as_str(), "config_key" | "env_var")
+        && !definitions
+        && group.usages.iter().any(|u| u.edge_kind == "reads_config")
+    {
         group
             .consistency_diagnostics
             .push("read_without_definition".into());
