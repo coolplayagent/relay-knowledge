@@ -13,7 +13,7 @@ type Target = Option<(String, String)>;
 pub(super) struct Resolver<'a> {
     pub rows: &'a [FeatureFlagRow],
     pub providers: &'a HashMap<String, Vec<usize>>,
-    pub targets: HashMap<(String, usize), Target>,
+    pub targets: HashMap<(String, usize, bool), Target>,
     pub evidence: HashMap<(String, usize), bool>,
 }
 impl Resolver<'_> {
@@ -24,7 +24,7 @@ impl Resolver<'_> {
         if depth >= 4 {
             return None;
         }
-        let key = (reference.clone(), depth);
+        let key = (reference.clone(), depth, row.metadata.exact_reference);
         if let Some(target) = self.targets.get(&key) {
             return target
                 .clone()
@@ -34,6 +34,11 @@ impl Resolver<'_> {
         let mut complete = true;
         if let Some(indices) = self.providers.get(reference) {
             for index in indices {
+                if row.metadata.exact_reference
+                    && self.rows[*index].metadata.declared_getter.as_ref() != Some(reference)
+                {
+                    continue;
+                }
                 if let Some(target) = self.resolve(&self.rows[*index], depth + 1) {
                     targets.insert(target);
                 } else {

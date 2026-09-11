@@ -50,7 +50,8 @@ pub(super) fn extract(
         if input.language_id == "ini" && line.starts_with('[') && line.ends_with(']') {
             section = line[1..line.len() - 1].trim().to_owned();
         } else if !line.is_empty()
-            && !line.starts_with(['#', '!'])
+            && !line.starts_with('#')
+            && !(input.language_id == "properties" && line.starts_with('!'))
             && !(input.language_id == "ini" && line.starts_with(';'))
             && !line.starts_with("{{")
         {

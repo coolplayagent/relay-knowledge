@@ -65,7 +65,7 @@ fn line_number(prefix: &str) -> usize {
         .count()
 }
 
-fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadata {
+pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadata {
     let format = match input.language_id {
         "gotemplate" => "ctmpl",
         "bash" => "shell",

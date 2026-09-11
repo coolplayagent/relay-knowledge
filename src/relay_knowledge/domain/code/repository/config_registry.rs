@@ -16,6 +16,12 @@ pub struct CodeConfigMetadata {
     /// Whether a proven getter participates in Java overriding; absent for other facts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub getter_overridable: Option<bool>,
+    /// Declaring getter identity, independent of inherited provider aliases.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declared_getter: Option<String>,
+    /// Construction and super calls resolve only against the declaring provider.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub exact_reference: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

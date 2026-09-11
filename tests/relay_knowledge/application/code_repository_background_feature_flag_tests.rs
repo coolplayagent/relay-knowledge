@@ -198,6 +198,18 @@ async fn feature_flags_resolve_platform_shadows_and_static_getters_across_files(
     let repo = FixtureRepo::create("cross-file-platform-shadows");
     for (path, source) in [
         (
+            "src/VirtualBase.java",
+            "package app; class VirtualBase { boolean isMode() { return java.lang.Boolean.getBoolean(\"exact_base\"); } }",
+        ),
+        (
+            "src/VirtualChild.java",
+            "package app; class VirtualChild extends VirtualBase { boolean isMode() { return java.lang.Boolean.getBoolean(\"exact_child\"); } void run() { if(super.isMode()) {} } }",
+        ),
+        (
+            "src/ExactCaller.java",
+            "package app; class ExactCaller { void run() { if(new app.VirtualBase().isMode()) {} if(((app.VirtualBase)new app.VirtualChild()).isMode()) {} } }",
+        ),
+        (
             "src/Integer.java",
             "package app; class Integer { static int parseInt(String key) { return 7; } }",
         ),
@@ -287,6 +299,36 @@ async fn feature_flags_resolve_platform_shadows_and_static_getters_across_files(
                 .any(|f| f.source_key.starts_with("fake_"))
         );
         if path == "src" {
+            let exact_base = response
+                .flags
+                .iter()
+                .find(|f| f.source_key == "exact_base")
+                .unwrap();
+            for caller in ["src/ExactCaller.java", "src/VirtualChild.java"] {
+                assert!(
+                    exact_base
+                        .usages
+                        .iter()
+                        .any(|u| u.path == caller && u.edge_kind == "guards_code")
+                );
+            }
+            let exact_child = response
+                .flags
+                .iter()
+                .find(|f| f.source_key == "exact_child")
+                .unwrap();
+            assert!(
+                exact_child
+                    .usages
+                    .iter()
+                    .any(|u| u.path == "src/ExactCaller.java" && u.edge_kind == "guards_code")
+            );
+            assert!(
+                !exact_child
+                    .usages
+                    .iter()
+                    .any(|u| u.path == "src/VirtualChild.java" && u.edge_kind == "guards_code")
+            );
             let port = response
                 .flags
                 .iter()

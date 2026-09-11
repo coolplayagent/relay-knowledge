@@ -293,7 +293,7 @@ fn collect_line_records(
         seen.push((source_kind.to_owned(), source_key.clone(), edge_kind));
         let mut record = feature_flag_record(&context, source_kind, &source_key, edge_kind)?;
         if context.input.language_id == "java" {
-            record.metadata.source_format = "java".into();
+            record.metadata = registry::metadata(context.input, context.byte_start);
         }
         records.push(record);
     }

@@ -728,3 +728,5 @@ fn allexport_enables_definitions_and_survives_disable_for_existing_exports() {
 
 #[path = "review_tests.rs"]
 mod review_tests;
+#[path = "syntax_tests.rs"]
+mod syntax_tests;

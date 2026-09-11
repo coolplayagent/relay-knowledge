@@ -3,7 +3,7 @@ use super::*;
 enum Token<'a> {
     Word(&'a str, usize),
     Literal(String, usize),
-    Boundary,
+    Boundary(char),
 }
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
@@ -34,7 +34,7 @@ pub(super) fn extract(
             tokens.push(Token::Literal(value, offset));
         } else if matches!(ch, '(' | ')' | '|') {
             offset += ch.len_utf8();
-            tokens.push(Token::Boundary);
+            tokens.push(Token::Boundary(ch));
         } else {
             let len = tail
                 .char_indices()
@@ -44,10 +44,22 @@ pub(super) fn extract(
             offset += len;
         }
     }
+    let mut command_position = true;
     for (index, token) in tokens.iter().enumerate() {
+        if let Token::Boundary(ch) = token {
+            command_position = matches!(ch, '(' | '|');
+            continue;
+        }
         let Token::Word(command, begin) = token else {
+            command_position = false;
             continue;
         };
+        let first = command_position;
+        command_position = (first && matches!(*command, "if" | "with" | "range" | "else"))
+            || matches!(*command, ":=" | "=");
+        if !first {
+            continue;
+        }
         if !matches!(*command, "key" | "keyOrDefault" | "env") {
             continue;
         }

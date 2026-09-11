@@ -397,5 +397,7 @@ fn conflicts_include_located_sources_and_unknown_flow_cannot_claim_completeness(
     );
 }
 
+#[path = "dispatch_tests.rs"]
+mod dispatch_tests;
 #[path = "review_tests.rs"]
 mod review_tests;

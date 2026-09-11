@@ -144,13 +144,14 @@ fn string_expression(node: Node<'_>, content: &str, depth: usize) -> bool {
 }
 pub(super) fn literal(node: Node<'_>, content: &str, depth: usize) -> Option<String> {
     let mut budget = 256;
-    literal_bounded(node, content, depth, &mut budget)
+    literal_bounded(node, content, depth, &mut budget, false)
 }
 fn literal_bounded(
     node: Node<'_>,
     content: &str,
     depth: usize,
     budget: &mut usize,
+    concatenation: bool,
 ) -> Option<String> {
     *budget = budget.checked_sub(1)?;
     if depth >= 16 {
@@ -161,9 +162,13 @@ fn literal_bounded(
             let raw = text(node, content).strip_prefix('"')?.strip_suffix('"')?;
             super::strings::decode(raw)
         }
-        "parenthesized_expression" => {
-            literal_bounded(node.named_child(0)?, content, depth + 1, budget)
-        }
+        "parenthesized_expression" => literal_bounded(
+            node.named_child(0)?,
+            content,
+            depth + 1,
+            budget,
+            concatenation,
+        ),
         "binary_expression"
             if node
                 .child_by_field_name("operator")
@@ -176,19 +181,25 @@ fn literal_bounded(
                     node.child_by_field_name("left")?,
                     content,
                     depth + 1,
-                    budget
+                    budget,
+                    true,
                 )?,
                 literal_bounded(
                     node.child_by_field_name("right")?,
                     content,
                     depth + 1,
-                    budget
+                    budget,
+                    true,
                 )?
             ))
         }
-        "true" | "false" | "decimal_integer_literal" | "decimal_floating_point_literal" => {
-            Some(text(node, content).to_owned())
-        }
+        "true" | "false" => Some(text(node, content).to_owned()),
+        "decimal_floating_point_literal" if concatenation => None,
+        "decimal_integer_literal"
+        | "decimal_floating_point_literal"
+        | "hex_integer_literal"
+        | "octal_integer_literal"
+        | "binary_integer_literal" => super::numbers::literal(node.kind(), text(node, content)),
         "identifier" | "field_access" if depth > 0 => {
             let declaration = constant_binding(node, content)?;
             let owner = declaration.parent()?;
@@ -212,6 +223,7 @@ fn literal_bounded(
                 content,
                 depth + 1,
                 budget,
+                concatenation,
             )
         }
         _ => None,
@@ -396,6 +408,21 @@ pub(super) fn receiver_type(node: Node<'_>, content: &str, depth: usize) -> Opti
                 .trim_end_matches('.')
                 .to_owned(),
         ),
+        "super" => {
+            let mut owner = node.parent();
+            while let Some(current) = owner {
+                if is_type(current) {
+                    let superclass = current.child_by_field_name("superclass")?;
+                    return Some(qualified(
+                        node,
+                        text(superclass.named_child(0)?, content),
+                        content,
+                    ));
+                }
+                owner = current.parent();
+            }
+            None
+        }
         "identifier" => {
             let Some(declaration) = binding(node, text(node, content), content) else {
                 return super::types::static_receiver(node, content);
@@ -431,6 +458,9 @@ pub(super) fn receiver_type(node: Node<'_>, content: &str, depth: usize) -> Opti
             if anonymous(node.child_by_field_name("value")?) {
                 return None;
             }
+            if exact_receiver(node.child_by_field_name("value")?) {
+                return receiver_type(node.child_by_field_name("value")?, content, depth + 1);
+            }
             Some(qualified(
                 node,
                 text(node.child_by_field_name("type")?, content),
@@ -452,6 +482,25 @@ pub(super) fn receiver_type(node: Node<'_>, content: &str, depth: usize) -> Opti
         "field_access" => super::types::static_receiver(node, content),
         _ => None,
     }
+}
+pub(super) fn exact_receiver(mut node: Node<'_>) -> bool {
+    for _ in 0..16 {
+        match node.kind() {
+            "super" => return true,
+            "object_creation_expression" => return !anonymous(node),
+            "parenthesized_expression" | "cast_expression" => {
+                let Some(inner) = node
+                    .child_by_field_name("value")
+                    .or_else(|| node.named_child(0))
+                else {
+                    return false;
+                };
+                node = inner;
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 fn anonymous(mut node: Node<'_>) -> bool {
     for _ in 0..16 {

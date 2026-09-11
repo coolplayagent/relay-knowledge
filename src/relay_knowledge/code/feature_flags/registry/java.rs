@@ -4,6 +4,7 @@ use tree_sitter::Node;
 mod flow;
 mod implicit;
 mod names;
+mod numbers;
 mod static_imports;
 mod strings;
 mod types;
@@ -48,6 +49,7 @@ pub(super) fn extract(
             if let Some(mut row) = read(input, node)? {
                 if let Some((method, shadows)) = flow::returning_method(node, input.content) {
                     row.metadata.bindings = hierarchy.bindings(method, input.content)?;
+                    row.metadata.declared_getter = row.metadata.bindings.first().cloned();
                     row.metadata.conversion_platform_owners = shadows;
                     row.metadata.getter_overridable =
                         Some(types::overridable(method, input.content));
@@ -68,6 +70,7 @@ pub(super) fn extract(
                         guard.end_byte(),
                     )?;
                     usage.metadata.reference.clone_from(&row.metadata.reference);
+                    usage.metadata.exact_reference = row.metadata.exact_reference;
                     usage
                         .metadata
                         .implicit_platform_owner
@@ -177,6 +180,7 @@ pub(super) fn extract(
                         method.end_byte(),
                     )?;
                     marker.metadata.reference = Some(own.clone());
+                    marker.metadata.declared_getter = Some(own.clone());
                     marker.metadata.getter_overridable =
                         Some(types::overridable(method, input.content));
                     marker.metadata.bindings = bindings;
@@ -299,6 +303,9 @@ fn read(
         node.end_byte(),
     )?;
     row.metadata.reference = Some(key);
+    row.metadata.exact_reference = node
+        .child_by_field_name("object")
+        .is_some_and(names::exact_receiver);
     Ok(Some(row))
 }
 fn guard_sites<'a>(
