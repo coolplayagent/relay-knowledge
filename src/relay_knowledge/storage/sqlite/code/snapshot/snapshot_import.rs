@@ -9,6 +9,9 @@ use super::scope_tables::CodeScopeTable;
 pub(super) const IMPORT_SCHEMA: &str = "relay_import";
 
 const OPTIONAL_LEGACY_IMPORT_TABLES: &[&str] = &[
+    "maven_reactor_status",
+    "maven_reactor_modules",
+    "maven_reactor_edges",
     "code_repository_routes",
     "code_repository_framework_nodes",
     "code_repository_framework_edges",

@@ -606,7 +606,9 @@ fn normalize_software_request(request: &mut SoftwareGlobalRequest) -> Option<Api
         request.kind,
         request.freshness_policy,
         request.limit,
-    ) {
+    )
+    .and_then(|validated| validated.with_cursor(request.cursor.clone()))
+    {
         Ok(validated) => {
             *request = validated;
             None

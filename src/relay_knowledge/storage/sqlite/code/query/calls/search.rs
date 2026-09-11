@@ -24,6 +24,11 @@ pub(in super::super) fn search_calls(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+    if let Some(rows) = super::class_rows::search(connection, status, request)? {
+        let mut hits = call_rows_to_hits(status, request, rows, 4.0);
+        filter_dedupe_sort_truncate(&mut hits, request);
+        return Ok(hits);
+    }
     let identity = call_identity_query(request);
     let mut identity_hits = Vec::new();
     if let Some(identity) = &identity {
@@ -37,7 +42,7 @@ pub(in super::super) fn search_calls(
         let direct_hit_count = rows.len();
         let implementation_hits =
             search_ambiguous_callee_implementation_hits(connection, status, request, &rows)?;
-        identity_hits = call_rows_to_hits(status, request, rows);
+        identity_hits = call_rows_to_hits(status, request, rows, 0.0);
         identity_hits.extend(implementation_hits);
         let mut saturated = saturated;
         if request.code_query_kind == CodeQueryKind::Callers
@@ -48,7 +53,7 @@ pub(in super::super) fn search_calls(
             let indirect_rows =
                 search_indirect_call_identity_rows(connection, status, request, identity)?;
             saturated = saturated || indirect_rows.saturated;
-            identity_hits.extend(call_rows_to_hits(status, request, indirect_rows.rows));
+            identity_hits.extend(call_rows_to_hits(status, request, indirect_rows.rows, 0.0));
         }
         let filtered_identity_hits = has_query_field_hit_filters(request)
             .then(|| query_field_filtered_hits_for_gate(&identity_hits, request));
@@ -74,6 +79,7 @@ pub(in super::super) fn search_calls(
         status,
         request,
         search_call_fts_rows(connection, status, request)?,
+        0.0,
     );
     hits.extend(identity_hits);
 

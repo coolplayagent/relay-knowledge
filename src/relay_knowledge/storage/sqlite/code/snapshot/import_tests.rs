@@ -93,6 +93,9 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
             ) VALUES ('repo', 'git_snapshot:test', 'flag', 'usage', 'file', 'src/routes.ts',
                 'typescript', 'flag', 'config_key', 'flag', 'reads_config', 9000,
                 'extracted', 0, 1, 1, 1, 'flag');
+            DROP TABLE maven_reactor_status;
+            DROP TABLE maven_reactor_modules;
+            DROP TABLE maven_reactor_edges;
             DROP TABLE code_repository_routes;
             DROP TABLE code_repository_commit_scopes;
             PRAGMA foreign_keys = OFF;
@@ -226,6 +229,15 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
     .expect("legacy scope status should load");
     fs::remove_file(source_path).expect("temporary source database should be removed");
 
+    assert!(
+        crate::storage::sqlite::maven::reactor::require_complete(&target, "git_snapshot:test")
+            .is_ok()
+    );
+    target.execute("UPDATE code_repository_files SET path = 'pom.xml' WHERE source_scope = 'git_snapshot:test'", []).unwrap();
+    assert!(
+        crate::storage::sqlite::maven::reactor::require_complete(&target, "git_snapshot:test")
+            .is_err()
+    );
     assert!(symbol_role.is_none());
     assert_eq!(route_count, 0);
     assert_eq!(commit_alias_count, 1);

@@ -98,6 +98,12 @@ Fresh full indexes still return a completed `summary` immediately. Freshness che
 
 ## 5.4 Query Symbols and Relationships
 
+Java class-name call queries use indexed class and direct-member ownership. `--query B --kind callers` aggregates incoming edges to B, its constructors and direct methods; `--kind callees` aggregates their outgoing edges. Results retain the actual caller/callee methods and call sites. For `A.main` calling `B.process()`, B callers returns `main calls process`; A callers does not incorrectly return that outgoing edge merely because its text mentions A. A matched class with no edges in the requested direction returns empty without full-text broadening.
+
+This aggregation applies only to short Java class names with `callers` or `callees`; names match case-sensitively and same-named classes are aggregated. Hybrid and qualified-name queries keep their existing search behavior. Package-qualified class aggregation is not supported: existing Java qualified-name facts encode source paths, not package declarations. Same-file source ranges and direct qualified names exclude nested-type methods, sibling methods, fields and unresolved incoming edges supported only by name text. Inherited members and dynamic dispatch are not guessed. Unresolved outgoing edges retain their status. `--query B.process` continues to query a specific method. Path, language, generated-file and inline filters apply before call-candidate limits; paths constrain call sites, so callers may be outside the selected class file.
+
+Selection admits at most 64 candidate classes and 1,024 class/member records, retaining the existing maximum of 200 call candidates and the requested result limit. Class resolution and call reads share approximately 4.1 million SQLite instructions. Exhausting identity or execution budgets explicitly returns a `class call query incomplete` capacity error instead of silently truncating identities. Query a member method to reduce expansion. This read-only change reuses existing facts, with no schema, fact-version or installation configuration change; completed older indexes can be queried directly.
+
 Hybrid query:
 
 ```bash

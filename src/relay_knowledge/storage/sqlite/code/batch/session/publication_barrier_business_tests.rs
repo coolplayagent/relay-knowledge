@@ -77,7 +77,7 @@ async fn software_relationship_storage_rejects_invalid_public_flags_before_fence
         .unwrap();
     assert_eq!(
         checkpoint.state,
-        "finalizing:software_projection:v2:relationships"
+        "finalizing:software_projection:v3:relationships"
     );
     let status = store
         .code_repository_status("fixture".into())
@@ -224,7 +224,7 @@ async fn code_index_persistence_performance_suite_fenced_projection_resumes_betw
     assert!(matches!(
         reset,
         software::FencedProjectionAdvance::Pending { checkpoint_state }
-            if checkpoint_state == "finalizing:software_projection:v2:dependencies"
+            if checkpoint_state == "finalizing:software_projection:v3:dependencies"
     ));
     let dependency_fence = fence.clone();
     let dependencies = store
@@ -238,7 +238,7 @@ async fn code_index_persistence_performance_suite_fenced_projection_resumes_betw
     assert!(matches!(
         dependencies,
         software::FencedProjectionAdvance::Pending { checkpoint_state }
-            if checkpoint_state == "finalizing:software_projection:v2:sdk_usages"
+            if checkpoint_state == "finalizing:software_projection:v3:sdk_usages"
     ));
     let resumed_checkpoint = store
         .code_index_checkpoint(SOURCE_SCOPE.to_owned())
@@ -247,7 +247,7 @@ async fn code_index_persistence_performance_suite_fenced_projection_resumes_betw
         .expect("resumable projection checkpoint should exist");
     assert_eq!(
         resumed_checkpoint.state,
-        "finalizing:software_projection:v2:sdk_usages"
+        "finalizing:software_projection:v3:sdk_usages"
     );
     let projection = store
         .refresh_software_global_projection_with_fence(SOURCE_SCOPE.to_owned(), fence)
@@ -296,4 +296,96 @@ async fn code_index_persistence_performance_suite_fenced_projection_resumes_betw
         .expect("active task should load")
         .expect("worker completes the task after the publication response");
     assert_eq!(active.state, CodeIndexTaskState::Running);
+}
+
+#[tokio::test]
+async fn maven_legacy_projection_phases_replay_reactor_before_fenced_publication() {
+    for phase in ["files", "topics", "relationships", "ontology", "publish"] {
+        let store = registered_store().await;
+        let (session, fence) = begin_fenced_session(
+            &store,
+            SOURCE_SCOPE,
+            "legacy-reactor",
+            LEASE_OWNER,
+            Default::default(),
+        )
+        .await;
+        store
+            .begin_code_index_session_with_fence(session.clone(), fence.clone())
+            .await
+            .unwrap();
+        let content = "<project><groupId>x</groupId><artifactId>root</artifactId><version>1</version></project>";
+        let mut facts = batch(SOURCE_SCOPE, 1);
+        let mut pom = file(
+            SOURCE_SCOPE,
+            "pom",
+            "pom.xml",
+            "xml",
+            CodeParseStatus::Parsed,
+        );
+        pom.byte_len = content.len();
+        facts.files.push(pom);
+        facts.chunks.push(crate::domain::RepositoryCodeChunkRecord {
+            repository_id: "repo".into(),
+            source_scope: SOURCE_SCOPE.into(),
+            chunk_id: "pom-chunk".into(),
+            file_id: "pom".into(),
+            path: "pom.xml".into(),
+            language_id: "xml".into(),
+            content: content.into(),
+            byte_range: crate::domain::RepositoryCodeRange {
+                start: 0,
+                end: content.len() as u32,
+            },
+            line_range: crate::domain::RepositoryCodeRange { start: 1, end: 1 },
+            symbol_snapshot_id: None,
+        });
+        store
+            .apply_code_index_batch_with_fence(facts, fence.clone())
+            .await
+            .unwrap();
+        store
+            .finalize_code_index_session_with_fence(session, fence.clone())
+            .await
+            .unwrap();
+        crate::storage::stage_empty_business_projection_with_fence_for_test(
+            &store,
+            "repo",
+            SOURCE_SCOPE,
+            "commit",
+            fence.clone(),
+        )
+        .await
+        .unwrap();
+        let reset_fence = fence.clone();
+        store.run(move |connection| {
+            let guard = lifecycle::publication_fence::prepare_guard(connection, reset_fence, None)?;
+            software::advance_fenced_projection(connection, SOURCE_SCOPE, &guard)?;
+            connection.execute("UPDATE software_global_status SET projection_schema_version = 8 WHERE source_scope = ?1", [SOURCE_SCOPE])?;
+            connection.execute("UPDATE code_repository_index_checkpoints SET state = ?1 WHERE source_scope = ?2", rusqlite::params![format!("finalizing:software_projection:v2:{phase}"), SOURCE_SCOPE])?;
+            Ok(())
+        }).await.unwrap();
+        let projection = store
+            .refresh_software_global_projection_with_fence(SOURCE_SCOPE.into(), fence)
+            .await
+            .unwrap();
+        assert!(!projection.status.stale);
+        let count = store
+            .run(|connection| {
+                crate::storage::sqlite::maven::reactor::require_complete(connection, SOURCE_SCOPE)?;
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM maven_reactor_modules WHERE source_scope = ?1",
+                        [SOURCE_SCOPE],
+                        |row| row.get::<_, usize>(0),
+                    )
+                    .map_err(crate::storage::StorageError::from)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "legacy phase {phase} must not skip reactor refresh"
+        );
+    }
 }

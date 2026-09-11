@@ -161,7 +161,14 @@ fn workspace_manifest_read_allowed(relative_path: &str, path_filters: &[String])
 fn is_workspace_manifest_path(relative_path: &str) -> bool {
     matches!(
         relative_path.rsplit('/').next(),
-        Some("pnpm-workspace.yaml" | "go.work" | "package.json" | "Cargo.toml" | "go.mod")
+        Some(
+            "pnpm-workspace.yaml"
+                | "go.work"
+                | "package.json"
+                | "Cargo.toml"
+                | "go.mod"
+                | "pom.xml"
+        )
     )
 }
 

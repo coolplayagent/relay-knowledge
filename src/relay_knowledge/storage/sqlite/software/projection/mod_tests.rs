@@ -878,7 +878,10 @@ fn software_relationship_storage_reclaims_legacy_scope_only_after_successful_ref
     initialize_schema(&connection).unwrap();
     let status = status_for_scope(&connection, "scope-1").unwrap().unwrap();
     assert!(status.stale);
-    assert_eq!(status.projection_schema_version, 8);
+    assert_eq!(
+        status.projection_schema_version,
+        crate::domain::SOFTWARE_PROJECTION_SCHEMA_VERSION
+    );
     let count = || {
         connection
             .query_row("SELECT COUNT(*) FROM software_relationships", [], |row| {

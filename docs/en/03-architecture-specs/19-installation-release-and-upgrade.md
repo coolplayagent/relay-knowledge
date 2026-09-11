@@ -234,6 +234,15 @@ automatic silent upgrades.
 - Installed Web services resolve Knowledge Map operations through explicit managed repository aliases and persisted repository roots; service behavior must not depend on the service manager's process working directory.
 - The release workflow or an equivalent gate must run a service lifecycle dry-run smoke so release binaries prove their service definition, rollback plan, and package-manifest checks do not drift from the release tag.
 
+
+### Maven reactor derived-data upgrade
+
+Software projection schema 9 adds snapshot-scoped `maven_reactor_modules`, `maven_reactor_edges` and `maven_reactor_status`. Existing projections become stale and rebuild through durable repair/index tasks; query hot paths never parse POMs. Immutable-scope imports, explicit cleanup and bounded retention GC include all three tables. Imports from pre-schema-9 databases may omit these additive tables; a Maven scope without a reactor completion marker remains incomplete until durable repair/reindex publishes the graph. Non-Maven legacy scopes need no reactor facts. Legacy GC tasks already past the added phases contain no new reactor data because these tables are only populated after upgrade. No runtime directories, environment settings or service processes are added.
+
+Projection checkpoints now write v3 tokens. Legacy v1/v2 nonterminal tokens restart derived projection at reset under the existing publication fence, including when upgrade interrupted at files/topics/relationships/ontology/publish. This prevents schema 9 from becoming fresh without reactor completion. Reindex Maven repositories or allow durable projection repair to finish before querying modules. Before binary rollback, drain/cancel active tasks and restore a consistent database backup; never manually edit reactor markers or checkpoints. Maven workspace detection uses the fourth bit (mask 8) of workspace-v1 while preserving the original three bits and disabled-scope identities.
+
+Dependency pagination adds idempotent `(source_scope, component_id)` and `(source_scope, usage_id)` read indexes during schema initialization; stored fact payloads and schema version 9 are unchanged. Existing clients may omit `cursor`; clients requiring complete dependencies/modules results must consume `next_cursor`. Rollback to an older binary ignores the extra indexes and loses the expanded dependencies response and cursor support.
+
 ---
 
 Navigation: Previous: [18. Observability, Diagnostics, and SLO](18-observability-diagnostics-and-slo.md) | Next: [20. Multi-Repository Code Graph Overlay](20-multi-repository-code-graph-overlay.md)
@@ -241,3 +250,4 @@ Navigation: Previous: [18. Observability, Diagnostics, and SLO](18-observability
 Configuration facts add the `config-registry-v20` scope component. Normal `repo index <alias> --ref HEAD` rebuilds a completed scope created by an older binary even when source HEAD is unchanged; `--reset` is not needed. SQLite adds `metadata_json` to configuration usage rows with an empty-object default, and the warm schema check verifies that capability before opening a current store. No startup source scan or fact backfill is performed. Durable snapshot copying includes metadata. Query-index plan ordinals and Python/C++ fact versions are unchanged. Complete or cancel unfinished tasks using their compatible binary before switching versions; keep database, WAL and checkpoints together when backing up or rolling back.
 
 Legacy database imports supply an empty metadata object when the source has no `metadata_json` column; preserve the old snapshot and its stale state so normal reindexing can regenerate configuration facts.
+The `xml-lossless-windows-v1` code fact identity invalidates older XML source windows that trimmed boundary whitespace. Reindex repositories after upgrade to publish lossless POM evidence; no database deletion or configuration change is required. Incomplete POM evidence keeps retained Maven software facts visibly degraded until repaired and reindexed.

@@ -61,6 +61,9 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
     if fixture == "grep_budget_v1" {
         return write_grep_budget_fixture(root);
     }
+    if fixture == "java_class_calls_v1" {
+        return super::java_class_calls::write_java_class_calls(root);
+    }
     if fixture == "index_performance_many_files_v1" {
         return write_index_performance_many_files_fixture(root);
     }

@@ -9,6 +9,10 @@ use crate::{
 #[test]
 fn agent_kind_aliases_normalize_to_existing_code_and_software_kinds() {
     assert_eq!(
+        parse_software_query_kind("modules").unwrap(),
+        SoftwareGlobalKind::Modules
+    );
+    assert_eq!(
         parse_code_query_kind("caller").unwrap(),
         CodeQueryKind::Callers
     );
@@ -36,4 +40,19 @@ fn code_context_limit_uses_codegraph_default_when_policy_allows_more() {
         CODEGRAPH_CONTEXT_DEFAULT_LIMIT
     );
     assert!(authorize_code_context_limit(Some(21), &policy).is_err());
+}
+
+#[test]
+fn software_mcp_cursor_is_preserved_and_wrong_types_are_rejected() {
+    let args: super::CodeSoftwareQueryArgs = serde_json::from_value(
+        serde_json::json!({"repository":"demo", "kind":"dependencies", "cursor":"sw1:abcd"}),
+    )
+    .unwrap();
+    assert_eq!(args.cursor.as_deref(), Some("sw1:abcd"));
+    assert!(
+        serde_json::from_value::<super::CodeSoftwareQueryArgs>(
+            serde_json::json!({"repository":"demo", "cursor":7})
+        )
+        .is_err()
+    );
 }

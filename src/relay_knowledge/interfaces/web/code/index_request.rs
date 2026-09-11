@@ -89,6 +89,7 @@ fn parse_workspace_format(value: &str) -> Result<CodeMonorepoWorkspaceFormat, We
         "pnpm" => Ok(CodeMonorepoWorkspaceFormat::Pnpm),
         "go_modules" => Ok(CodeMonorepoWorkspaceFormat::GoModules),
         "cargo_workspace" => Ok(CodeMonorepoWorkspaceFormat::CargoWorkspace),
+        "maven" => Ok(CodeMonorepoWorkspaceFormat::Maven),
         other => Err(WebError::bad_request(format!(
             "unsupported workspace_detection.supported_formats '{other}'"
         ))),

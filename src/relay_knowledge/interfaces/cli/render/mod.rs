@@ -287,6 +287,12 @@ where
                 .as_str()
                 .unwrap_or("unknown")
         ),
+        "code.repo.software" if value["request"]["kind"] == "modules" => format!(
+            "maven modules={} relationships={} stale={}",
+            value["build_targets"].as_array().map_or(0, Vec::len),
+            value["relationships"].as_array().map_or(0, Vec::len),
+            value["status"]["stale"].as_bool().unwrap_or(true)
+        ),
         "code.repo.software" => format!(
             "software scope={} components={} dependency_usages={} sdk_usages={} files={} topics={} relationships={} build_targets={} iac_resources={} design_elements={} stale={}",
             value["status"]["source_scope"]
@@ -342,6 +348,11 @@ where
         _ => operation.to_owned(),
     };
 
+    if operation == "code.repo.software" {
+        if let Some(cursor) = value["next_cursor"].as_str() {
+            return Ok(format!("{line} next_cursor={}\n", single_line(cursor)));
+        }
+    }
     Ok(format!("{line}\n"))
 }
 

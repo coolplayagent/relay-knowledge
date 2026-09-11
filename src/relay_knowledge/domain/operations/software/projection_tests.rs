@@ -4,6 +4,7 @@ use crate::domain::SOFTWARE_ONTOLOGY_VERSION;
 #[test]
 fn empty_projection_preserves_freshness_status() {
     let projection = SoftwareGlobalProjection {
+        next_cursor: None,
         status: SoftwareGlobalStatus {
             repository_id: "repo".to_owned(),
             source_scope: "scope".to_owned(),

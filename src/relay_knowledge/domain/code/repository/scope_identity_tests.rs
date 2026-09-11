@@ -92,7 +92,7 @@ fn fact_versioned_snapshot_scope_requires_generated_hash_shape() {
     assert!(code_snapshot_scope_is_fact_versioned(&format!(
         "{base}:workspace-v1:7"
     )));
-    for malformed in ["00", "01", "8", "-1", "+1", "1x", "1:extra"] {
+    for malformed in ["00", "01", "16", "-1", "+1", "1x", "1:extra"] {
         assert!(!code_snapshot_scope_is_fact_versioned(&format!(
             "{base}:workspace-v1:{malformed}"
         )));

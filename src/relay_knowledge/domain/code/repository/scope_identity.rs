@@ -1,6 +1,6 @@
 use crate::identity::stable_hash64;
 
-const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1-workspace-imports-v1-generated-files-v1-web-routes-v1-syntax-failure-chunks-v1-bounded-config-chunks-v1-dense-source-windows-v1-c-composite-tags-v1-doc-block-owner-anchor-v2-bounded-type-doc-summary-v1-search-owner-v2-reference-search-groups-v2-config-registry-v20";
+const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1-workspace-imports-v1-generated-files-v1-web-routes-v1-syntax-failure-chunks-v1-bounded-config-chunks-v1-dense-source-windows-v1-c-composite-tags-v1-doc-block-owner-anchor-v2-bounded-type-doc-summary-v1-search-owner-v2-reference-search-groups-v2-xml-lossless-windows-v1-config-registry-v20";
 
 /// Builds the stable source scope id for a Git snapshot partition.
 pub fn code_snapshot_scope_id(
@@ -73,6 +73,7 @@ fn workspace_detection_mask(
         super::super::workspace::CodeMonorepoWorkspaceFormat::Pnpm,
         super::super::workspace::CodeMonorepoWorkspaceFormat::GoModules,
         super::super::workspace::CodeMonorepoWorkspaceFormat::CargoWorkspace,
+        super::super::workspace::CodeMonorepoWorkspaceFormat::Maven,
     ];
     Some(
         formats
@@ -117,7 +118,7 @@ fn parse_scope_identity(source_scope: &str) -> Option<ParsedScopeIdentity> {
         return None;
     }
     let mask = encoded.parse::<u8>().ok()?;
-    if mask >= 8 || encoded != mask.to_string() {
+    if mask >= 16 || encoded != mask.to_string() {
         return None;
     }
     Some(ParsedScopeIdentity {

@@ -23,6 +23,20 @@ fn feature_flag_operation_rejects_non_string_filters() {
 }
 
 #[test]
+fn software_cursor_is_forwarded_and_invalid_types_or_kinds_are_rejected() {
+    let mut payload = json!({"alias":"repo", "ref":"HEAD", "kind":"dependencies", "freshness":"allow-stale", "limit":5, "cursor":"sw1:abcd"});
+    assert_eq!(
+        code_software_request(&payload).unwrap().cursor.as_deref(),
+        Some("sw1:abcd")
+    );
+    payload["cursor"] = json!(7);
+    assert!(code_software_request(&payload).is_err());
+    payload["cursor"] = json!("sw1:abcd");
+    payload["kind"] = json!("all");
+    assert!(code_software_request(&payload).is_err());
+}
+
+#[test]
 fn knowledge_map_history_page_requires_positive_bounded_inputs() {
     let page = knowledge_map_history_page(&serde_json::json!({
         "repository": " relay ",

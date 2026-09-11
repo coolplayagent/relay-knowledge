@@ -491,7 +491,10 @@ fn map_graph_dimensions_survive_incremental_removal_and_pinned_replay() {
             "missing software dimension {field}"
         );
     }
-    assert_eq!(first["status"]["projection_schema_version"], 8);
+    assert_eq!(
+        first["status"]["projection_schema_version"],
+        relay_knowledge::domain::SOFTWARE_PROJECTION_SCHEMA_VERSION
+    );
     assert_eq!(first["status"]["completeness_basis_points"], 10000);
     assert_map_graph_endpoints(&first);
 

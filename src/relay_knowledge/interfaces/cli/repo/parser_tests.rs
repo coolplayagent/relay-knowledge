@@ -647,3 +647,34 @@ fn update_parser_rejects_impact_only_and_duplicate_flags() {
     .expect_err("duplicate refs should fail closed");
     assert_eq!(duplicate, CliError::UnexpectedArgument("--head".to_owned()));
 }
+
+#[test]
+fn parses_software_page_cursor_and_path() {
+    let args = [
+        "software",
+        "demo",
+        "--kind",
+        "dependencies",
+        "--limit",
+        "2",
+        "--cursor",
+        "sw1:abcd",
+        "--path",
+        "module-a",
+    ]
+    .map(str::to_owned);
+    let RepoCommand::Software {
+        cursor,
+        path_filters,
+        kind,
+        limit,
+        ..
+    } = parse_repo(&args).unwrap()
+    else {
+        panic!("software command expected")
+    };
+    assert_eq!(cursor.as_deref(), Some("sw1:abcd"));
+    assert_eq!(path_filters, vec!["module-a"]);
+    assert_eq!(kind, SoftwareGlobalKind::Dependencies);
+    assert_eq!(limit, 2);
+}

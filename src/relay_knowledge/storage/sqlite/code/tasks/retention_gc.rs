@@ -43,6 +43,9 @@ const PHASES: &[&str] = &[
     "software_relationships",
     "software_global_status",
     "software_build_targets",
+    "maven_reactor_edges",
+    "maven_reactor_modules",
+    "maven_reactor_status",
     "software_iac_resources",
     "software_design_elements",
     "software_entities",
@@ -369,6 +372,15 @@ fn delete_phase_batch(
         }
         "software_global_status" => {
             delete_scope_table(transaction, "software_global_status", source_scope)
+        }
+        "maven_reactor_status" => {
+            delete_scope_table(transaction, "maven_reactor_status", source_scope)
+        }
+        "maven_reactor_modules" => {
+            delete_scope_table(transaction, "maven_reactor_modules", source_scope)
+        }
+        "maven_reactor_edges" => {
+            delete_scope_table(transaction, "maven_reactor_edges", source_scope)
         }
         "software_build_targets" => {
             delete_scope_table(transaction, "software_build_targets", source_scope)
