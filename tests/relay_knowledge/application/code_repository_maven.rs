@@ -268,3 +268,53 @@ async fn maven_service(repo: &FixtureRepo) -> RelayKnowledgeService {
         Arc::new(SqliteGraphStore::open_in_memory().unwrap()),
     )
 }
+
+#[tokio::test]
+async fn maven_large_pom_survives_full_and_incremental_indexing() {
+    let repo = FixtureRepo::create("maven-large-pom");
+    let content = format!(
+        "  <project>\n<groupId>demo</groupId><artifactId>root</artifactId><version>1</version><description>{}</description>\n<dependencies><dependency><groupId>external</groupId><artifactId>api</artifactId><version>1</version></dependency></dependencies>\n</project>\n",
+        "多字节 text ".repeat(2200)
+    );
+    repo.write("pom.xml", &content);
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "large POM"]);
+    let service = maven_service(&repo).await;
+    register_fixture_repo(&service, &repo, vec![], "register-large-pom").await;
+    index(&service, CodeIndexMode::Full).await;
+    let first = modules(&service).await;
+    assert_eq!(
+        first.status.freshness,
+        relay_knowledge::domain::SoftwareProjectionFreshness::Fresh
+    );
+    assert_eq!(first.build_targets.len(), 1);
+    assert_eq!(first.relationships.len(), 1);
+    repo.write(
+        "pom.xml",
+        &content.replace(
+            "<artifactId>api</artifactId>",
+            "<artifactId>next</artifactId>",
+        ),
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update large POM"]);
+    index(
+        &service,
+        CodeIndexMode::Incremental {
+            base_ref: "HEAD~1".into(),
+            head_ref: "HEAD".into(),
+        },
+    )
+    .await;
+    let next = modules(&service).await;
+    assert_eq!(
+        next.status.freshness,
+        relay_knowledge::domain::SoftwareProjectionFreshness::Fresh
+    );
+    assert_eq!(next.build_targets.len(), 1);
+    assert_eq!(next.relationships.len(), 1);
+    assert_ne!(
+        first.relationships[0].target_id,
+        next.relationships[0].target_id
+    );
+}

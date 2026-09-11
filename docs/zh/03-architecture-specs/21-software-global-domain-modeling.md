@@ -153,3 +153,5 @@ Workspace detector 可显式启用 `maven`，从授权 snapshot 的根 POM 递�
 ---
 
 导航: 上一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md) | 下一章: [22. 服务化部署、控制面与数据面分离](22-service-deployment-control-data-plane.md)
+
+XML 源码窗口保留原始 UTF-8 字节及边界空白。Maven 加载在既有文档、chunk 和字节预算内按路径及字节偏移重组；缺口、重叠、文件身份不一致或截断范围仍视为证据不完整。原子刷新与 fenced ontology 发布均将保留的 Maven 事实标为 `freshness=degraded`、完整度为零，并提供解释性的 `last_error`，包括 `--kind build` 和 `--kind all`。完成的发布不会自动反复重启；修复并重新索引 POM 后清除 degraded 状态。回归测试覆盖多字节大 POM 和修复状态转换。

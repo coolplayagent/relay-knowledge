@@ -723,7 +723,7 @@ fn build_targets_honor_scope_language_filters() {
             )
             VALUES ('repo', 'scope', 'pom-chunk', 'pom-file', 'pom.xml',
                 '<project><modelVersion>4.0.0</modelVersion><groupId>com.acme</groupId><artifactId>service</artifactId><version>1.0.0</version></project>',
-                0, 139, 1, 1, NULL)
+                0, 136, 1, 1, NULL)
             ",
             [],
         )
@@ -750,7 +750,7 @@ fn build_target_visitor_stops_at_the_callers_bounded_capacity() {
             )
             VALUES ('repo', 'scope', 'pom-chunk', 'pom-file', 'pom.xml',
                 '<project><modelVersion>4.0.0</modelVersion><groupId>com.acme</groupId><artifactId>service</artifactId><version>1.0.0</version></project>',
-                0, 139, 1, 1, NULL)
+                0, 136, 1, 1, NULL)
             ",
             [],
         )
@@ -959,3 +959,6 @@ fn count_rows(connection: &Connection, sql: &str) -> i64 {
         .query_row(sql, params![], |row| row.get(0))
         .expect("row count should load")
 }
+
+#[path = "chunk_assembly_tests.rs"]
+mod chunk_assembly_tests;

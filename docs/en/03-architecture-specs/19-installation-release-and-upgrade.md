@@ -246,3 +246,5 @@ Dependency pagination adds idempotent `(source_scope, component_id)` and `(sourc
 ---
 
 Navigation: Previous: [18. Observability, Diagnostics, and SLO](18-observability-diagnostics-and-slo.md) | Next: [20. Multi-Repository Code Graph Overlay](20-multi-repository-code-graph-overlay.md)
+
+The `xml-lossless-windows-v1` code fact identity invalidates older XML source windows that trimmed boundary whitespace. Reindex repositories after upgrade to publish lossless POM evidence; no database deletion or configuration change is required. Incomplete POM evidence keeps retained Maven software facts visibly degraded until repaired and reindexed.

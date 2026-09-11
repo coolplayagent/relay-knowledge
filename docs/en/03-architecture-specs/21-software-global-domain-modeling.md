@@ -154,3 +154,5 @@ Regression coverage includes legacy imports without reactor tables, parent and B
 ---
 
 Navigation: Previous: [20. Multi-Repository Code Graph Overlay](20-multi-repository-code-graph-overlay.md) | Next: [22. Service Deployment, Control Plane, and Data Plane](22-service-deployment-control-data-plane.md)
+
+XML source windows retain original UTF-8 bytes, including boundary whitespace. Maven loading joins chunks by path and byte offset under the existing document/chunk/byte budgets; gaps, overlaps, mismatched file identities and truncated ranges remain incomplete. Both atomic refresh and fenced ontology publication expose retained Maven facts with `freshness=degraded`, zero completeness and an explanatory `last_error`, including `--kind build` and `--kind all`. A completed publication does not restart automatically; repairing and reindexing the POM clears the degraded status. Tests cover large multibyte POMs and repair transitions.

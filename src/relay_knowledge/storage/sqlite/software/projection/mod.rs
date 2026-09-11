@@ -111,7 +111,7 @@ pub(in super::super) fn refresh_projection(
 
     let repository_id = repository_id_for_scope(&transaction, source_scope)?
         .unwrap_or_else(|| "unknown".to_owned());
-    let status = SoftwareGlobalStatus {
+    let mut status = SoftwareGlobalStatus {
         repository_id,
         source_scope: source_scope.to_owned(),
         projected_graph_version: graph_version,
@@ -135,6 +135,7 @@ pub(in super::super) fn refresh_projection(
         design_element_count: lifecycle_projection.design_elements.len(),
         last_error: None,
     };
+    apply_maven_completeness(&transaction, &mut status)?;
     upsert_status(&transaction, &status)?;
     transaction.commit()?;
 
@@ -963,3 +964,25 @@ mod tests;
 
 #[cfg(test)]
 mod maven_performance_tests;
+
+fn apply_maven_completeness(
+    connection: &Connection,
+    status: &mut SoftwareGlobalStatus,
+) -> Result<(), StorageError> {
+    let incomplete: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM maven_reactor_status WHERE source_scope = ?1 AND complete = 0)",
+        [&status.source_scope],
+        |row| row.get(0),
+    )?;
+    if incomplete {
+        status.freshness = SoftwareProjectionFreshness::Degraded;
+        status.completeness_basis_points = 0;
+        status.last_error = Some("Indexed Maven POM evidence is incomplete; retained Maven facts may belong to an earlier snapshot. Repair and reindex the POM evidence.".to_owned());
+    } else {
+        status.last_error = None;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod maven_completeness_tests;

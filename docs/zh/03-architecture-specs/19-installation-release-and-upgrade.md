@@ -202,3 +202,5 @@ Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_re
 ---
 
 导航: 上一章: [18. 可观测性、诊断与 SLO](18-observability-diagnostics-and-slo.md) | 下一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md)
+
+`xml-lossless-windows-v1` 代码事实身份使曾裁掉边界空白的旧 XML 源码窗口失效。升级后重新索引仓库以发布无损 POM 证据，无需删除数据库或修改配置。POM 证据不完整时，保留的 Maven 软件事实持续显示 degraded，直到修复并重新索引。
