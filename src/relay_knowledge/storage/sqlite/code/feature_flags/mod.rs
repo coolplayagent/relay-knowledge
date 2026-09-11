@@ -147,7 +147,11 @@ fn feature_flag_sql_query(
         }
     }
     where_clause.push_str(" AND flag.edge_kind != 'declares_config_getter'");
-    if terms.is_empty() {
+    if terms.is_empty()
+        && request.filters.domain.is_none()
+        && request.filters.source.is_none()
+        && request.filters.hot_reload.is_none()
+    {
         where_clause.push_str(" AND (flag.source_kind != 'config_symbol' OR json_extract(flag.metadata_json,'$.target_kind') IS NOT NULL)");
     }
     where_clause.push_str(" AND (flag.edge_kind != 'declares_string_constant' OR EXISTS (SELECT 1 FROM code_repository_feature_flags evidence, json_each(flag.metadata_json,'$.bindings') binding WHERE evidence.source_scope=flag.source_scope AND json_extract(evidence.metadata_json,'$.target_kind') IS NOT NULL AND json_extract(evidence.metadata_json,'$.reference')=binding.value))");

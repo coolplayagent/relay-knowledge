@@ -585,3 +585,56 @@ fn exact_consistency_query_ignores_unrelated_rows_beyond_the_global_budget() {
             .contains(&"missing_from_format: ctmpl".into())
     );
 }
+
+#[test]
+fn metadata_only_filters_resolve_annotated_symbolic_getters() {
+    let db = fixture();
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            bindings: vec!["Config.getX".into()],
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "Config.getX",
+        "config_symbol",
+        "reads_config",
+        CodeConfigMetadata {
+            reference: Some("Config.getX".into()),
+            domain: Some("business".into()),
+            source_format: "java".into(),
+            hot_reload: Some(true),
+            ..Default::default()
+        },
+    );
+    for filter in [
+        CodeConfigFilter {
+            domain: Some("business".into()),
+            ..Default::default()
+        },
+        CodeConfigFilter {
+            source: Some("java".into()),
+            ..Default::default()
+        },
+        CodeConfigFilter {
+            hot_reload: Some(true),
+            ..Default::default()
+        },
+        CodeConfigFilter {
+            domain: Some("business".into()),
+            source: Some("java".into()),
+            hot_reload: Some(true),
+            ..Default::default()
+        },
+    ] {
+        let groups = search(&db, &status(), &request(None, filter)).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].source_key, "flag");
+        assert_eq!(groups[0].usages.len(), 2);
+    }
+}

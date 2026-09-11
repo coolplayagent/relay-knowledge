@@ -41,12 +41,8 @@ fn record(
     let range = ConfigRange {
         byte_start: start,
         byte_end: end,
-        line_start: input.content[..start]
-            .bytes()
-            .filter(|b| *b == b'\n')
-            .count()
-            + 1,
-        line_end: input.content[..end].bytes().filter(|b| *b == b'\n').count() + 1,
+        line_start: line_number(&input.content[..start]),
+        line_end: line_number(&input.content[..end]),
     };
     let mut result = feature_flag_record_from_range(
         input,
@@ -60,6 +56,15 @@ fn record(
     Ok(result)
 }
 
+fn line_number(prefix: &str) -> usize {
+    let bytes = prefix.as_bytes();
+    1 + bytes
+        .iter()
+        .enumerate()
+        .filter(|(i, b)| **b == b'\r' || (**b == b'\n' && (*i == 0 || bytes[*i - 1] != b'\r')))
+        .count()
+}
+
 fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadata {
     let format = match input.language_id {
         "gotemplate" => "ctmpl",
@@ -71,8 +76,15 @@ fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadat
         ..Default::default()
     };
     // Only an adjacent explicit annotation supplies domain/hot-reload evidence.
-    let line_start = input.content[..start].rfind('\n').map_or(0, |i| i + 1);
-    for line in input.content[..line_start].lines().rev().take(3) {
+    let line_start = input.content[..start]
+        .rfind(['\r', '\n'])
+        .map_or(0, |i| i + 1);
+    for line in input.content[..line_start]
+        .split(['\r', '\n'])
+        .rev()
+        .filter(|line| !line.is_empty())
+        .take(3)
+    {
         let line = line.trim();
         let comment = match input.language_id {
             "java" => line

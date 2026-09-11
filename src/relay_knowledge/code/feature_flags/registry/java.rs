@@ -6,6 +6,7 @@ mod implicit;
 mod names;
 mod static_imports;
 mod strings;
+mod types;
 use names::{field_symbol, literal, receiver_type, text};
 
 pub(super) fn extract(
@@ -18,6 +19,7 @@ pub(super) fn extract(
     let tree = parser
         .parse(input.content, None)
         .ok_or_else(|| DomainError::invalid("java", "parse cancelled"))?;
+    let hierarchy = types::Hierarchy::collect(tree.root_node(), input.content)?;
     let mut cursor = tree.root_node().walk();
     let mut rows = Vec::new();
     let mut methods = Vec::new();
@@ -44,7 +46,7 @@ pub(super) fn extract(
         if node.kind() == "method_invocation" {
             if let Some(mut row) = read(input, node)? {
                 if let Some(method) = flow::returning_method(node, input.content) {
-                    row.metadata.bindings = names::getter_bindings(method, input.content);
+                    row.metadata.bindings = hierarchy.bindings(method, input.content)?;
                 } else if flow::inside_getter(node, input.content) {
                     row.metadata.flow_incomplete = Some("unsupported_getter_value_flow".into());
                 }
@@ -137,7 +139,7 @@ pub(super) fn extract(
                     .collect::<std::collections::BTreeSet<_>>();
                 let mut markers = Vec::new();
                 for method in methods {
-                    let bindings = names::getter_bindings(method, input.content);
+                    let bindings = hierarchy.bindings(method, input.content)?;
                     let Some(own) = bindings.first() else {
                         continue;
                     };

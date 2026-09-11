@@ -93,12 +93,19 @@ fn export_mode(node: Node<'_>, content: &str) -> Option<bool> {
     let mut words = content[node.byte_range()].split_whitespace();
     let command = words.next()?;
     let options = words
-        .take_while(|word| word.starts_with(['-', '+']))
+        .take_while(|word| *word != "--" && word.starts_with(['-', '+']))
         .collect::<Vec<_>>();
+    if options
+        .iter()
+        .any(|option| option.starts_with('-') && option.contains('f'))
+    {
+        return None;
+    }
     if command == "unset"
-        || options
-            .iter()
-            .any(|option| *option == "-n" || (option.starts_with('+') && option.contains('x')))
+        || options.iter().any(|option| {
+            (option.starts_with('-') && option.contains('n'))
+                || (option.starts_with('+') && option.contains('x'))
+        })
     {
         return Some(false);
     }

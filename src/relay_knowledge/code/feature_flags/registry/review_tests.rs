@@ -285,3 +285,96 @@ fn java_keys_use_java_escape_semantics() {
         assert!(rows.iter().any(|r| r.source_key == key), "{key:?}");
     }
 }
+
+#[test]
+fn nested_java_receivers_use_visible_lexical_type_owners() {
+    let rows = facts(
+        "java",
+        r#"package app; class Reader {
+      static class Config { boolean getX() { return Boolean.getBoolean("flag"); } }
+      void run(Config c) { if(c.getX()) {} }
+    }"#,
+    );
+    assert!(rows.iter().any(|r| {
+        r.metadata
+            .bindings
+            .contains(&"app.Reader.Config.getX".into())
+    }));
+    assert!(rows.iter().any(|r| r.edge_kind == "guards_code"
+        && r.metadata.reference.as_deref() == Some("app.Reader.Config.getX")));
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.metadata.reference.as_deref() == Some("app.Config.getX"))
+    );
+}
+#[test]
+fn getter_bindings_include_transitive_visible_supertypes() {
+    let rows = facts(
+        "java",
+        r#"package app;
+      interface Base { boolean getX(); } interface Child extends Base {}
+      class Parent implements Child {}
+      class Impl extends Parent { public boolean getX() { return Boolean.getBoolean("flag"); } }
+      class Reader { void run(Base c) { if(c.getX()) {} } }
+    "#,
+    );
+    let read = rows
+        .iter()
+        .find(|r| r.source_key == "flag" && r.edge_kind == "reads_config")
+        .unwrap();
+    for owner in ["app.Impl", "app.Parent", "app.Child", "app.Base"] {
+        assert!(
+            read.metadata.bindings.contains(&format!("{owner}.getX")),
+            "{owner}"
+        );
+    }
+}
+#[test]
+fn shell_ansi_c_defaults_are_unknown_without_losing_definitions() {
+    let rows = facts("bash", r#"export FLAG=$'on\n'; export MIX=pre$'\t'post"#);
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.edge_kind == "defines_config")
+            .count(),
+        2
+    );
+    assert!(
+        rows.iter()
+            .all(|r| r.metadata.default_value.is_none() && r.metadata.value_type.is_none())
+    );
+}
+#[test]
+fn shell_function_exports_do_not_change_variable_export_state() {
+    for option in ["-f", "-fn", "-nf"] {
+        let rows = facts(
+            "bash",
+            &format!("FLAG=local; export {option} FLAG; echo $FLAG"),
+        );
+        assert!(rows.is_empty(), "{option}: {rows:?}");
+    }
+    let rows = facts("bash", "export FLAG=on; export -f FLAG; echo $FLAG");
+    assert!(rows.iter().any(|r| r.edge_kind == "reads_config"));
+}
+#[test]
+fn properties_natural_lines_preserve_offsets_and_continuations() {
+    for ending in ["\r", "\n", "\r\n"] {
+        let content =
+            format!("flag=true{ending}other=false{ending}long=first\\{ending} second{ending}");
+        let rows = facts("properties", &content);
+        assert_eq!(rows.len(), 3, "{ending:?}");
+        assert_eq!(rows[1].source_key, "other");
+        assert_eq!(rows[1].line_range.start, 2);
+        assert_eq!(rows[1].line_range.end, 2);
+        assert_eq!(
+            &content[rows[1].byte_range.start as usize..rows[1].byte_range.end as usize],
+            "other=false"
+        );
+        assert_eq!(
+            rows[2].metadata.default_value.as_deref(),
+            Some("firstsecond")
+        );
+        assert_eq!(rows[2].line_range.start, 3);
+        assert_eq!(rows[2].line_range.end, 4);
+    }
+}

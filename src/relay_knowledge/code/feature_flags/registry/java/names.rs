@@ -36,6 +36,9 @@ pub(super) fn qualified(node: Node<'_>, name: &str, content: &str) -> String {
     let (head, suffix) = name
         .split_once('.')
         .map_or((name, ""), |(head, _)| (head, &name[head.len()..]));
+    if let Some(owner) = super::types::lexical(node, head, content) {
+        return format!("{owner}{suffix}");
+    }
     let mut local_type = false;
     let mut wildcards = std::collections::BTreeSet::new();
     let mut package = String::new();
@@ -538,50 +541,6 @@ pub(super) fn platform_visible(node: Node<'_>, name: &str, content: &str) -> boo
     }
     true
 }
-pub(super) fn getter_bindings(method: Node<'_>, content: &str) -> Vec<String> {
-    let Some(name) = method.child_by_field_name("name") else {
-        return Vec::new();
-    };
-    let name = text(name, content);
-    if !name.starts_with("get") && !name.starts_with("is") {
-        return Vec::new();
-    }
-    let mut result = vec![field_symbol(method, name, content)];
-    let mut owner = method.parent();
-    while let Some(node) = owner {
-        if is_type(node) {
-            let mut cursor = node.walk();
-            for clause in node.named_children(&mut cursor).filter(|n| {
-                matches!(
-                    n.kind(),
-                    "super_interfaces" | "superclass" | "extends_interfaces"
-                )
-            }) {
-                let mut pending = vec![clause];
-                while let Some(parent) = pending.pop() {
-                    if parent.kind() == "generic_type" {
-                        if let Some(owner) = parent.named_child(0) {
-                            pending.push(owner);
-                        }
-                    } else if matches!(parent.kind(), "type_identifier" | "scoped_type_identifier")
-                    {
-                        result.push(format!(
-                            "{}.{name}",
-                            qualified(node, text(parent, content), content)
-                        ));
-                    } else {
-                        let mut cursor = parent.walk();
-                        pending.extend(parent.named_children(&mut cursor));
-                    }
-                }
-            }
-            break;
-        }
-        owner = node.parent();
-    }
-    result
-}
-
 /// Static platform imports must name the real Java owner and have no local method shadow.
 pub(super) fn static_owner(node: Node<'_>, method: &str, content: &str) -> Option<&'static str> {
     let mut single = std::collections::BTreeSet::new();

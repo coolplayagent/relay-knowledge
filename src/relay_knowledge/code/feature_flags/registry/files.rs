@@ -13,12 +13,17 @@ pub(super) fn extract(
     let mut start = 0;
     let mut logical = String::new();
     let mut section = String::new();
-    for segment in input.content.split_inclusive('\n') {
+    let mut segments = input.content.split_inclusive(['\r', '\n']).peekable();
+    while let Some(segment) = segments.next() {
         if logical.is_empty() {
             start = offset;
         }
         let line = segment.trim_end_matches(['\r', '\n']);
         offset += segment.len();
+        if segment.ends_with('\r') && segments.peek() == Some(&"\n") {
+            segments.next();
+            offset += 1;
+        }
         logical.push_str(if logical.is_empty() {
             line
         } else {

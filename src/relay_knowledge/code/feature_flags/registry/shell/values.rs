@@ -18,7 +18,10 @@ pub(super) fn static_value(
             )
         })?;
         if part.kind().ends_with("expansion")
-            || matches!(part.kind(), "command_substitution" | "process_substitution")
+            || matches!(
+                part.kind(),
+                "command_substitution" | "process_substitution" | "ansi_c_string"
+            )
         {
             return Ok(None);
         }
