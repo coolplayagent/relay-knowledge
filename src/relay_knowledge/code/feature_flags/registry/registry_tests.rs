@@ -651,12 +651,9 @@ fn later_export_retains_only_the_latest_unconditional_shell_assignment() {
         .iter()
         .filter(|r| r.edge_kind == "defines_config")
         .collect::<Vec<_>>();
-    assert_eq!(definitions.len(), 1, "{rows:?}");
-    assert_eq!(definitions[0].source_key, "FLAG");
-    assert_eq!(
-        definitions[0].metadata.default_value.as_deref(),
-        Some("yes")
-    );
+    assert_eq!(definitions.len(), 2, "{rows:?}");
+    let flag = definitions.iter().find(|r| r.source_key == "FLAG").unwrap();
+    assert_eq!(flag.metadata.default_value.as_deref(), Some("yes"));
     assert!(
         rows.iter()
             .any(|r| r.source_key == "FLAG" && r.edge_kind == "reads_config")

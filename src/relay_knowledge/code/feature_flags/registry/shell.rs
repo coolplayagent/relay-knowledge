@@ -1,6 +1,7 @@
 //! Bounded lexical export state for shell configuration facts.
 use super::*;
 use tree_sitter::Node;
+mod guards;
 mod options;
 mod values;
 pub(super) fn extract(
@@ -44,8 +45,13 @@ pub(super) fn extract(
                 .filter(|n| matches!(n.kind(), "word" | "variable_name"))
             {
                 let key = &input.content[name.byte_range()];
-                if let Some(assignment) = prior_assignment(node, key, input.content)? {
-                    if let Some(row) = definition(input, assignment)? {
+                if let Some((assignment, uncertain)) = prior_assignment(node, key, input.content)? {
+                    if let Some(mut row) = definition(input, assignment)? {
+                        if uncertain {
+                            row.metadata.default_value = None;
+                            row.metadata.value_type = None;
+                            row.metadata.flow_incomplete = Some("conditional_reassignment".into());
+                        }
                         check_fact_budget(rows.len())?;
                         rows.push(row);
                     }
@@ -61,14 +67,28 @@ pub(super) fn extract(
                 let key = &input.content[name.byte_range()];
                 if shell_external(node, key, input.content, true)? {
                     check_fact_budget(rows.len())?;
-                    rows.push(record(
+                    let row = record(
                         input,
                         "env_var",
                         key,
                         "reads_config",
                         node.start_byte(),
                         node.end_byte(),
-                    )?);
+                    )?;
+                    for guard in guards::sites(node)? {
+                        check_fact_budget(rows.len() + 1)?;
+                        let mut usage = record(
+                            input,
+                            "env_var",
+                            key,
+                            "guards_code",
+                            guard.start_byte(),
+                            guard.end_byte(),
+                        )?;
+                        usage.metadata.read_usage_id = Some(row.usage_id.clone());
+                        rows.push(usage);
+                    }
+                    rows.push(row);
                 }
             }
         }
@@ -230,7 +250,14 @@ fn definition(
         node.start_byte(),
         node.end_byte(),
     )?;
-    if let Some(value) = values::static_value(node.child_by_field_name("value"), input.content)? {
+    let append = node
+        .child_by_field_name("value")
+        .is_some_and(|value| input.content[name.end_byte()..value.start_byte()].contains("+="));
+    if let Some(value) = if append {
+        None
+    } else {
+        values::static_value(node.child_by_field_name("value"), input.content)?
+    } {
         row.metadata.value_type = Some(value_type(&value).to_owned());
         row.metadata.default_value = Some(value);
     }
@@ -240,9 +267,10 @@ fn prior_assignment<'a>(
     export: Node<'a>,
     key: &str,
     content: &str,
-) -> Result<Option<Node<'a>>, DomainError> {
+) -> Result<Option<(Node<'a>, bool)>, DomainError> {
     let mut previous = export.prev_named_sibling();
     let mut budget = 1024_usize;
+    let mut uncertain = false;
     while let Some(statement) = previous {
         let mut pending = vec![(statement, false)];
         while let Some((node, conditional)) = pending.pop() {
@@ -257,7 +285,11 @@ fn prior_assignment<'a>(
                     .child_by_field_name("name")
                     .is_some_and(|n| &content[n.byte_range()] == key)
             {
-                return Ok((!conditional).then_some(node));
+                if conditional {
+                    uncertain = true;
+                    continue;
+                }
+                return Ok(Some((node, uncertain)));
             }
             if node.kind() == "unset_command"
                 && content[node.byte_range()]

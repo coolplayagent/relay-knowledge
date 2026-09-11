@@ -311,6 +311,8 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Result<(Vec<Node<'a>>, bool
                     | "for_statement"
                     | "do_statement"
                     | "ternary_expression"
+                    | "switch_statement"
+                    | "switch_expression"
             )
         {
             guards.push(current);

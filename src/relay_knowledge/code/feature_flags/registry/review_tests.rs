@@ -1,6 +1,153 @@
 //! Scope, truncation and literal-preservation review regressions.
 use super::*;
 #[test]
+fn annotation_blank_lines_are_boundaries_for_all_natural_line_endings() {
+    // Exercise natural-line metadata boundaries independently of parser newline rules.
+    let annotation = |source: &str| {
+        metadata(
+            &FeatureFlagFileInput {
+                repository_id: "repo",
+                source_scope: "scope",
+                file_id: "file",
+                path: "App.java",
+                language_id: "java",
+                content: source,
+                config_facts: &[],
+            },
+            source.find("System.getProperty").unwrap(),
+        )
+    };
+    for newline in ["\n", "\r", "\r\n"] {
+        for comment in [
+            "// @config domain=payments hot-reload=true",
+            "/* @config domain=payments hot-reload=true */",
+            "/**\n * @config domain=payments hot-reload=true\n */",
+        ] {
+            for blank in ["", " ", "\t"] {
+                let source = format!(
+                    "class App {{ void run() {{{newline}{comment}{newline}{blank}{newline}System.getProperty(\"flag\"); }} }}"
+                );
+                let meta = annotation(&source);
+                assert!(
+                    meta.domain.is_none() && meta.hot_reload.is_none(),
+                    "{source}: {meta:?}"
+                );
+            }
+            let source = format!(
+                "class App {{ void run() {{{newline}{comment}{newline}System.getProperty(\"flag\"); }} }}"
+            );
+            assert!(
+                annotation(&source).domain.as_deref() == Some("payments"),
+                "{source}"
+            );
+        }
+        for (language, comment, source) in [
+            ("properties", "#", "flag=true"),
+            ("ini", ";", "flag=true"),
+            ("bash", "#", "export FLAG=true"),
+            ("gotemplate", "{{/*", "{{ key \"flag\" }}"),
+        ] {
+            let close = if language == "gotemplate" {
+                " */}}"
+            } else {
+                ""
+            };
+            let content =
+                format!("{comment} @config domain=payments{close}{newline}{newline}{source}");
+            assert!(
+                facts(language, &content)
+                    .iter()
+                    .all(|r| r.metadata.domain.is_none())
+            );
+        }
+    }
+}
+#[test]
+fn conditional_shell_override_keeps_the_guaranteed_definition_without_a_default() {
+    let rows = facts(
+        "bash",
+        "FLAG=base; if test -f marker; then FLAG=override; fi; export FLAG; echo \"$FLAG\"",
+    );
+    let definition = rows
+        .iter()
+        .find(|r| r.edge_kind == "defines_config" && r.source_key == "FLAG")
+        .unwrap();
+    assert!(definition.metadata.default_value.is_none());
+    assert_eq!(
+        definition.metadata.flow_incomplete.as_deref(),
+        Some("conditional_reassignment")
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.edge_kind == "reads_config" && r.source_key == "FLAG")
+    );
+}
+#[test]
+fn shell_append_assignments_keep_definitions_without_suffix_defaults() {
+    for source in [
+        "FLAG=base; export FLAG+=suffix",
+        "export FLAG+=suffix",
+        "FLAG+=suffix; export FLAG",
+        "export FLAG=base; FLAG+=suffix",
+    ] {
+        let rows = facts("bash", source);
+        let append = rows
+            .iter()
+            .find(|r| r.edge_kind == "defines_config" && r.excerpt.contains("+="))
+            .unwrap();
+        assert!(append.metadata.default_value.is_none(), "{rows:?}");
+        assert!(append.metadata.value_type.is_none());
+    }
+}
+#[test]
+fn inline_java_switch_selectors_link_guard_usages() {
+    let rows = facts(
+        "java",
+        r#"class App { void run() { switch(config.get("mode")) { case "on": break; default: break; } String result = switch(System.getProperty("shape")) { case "a" -> "x"; default -> "y"; }; } }"#,
+    );
+    for key in ["mode", "shape"] {
+        let read = rows
+            .iter()
+            .find(|r| r.source_key == key && r.edge_kind == "reads_config")
+            .unwrap();
+        assert!(
+            rows.iter().any(|r| r.edge_kind == "guards_code"
+                && r.metadata.read_usage_id.as_deref() == Some(&read.usage_id)),
+            "{rows:?}"
+        );
+    }
+}
+#[test]
+fn shell_predicate_reads_link_guards_without_marking_branch_body_reads() {
+    for source in [
+        "if test \"$FEATURE\" = on; then echo \"$BODY\"; fi",
+        "if false; then :; elif test \"$FEATURE\" = on; then echo \"$BODY\"; fi",
+        "while test \"$FEATURE\" = on; do echo \"$BODY\"; done",
+        "until test \"$FEATURE\" = off; do echo \"$BODY\"; done",
+        "case \"$FEATURE\" in on) echo \"$BODY\";; esac",
+        "for item in $FEATURE; do echo \"$BODY\"; done",
+        "test \"$FEATURE\" = on && echo \"$BODY\"",
+        "test \"$FEATURE\" = on || echo \"$BODY\"",
+    ] {
+        let rows = facts("bash", source);
+        let read = rows
+            .iter()
+            .find(|r| r.source_key == "FEATURE" && r.edge_kind == "reads_config")
+            .unwrap();
+        assert!(
+            rows.iter().any(|r| r.edge_kind == "guards_code"
+                && r.metadata.read_usage_id.as_deref() == Some(&read.usage_id)),
+            "{source}: {rows:?}"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|r| r.source_key == "BODY" && r.edge_kind == "guards_code"),
+            "{source}: {rows:?}"
+        );
+    }
+}
+#[test]
 fn enhanced_for_receivers_use_loop_types_and_stop_outer_field_fallback() {
     let rows = facts(
         "java",

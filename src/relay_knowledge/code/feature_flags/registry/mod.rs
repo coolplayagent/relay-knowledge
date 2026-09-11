@@ -80,7 +80,16 @@ fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadat
         .rfind(['\r', '\n'])
         .map_or(0, |i| i + 1);
     let prefix = &input.content[..line_start];
-    let block = if input.language_id == "java" && prefix.trim_end().ends_with("*/") {
+    let adjacent = prefix
+        .strip_suffix("\r\n")
+        .or_else(|| prefix.strip_suffix(['\r', '\n']))
+        .unwrap_or(prefix);
+    let block = if input.language_id == "java"
+        && adjacent
+            .rsplit(['\r', '\n'])
+            .next()
+            .is_some_and(|line| line.trim_end().ends_with("*/"))
+    {
         prefix
             .rfind("/*")
             .filter(|begin| {
@@ -95,13 +104,22 @@ fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadat
     } else {
         None
     };
-    for line in block.into_iter().chain(
-        prefix
-            .split(['\r', '\n'])
-            .rev()
-            .filter(|line| !line.is_empty())
-            .take(3),
-    ) {
+    let mut remaining = Some(adjacent);
+    let lines = std::iter::from_fn(|| {
+        let rest = remaining.take()?;
+        if let Some(end) = rest.rfind(['\r', '\n']) {
+            let before = &rest[..end];
+            remaining = Some(if rest.as_bytes()[end] == b'\n' {
+                before.strip_suffix('\r').unwrap_or(before)
+            } else {
+                before
+            });
+            Some(&rest[end + 1..])
+        } else {
+            Some(rest)
+        }
+    });
+    for line in block.into_iter().chain(lines.take(3)) {
         let line = if input.language_id == "properties" {
             line.trim_matches(files::PROPERTY_WHITESPACE)
         } else {
@@ -122,7 +140,7 @@ fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadat
             _ => None,
         };
         if line.is_empty() {
-            continue;
+            break;
         }
         let Some(comment) = comment else {
             break;
