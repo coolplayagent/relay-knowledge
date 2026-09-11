@@ -588,6 +588,9 @@ pub(super) fn static_owner(node: Node<'_>, method: &str, content: &str) -> Optio
     match candidates.first()?.as_str() {
         "java.lang.System" => Some("java.lang.System"),
         "java.lang.Boolean" => Some("java.lang.Boolean"),
+        "java.lang.Integer" => Some("java.lang.Integer"),
+        "java.lang.Long" => Some("java.lang.Long"),
+        "java.lang.Double" => Some("java.lang.Double"),
         _ => None,
     }
 }

@@ -26,7 +26,14 @@ pub(super) fn formats(
     })
     .collect()
 }
-pub(super) fn check(group: &mut CodeFeatureFlagGraph, formats: &BTreeSet<String>) {
+pub(super) fn check(group: &mut CodeFeatureFlagGraph, formats: &BTreeSet<String>, fresh: bool) {
+    if !fresh {
+        group.analysis_complete = false;
+        group
+            .consistency_diagnostics
+            .push("incomplete_analysis: served scope is stale or degraded".into());
+        return;
+    }
     let defaults = group
         .usages
         .iter()

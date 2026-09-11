@@ -22,7 +22,15 @@ pub(super) fn extract(
                 .parent()
                 .and_then(|parent| export_mode(parent, input.content))
                 == Some(true)
-                || options::allexport(node, input.content)?)
+                || options::allexport(node, input.content)?
+                || shell_external(
+                    node,
+                    node.child_by_field_name("name")
+                        .map(|name| &input.content[name.byte_range()])
+                        .unwrap_or(""),
+                    input.content,
+                    false,
+                )?)
         {
             if let Some(row) = definition(input, node)? {
                 check_fact_budget(rows.len())?;
@@ -51,7 +59,7 @@ pub(super) fn extract(
                 .find(|child| child.kind() == "variable_name")
             {
                 let key = &input.content[name.byte_range()];
-                if shell_external(node, key, input.content)? {
+                if shell_external(node, key, input.content, true)? {
                     check_fact_budget(rows.len())?;
                     rows.push(record(
                         input,
@@ -121,7 +129,12 @@ fn export_mode(node: Node<'_>, content: &str) -> Option<bool> {
     }
     (command == "local").then_some(false)
 }
-fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> Result<bool, DomainError> {
+fn shell_external(
+    mut node: Node<'_>,
+    key: &str,
+    content: &str,
+    inherited_external: bool,
+) -> Result<bool, DomainError> {
     let mut budget = 1024_usize;
     let mut assigned = false;
     while let Some(parent) = node.parent() {
@@ -154,6 +167,9 @@ fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> Result<bool, 
                                         .child_by_field_name("name")
                                         .is_some_and(|name| &content[name.byte_range()] == key))
                         });
+                        if names && conditional && !inherited_external {
+                            return Ok(false);
+                        }
                         if names && !conditional {
                             return Ok(exported);
                         }
@@ -196,7 +212,7 @@ fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> Result<bool, 
         }
         node = parent;
     }
-    Ok(!assigned)
+    Ok(inherited_external && !assigned)
 }
 
 fn definition(

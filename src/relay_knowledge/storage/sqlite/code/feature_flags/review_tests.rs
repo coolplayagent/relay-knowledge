@@ -638,3 +638,46 @@ fn metadata_only_filters_resolve_annotated_symbolic_getters() {
         assert_eq!(groups[0].usages.len(), 2);
     }
 }
+
+#[test]
+fn directly_stale_or_degraded_scopes_suppress_loaded_default_conflicts() {
+    let db = fixture();
+    for value in ["true", "false"] {
+        add(
+            &db,
+            "flag",
+            "config_key",
+            "defines_config",
+            CodeConfigMetadata {
+                default_value: Some(value.into()),
+                ..Default::default()
+            },
+        );
+    }
+    for degraded in [false, true] {
+        let mut scoped = status();
+        scoped.stale = !degraded;
+        scoped.degraded_reason = degraded.then(|| "partial facts".into());
+        let groups = search(
+            &db,
+            &scoped,
+            &request(
+                None,
+                CodeConfigFilter {
+                    consistency: true,
+                    ..Default::default()
+                },
+            ),
+        )
+        .unwrap();
+        assert_eq!(groups.len(), 1);
+        assert!(!groups[0].analysis_complete);
+        assert!(groups[0].conflicting_default_sources.is_empty());
+        assert!(
+            groups[0]
+                .consistency_diagnostics
+                .iter()
+                .all(|d| d.starts_with("incomplete_analysis"))
+        );
+    }
+}

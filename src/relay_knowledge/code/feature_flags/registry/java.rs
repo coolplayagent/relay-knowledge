@@ -50,7 +50,7 @@ pub(super) fn extract(
                 } else if flow::inside_getter(node, input.content) {
                     row.metadata.flow_incomplete = Some("unsupported_getter_value_flow".into());
                 }
-                let guards = guard_sites(node, input.content);
+                let guards = guard_sites(node, input.content)?;
                 for guard in guards {
                     let mut usage = record(
                         input,
@@ -198,11 +198,20 @@ fn read(
         "getProperty" if is_system => Some("config_key"),
         "getenv" if is_system => Some("env_var"),
         "getBoolean" if is_boolean => Some("config_key"),
+        _ if object.is_some_and(|object| {
+            super::super::extractors::is_config_reader(text(object, input.content), method)
+        }) =>
+        {
+            Some("config_key")
+        }
         _ => None,
     };
     if let Some(kind) = kind {
         let count = arguments.named_child_count();
-        if count == 0 || count > 2 || (method != "getProperty" && count != 1) {
+        if count == 0
+            || count > 2
+            || (((is_system && method == "getenv") || is_boolean) && count != 1)
+        {
             return Ok(None);
         }
         let argument = arguments.named_child(0).unwrap();
@@ -226,7 +235,7 @@ fn read(
         )?;
         row.metadata.reference = reference;
         row.metadata.value_type = Some(
-            if method == "getBoolean" {
+            if method == "getBoolean" && is_boolean {
                 "boolean"
             } else {
                 "string"
@@ -236,7 +245,7 @@ fn read(
         row.metadata.default_value = arguments
             .named_child(1)
             .and_then(|value| literal(value, input.content, 1));
-        if method == "getBoolean" {
+        if method == "getBoolean" && is_boolean {
             row.metadata.default_value = Some("false".to_owned());
         }
         // Preserve the target namespace even when a constant supplies the key.
@@ -270,7 +279,7 @@ fn read(
     row.metadata.reference = Some(key);
     Ok(Some(row))
 }
-fn guard_sites<'a>(node: Node<'a>, content: &str) -> Vec<Node<'a>> {
+fn guard_sites<'a>(node: Node<'a>, content: &str) -> Result<Vec<Node<'a>>, DomainError> {
     let mut current = node;
     let mut guards = Vec::new();
     while let Some(parent) = current.parent() {
@@ -285,7 +294,7 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Vec<Node<'a>> {
             )
         {
             guards.push(current);
-            return guards;
+            return Ok(guards);
         }
         let assigned = if parent.kind() == "variable_declarator"
             && parent.child_by_field_name("value") == Some(current)
@@ -319,7 +328,10 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Vec<Node<'a>> {
                 let mut pending = vec![statement];
                 while let Some(candidate) = pending.pop() {
                     if budget == 0 {
-                        return guards;
+                        return Err(DomainError::invalid(
+                            "configuration",
+                            "Java guard analysis incomplete: node budget exceeded",
+                        ));
                     }
                     budget -= 1;
                     if candidate.kind() == "block" {
@@ -347,10 +359,10 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Vec<Node<'a>> {
                         _ => None,
                     };
                     if write.is_some_and(|write| text(write, content) == text(name, content)) {
-                        return guards;
+                        return Ok(guards);
                     }
                     if let Some(condition) = candidate.child_by_field_name("condition") {
-                        if contains_name(condition, text(name, content), content, &mut budget) {
+                        if contains_name(condition, text(name, content), content, &mut budget)? {
                             guards.push(condition);
                         }
                     }
@@ -369,7 +381,7 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Vec<Node<'a>> {
                 }
                 next = statement.next_named_sibling();
             }
-            return guards;
+            return Ok(guards);
         }
         if matches!(
             parent.kind(),
@@ -380,17 +392,25 @@ fn guard_sites<'a>(node: Node<'a>, content: &str) -> Vec<Node<'a>> {
                 | "method_declaration"
                 | "lambda_expression"
         ) {
-            return guards;
+            return Ok(guards);
         }
         current = parent;
     }
-    guards
+    Ok(guards)
 }
-fn contains_name(node: Node<'_>, name: &str, content: &str, budget: &mut usize) -> bool {
+fn contains_name(
+    node: Node<'_>,
+    name: &str,
+    content: &str,
+    budget: &mut usize,
+) -> Result<bool, DomainError> {
     let mut pending = vec![node];
     while let Some(node) = pending.pop() {
         if *budget == 0 {
-            return false;
+            return Err(DomainError::invalid(
+                "configuration",
+                "Java guard analysis incomplete: node budget exceeded",
+            ));
         }
         *budget -= 1;
         if node.kind() == "identifier"
@@ -402,12 +422,12 @@ fn contains_name(node: Node<'_>, name: &str, content: &str, budget: &mut usize) 
                         && parent.child_by_field_name("field") == Some(node)))
             })
         {
-            return true;
+            return Ok(true);
         }
         if !matches!(node.kind(), "lambda_expression" | "class_body") {
             let mut cursor = node.walk();
             pending.extend(node.named_children(&mut cursor));
         }
     }
-    false
+    Ok(false)
 }

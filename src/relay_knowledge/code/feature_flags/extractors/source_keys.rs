@@ -49,6 +49,15 @@ pub(in crate::code::feature_flags) fn env_keys(line: &str) -> Vec<String> {
     keys
 }
 
+pub(in crate::code::feature_flags) fn is_config_reader(receiver: &str, method: &str) -> bool {
+    CONFIG_RECEIVERS.contains(&receiver.rsplit('.').next().unwrap_or(receiver))
+        && CONFIG_METHODS.iter().any(|candidate| {
+            candidate
+                .strip_prefix('.')
+                .and_then(|s| s.strip_suffix('('))
+                == Some(method)
+        })
+}
 pub(in crate::code::feature_flags) fn config_read_keys(line: &str) -> Vec<String> {
     let mut keys = Vec::new();
     for receiver in CONFIG_RECEIVERS {

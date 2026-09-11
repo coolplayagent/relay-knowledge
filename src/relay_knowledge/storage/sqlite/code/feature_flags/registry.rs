@@ -291,7 +291,11 @@ fn search_bounded(
                 .then_with(|| a.byte_range.start.cmp(&b.byte_range.start))
         });
         if request.filters.consistency {
-            consistency::check(group, &formats);
+            consistency::check(
+                group,
+                &formats,
+                !status.stale && status.degraded_reason.is_none(),
+            );
         }
     }
     groups.sort_by(|a, b| {

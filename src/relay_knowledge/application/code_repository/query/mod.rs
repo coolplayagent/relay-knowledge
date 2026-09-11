@@ -261,14 +261,18 @@ impl RelayKnowledgeService {
             .search_code_feature_flags_scope(source_scope, request.clone())
             .await
             .map_err(storage_api_error)?;
-        if served_stale_scope || stale_reason.is_some() {
+        if served_stale_scope
+            || stale_reason.is_some()
+            || scoped_status.stale
+            || scoped_status.degraded_reason.is_some()
+        {
             for flag in &mut flags {
                 flag.analysis_complete = false;
                 flag.conflicting_default_sources.clear();
                 flag.consistency_diagnostics.clear();
                 if request.filters.consistency {
                     flag.consistency_diagnostics
-                        .push("incomplete_analysis: served scope is stale".into());
+                        .push("incomplete_analysis: served scope is stale or degraded".into());
                 }
             }
         }

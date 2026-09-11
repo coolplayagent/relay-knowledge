@@ -378,3 +378,120 @@ fn properties_natural_lines_preserve_offsets_and_continuations() {
         assert_eq!(rows[2].line_range.end, 4);
     }
 }
+
+#[test]
+fn properties_comments_cannot_continue_into_definitions() {
+    for comment in ["# note\\", "! note\\", "  # note\\"] {
+        let rows = facts("properties", &format!("{comment}\nflag=true\n"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].source_key, "flag");
+        assert_eq!(rows[0].line_range.start, 2);
+    }
+}
+#[test]
+fn template_keys_and_defaults_follow_go_escape_semantics() {
+    let rows = facts(
+        "gotemplate",
+        r#"{{ key "feature\x2ex" }} {{ keyOrDefault "\U00000061" "\141" }}"#,
+    );
+    assert_eq!(rows[0].source_key, "feature.x");
+    assert_eq!(rows[1].source_key, "a");
+    assert_eq!(rows[1].metadata.default_value.as_deref(), Some("a"));
+}
+#[test]
+fn template_comment_quotes_do_not_consume_following_actions() {
+    for comment in [
+        r#"{{/* document "quoted value */}}"#,
+        r#"{{- /* ` unclosed " */ -}}"#,
+    ] {
+        let rows = facts("gotemplate", &format!("{comment}\n{{{{ key \"flag\" }}}}"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].source_key, "flag");
+    }
+}
+#[test]
+fn shell_assignments_keep_previously_enabled_export_attributes() {
+    for source in [
+        "export FLAG; FLAG=true; echo $FLAG",
+        "export FLAG=old; FLAG=true; echo $FLAG",
+    ] {
+        let rows = facts("bash", source);
+        assert!(rows.iter().any(|r| r.edge_kind == "defines_config"
+            && r.metadata.default_value.as_deref() == Some("true")));
+    }
+    for source in [
+        "export FLAG; export -n FLAG; FLAG=true",
+        "if test -f local; then export FLAG; fi; FLAG=true",
+    ] {
+        assert!(
+            !facts("bash", source)
+                .iter()
+                .any(|r| r.metadata.default_value.as_deref() == Some("true"))
+        );
+    }
+}
+#[test]
+fn java_guard_scan_exhaustion_is_explicit() {
+    let source = format!(
+        "class App {{ void run() {{ boolean enabled=Boolean.getBoolean(\"flag\"); {} if(enabled) {{}} }} }}",
+        "work();".repeat(700)
+    );
+    let error = extract(&FeatureFlagFileInput {
+        repository_id: "repo",
+        source_scope: "scope",
+        file_id: "file",
+        path: "App.java",
+        language_id: "java",
+        content: &source,
+        config_facts: &[],
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("guard analysis incomplete"));
+}
+#[test]
+fn statically_imported_numeric_conversions_bind_configuration_getters() {
+    for (owner, method, ty) in [
+        ("Integer", "parseInt", "int"),
+        ("Long", "parseLong", "long"),
+        ("Double", "parseDouble", "double"),
+    ] {
+        let source = format!(
+            "import static java.lang.{owner}.{method}; class App {{ {ty} getPort() {{ return {method}(System.getProperty(\"port\")); }} }}"
+        );
+        let rows = facts("java", &source);
+        assert!(
+            rows.iter()
+                .any(|r| r.metadata.bindings.contains(&"App.getPort".into())
+                    && r.metadata.flow_incomplete.is_none()),
+            "{owner}"
+        );
+    }
+}
+#[test]
+fn direct_java_config_readers_retain_legacy_keys_and_guards() {
+    let rows = facts(
+        "java",
+        r#"class App { void run() {
+      if(config.getBoolean("checkout")) {} settings.get("mode");
+      options.get("\141", "fallback");
+      String text="config.getBoolean(\"fake\")";
+      // settings.get("comment")
+    }}"#,
+    );
+    for key in ["checkout", "mode", "a"] {
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == key && r.edge_kind == "reads_config"),
+            "{key}"
+        );
+    }
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "checkout" && r.edge_kind == "guards_code")
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|r| matches!(r.source_key.as_str(), "fake" | "comment"))
+    );
+}

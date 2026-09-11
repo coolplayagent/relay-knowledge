@@ -1,5 +1,6 @@
 //! Properties/INI/template values and exported shell configuration facts.
 use super::*;
+mod go_strings;
 mod pipelines;
 
 pub(super) fn extract(
@@ -30,6 +31,7 @@ pub(super) fn extract(
             line.trim_start()
         });
         if input.language_id == "properties"
+            && !logical.trim_start().starts_with(['#', '!'])
             && logical.chars().rev().take_while(|c| *c == '\\').count() % 2 == 1
         {
             logical.pop();
@@ -177,6 +179,20 @@ fn template_reads(
     Ok(())
 }
 fn action_end(content: &str, start: usize) -> Option<usize> {
+    let tail = content[start..]
+        .trim_start()
+        .trim_start_matches('-')
+        .trim_start();
+    if let Some(comment) = tail.strip_prefix("/*") {
+        let close = comment.find("*/")?;
+        let suffix = comment[close + 2..]
+            .trim_start()
+            .trim_start_matches('-')
+            .trim_start();
+        return suffix
+            .starts_with("}}")
+            .then_some(content.len() - suffix.len());
+    }
     let mut quote = None;
     let mut escaped = false;
     for (index, ch) in content[start..].char_indices() {
@@ -216,9 +232,9 @@ pub(super) fn quoted(raw: &str) -> Option<(String, usize)> {
         if ch == quote {
             return Some((
                 if quote == '"' {
-                    decode(&raw[1..index + 1])?
+                    go_strings::decode(&raw[1..index + 1])?
                 } else {
-                    raw[1..index + 1].to_owned()
+                    raw[1..index + 1].replace('\r', "")
                 },
                 index + 2,
             ));
