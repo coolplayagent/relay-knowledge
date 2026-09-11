@@ -192,3 +192,96 @@ fn shell_quote_forms_preserve_static_dollars_and_backslashes() {
         );
     }
 }
+
+#[test]
+fn annotations_require_source_format_comments() {
+    for (language, source) in [
+        (
+            "java",
+            "class App { void run() {\nString marker = \"@config domain=fake\";\nSystem.getProperty(\"flag\"); }}",
+        ),
+        ("properties", "marker=@config domain=fake\nflag=true\n"),
+        ("ini", "marker=@config domain=fake\nflag=true\n"),
+        ("bash", "echo '@config domain=fake'\necho $FLAG\n"),
+        ("gotemplate", "@config domain=fake\n{{ key \"flag\" }}\n"),
+    ] {
+        assert!(
+            facts(language, source)
+                .iter()
+                .all(|r| r.metadata.domain.is_none()),
+            "{language}"
+        );
+    }
+    for (language, source) in [
+        ("properties", "! @config domain=valid\nflag=true\n"),
+        ("ini", "; @config domain=valid\nflag=true\n"),
+        ("bash", "# @config domain=valid\nexport FLAG=true\n"),
+        (
+            "gotemplate",
+            "{{/* @config domain=valid */}}\n{{ key \"flag\" }}\n",
+        ),
+        (
+            "java",
+            "class App { void run() {\n// @config domain=valid\nSystem.getProperty(\"flag\"); }}",
+        ),
+    ] {
+        assert!(
+            facts(language, source)
+                .iter()
+                .any(|r| r.metadata.domain.as_deref() == Some("valid")),
+            "{language}"
+        );
+    }
+}
+#[test]
+fn implicit_getters_link_callers_and_guards_without_overload_fallback() {
+    let rows = facts(
+        "java",
+        r#"class App {
+      boolean isEnabled() { return Boolean.getBoolean("flag"); }
+      void run() { if (isEnabled()) {} }
+      class Inner { boolean isEnabled(int n) { return false; } void run() { isEnabled(); } }
+    }"#,
+    );
+    assert!(rows.iter().any(|r| r.edge_kind == "reads_config"
+        && r.metadata.reference.as_deref() == Some("App.isEnabled")));
+    assert!(rows.iter().any(|r| r.edge_kind == "guards_code"
+        && r.metadata.reference.as_deref() == Some("App.isEnabled")));
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.metadata.reference.as_deref() == Some("App.Inner.isEnabled"))
+    );
+}
+#[test]
+fn conditional_shell_assignments_preserve_potential_inherited_reads() {
+    for source in [
+        "if test -f local; then FLAG=local; fi; echo $FLAG",
+        "if test -f local; then export -n FLAG; fi; echo $FLAG",
+    ] {
+        let rows = facts("bash", source);
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == "FLAG" && r.edge_kind == "reads_config")
+        );
+        assert!(!rows.iter().any(|r| r.edge_kind == "defines_config"));
+    }
+    let rows = facts(
+        "bash",
+        "FLAG=local; if test -f local; then FLAG=other; fi; echo $FLAG",
+    );
+    assert!(!rows.iter().any(|r| r.edge_kind == "reads_config"));
+}
+#[test]
+fn java_keys_use_java_escape_semantics() {
+    let rows = facts(
+        "java",
+        r#"class App { void run() {
+      System.getProperty("\141"); System.getProperty("\b\s\t\n\f\r");
+      System.getProperty("\u0062"); System.getProperty("\3777");
+    }}"#,
+    );
+    for key in ["a", "\u{0008} \t\n\u{000c}\r", "b", "ÿ7"] {
+        assert!(rows.iter().any(|r| r.source_key == key), "{key:?}");
+    }
+}

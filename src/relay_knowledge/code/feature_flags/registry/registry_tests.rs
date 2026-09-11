@@ -493,7 +493,7 @@ fn shell_export_status_survives_assignments_and_respects_unexport_and_subshells(
         ("FLAG=yes; export FLAG; echo $FLAG", true),
         ("export FLAG=yes; export -n FLAG; echo $FLAG", false),
         ("( FLAG=no ); echo $FLAG", true),
-        ("if true; then FLAG=no; fi; echo $FLAG", false),
+        ("if true; then FLAG=no; fi; echo $FLAG", true),
     ] {
         let rows = facts("bash", source);
         assert_eq!(

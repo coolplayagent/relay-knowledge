@@ -124,7 +124,7 @@ fn literal_bounded(
     let value = match node.kind() {
         "string_literal" => {
             let raw = text(node, content).strip_prefix('"')?.strip_suffix('"')?;
-            super::super::files::decode(raw)
+            super::strings::decode(raw)
         }
         "parenthesized_expression" => {
             literal_bounded(node.named_child(0)?, content, depth + 1, budget)

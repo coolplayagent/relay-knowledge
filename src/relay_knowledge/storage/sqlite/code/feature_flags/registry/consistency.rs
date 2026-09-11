@@ -27,6 +27,23 @@ pub(super) fn formats(
     .collect()
 }
 pub(super) fn check(group: &mut CodeFeatureFlagGraph, formats: &BTreeSet<String>) {
+    let defaults = group
+        .usages
+        .iter()
+        .filter_map(|u| u.metadata.default_value.as_ref())
+        .collect::<BTreeSet<_>>();
+    if defaults.len() > 1 {
+        group.conflicting_default_sources = group
+            .usages
+            .iter()
+            .filter(|u| u.metadata.default_value.is_some())
+            .cloned()
+            .collect();
+        group.consistency_diagnostics.push(format!(
+            "conflicting_defaults: {}",
+            defaults.into_iter().cloned().collect::<Vec<_>>().join(", ")
+        ));
+    }
     if !group.analysis_complete {
         group
             .consistency_diagnostics
@@ -52,22 +69,5 @@ pub(super) fn check(group: &mut CodeFeatureFlagGraph, formats: &BTreeSet<String>
                     .push(format!("missing_from_format: {format}"));
             }
         }
-    }
-    let defaults = group
-        .usages
-        .iter()
-        .filter_map(|u| u.metadata.default_value.as_ref())
-        .collect::<BTreeSet<_>>();
-    if defaults.len() > 1 {
-        group.conflicting_default_sources = group
-            .usages
-            .iter()
-            .filter(|u| u.metadata.default_value.is_some())
-            .cloned()
-            .collect();
-        group.consistency_diagnostics.push(format!(
-            "conflicting_defaults: {}",
-            defaults.into_iter().cloned().collect::<Vec<_>>().join(", ")
-        ));
     }
 }

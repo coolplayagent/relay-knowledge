@@ -147,8 +147,8 @@ fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> Result<bool, 
                                         .child_by_field_name("name")
                                         .is_some_and(|name| &content[name.byte_range()] == key))
                         });
-                        if names {
-                            return Ok(!conditional && exported);
+                        if names && !conditional {
+                            return Ok(exported);
                         }
                     }
                     if candidate.kind() == "variable_assignment"
@@ -157,7 +157,7 @@ fn shell_external(mut node: Node<'_>, key: &str, content: &str) -> Result<bool, 
                             .is_some_and(|name| &content[name.byte_range()] == key)
                     {
                         if conditional {
-                            return Ok(false);
+                            continue;
                         }
                         if options::allexport(candidate, content)? {
                             return Ok(true);

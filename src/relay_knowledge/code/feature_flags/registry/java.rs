@@ -2,8 +2,10 @@
 use super::*;
 use tree_sitter::Node;
 mod flow;
+mod implicit;
 mod names;
 mod static_imports;
+mod strings;
 use names::{field_symbol, literal, receiver_type, text};
 
 pub(super) fn extract(
@@ -246,10 +248,12 @@ fn read(
     {
         return Ok(None);
     }
-    let Some(object) = object else {
-        return Ok(None);
+    let owner = if let Some(object) = object {
+        receiver_type(object, input.content, 0)
+    } else {
+        implicit::owner(node, method, input.content)
     };
-    let Some(owner) = receiver_type(object, input.content, 0) else {
+    let Some(owner) = owner else {
         return Ok(None);
     };
     let key = format!("{owner}.{method}");

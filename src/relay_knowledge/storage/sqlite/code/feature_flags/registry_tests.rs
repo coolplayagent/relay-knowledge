@@ -376,6 +376,19 @@ fn conflicts_include_located_sources_and_unknown_flow_cannot_claim_completeness(
     );
     let groups = search(&db, &status(), &query).unwrap();
     assert!(!groups[0].analysis_complete);
+    assert_eq!(groups[0].conflicting_default_sources.len(), 2);
+    assert!(
+        groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.starts_with("conflicting_defaults:"))
+    );
+    assert!(
+        !groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.starts_with("missing_from_format:") || d == "read_without_definition")
+    );
     assert!(
         groups[0]
             .consistency_diagnostics

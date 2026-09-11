@@ -71,9 +71,30 @@ fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadat
         ..Default::default()
     };
     // Only an adjacent explicit annotation supplies domain/hot-reload evidence.
-    for line in input.content[..start].lines().rev().take(3) {
+    let line_start = input.content[..start].rfind('\n').map_or(0, |i| i + 1);
+    for line in input.content[..line_start].lines().rev().take(3) {
         let line = line.trim();
-        if let Some((_, annotation)) = line.split_once("@config ") {
+        let comment = match input.language_id {
+            "java" => line
+                .strip_prefix("//")
+                .or_else(|| line.strip_prefix("/*"))
+                .map(|s| s.split("*/").next().unwrap_or(s)),
+            "properties" => line.strip_prefix('#').or_else(|| line.strip_prefix('!')),
+            "ini" => line.strip_prefix('#').or_else(|| line.strip_prefix(';')),
+            "bash" => line.strip_prefix('#'),
+            "gotemplate" => line
+                .strip_prefix("{{/*")
+                .or_else(|| line.strip_prefix("{{- /*"))
+                .map(|s| s.split("*/").next().unwrap_or(s)),
+            _ => None,
+        };
+        if line.is_empty() {
+            continue;
+        }
+        let Some(comment) = comment else {
+            break;
+        };
+        if let Some((_, annotation)) = comment.split_once("@config ") {
             for part in annotation.split_whitespace() {
                 if let Some((key, value)) = part.split_once('=') {
                     match key {
@@ -83,9 +104,6 @@ fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadat
                     }
                 }
             }
-            break;
-        }
-        if !line.is_empty() && !line.starts_with(['#', '!', '/', '*']) {
             break;
         }
     }
