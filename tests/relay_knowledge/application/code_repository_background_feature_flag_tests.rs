@@ -192,3 +192,84 @@ async fn feature_flags_resolve_transitive_getters_across_indexed_java_files() {
         );
     }
 }
+
+#[tokio::test]
+async fn feature_flags_resolve_platform_shadows_and_static_getters_across_files() {
+    let repo = FixtureRepo::create("cross-file-platform-shadows");
+    for (path, source) in [
+        (
+            "src/System.java",
+            "package app; class System { static String getProperty(String key) { return key; } }",
+        ),
+        (
+            "src/Boolean.java",
+            "package app; class Boolean { static boolean getBoolean(String key) { return true; } }",
+        ),
+        (
+            "src/Reader.java",
+            "package app; class Reader { void run() { System.getProperty(\"fake_system\"); Boolean.getBoolean(\"fake_boolean\"); java.lang.System.getProperty(\"real\"); } }",
+        ),
+        (
+            "src/Explicit.java",
+            "package app; import java.lang.System; class Explicit { void run() { System.getProperty(\"explicit\"); } }",
+        ),
+        (
+            "src/FeatureConfig.java",
+            "package app; class FeatureConfig { static boolean isEnabled() { return java.lang.Boolean.getBoolean(\"static_flag\"); } }",
+        ),
+        (
+            "src/Caller.java",
+            "package reader; import app.FeatureConfig; class Caller { void run() { if(FeatureConfig.isEnabled()) {} } }",
+        ),
+    ] {
+        repo.write(path, source);
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "fixture"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-platform-shadows").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-platform-shadows"),
+        )
+        .await
+        .unwrap();
+    for path in ["src", "src/Reader.java"] {
+        let response = service
+            .query_code_repository_feature_flags(
+                CodeFeatureFlagRequest::new(
+                    None,
+                    filtered_selector("fixture", "HEAD", path),
+                    10,
+                    FreshnessPolicy::WaitUntilFresh,
+                )
+                .unwrap(),
+                context("query-platform-shadows"),
+            )
+            .await
+            .unwrap();
+        assert!(response.flags.iter().any(|f| f.source_key == "real"));
+        assert!(
+            !response
+                .flags
+                .iter()
+                .any(|f| f.source_key.starts_with("fake_"))
+        );
+        if path == "src" {
+            assert!(response.flags.iter().any(|f| f.source_key == "explicit"));
+            assert!(response.flags.iter().any(|f| {
+                f.source_key == "static_flag"
+                    && f.usages
+                        .iter()
+                        .any(|u| u.path == "src/Caller.java" && u.edge_kind == "guards_code")
+            }));
+        }
+    }
+}

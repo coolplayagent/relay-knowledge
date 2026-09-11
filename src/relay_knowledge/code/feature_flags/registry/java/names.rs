@@ -110,6 +110,38 @@ pub(super) fn field_symbol(mut node: Node<'_>, name: &str, content: &str) -> Str
     let qualified_head = qualified(node, head, content);
     format!("{}{}", qualified_head, &suffix[head.len()..])
 }
+pub(super) fn key_literal(node: Node<'_>, content: &str) -> Option<String> {
+    if matches!(node.kind(), "identifier" | "field_access") {
+        return None;
+    }
+    string_expression(node, content, 0)
+        .then(|| literal(node, content, 0))
+        .flatten()
+}
+fn string_expression(node: Node<'_>, content: &str, depth: usize) -> bool {
+    if depth >= 16 {
+        return false;
+    }
+    match node.kind() {
+        "string_literal" => true,
+        "parenthesized_expression" => node
+            .named_child(0)
+            .is_some_and(|n| string_expression(n, content, depth + 1)),
+        "binary_expression" => {
+            node.child_by_field_name("operator")
+                .is_some_and(|n| text(n, content) == "+")
+                && ["left", "right"].iter().any(|field| {
+                    node.child_by_field_name(field)
+                        .is_some_and(|n| string_expression(n, content, depth + 1))
+                })
+        }
+        "identifier" | "field_access" => constant_binding(node, content)
+            .and_then(|n| n.parent())
+            .and_then(|n| n.child_by_field_name("type"))
+            .is_some_and(|n| matches!(text(n, content), "String" | "java.lang.String")),
+        _ => false,
+    }
+}
 pub(super) fn literal(node: Node<'_>, content: &str, depth: usize) -> Option<String> {
     let mut budget = 256;
     literal_bounded(node, content, depth, &mut budget)
@@ -211,7 +243,7 @@ fn constant_binding<'a>(node: Node<'a>, content: &str) -> Option<Node<'a>> {
     }
     None
 }
-fn binding<'a>(mut node: Node<'a>, name: &str, content: &str) -> Option<Node<'a>> {
+pub(super) fn binding<'a>(mut node: Node<'a>, name: &str, content: &str) -> Option<Node<'a>> {
     let explicit_field = node.parent().is_some_and(|parent| {
         parent.kind() == "field_access"
             && parent.child_by_field_name("field") == Some(node)
@@ -364,7 +396,9 @@ pub(super) fn receiver_type(node: Node<'_>, content: &str, depth: usize) -> Opti
                 .to_owned(),
         ),
         "identifier" => {
-            let declaration = binding(node, text(node, content), content)?;
+            let Some(declaration) = binding(node, text(node, content), content) else {
+                return super::types::static_receiver(node, content);
+            };
             let owner = if declaration.kind() == "variable_declarator" {
                 declaration.parent()?
             } else {
@@ -414,6 +448,7 @@ pub(super) fn receiver_type(node: Node<'_>, content: &str, depth: usize) -> Opti
         {
             receiver_type(node.child_by_field_name("field")?, content, depth + 1)
         }
+        "field_access" => super::types::static_receiver(node, content),
         _ => None,
     }
 }

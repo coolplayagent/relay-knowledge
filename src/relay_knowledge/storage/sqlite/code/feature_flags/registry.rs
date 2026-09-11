@@ -71,13 +71,21 @@ fn search_bounded(
         .unwrap_or_default();
     let query = feature_flag_sql_query(scope, status, request, &terms);
     let mut rows = load(connection, &query.sql, &query.params)?;
+    let mut type_hierarchy = None;
+    if rows
+        .iter()
+        .any(|row| row.metadata.implicit_platform_owner.is_some())
+    {
+        let hierarchy = hierarchy::Hierarchy::load(connection, scope, status, request)?;
+        hierarchy.filter_platform_reads(&mut rows);
+        type_hierarchy = Some(hierarchy);
+    }
     let mut seen = rows
         .iter()
         .map(|row| row.usage_id.clone())
         .collect::<BTreeSet<_>>();
     let mut queried = BTreeSet::new();
     let mut evidence_groups = BTreeSet::new();
-    let mut type_hierarchy = None;
     for round in 0..4 {
         let keys = rows
             .iter()
@@ -104,6 +112,7 @@ fn search_bounded(
             .difference(&queried)
             .cloned()
             .collect::<BTreeSet<_>>();
+        hierarchy.filter_platform_reads(&mut rows);
         hierarchy.augment(&mut rows)?;
         check_size(&rows)?;
         if keys.len() + queried.len() > 1000 {
@@ -128,6 +137,7 @@ fn search_bounded(
             }
             check_size(&rows)?;
         }
+        hierarchy.filter_platform_reads(&mut rows);
         hierarchy.augment(&mut rows)?;
         check_size(&rows)?;
         queried.extend(keys);
@@ -140,6 +150,7 @@ fn search_bounded(
             &mut seen,
             &mut evidence_groups,
         )?;
+        hierarchy.filter_platform_reads(&mut rows);
         hierarchy.augment(&mut rows)?;
         check_size(&rows)?;
         if round == 3
@@ -338,7 +349,13 @@ fn matches_group(
         group
             .usages
             .iter()
-            .map(|u| format!("{} {}", u.path, u.excerpt))
+            .map(|u| format!(
+                "{} {} {} {}",
+                u.path,
+                u.excerpt,
+                u.metadata.bindings.join(" "),
+                u.metadata.reference.as_deref().unwrap_or("")
+            ))
             .collect::<Vec<_>>()
             .join(" ")
     )

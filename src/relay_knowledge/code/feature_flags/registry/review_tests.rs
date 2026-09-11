@@ -606,3 +606,54 @@ fn shell_prior_assignment_budget_exhaustion_is_explicit() {
             .contains("prior assignment analysis incomplete")
     );
 }
+
+#[test]
+fn static_getter_receivers_resolve_local_and_explicit_imported_types() {
+    let rows = facts(
+        "java",
+        r#"package app; class FeatureConfig { static boolean isEnabled() { return Boolean.getBoolean("flag"); } }
+      class Reader { void run() { if(FeatureConfig.isEnabled()) {} } }"#,
+    );
+    assert!(rows.iter().any(|r| r.edge_kind == "guards_code"
+        && r.metadata.reference.as_deref() == Some("app.FeatureConfig.isEnabled")));
+    let rows = facts(
+        "java",
+        "package reader; import settings.FeatureConfig; class Reader { void run() { FeatureConfig.isEnabled(); settings.FeatureConfig.isEnabled(); } }",
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.metadata.reference.as_deref() == Some("settings.FeatureConfig.isEnabled"))
+            .count(),
+        2
+    );
+    let rows = facts(
+        "java",
+        "class FeatureConfig {} class Reader { void run(Unknown FeatureConfig) { FeatureConfig.isEnabled(); } }",
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|r| r.metadata.reference.as_deref() == Some("FeatureConfig.isEnabled"))
+    );
+}
+#[test]
+fn direct_java_reader_keys_require_string_expressions() {
+    let rows = facts(
+        "java",
+        r#"class App { static final String KEY="flag"; void run() {
+      config.get(0); config.get(true); config.get(1+2); config.get((5));
+      config.get("flag."+1); config.get(KEY); config.get("limit", 5);
+    }}"#,
+    );
+    assert!(!rows.iter().any(|r| r.edge_kind == "reads_config"
+        && matches!(r.source_key.as_str(), "0" | "true" | "3" | "5")));
+    assert!(rows.iter().any(|r| r.source_key == "flag.1"));
+    assert!(
+        rows.iter()
+            .any(|r| r.metadata.reference.as_deref() == Some("App.KEY"))
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "limit" && r.metadata.default_value.as_deref() == Some("5"))
+    );
+}

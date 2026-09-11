@@ -108,34 +108,48 @@ impl Hierarchy {
             }
         }
     }
-    pub(super) fn fact(
+    pub(super) fn facts(
         &self,
         input: &super::FeatureFlagFileInput<'_>,
         node: Node<'_>,
-    ) -> Result<Option<crate::domain::CodeFeatureFlagRecord>, DomainError> {
+    ) -> Result<Vec<crate::domain::CodeFeatureFlagRecord>, DomainError> {
         if !is_type(node) {
-            return Ok(None);
+            return Ok(Vec::new());
         }
         let Some(name) = node.child_by_field_name("name") else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
         let owner = names::field_symbol(node, names::text(name, input.content), input.content);
-        let Some(parents) = self.0.get(&owner).filter(|parents| !parents.is_empty()) else {
-            return Ok(None);
+        let Some(parents) = self.0.get(&owner) else {
+            return Ok(Vec::new());
         };
         let end = node
             .child_by_field_name("body")
             .map_or(name.end_byte(), |body| body.start_byte());
-        let mut row = super::super::record(
-            input,
-            "config_symbol",
-            &owner,
-            "config_type_hierarchy",
-            node.start_byte(),
-            end,
-        )?;
-        row.metadata.bindings = parents.clone();
-        Ok(Some(row))
+        let mut facts = Vec::new();
+        if !parents.is_empty() {
+            let mut row = super::super::record(
+                input,
+                "config_symbol",
+                &owner,
+                "config_type_hierarchy",
+                node.start_byte(),
+                end,
+            )?;
+            row.metadata.bindings = parents.clone();
+            facts.push(row);
+        }
+        if matches!(names::text(name, input.content), "System" | "Boolean") {
+            facts.push(super::super::record(
+                input,
+                "config_symbol",
+                &owner,
+                "config_type_declaration",
+                node.start_byte(),
+                end,
+            )?);
+        }
+        Ok(facts)
     }
     pub(super) fn bindings(
         &self,
@@ -168,4 +182,77 @@ impl Hierarchy {
         }
         Ok(result)
     }
+}
+
+pub(super) fn static_receiver(node: Node<'_>, content: &str) -> Option<String> {
+    let raw = names::text(node, content);
+    let head = raw.split('.').next()?;
+    if names::binding(node, head, content).is_some() {
+        return None;
+    }
+    let mut root = node;
+    while let Some(parent) = root.parent() {
+        root = parent;
+    }
+    let mut visible = lexical(node, head, content).is_some();
+    let mut cursor = root.walk();
+    for item in root.named_children(&mut cursor).take(4096) {
+        if is_type(item)
+            && item
+                .child_by_field_name("name")
+                .is_some_and(|n| names::text(n, content) == head)
+        {
+            visible = true;
+        }
+        if item.kind() == "import_declaration" {
+            let imported = names::text(item, content)
+                .trim()
+                .trim_start_matches("import ")
+                .trim_end_matches(';')
+                .trim();
+            if let Some(path) = imported.strip_prefix("static ") {
+                if path.ends_with(".*") || path.rsplit('.').next() == Some(head) {
+                    return None;
+                }
+            } else if imported.rsplit('.').next() == Some(head) {
+                visible = true;
+            }
+        }
+    }
+    // A fully qualified type expression has no lexical variable at its head.
+    if !visible && !(raw.contains('.') && head.chars().next().is_some_and(char::is_lowercase)) {
+        return None;
+    }
+    Some(names::qualified(node, raw, content))
+}
+pub(super) fn platform_shadow(mut node: Node<'_>, owner: &str, content: &str) -> Option<String> {
+    if !matches!(owner, "System" | "Boolean") {
+        return None;
+    }
+    while let Some(parent) = node.parent() {
+        node = parent;
+    }
+    let mut package = String::new();
+    let mut cursor = node.walk();
+    for item in node.named_children(&mut cursor).take(4096) {
+        let text = names::text(item, content)
+            .trim()
+            .trim_end_matches(';')
+            .trim();
+        if item.kind() == "import_declaration"
+            && text
+                .strip_prefix("import ")
+                .is_some_and(|p| p.trim() == format!("java.lang.{owner}"))
+        {
+            return None;
+        }
+        if item.kind() == "package_declaration" {
+            package = text.trim_start_matches("package").trim().to_owned();
+        }
+    }
+    Some(if package.is_empty() {
+        owner.into()
+    } else {
+        format!("{package}.{owner}")
+    })
 }

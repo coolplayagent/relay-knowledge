@@ -25,9 +25,7 @@ pub(super) fn extract(
     let mut methods = Vec::new();
     loop {
         let node = cursor.node();
-        if let Some(row) = hierarchy.fact(input, node)? {
-            rows.push(row);
-        }
+        rows.extend(hierarchy.facts(input, node)?);
         if node.kind() == "method_declaration"
             && node.child_by_field_name("name").is_some_and(|name| {
                 let name = text(name, input.content);
@@ -69,6 +67,10 @@ pub(super) fn extract(
                         guard.end_byte(),
                     )?;
                     usage.metadata.reference.clone_from(&row.metadata.reference);
+                    usage
+                        .metadata
+                        .implicit_platform_owner
+                        .clone_from(&row.metadata.implicit_platform_owner);
                     usage
                         .metadata
                         .target_kind
@@ -223,13 +225,14 @@ fn read(
             return Ok(None);
         }
         let argument = arguments.named_child(0).unwrap();
-        let (source_kind, key, reference) = if let Some(key) = literal(argument, input.content, 0) {
-            (kind, key, None)
-        } else if let Some(reference) = names::key_symbol(argument, input.content) {
-            ("config_symbol", reference.clone(), Some(reference))
-        } else {
-            return Ok(None);
-        };
+        let (source_kind, key, reference) =
+            if let Some(key) = names::key_literal(argument, input.content) {
+                (kind, key, None)
+            } else if let Some(reference) = names::key_symbol(argument, input.content) {
+                ("config_symbol", reference.clone(), Some(reference))
+            } else {
+                return Ok(None);
+            };
         if key.is_empty() {
             return Ok(None);
         }
@@ -242,6 +245,8 @@ fn read(
             node.end_byte(),
         )?;
         row.metadata.reference = reference;
+        row.metadata.implicit_platform_owner =
+            platform.and_then(|owner| types::platform_shadow(node, owner, input.content));
         row.metadata.value_type = Some(
             if matches!(
                 method,
@@ -253,6 +258,9 @@ fn read(
             }
             .to_owned(),
         );
+        if !is_system && !is_boolean && method == "get" {
+            row.metadata.value_type = None;
+        }
         row.metadata.default_value = arguments
             .named_child(1)
             .and_then(|value| literal(value, input.content, 1));

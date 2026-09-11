@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct CodeConfigMetadata {
     pub source_format: String,
+    /// Same-package type whose presence invalidates an implicit java.lang read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub implicit_platform_owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

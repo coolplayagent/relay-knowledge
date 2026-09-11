@@ -816,3 +816,83 @@ fn snapshot_hierarchy_closure_budget_is_enforced() {
     let error = search(&db, &status(), &request(None, CodeConfigFilter::default())).unwrap_err();
     assert!(error.to_string().contains("type closure budget exceeded"));
 }
+
+#[test]
+fn final_query_matching_retains_getter_binding_and_reference_names() {
+    let db = fixture();
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            bindings: vec!["FeatureConfig.isEnabled".into()],
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "FeatureConfig.isEnabled",
+        "config_symbol",
+        "guards_code",
+        CodeConfigMetadata {
+            reference: Some("FeatureConfig.isEnabled".into()),
+            ..Default::default()
+        },
+    );
+    db.execute(
+        "UPDATE code_repository_feature_flags SET excerpt='cfg.isEnabled()'",
+        [],
+    )
+    .unwrap();
+    let groups = search(
+        &db,
+        &status(),
+        &request(Some("FeatureConfig.isEnabled"), CodeConfigFilter::default()),
+    )
+    .unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].source_key, "flag");
+}
+#[test]
+fn same_package_platform_shadows_apply_across_paths_but_not_snapshots() {
+    let db = fixture();
+    add(
+        &db,
+        "app.System",
+        "config_symbol",
+        "config_type_declaration",
+        CodeConfigMetadata::default(),
+    );
+    db.execute(
+        "UPDATE code_repository_feature_flags SET path='src/System.java'",
+        [],
+    )
+    .unwrap();
+    add(
+        &db,
+        "fake",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            implicit_platform_owner: Some("app.System".into()),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "real",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata::default(),
+    );
+    db.execute("UPDATE code_repository_feature_flags SET path='src/Reader.java' WHERE source_kind='config_key'", []).unwrap();
+    let mut query = request(None, CodeConfigFilter::default());
+    query.limit = 10;
+    query.repository.path_filters = vec!["src/Reader.java".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].source_key, "real");
+    db.execute("UPDATE code_repository_feature_flags SET source_scope='old' WHERE edge_kind='config_type_declaration'", []).unwrap();
+    assert_eq!(search(&db, &status(), &query).unwrap().len(), 2);
+}

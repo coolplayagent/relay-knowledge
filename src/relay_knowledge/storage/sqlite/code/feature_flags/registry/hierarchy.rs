@@ -1,6 +1,7 @@
 //! Snapshot-local type hierarchy connects getter evidence across Java files.
 use super::*;
 pub(super) struct Hierarchy {
+    declarations: BTreeSet<String>,
     parents: BTreeMap<String, BTreeSet<String>>,
     children: BTreeMap<String, BTreeSet<String>>,
 }
@@ -13,18 +14,25 @@ impl Hierarchy {
     ) -> Result<Self, StorageError> {
         let filter = feature_flag_sql_filter(scope, status, request, &[]);
         let sql = format!(
-            "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND flag.edge_kind='config_type_hierarchy' LIMIT {}",
+            "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND flag.edge_kind='config_type_hierarchy' OR (flag.source_scope=? AND flag.edge_kind='config_type_declaration') LIMIT {}",
             filter.where_clause,
             MAX_ROWS + 1
         );
-        let rows = load(connection, &sql, &filter.params)?;
+        let mut params = filter.params;
+        params.push(Value::Text(scope.to_owned()));
+        let rows = load(connection, &sql, &params)?;
         check_size(&rows)?;
         if rows.iter().map(row_size).sum::<usize>() > 4 * 1024 * 1024 {
             return Err(incomplete("type hierarchy 4 MiB evidence budget exceeded"));
         }
         let mut parents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut children: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut declarations = BTreeSet::new();
         for row in rows {
+            if row.edge_kind == "config_type_declaration" {
+                declarations.insert(row.source_key);
+                continue;
+            }
             for parent in row.metadata.bindings {
                 parents
                     .entry(row.source_key.clone())
@@ -36,7 +44,19 @@ impl Hierarchy {
                     .insert(row.source_key.clone());
             }
         }
-        Ok(Self { parents, children })
+        Ok(Self {
+            parents,
+            children,
+            declarations,
+        })
+    }
+    pub(super) fn filter_platform_reads(&self, rows: &mut Vec<FeatureFlagRow>) {
+        rows.retain(|row| {
+            row.metadata
+                .implicit_platform_owner
+                .as_ref()
+                .is_none_or(|owner| !self.declarations.contains(owner))
+        });
     }
     fn related(&self, symbol: &str, descendants: bool) -> Result<BTreeSet<String>, StorageError> {
         let Some((owner, method)) = symbol.rsplit_once('.') else {
