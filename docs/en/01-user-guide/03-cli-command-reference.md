@@ -118,7 +118,7 @@ relay-knowledge repo framework <alias> [--query <text>] [--framework angular|vue
 relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
-relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
+relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|modules|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--path <prefix>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--cursor <token>]
 relay-knowledge repo software export <alias> --profile spdx-3|cyclonedx-1.7|prov-o [--ref <ref>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo business <alias> [--ref <ref>] [--domain <id>] [--query <text>] [--kind terms|mappings|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo view <alias> [--kind architecture-layers|business-domains|dependency-tour|process-flow|affected-scope] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--changed-path <path>]
@@ -256,3 +256,5 @@ positive and negative instances before release packaging.
 
 The skill intentionally does not configure MCP, call MCP tools, or manage ACP
 sessions. Use the MCP/ACP chapters for protocol-level agent access.
+
+`repo software --kind dependencies` returns Maven module targets and declared POM edges alongside components and source usages. `--kind modules` selects only the reactor graph. Both share a per-page `--limit` (maximum 500) across their arrays and return `next_cursor` when more facts exist. Continue using `--cursor <token>` with the same ref and filters; accumulate pages until the cursor is absent. `repo impact` returns default-profile downstream POM evidence chains. See [Software Global Modeling](../03-architecture-specs/21-software-global-domain-modeling.md).

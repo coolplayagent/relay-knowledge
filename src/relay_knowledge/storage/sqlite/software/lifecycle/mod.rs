@@ -86,6 +86,19 @@ pub(super) fn refresh_projection(
     source_scope: &str,
     graph_version: GraphVersion,
 ) -> Result<LifecycleProjection, StorageError> {
+    let models = crate::storage::sqlite::maven::effective_models(connection, source_scope)?;
+    let complete = crate::storage::sqlite::maven::reactor::refresh(
+        connection,
+        source_scope,
+        graph_version,
+        &models,
+    )?;
+    if complete {
+        connection.execute(
+            "DELETE FROM software_build_targets WHERE source_scope = ?1 AND ecosystem = 'maven'",
+            [source_scope],
+        )?;
+    }
     let mut build_targets = build::begin_refresh(connection, source_scope)?;
     let mut iac_resources = iac::new_resources();
     let mut design_elements = design::new_elements();
@@ -94,7 +107,12 @@ pub(super) fn refresh_projection(
         iac::collect(&candidate, graph_version, &mut iac_resources)?;
         design::collect(&candidate, graph_version, &mut design_elements)
     })?;
-    build::persist(connection, source_scope, graph_version, &mut build_targets)?;
+    build::persist(
+        connection,
+        graph_version,
+        &mut build_targets,
+        complete.then_some(&models),
+    )?;
     iac::persist(connection, iac_resources.as_slice())?;
     design::persist(connection, design_elements.as_slice())?;
     tracing::debug!(

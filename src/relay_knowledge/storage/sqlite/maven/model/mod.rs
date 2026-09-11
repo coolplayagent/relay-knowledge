@@ -19,9 +19,9 @@ mod dependencies_tests;
 mod plugins_tests;
 
 pub(super) use contracts::{
-    EffectiveDependency, EffectiveGoal, EffectivePlugin, EffectivePluginExecution, EffectivePom,
-    EffectiveProfile, ParentPom, PomDocument, RawDependency, RawPlugin, RawPluginExecution, RawPom,
-    RawProfile, ResolvedPomLoad, TaggedValue,
+    EffectiveDependency, EffectiveGoal, EffectiveParent, EffectivePlugin, EffectivePluginExecution,
+    EffectivePom, EffectiveProfile, ParentPom, PomDocument, RawDependency, RawPlugin,
+    RawPluginExecution, RawPom, RawProfile, ResolvedPomLoad, TaggedValue,
 };
 
 use coordinates::{insert_project_properties, parent_properties, project_coordinates};
@@ -51,7 +51,10 @@ pub(super) fn resolve_effective_model_load(
             Ok(Some(raw)) => {
                 raw_models.insert(raw.document.path.clone(), raw);
             }
-            Ok(None) => {}
+            Ok(None) => {
+                tracing::warn!(source_scope = %source_scope, path = %path, "indexed POM has no project document");
+                preserve_existing_facts = true;
+            }
             Err(StorageError::InvalidInput(error)) => {
                 tracing::warn!(
                     source_scope = %source_scope,
@@ -584,6 +587,12 @@ impl EffectiveResolver {
         let modules = raw
             .modules
             .iter()
+            .chain(
+                raw.profiles
+                    .iter()
+                    .filter(|profile| profile.active_by_default)
+                    .flat_map(|profile| &profile.modules),
+            )
             .map(|module| TaggedValue {
                 value: interpolate(&module.value, &default_properties),
                 line: module.line,
@@ -596,7 +605,15 @@ impl EffectiveResolver {
             .or_else(|| raw.parent.as_ref().map(|parent| parent.line))
             .unwrap_or(1);
 
+        let effective_parent = raw.parent.as_ref().map(|declaration| EffectiveParent {
+            coordinate: declaration
+                .coordinate(&default_properties)
+                .unwrap_or_else(|| "unknown parent".into()),
+            path: parent.as_ref().map(|model| model.document.path.clone()),
+            line: declaration.line,
+        });
         Ok(EffectivePom {
+            parent: effective_parent,
             document: raw.document,
             group_id,
             artifact_id,

@@ -1,5 +1,7 @@
 # relay-knowledge 自迭代
 
+`code_index_persistence_performance_suite_maven_lifecycle_loads_models_once` 用例通过 SQL trace 跟踪 128 个索引 POM 的 reset 与 lifecycle，要求 `maven_effective_model_loads=1`，并校验 reactor 模块和构建事实。重复物化 POM 会使现有 fast/performance gate 失败；有界 worker 阶段、publication fence 与不完整证据保留规则不变。
+
 中文 | [English](README.md)
 
 fast profile 默认包含 `java_class_calls`（`cases/repository_java_class_calls.json`）：生成 Java 类/方法调用对，并在 256 个噪声文件中加入 32,768 次无关调用。两个类名查询方向都必须返回正确成员证据，查询 p95 预算为 2,000 ms，用于保护 issue #388，查询不使用 canonical ID。设置 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=java_class_calls` 可运行定向 fast 评估。

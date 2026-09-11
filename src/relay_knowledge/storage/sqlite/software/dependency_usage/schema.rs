@@ -28,6 +28,8 @@ pub(in crate::storage::sqlite::software) fn initialize_schema(
 
         CREATE INDEX IF NOT EXISTS software_dependency_usages_scope
             ON software_dependency_usages(source_scope, language_id, ecosystem, package_name);
+        CREATE INDEX IF NOT EXISTS software_dependency_usages_page
+            ON software_dependency_usages(source_scope, usage_id);
         ",
     )?;
     if !had_usage_table {

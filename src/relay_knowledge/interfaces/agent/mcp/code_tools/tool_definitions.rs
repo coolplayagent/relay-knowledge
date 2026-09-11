@@ -159,9 +159,10 @@ pub(in crate::interfaces::agent::mcp) fn code_software_query_tool_definition() -
                 "repository": {"type": "string", "minLength": 1},
                 "kind": {
                     "type": "string",
-                    "enum": ["dependency", "dependencies", "sdk", "sdks", "file", "files", "topic", "topics", "relationship", "relationships", "config", "configuration", "configurations", "build", "iac", "design", "model", "models", "system", "systems", "api", "apis", "resource", "resources", "test", "tests", "deployment", "deployments", "release", "releases", "statement", "statements", "conflict", "conflicts", "all"]
+                    "enum": ["dependency", "dependencies", "sdk", "sdks", "file", "files", "topic", "topics", "relationship", "relationships", "config", "configuration", "configurations", "build", "modules", "iac", "design", "model", "models", "system", "systems", "api", "apis", "resource", "resources", "test", "tests", "deployment", "deployments", "release", "releases", "statement", "statements", "conflict", "conflicts", "all"]
                 },
-                "limit": {"type": "integer", "minimum": 1},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+                "cursor": {"type": "string", "minLength": 1, "maxLength": 4096},
                 "ref_selector": {"type": "string"},
                 "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
                 "language_filters": {"type": "array", "items": {"type": "string"}},

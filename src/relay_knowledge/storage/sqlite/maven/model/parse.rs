@@ -91,6 +91,7 @@ fn parse_profiles(root: &XmlNode, source_path: &str) -> Vec<RawProfile> {
                 .filter_map(|profile| {
                     let id = child_text(profile, "id")?;
                     Some(RawProfile {
+                        modules: parse_modules(profile),
                         properties: parse_properties(profile),
                         dependencies: parse_dependencies(profile),
                         dependency_management: profile

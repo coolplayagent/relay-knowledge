@@ -124,6 +124,8 @@ pub(super) struct CodeFrameworkGraphArgs {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct CodeSoftwareQueryArgs {
+    #[serde(default)]
+    pub(super) cursor: Option<String>,
     pub(super) repository: String,
     #[serde(default)]
     pub(super) kind: Option<String>,
@@ -290,6 +292,7 @@ pub(super) fn parse_software_query_kind(
             Ok(SoftwareGlobalKind::Relationships)
         }
         "build" => Ok(SoftwareGlobalKind::Build),
+        "modules" => Ok(SoftwareGlobalKind::Modules),
         "iac" => Ok(SoftwareGlobalKind::Iac),
         "design" | "model" | "models" => Ok(SoftwareGlobalKind::Design),
         "system" | "systems" => Ok(SoftwareGlobalKind::Systems),

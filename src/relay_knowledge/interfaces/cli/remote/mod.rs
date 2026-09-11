@@ -431,6 +431,8 @@ pub(super) async fn run_remote(
             repo::render_report_response(&response, format).map(Some)
         }
         RepoCommand::Software {
+            cursor,
+            path_filters,
             alias,
             ref_selector,
             kind,
@@ -441,7 +443,7 @@ pub(super) async fn run_remote(
                 repo::selector(
                     alias.clone(),
                     ref_selector.clone(),
-                    Vec::new(),
+                    path_filters.clone(),
                     Vec::new(),
                     format,
                 )?,
@@ -449,6 +451,7 @@ pub(super) async fn run_remote(
                 *freshness,
                 *limit,
             )
+            .and_then(|request| request.with_cursor(cursor.clone()))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = client
                 .post_repository::<_, SoftwareGlobalResponse>(alias, "software", &request)

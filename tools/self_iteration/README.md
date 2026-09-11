@@ -1,5 +1,7 @@
 # relay-knowledge self-iteration
 
+The `code_index_persistence_performance_suite_maven_lifecycle_loads_models_once` case traces 128 indexed POMs through reset and lifecycle. It requires `maven_effective_model_loads=1` while verifying reactor module and lifecycle build facts, so repeated POM materialization fails the existing fast/performance gate. This preserves bounded worker phases, publication fences and incomplete-evidence retention.
+
 [中文](README.zh-CN.md) | English
 
 The fast profile includes `java_class_calls` (`cases/repository_java_class_calls.json`): a generated Java class/member call pair plus 32,768 unrelated calls across 256 noise files. Both class-name directions must return the correct member evidence under a 2,000 ms p95 query budget. This guards issue #388 without relying on canonical-ID selectors. Run a focused fast evaluation with `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=java_class_calls`; the normal fast profile includes the fixture by default.

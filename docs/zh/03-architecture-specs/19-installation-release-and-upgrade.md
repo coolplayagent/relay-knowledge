@@ -186,6 +186,21 @@ Plan rendering 与 execution 必须使用 bootstrap 捕获的精确 source execu
 - 安装后的 Web 服务必须通过显式的托管仓库别名与持久化仓库根目录解析 Knowledge Map 操作；服务行为不得依赖 service manager 设置的进程工作目录。
 - Release workflow 或等价门禁必须运行 service lifecycle dry-run smoke，验证发布二进制生成的 service definition、rollback plan 和 package manifest 检查不会与 release tag 漂移。
 
+
+### Maven reactor 派生数据升级
+
+投影 checkpoint 改为 v3 token。旧 v1/v2 的非终态 token 在原有 publication fence 下从 reset 重放派生，包括升级停在 files/topics/relationships/ontology/publish 的情况，避免 schema 9 被标为 fresh 却缺少 reactor 完成证据。
+
+从 schema 9 之前的数据库导入时，允许缺少新增的三个 reactor 表；包含 POM 却没有 reactor 完成标记的 scope 保持 incomplete，直到 durable repair/reindex 发布完整图。非 Maven 旧 scope 无需 reactor 事实。
+
+Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_reactor_edges` 和 `maven_reactor_status` 三张 snapshot-scoped 派生表。旧投影标记 stale，由现有 durable repair/index task 重建，不在查询热路径解析 POM。三个 owner 同时纳入 immutable-scope import、显式 scope 清理和有界 retention GC；新表只在升级后开始填充，升级前已越过新增 GC phase 的旧任务没有这些数据需要回收。没有新增运行目录、环境变量或服务进程。
+
+升级后为 Maven 仓库执行完整索引或等待既有投影修复任务完成，再查询 modules。旧二进制回滚前应 drain/cancel 当前任务并恢复一致的数据库备份；不要手工删除 reactor marker 或修改 checkpoint。新 workspace `maven` 使用 workspace-v1 mask 的第 4 位，旧三种格式的位值不变；禁用检测的 scope identity 保持兼容。
+
+依赖分页在 schema 初始化时幂等增加 `(source_scope, component_id)` 与 `(source_scope, usage_id)` 读取索引，不改变事实载荷或 schema 9 版本。已有调用可以省略 `cursor`；需要完整 dependencies/modules 结果的客户端必须消费 `next_cursor`。回滚旧二进制会忽略新增索引，并失去扩展的 dependencies 返回内容和游标支持。
+
 ---
 
 导航: 上一章: [18. 可观测性、诊断与 SLO](18-observability-diagnostics-and-slo.md) | 下一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md)
+
+`xml-lossless-windows-v1` 代码事实身份使曾裁掉边界空白的旧 XML 源码窗口失效。升级后重新索引仓库以发布无损 POM 证据，无需删除数据库或修改配置。POM 证据不完整时，保留的 Maven 软件事实持续显示 degraded，直到修复并重新索引。

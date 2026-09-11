@@ -118,6 +118,8 @@ pub enum RepoCommand {
         alias: String,
     },
     Software {
+        cursor: Option<String>,
+        path_filters: Vec<String>,
         alias: String,
         ref_selector: String,
         kind: SoftwareGlobalKind,

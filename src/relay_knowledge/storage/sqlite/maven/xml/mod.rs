@@ -36,7 +36,7 @@ pub(super) fn parse_xml_document(content: &str) -> Result<Option<XmlNode>, Stora
             Ok(Event::Start(event)) => {
                 let line = line_for_event_end(content, reader.buffer_position() as usize);
                 stack.push(XmlNode {
-                    name: String::from_utf8_lossy(event.name().as_ref()).into_owned(),
+                    name: String::from_utf8_lossy(event.local_name().as_ref()).into_owned(),
                     text: String::new(),
                     line,
                     children: Vec::new(),
@@ -45,7 +45,7 @@ pub(super) fn parse_xml_document(content: &str) -> Result<Option<XmlNode>, Stora
             Ok(Event::Empty(event)) => {
                 let line = line_for_event_end(content, reader.buffer_position() as usize);
                 let node = XmlNode {
-                    name: String::from_utf8_lossy(event.name().as_ref()).into_owned(),
+                    name: String::from_utf8_lossy(event.local_name().as_ref()).into_owned(),
                     text: String::new(),
                     line,
                     children: Vec::new(),
@@ -57,7 +57,21 @@ pub(super) fn parse_xml_document(content: &str) -> Result<Option<XmlNode>, Stora
                     let text = event
                         .decode()
                         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-                    node.text.push_str(text.as_ref());
+                    node.text.push_str(
+                        &quick_xml::escape::unescape(&text)
+                            .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
+                    );
+                }
+            }
+            Ok(Event::GeneralRef(event)) => {
+                if let Some(node) = stack.last_mut() {
+                    let reference = event
+                        .decode()
+                        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+                    node.text.push_str(
+                        &quick_xml::escape::unescape(&format!("&{reference};"))
+                            .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
+                    );
                 }
             }
             Ok(Event::CData(event)) => {

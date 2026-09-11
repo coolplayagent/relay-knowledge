@@ -196,6 +196,9 @@ pub struct CodeRepositoryReportResponse {
 /// Repository-scoped software global model projection response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SoftwareGlobalResponse {
+    /// Pass back as cursor with the same ref, kind and filters to continue this page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
     pub metadata: ApiMetadata,
     pub scope: CodeRepositoryScopeMetadata,
     pub request: SoftwareGlobalRequest,

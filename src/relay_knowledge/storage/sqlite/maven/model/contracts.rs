@@ -26,6 +26,7 @@ pub(in crate::storage::sqlite::maven) struct EffectivePom {
     pub(in crate::storage::sqlite::maven) artifact_id: String,
     pub(in crate::storage::sqlite::maven) version: Option<String>,
     pub(in crate::storage::sqlite::maven) coordinate: String,
+    pub(in crate::storage::sqlite::maven) parent: Option<EffectiveParent>,
     pub(in crate::storage::sqlite::maven) packaging: Option<String>,
     pub(in crate::storage::sqlite::maven) modules: Vec<TaggedValue>,
     pub(in crate::storage::sqlite::maven) profiles: Vec<EffectiveProfile>,
@@ -36,6 +37,14 @@ pub(in crate::storage::sqlite::maven) struct EffectivePom {
     pub(in crate::storage::sqlite::maven) dependency_management: BTreeMap<String, RawDependency>,
     pub(in crate::storage::sqlite::maven) plugin_management: BTreeMap<String, RawPlugin>,
     pub(in crate::storage::sqlite::maven) properties: BTreeMap<String, String>,
+}
+
+/// Declared parent evidence and the exact local model used for inheritance.
+#[derive(Debug, Clone)]
+pub(in crate::storage::sqlite::maven) struct EffectiveParent {
+    pub(in crate::storage::sqlite::maven) coordinate: String,
+    pub(in crate::storage::sqlite::maven) path: Option<String>,
+    pub(in crate::storage::sqlite::maven) line: u32,
 }
 
 impl EffectivePom {
@@ -275,6 +284,7 @@ impl ParentPom {
 pub(in crate::storage::sqlite::maven) struct RawProfile {
     pub(in crate::storage::sqlite::maven) id: TaggedValue,
     pub(in crate::storage::sqlite::maven) active_by_default: bool,
+    pub(in crate::storage::sqlite::maven) modules: Vec<TaggedValue>,
     pub(in crate::storage::sqlite::maven) properties: BTreeMap<String, TaggedValue>,
     pub(in crate::storage::sqlite::maven) dependencies: Vec<RawDependency>,
     pub(in crate::storage::sqlite::maven) dependency_management: Vec<RawDependency>,

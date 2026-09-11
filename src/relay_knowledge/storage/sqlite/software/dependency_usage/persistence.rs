@@ -143,7 +143,9 @@ pub(super) fn import_evidence(
     Ok(imports)
 }
 
-fn usage_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SoftwareDependencyUsage> {
+pub(in crate::storage::sqlite::software) fn usage_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<SoftwareDependencyUsage> {
     Ok(SoftwareDependencyUsage {
         usage_id: row.get(0)?,
         component_id: row.get(1)?,
