@@ -180,15 +180,7 @@ fn shell_external(
                     }
                     budget -= 1;
                     if let Some(exported) = export_mode(candidate, content) {
-                        let mut cursor = candidate.walk();
-                        let names = candidate.named_children(&mut cursor).any(|child| {
-                            (matches!(child.kind(), "word" | "variable_name")
-                                && &content[child.byte_range()] == key)
-                                || (child.kind() == "variable_assignment"
-                                    && child
-                                        .child_by_field_name("name")
-                                        .is_some_and(|name| &content[name.byte_range()] == key))
-                        });
+                        let names = command_names(candidate, key, content)?;
                         if names && conditional && !inherited_external {
                             return Ok(false);
                         }
@@ -265,6 +257,28 @@ fn definition(
     }
     Ok(Some(row))
 }
+fn command_names(node: Node<'_>, key: &str, content: &str) -> Result<bool, DomainError> {
+    let mut cursor = node.walk();
+    for (index, child) in node.named_children(&mut cursor).enumerate() {
+        if index >= 1024 {
+            return Err(DomainError::invalid(
+                "configuration",
+                "shell command operand budget exceeded",
+            ));
+        }
+        if child.kind() == "variable_assignment" {
+            if child
+                .child_by_field_name("name")
+                .is_some_and(|n| &content[n.byte_range()] == key)
+            {
+                return Ok(true);
+            }
+        } else if values::static_value(Some(child), content)?.as_deref() == Some(key) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
 fn prior_assignment<'a>(
     export: Node<'a>,
     key: &str,
@@ -309,9 +323,8 @@ fn prior_assignment<'a>(
                 return Ok(Some((node, uncertain)));
             }
             if node.kind() == "unset_command"
-                && content[node.byte_range()]
-                    .split_whitespace()
-                    .any(|word| word == key)
+                && export_mode(node, content) == Some(false)
+                && command_names(node, key, content)?
             {
                 return Ok(None);
             }

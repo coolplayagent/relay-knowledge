@@ -258,3 +258,22 @@ fn dotenv_assignments_preserve_nonboolean_and_unknown_definitions() {
             .is_none()
     );
 }
+
+#[test]
+fn invalid_annotation_domains_do_not_create_oversized_metadata() {
+    for (domain, valid) in [
+        ("x".repeat(128), true),
+        ("x".repeat(129), false),
+        ("x".repeat(70000), false),
+        ("İ".repeat(64), false),
+        (String::new(), false),
+    ] {
+        let rows = facts(
+            "properties",
+            &format!("# @config domain={domain} hot-reload=true\nfeature=true\n"),
+        );
+        assert_eq!(rows[0].metadata.domain.is_some(), valid);
+        assert_eq!(rows[0].metadata.hot_reload, Some(true));
+        assert!(serde_json::to_vec(&rows[0].metadata).unwrap().len() < 1024);
+    }
+}

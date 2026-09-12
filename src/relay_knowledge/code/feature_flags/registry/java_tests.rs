@@ -319,3 +319,23 @@ fn boolean_conversions_preserve_nullable_property_fallback_only() {
         }
     }
 }
+
+#[test]
+fn boolean_conversions_normalize_explicit_property_fallbacks() {
+    for (fallback, expected) in [
+        ("TRUE", "true"),
+        ("True", "true"),
+        ("false", "false"),
+        ("other", "false"),
+        ("", "false"),
+    ] {
+        let source = format!(
+            r#"class Config {{ boolean getX() {{ return Boolean.parseBoolean(System.getProperty("flag", "{fallback}")); }} }}"#
+        );
+        let rows = facts("java", &source);
+        let read = rows.iter().find(|r| r.edge_kind == "reads_config").unwrap();
+        assert_eq!(read.metadata.default_value.as_deref(), Some(expected));
+        assert_eq!(read.metadata.value_type.as_deref(), Some("boolean"));
+        assert_eq!(read.metadata.unconverted_default.as_deref(), Some(fallback));
+    }
+}

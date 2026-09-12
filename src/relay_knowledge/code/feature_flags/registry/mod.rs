@@ -159,7 +159,14 @@ pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeCo
             for part in annotation.split_whitespace() {
                 if let Some((key, value)) = part.split_once('=') {
                     match key {
-                        "domain" => meta.domain = Some(value.to_lowercase()),
+                        "domain" => {
+                            meta.domain = if !value.is_empty() && value.len() <= 128 {
+                                let normalized = value.to_lowercase();
+                                (normalized.len() <= 128).then_some(normalized)
+                            } else {
+                                None
+                            };
+                        }
                         "hot-reload" => meta.hot_reload = value.parse().ok(),
                         _ => {}
                     }

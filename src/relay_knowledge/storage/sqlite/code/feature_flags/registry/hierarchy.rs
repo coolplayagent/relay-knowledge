@@ -180,9 +180,11 @@ impl Hierarchy {
                 .any(|owner| self.declarations.contains(owner))
             {
                 row.metadata.bindings.clear();
-                if row.metadata.boolean_null_fallback {
-                    row.metadata.default_value = None;
-                    row.metadata.value_type = None;
+                if row.metadata.boolean_converted_default {
+                    row.metadata
+                        .default_value
+                        .clone_from(&row.metadata.unconverted_default);
+                    row.metadata.value_type = Some("string".into());
                 }
                 row.metadata.flow_incomplete = Some("shadowed_platform_conversion".into());
             }

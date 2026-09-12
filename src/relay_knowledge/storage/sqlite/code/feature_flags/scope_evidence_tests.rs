@@ -458,3 +458,49 @@ fn query_terms_match_across_connected_usages_after_resolution() {
         .is_empty()
     );
 }
+
+#[test]
+fn converted_explicit_defaults_compare_effective_values_and_restore_shadowed_raw_values() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[(
+            "Config.java",
+            r#"package app; class Config { boolean getX(){return Boolean.parseBoolean(System.getProperty("flag", "TRUE"));} }"#,
+        )],
+    );
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            default_value: Some("true".into()),
+            ..Default::default()
+        },
+    );
+    let query = request(
+        Some("flag"),
+        CodeConfigFilter {
+            consistency: true,
+            ..Default::default()
+        },
+    );
+    let groups = search(&db, &status(), &query).unwrap();
+    assert!(
+        !groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.starts_with("conflicting_defaults"))
+    );
+    java_files(&db, &[("Boolean.java", "package app; class Boolean {}")]);
+    let groups = search(&db, &status(), &query).unwrap();
+    assert!(
+        groups[0]
+            .usages
+            .iter()
+            .any(|u| u.edge_kind == "reads_config"
+                && u.metadata.default_value.as_deref() == Some("TRUE"))
+    );
+}

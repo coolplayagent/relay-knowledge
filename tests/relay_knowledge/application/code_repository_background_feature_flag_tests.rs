@@ -31,6 +31,13 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
     ] {
         repo.write(path, source);
     }
+    repo.write(
+        "src/oversized.properties",
+        &format!(
+            "# @config domain={} hot-reload=true\noversized=true\n",
+            "x".repeat(70000)
+        ),
+    );
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "fixture"]);
     let service = service_with_memory_store().await;

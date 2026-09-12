@@ -40,9 +40,12 @@ pub struct CodeConfigMetadata {
     /// Lexical member signature that takes precedence over a static platform import.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub static_import_reference: Option<String>,
-    /// False fallback supplied by a proven Boolean conversion of a nullable property.
+    /// Default supplied by a proven Boolean conversion of a property read.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub boolean_null_fallback: bool,
+    pub boolean_converted_default: bool,
+    /// Raw property fallback restored if the apparent Boolean conversion is shadowed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unconverted_default: Option<String>,
 
     /// Java getter visibility: public, protected, private, or package.
     #[serde(skip_serializing_if = "Option::is_none")]

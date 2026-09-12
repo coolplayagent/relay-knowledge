@@ -341,3 +341,16 @@ fn export_in_brace_groups_finds_enclosing_assignments() {
         assert!(!rows.iter().any(|r| r.edge_kind == "defines_config"));
     }
 }
+
+#[test]
+fn quoted_unset_operands_stop_prior_definition_lookup() {
+    for operand in ["'FLAG'", r#""FLAG""#, r#"FL\AG"#] {
+        let rows = facts("bash", &format!("FLAG=true; unset {operand}; export FLAG"));
+        assert!(
+            !rows.iter().any(|r| r.edge_kind == "defines_config"),
+            "{operand}: {rows:?}"
+        );
+    }
+    let rows = facts("bash", "FLAG=true; unset -f 'FLAG'; export FLAG");
+    assert!(rows.iter().any(|r| r.edge_kind == "defines_config"));
+}

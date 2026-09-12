@@ -55,22 +55,31 @@ pub(super) fn extract(
                     flow::returning_method(node, input.content)
                 {
                     if boolean_conversion
-                        && row.metadata.default_value.is_none()
                         && node
                             .child_by_field_name("name")
                             .is_some_and(|n| text(n, input.content) == "getProperty")
-                        && node
-                            .child_by_field_name("arguments")
-                            .is_some_and(|n| n.named_child_count() == 1)
                         && (node.child_by_field_name("object").is_some_and(|n| {
                             matches!(text(n, input.content), "System" | "java.lang.System")
                         }) || (node.child_by_field_name("object").is_none()
                             && names::static_owner(node, "getProperty", input.content)
                                 == Some("java.lang.System")))
                     {
-                        row.metadata.boolean_null_fallback = true;
-                        row.metadata.default_value = Some("false".into());
-                        row.metadata.value_type = Some("boolean".into());
+                        let converted = row
+                            .metadata
+                            .default_value
+                            .as_ref()
+                            .map(|v| v.eq_ignore_ascii_case("true"))
+                            .or_else(|| {
+                                node.child_by_field_name("arguments")
+                                    .filter(|n| n.named_child_count() == 1)
+                                    .map(|_| false)
+                            });
+                        if let Some(value) = converted {
+                            row.metadata.boolean_converted_default = true;
+                            row.metadata.unconverted_default = row.metadata.default_value.take();
+                            row.metadata.default_value = Some(value.to_string());
+                            row.metadata.value_type = Some("boolean".into());
+                        }
                     }
                     row.metadata.bindings = hierarchy.bindings(method, input.content)?;
                     row.metadata.declared_getter = row.metadata.bindings.first().cloned();

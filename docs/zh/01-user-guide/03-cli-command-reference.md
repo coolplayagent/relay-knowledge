@@ -170,6 +170,8 @@ dotenv（.env）赋值均索引为环境变量定义，包括布尔、字符串�
 
 多个查询词可以分别命中同一配置分组的不同关联使用位置。候选选择在授权范围内匹配单个词，最终组装后的分组必须满足全部查询词。配置键的格式比较排除 Shell 文件，因为 Shell 定义属于环境变量命名空间。
 
+已证明的 Boolean 转换按有效布尔值比较显式属性回退（例如 TRUE 转为 true）；转换被同包类型遮蔽时恢复原始回退值。Shell unset 参数按引号及转义语法解码。领域注释必须非空，且小写规范化前后均不超过 128 个 UTF-8 字节；非法领域元数据被忽略，不丢弃配置事实，也不阻断索引发布。
+
 `repo framework`，feature flag 使用 `repo feature-flags`；它们不是 `repo query --kind` 的取值。
 
 `--path` 是 CLI 中 path filter 的参数名。`repo register --path` 保存索引范围，`repo query --path`、`repo framework --path` 和 `repo feature-flags --path` 只在该已索引范围内收窄读取。`repo index` 不接受 `--path`，它使用注册范围和选定的 `--ref`。非 Git 源码目录的常规移动文件系统快照使用 `HEAD`，状态里会记录解析后的 `filesystem:<hash>` commit。`worktree` 是 Git worktree overlay selector，不是非 Git 目录的默认 ref。
