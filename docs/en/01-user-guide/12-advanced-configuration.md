@@ -49,6 +49,25 @@ RELAY_KNOWLEDGE_SERVICE_DIR
 
 All overrides must be absolute paths and must not contain `..`.
 
+`RELAY_KNOWLEDGE_DATA_DIR` selects the directory for both `relay-knowledge.sqlite`
+and `stores/repositories/`. It takes precedence over `RELAY_KNOWLEDGE_HOME/data`,
+which takes precedence over existing Windows LocalAppData storage and platform
+defaults. New Windows installations use
+`D:\relay-knowledge\users\<user-sid>\data`; the SID is obtained from the Windows process token
+and remains stable when LocalAppData moves. New default directories require
+protected ACLs; unsafe directories fail with an actionable error. Explicit HOME/DATA
+settings that select this SID layout retain its original account policy, including
+LocalSystem service startup checks. Overrides elsewhere retain operator-managed
+permissions. Existing
+Windows data directories remain selected on upgrade; conflicting old/new directories require an explicit override.
+Other platforms retain their normal data directories. Lifecycle plans inspect
+an existing catalog read-only and reject `single_sqlite` when active partitioned
+shards exist. Service definitions preserve the selected topology alongside the
+data directory; missing storage still permits plans and uninstall.
+An empty override is an error. See [installation and migration](01-install-and-runtime.md#14-zero-config-defaults)
+for PowerShell examples, persistent user settings, service configuration, and
+moving an existing database safely.
+
 ## 12.3 Storage Topology
 
 The default storage topology is `single_sqlite` and stores all runtime state in

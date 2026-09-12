@@ -56,6 +56,17 @@ impl StorageProvider {
         self.ready.get().map(Arc::clone)
     }
 
+    /// Preserve the configured catalog guard without initializing cold graph
+    /// storage. Injected ready stores have no external catalog to inspect.
+    pub(in crate::application) async fn validate_lifecycle_storage(
+        &self,
+    ) -> Result<(), StorageError> {
+        match &self.factory {
+            Some(factory) => factory.validate_lifecycle_storage().await,
+            None => Ok(()),
+        }
+    }
+
     pub(in crate::application) async fn topology_snapshot(
         &self,
     ) -> Result<StorageTopologySnapshot, StorageError> {

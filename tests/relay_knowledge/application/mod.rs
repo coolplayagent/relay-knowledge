@@ -14,3 +14,5 @@ mod graphrag_evaluation;
 mod knowledge_development_loop;
 mod local_files;
 mod unified_api;
+#[cfg(windows)]
+mod windows_storage;

@@ -81,6 +81,61 @@ fn binary_outputs_single_json_object() {
 }
 
 #[test]
+fn binary_persists_sqlite_in_environment_selected_data_directory() {
+    let root = std::path::PathBuf::from(isolated_home("sqlite-data-override"));
+    let runtime_home = root.join("runtime");
+    let data_dir = root.join("custom data");
+    let mut command = relay_command();
+    command
+        .env(RELAY_KNOWLEDGE_HOME, &runtime_home)
+        .env(RELAY_KNOWLEDGE_DATA_DIR, &data_dir)
+        .env("RELAY_KNOWLEDGE_SEMANTIC_BACKEND", "local")
+        .env("RELAY_KNOWLEDGE_VECTOR_BACKEND", "local")
+        .env("RELAY_KNOWLEDGE_STORAGE_TOPOLOGY", "single_sqlite")
+        .args([
+            "ingest",
+            "--source",
+            "storage-test",
+            "--content",
+            "SQLite persists in the configured data directory",
+            "--entity",
+            "SQLite",
+            "--format",
+            "json",
+        ]);
+    let output = command.output().expect("ingest should run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let ingested: Value = serde_json::from_slice(&output.stdout).expect("ingest JSON");
+    assert!(ingested["metadata"]["graph_version"].as_u64().unwrap() > 0);
+
+    let output = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, &runtime_home)
+        .env(RELAY_KNOWLEDGE_DATA_DIR, &data_dir)
+        .env("RELAY_KNOWLEDGE_STORAGE_TOPOLOGY", "single_sqlite")
+        .args(["status", "--format", "json"])
+        .output()
+        .expect("a second process should reopen the database");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let status: Value = serde_json::from_slice(&output.stdout).expect("status JSON");
+    assert_eq!(status["runtime"]["data_dir"], data_dir.to_str().unwrap());
+    assert_eq!(
+        status["metadata"]["graph_version"],
+        ingested["metadata"]["graph_version"]
+    );
+    assert!(data_dir.join("relay-knowledge.sqlite").is_file());
+    assert!(!runtime_home.join("data/relay-knowledge.sqlite").exists());
+    std::fs::remove_dir_all(root).expect("isolated storage should be cleaned up");
+}
+
+#[test]
 fn binary_outputs_streaming_json_as_ndjson_events() {
     let output = relay_command()
         .args(["--format=streaming-json"])

@@ -8,17 +8,16 @@ use crate::{
         ServiceOperatorStatus, WorkerStatus, WorkerTaskRecord,
     },
     storage::{
-        AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeQueryReadStore,
-        CodeReferenceSearchRequest, CodeSymbolSearchRequest, FileContentSearchHit,
-        FileContentSearchRequest, FileIndexDiagnostics, FileIndexRoot, FileIndexRootStatus,
-        FileIndexRootUpdate, FileSearchHit, FileSearchRequest, GraphCanvasStorageRequest,
-        GraphCanvasStorageSnapshot, GraphInspection, GraphSearchOutcome, GraphSearchRequest,
-        GraphStore, HealthStorageSnapshot, IndexCursor, IndexRefreshClaimRequest,
-        IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure,
-        IndexRefreshQueueRequest, IndexRefreshTask, IndexStore, MutationLogEntry, MutationLogStore,
-        NewAuditEvent, NewProposal, ProposalDecision, ProposalListRequest, RepositoryCatalogStore,
-        ServiceOperatorUpdate, StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion,
-        WorkerTaskFailure, WorkerTaskSeed,
+        AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
+        CodeSymbolSearchRequest, FileContentSearchHit, FileContentSearchRequest,
+        FileIndexDiagnostics, FileIndexRoot, FileIndexRootStatus, FileIndexRootUpdate,
+        FileSearchHit, FileSearchRequest, GraphCanvasStorageRequest, GraphCanvasStorageSnapshot,
+        GraphInspection, GraphSearchOutcome, GraphSearchRequest, GraphStore, HealthStorageSnapshot,
+        IndexCursor, IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshDiagnostics,
+        IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask, IndexStore,
+        MutationLogEntry, MutationLogStore, NewAuditEvent, NewProposal, ProposalDecision,
+        ProposalListRequest, RepositoryCatalogStore, ServiceOperatorUpdate, StorageFuture,
+        WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure, WorkerTaskSeed,
     },
 };
 
@@ -82,11 +81,7 @@ impl GraphStore for PartitionedSqliteKnowledgeStore {
 
     fn health_snapshot(&self, now_ms: u64) -> StorageFuture<'_, HealthStorageSnapshot> {
         let this = self.clone();
-        Box::pin(async move {
-            let mut snapshot = super::diagnostics::health_snapshot(&this, now_ms).await?;
-            snapshot.repository_code_totals = this.code_repository_totals().await?;
-            Ok(snapshot)
-        })
+        Box::pin(async move { super::diagnostics::health_snapshot(&this, now_ms).await })
     }
 
     fn graph_canvas(

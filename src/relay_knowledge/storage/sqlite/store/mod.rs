@@ -28,11 +28,27 @@ pub struct SqliteGraphStore {
     pub(super) connection: Arc<Mutex<Connection>>,
     pub(super) read_pool: Option<Arc<ReadConnectionPool>>,
     pub(super) database_path: Option<PathBuf>,
-    pub(super) publication_authority_path: Option<PathBuf>,
+    pub(super) publication_authority_path:
+        Option<Arc<code::lifecycle::publication_fence::PublicationAuthority>>,
     pub(super) maintenance: Arc<Mutex<SqliteMaintenanceState>>,
 }
 
 impl SqliteGraphStore {
+    /// Reads physical SQLite health through an already-open pool handle.
+    pub(in crate::storage) fn sqlite_diagnostics(
+        &self,
+    ) -> StorageFuture<'_, crate::storage::SqliteStorageDiagnostics> {
+        let path = self.database_path.clone();
+        let maintenance = Arc::clone(&self.maintenance);
+        self.try_run_read(move |connection| {
+            super::connection_runtime::maintenance::diagnostics(
+                connection,
+                path.as_deref(),
+                &maintenance,
+            )
+        })
+    }
+
     /// Opens a SQLite database and initializes the current schema.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let path = path.as_ref().to_path_buf();
@@ -77,9 +93,15 @@ impl SqliteGraphStore {
     pub(in crate::storage) fn open_with_publication_authority(
         path: impl AsRef<Path>,
         authority_path: impl AsRef<Path>,
+        paths: crate::paths::RuntimePaths,
     ) -> Result<Self, StorageError> {
         let mut store = Self::open(path)?;
-        store.publication_authority_path = Some(authority_path.as_ref().to_path_buf());
+        store.publication_authority_path = Some(Arc::new(
+            code::lifecycle::publication_fence::PublicationAuthority {
+                path: authority_path.as_ref().to_path_buf(),
+                paths,
+            },
+        ));
         Ok(store)
     }
 
@@ -100,7 +122,7 @@ impl SqliteGraphStore {
         })
     }
 
-    pub(super) fn run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
+    pub(in crate::storage) fn run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,

@@ -13,6 +13,24 @@ The default local profile needs no external service: platform defaults select
 the runtime directories, SQLite stores local state, and deterministic local
 semantic/vector read models are enabled.
 
+New Windows installations default to
+`D:\relay-knowledge\users\<user-sid>\data\relay-knowledge.sqlite`, using the Windows
+account SID and a protected directory ACL. Profile relocation retains the same
+store. Services pinned to this SID path revalidate directory and existing SQLite
+payload ACLs on startup, including descendant links and recovery files. Existing
+LocalAppData data directories remain selected automatically during upgrades. An administrator must first provision the shared D: ancestors and each account SID directory; ordinary accounts then use their existing private store. Windows services reject linked legacy/custom data paths and recovery files at preflight and startup.
+Set `RELAY_KNOWLEDGE_DATA_DIR` to an absolute directory to select the main
+database and repository shards together. This overrides `RELAY_KNOWLEDGE_HOME`
+and platform defaults; Linux and macOS retain their platform data directories.
+
+```powershell
+$env:RELAY_KNOWLEDGE_DATA_DIR = 'E:\KnowledgeData'
+relay-knowledge status --format json
+```
+
+The directory must be writable. Existing databases are not moved automatically;
+see [storage configuration and migration](docs/en/01-user-guide/01-install-and-runtime.md#14-zero-config-defaults).
+
 ```bash
 cargo build
 target/debug/relay-knowledge status

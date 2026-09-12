@@ -17,15 +17,51 @@ fn platform_service_specs_keep_manager_commands_and_definition_formats_distinct(
     assert_eq!(macos.first().map(String::as_str), Some("launchctl"));
     assert_eq!(windows.first().map(String::as_str), Some("powershell"));
     assert!(
-        render_definition("linux", "/opt/relay knowledge", "/tmp/data")
-            .contains("ExecStart=\"/opt/relay knowledge\"")
+        render_definition(
+            "linux",
+            "/opt/relay knowledge",
+            "/tmp/data",
+            StorageTopology::SingleSqlite
+        )
+        .contains("ExecStart=\"/opt/relay knowledge\"")
     );
-    assert!(render_definition("macos", "/opt/relay", "/tmp/data").contains("<plist"));
-    assert!(render_definition("windows", "C:\\relay.exe", "C:\\data").contains("<service>"));
+    assert!(
+        render_definition(
+            "macos",
+            "/opt/relay",
+            "/tmp/data",
+            StorageTopology::SingleSqlite
+        )
+        .contains("<plist")
+    );
+    assert!(
+        render_definition(
+            "windows",
+            "C:\\relay.exe",
+            "C:\\data",
+            StorageTopology::SingleSqlite
+        )
+        .contains("<service>")
+    );
     for platform in ["linux", "macos", "windows"] {
-        let definition = render_definition(platform, "/opt/relay", "/tmp/data");
+        let definition = render_definition(
+            platform,
+            "/opt/relay",
+            "/tmp/data",
+            StorageTopology::SingleSqlite,
+        );
         assert!(definition.contains("RELAY_KNOWLEDGE_WATCHER_ENABLED"));
         assert!(definition.contains("RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS"));
         assert!(definition.contains("5000"));
+        assert!(definition.contains("RELAY_KNOWLEDGE_STORAGE_TOPOLOGY"));
+        assert!(definition.contains("single_sqlite"));
+        let partitioned = render_definition(
+            platform,
+            "/opt/relay",
+            "/tmp/data",
+            StorageTopology::PartitionedSqlite,
+        );
+        assert!(partitioned.contains("RELAY_KNOWLEDGE_STORAGE_TOPOLOGY"));
+        assert!(partitioned.contains("partitioned_sqlite"));
     }
 }

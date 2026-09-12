@@ -60,6 +60,143 @@ Web Knowledge Map 请求必须显式指定已注册仓库。安装后的服务�
 
 ## 4. 运行时状态
 
+Windows 新安装的数据目录为 `D:\relay-knowledge\users\<user-sid>\data`，
+主库为 `relay-knowledge.sqlite`，分片位于 `stores/repositories/`。
+SID 通过安全的 WinSafe advapi 包装直接调用 `OpenProcessToken` / `GetTokenInformation`，
+无需脚本引擎；迁移用户配置目录或修改 LocalAppData 不会改变账户存储标识。paths 边界通过 OS `GetSystemDirectoryW` API（兼容 MSRV 的 WinSafe kernel
+包装）定位 PowerShell，不依赖 SystemRoot 或 PATH。子进程仅保留从 OS 派生的 SystemRoot/WINDIR
+和系统模块目录，不继承模块/CLR profiler 注入设置。非交互命令使用
+每进程 10 秒超时和 4096 字节输出上限；超时或取消会终止子进程，不回退到环境变量或账户名称。
+其他 Windows 运行时目录
+继续使用 AppData/TEMP；Linux、macOS 的默认规则不变。数据目录优先级固定为
+`RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` > 已有 Windows LocalAppData 数据目录 >
+新平台默认值，环境变量必须是非空绝对目录且不含 `..`。新安装需要可写的 D 盘目录或显式覆盖。
+`RuntimePaths::resolve` 在 Windows 上要求显式 data/home 覆盖；应用启动使用 `resolve_for_runtime`，最多执行两次
+异步 metadata 探测，每次在当前二进制的可终止原生子进程内执行，超时上限 5 秒。
+内部 `--internal-windows-storage-probe` 模式仅调用 `GetFileAttributesW`，在 CLI 配置和存储启动前退出；
+子进程不继承环境，只接受一个有界路径并返回有界输出。CLI 启动时固定注册自身绝对路径；
+嵌入式库宿主须先通过 `paths::initialize_windows_probe_executable` 注册已安装的 CLI，避免递归启动任意宿主程序。旧目录发现和生命周期存在性探测均不依赖 PowerShell。
+文件系统 I/O 不进入 Tokio blocking pool，因此离线或挂起的 LocalAppData 不会留下阻止
+runtime 退出的后台文件探测。显式 data/home 覆盖不做目录发现。
+旧目录缺失时选择新默认值；已有旧目录或符号链接继续被选中。非目录路径、探测错误和超时
+必须显式失败。旧目录与新目录同时存在时要求显式数据覆盖，不推测哪一份是权威。
+路径解析期间不会打开数据库或搬迁数据。
+
+此默认值变化不修改 SQLite schema，也不会自动迁移旧的
+`%LOCALAPPDATA%\relay-knowledge\data`。升级会自动保留存在的旧目录，让 CLI/Web 与已固定旧路径的服务保持一致。
+选择搬迁时必须先停止服务及所有 writer，备份并整体复制主库、WAL/SHM 和全部仓库分片，
+保留旧副本。服务定义必须保存解析后的数据目录；已有服务不能仅依靠安装终端的环境变量
+变更目录，需刷新并应用生命周期计划。回滚应显式选择原数据目录并遵守数据库备份合同，
+卸载仍默认保留数据。路径 UT 覆盖 Windows 主库/分片隔离、稳定账户 SID、环境覆盖优先级、
+旧目录保留、冲突目录和探测错误。集成测试验证环境覆盖后的 CLI 跨进程持久化，并在两种存储拓扑下
+通过升级后的 CLI/Web 配置重新打开含有实际图谱数据的旧库。
+原生 ACL 夹具恢复权限时，将保存的 access 描述符导入新的 FileSecurity 对象，
+明确标记 access 部分已修改再写回；仅传回读取的对象不会恢复注入前的 ACL，
+依据 [.NET Framework 的持久化规则](https://github.com/microsoft/referencesource/blob/main/mscorlib/system/security/accesscontrol/filesecurity.cs)。
+`windows-storage` PR job 在 Windows 上执行 PowerShell ACL、Rust UT 和旧 SQLite 升级集成测试，
+覆盖私有目录和文件继承、校验前后落盘 ACL 保持不变、已有目录及父目录宽松 ACL、junction 拒绝、稳定 SID 和已有图谱。
+Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不创建目录；存储工厂与服务测试
+证明策略失败先于 SQLite 打开，且数据路径不可用时仍能生成生命周期计划。
+生命周期预检测试覆盖安装/升级/回滚执行前拒绝，以及 dry-run/卸载跳过预检；测试清空外部
+执行步骤，避免回归时修改真实服务。
+服务路径测试验证显式 DATA/HOME 重载保留原 SID 策略。Windows ACL 测试仅在测试作用域
+替换令牌和管理员角色查询来覆盖授权分支，其余 ACL、owner 和 junction 检查均读取真实文件系统；
+验证安全目录可访问、权限改动和 junction 在新启动校验时被拒绝。Linux UT 验证子进程失败、
+输出限制、超时和取消，不模拟 Windows 账户令牌。新增回归覆盖只读诊断不授权首次打开、
+服务计划/执行拒绝拓扑冲突、服务定义固定拓扑、Windows 探测超时后 runtime 能及时退出、
+保留显式 ACL 的搬入数据库及恢复文件、文件符号链接、分片 junction 和树深度上限。
+新增原生回归逐一移除账户、SYSTEM、Administrators 授权，并向目录与文件加入主体及 Everyone 拒绝规则，
+验证拒绝且不修复 ACL。撤销授权的夹具重建显式测试 ACE，因为 [`PurgeAccessRules` 会保留继承 ACE](https://github.com/microsoft/referencesource/blob/main/mscorlib/system/security/accesscontrol/acl.cs#L2674)；
+测试先重读落盘 DACL，确认授权已撤销或 deny 已写入，再检查产品校验器。
+健康回归确保不会再次扫描全树；拓扑回归重定向后续路径，验证仍通过保留句柄读取原库。
+
+路径解析仅保留 SID 策略，不创建目录。工厂通过异步互斥锁串行执行首次 ACL 校验；
+只读诊断不能授权后续 SQLite 打开，每次工厂打开都会重新校验。成功打开后，工厂保留真实的
+只读 control 连接供 topology 查询复用，不把历史权限结果用于授权新的路径打开。冷 topology 查询
+仍在每次新建连接前检查 control 文件、恢复文件和父目录；这类打开遇到受管理的主库缺失时明确报错。
+定向检查不扫描无关分片。SQLite 工厂在实际打开存储前创建 SID 目录及其 `data`
+子目录，并原子设置创建账户、LocalSystem 或代管的 Administrators 组为 owner 及受保护 DACL，
+仅授予目录所标识的账户、SYSTEM、Administrators 可继承的完全控制。已有私有目录和文件
+必须为这三类主体分别保留完整授权，目录同时包含文件和目录继承标志。拒绝任何 deny ACE
+（包括组拒绝）及适用于父目录的 deny ACE，避免猜测组成员关系导致误判。已有目录必须满足同一 ACL 合同，
+存储边界不会自动修复宽松 ACL。只读存储诊断仅校验已有目录，不创建目录。自卷根逐级检查最多 32 个父目录，拒绝重解析点、不可信 owner，
+以及允许其他账户删除、修改属性、修改权限或夺取所有权的 ACL；卷级父目录可允许创建子目录，
+应用拥有的两级共享父目录只向普通账户授予读取和遍历权限，防止 SID 目录抢占。已有数据库、WAL/SHM/journal、仓库分片及所有后代目录也必须
+验证 owner、ACL 和重解析点，不能因父目录私有而信任保留宽松 ACL 的搬入文件。
+初次校验按需枚举，最多 65,536 个条目、32 层，且受同一子进程 10 秒超时约束；
+超过任一限制都明确失败。每个分片首次打开还会在现有 blocking worker 中通过有界异步
+子进程检查具体路径、父目录和 sidecar，由独立的 `catalog::store_access` 模块负责，
+缓存句柄不重复启动校验，安全检查期间不持有共享 cache 锁。同步分片入口先以 open-or-create 策略校验 control 路径，再创建目录、打开 SQLite 和迁移 schema。新建分片诊断连接前
+在完整图谱诊断中统一批量校验数据树。500 毫秒健康检查改用保留的 control 连接池及已校验分片句柄，
+为已打开的分片保留 WAL 汇总、维护状态和仓库统计，不在每次轮询时扫描全树。
+任何 active 分片尚无缓存句柄时，健康检查返回 stale、unhealthy 的 `storage_cold` 状态，
+不启动 ACL 校验、可写打开或完整图谱诊断回退。业务请求负责校验和打开冷分片，
+重复健康探针不会预热；只读缺失分片清单通过 status/doctor 查询。发布围栏首次 `ATTACH`
+还会在附加前独立校验 control 文件、sidecar 和父目录，后续变更复用已经附加的句柄。
+所有新建 catalog 读写连接也会从路径恢复保留 SID 策略，并在打开前重新检查数据库、sidecar
+及父目录。仓库导入 ATTACH 使用同一 worker 校验边界；完整诊断使用请求内批量校验。
+它从保留的 control 句柄读取 active 清单，在文件系统操作前检查最多 1,024 个分片的上限，
+超限明确失败。worker 获准后仅校验整树一次，随后在该 worker 内逐个只读打开分片，
+不会为每个分片再启动 PowerShell。受管理路径仍执行完整 ACL 检查，LocalSystem 的旧目录/
+自定义路径执行有界重解析点检查；结果不授权其他请求或可写打开。缺失分片保留独立错误
+且不创建数据库；取消请求会终止权限子进程或在下一分片前停止，每次仅持有一个 SQLite
+读取连接。工厂的冷 topology 读取保留
+可取消的异步预检，之后直接进入只读打开 worker，避免在 worker 内再次启动权限子进程。
+路径解析最多 4096 字节，权限检查仍由有界子进程执行。保留连接不授权后续路径重开，
+健康检查继续只使用缓存句柄。同步入口无需外部 Tokio runtime：有作用域的安全校验线程
+拥有独立的 current-thread runtime，并在返回前 join；最多允许一个此类线程/子进程，
+使用条件变量最多容纳 16 个等待者，等待上限 11 秒；普通并发等待前一个检查完成，
+仅队列溢出或准入超时返回可见的 `Busy`。这些入口仍是阻塞 API，异步应用使用工厂和
+SQLite worker 边界；冷 topology 诊断保留可取消的异步预检，健康检查不用同步校验线程预热分片。只读检查不创建目录，也不自动修复 ACL。缺少或不安全的 D: 会明确报错，缺失的共享 `relay-knowledge`、`users` 目录需要管理员首次配置：创建时原子设置
+Administrators owner 和受保护 DACL，SYSTEM/Administrators 完全控制，Authenticated Users
+仅在共享目录本身具有读取和遍历权限。已有共享根若由普通用户拥有、继承 ACL 或授予普通
+账户创建/写入权限则拒绝，不自动修复。每个 SID 目录需提权管理员或 LocalSystem 首次配置，
+普通账户随后使用已有私有目录，不能创建兄弟目录。提权管理员可以校验或代为配置其他
+安装者的 SID 路径，新目录由 Administrators 组拥有，原账户仍保留完全控制；其他普通账户
+无权代管。卷根和其他父目录也必须满足共享信任策略。
+也可通过环境变量显式选择私有目录。自动路径要求 Windows PowerShell 5.1
+及支持 ACL 的本地卷。保留的旧库及保留 SID 布局之外的显式 HOME/DATA 继续由操作者管理 ACL，
+但 Windows 服务预检仍检查这些路径、所有父目录及 SQLite 恢复文件的重解析点，不改写 ACL。
+LocalSystem 在启动以及新建 catalog/import/diagnostic 打开前重复检查，防止安装后将旧目录
+替换成 junction 绕过服务准入。用户态旧目录发现仍可保留目录链接；服务检查需要 Windows
+PowerShell 5.1，使用同一有界子进程超时。SID 策略恢复前拒绝 Win32 尾部点/空格、父路径遍历、
+设备命名空间以及保留 D: 根的短文件名别名。也拒绝 UNC、管理共享、扩展 UNC 和卷 GUID 根，
+Windows 存储必须使用本地盘符绝对路径。
+`D:\relay-knowledge\users\<user-sid>\data` 布局始终恢复目录中原账户的 SID 策略，
+包括服务定义固定的显式路径。每个新服务进程在打开 SQLite 前重新检查 ACL 和重解析点，
+生命周期预检不能代替启动校验。该存储边界允许原账户、LocalSystem 或提权管理员；LocalSystem
+创建缺失私有目录时以自身为 owner，仍授予原账户、SYSTEM、Administrators 权限。
+卸载和回滚不迁移 ACL。
+实际执行安装、升级或回滚前，生命周期边界也会创建或校验受管理的 SID 数据目录，确保服务将目录
+固定为显式覆盖并以 LocalSystem 启动前，目录已具有私有权限。计划会提示这项预检，失败时
+不执行服务管理步骤；该预检不创建 SQLite 数据库，dry-run 和卸载跳过它。
+Windows 升级或显式回滚停止现有服务前，还会读取旧安装定义或检查点中的定义
+（最多 64 KiB、XML 深度 32，只允许一个 service 根，拒绝额外根及根外非空白文本、DTD
+和重复存储设置），按 DATA_DIR 优先于 HOME
+解析其固定路径并只读校验。即使当前运行时选择另一目录，旧库缺失、SID ACL 不安全
+或存在 junction 都会在修改服务之前失败。旧定义必须固定存储路径；预检不补建回滚库，
+数据库路径必须是普通文件，目录及 reparse/symlink 条目在预检时拒绝；启动时仍会重新校验。
+Linux/macOS 执行安装、升级或回滚时也会拒绝数据目录或任一父路径为文件的配置，在任何
+生命周期修改步骤前失败。dry-run 和卸载保持无需存储，缺失目录仍可在后续正常配置。原生 Windows CI 同时执行旧定义解析和检查点存储预检回归，
+实际验证 Windows 盘符、SID 策略恢复、跨主体共享 owner 稳定性、路径别名拒绝、
+同步入口不依赖外部 runtime、首次 control 打开前的校验、并发准入的队列和超时边界，
+以及安装后旧目录被替换成链接的拒绝行为。批量诊断回归覆盖只读容量、取消、保留
+control 句柄的清单读取，以及独立的缺失分片错误。原生 ACL 回归从保存的
+SDDL 恢复一次性夹具，并回读比较实际权限和保护属性，兼容 Windows 对 SDDL 控制标志的规范化，
+避免注入的权限污染后续用例。公开的 `KnowledgeStoreFactory::validate_lifecycle_storage` 为不含
+catalog 的工厂提供默认空实现，保持源码兼容；SQLite 覆盖该方法执行权限和 catalog 检查。
+生命周期计划及执行会只读检查已有 control catalog，不初始化图存储或 schema。
+已有 active partitioned catalog 却选择 single_sqlite 时，在渲染计划或执行服务步骤前报错，
+要求设置 `RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite`。数据库路径缺失时仍可
+规划或卸载且不创建目录；已有 catalog 无法安全检查时明确失败。未打开存储时计划 metadata
+使用图版本 0。systemd、launchd 和 Windows 服务定义同时固定数据路径及存储拓扑，
+避免新服务进程丢失安装终端选择的拓扑。
+实现依据微软的 [SID 合同](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers)
+[系统目录查询](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw)
+[带安全描述符的目录创建](https://learn.microsoft.com/en-us/dotnet/api/system.io.directoryinfo.create?view=netframework-4.8.1)、
+[文件 ACL 检查](https://learn.microsoft.com/en-us/dotnet/api/system.io.fileinfo.getaccesscontrol?view=netframework-4.8.1)
+和[链接属性行为](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileattributesa)。
+
 配置、数据库、索引、日志、缓存、临时文件和 dead-letter 数据写入 `paths` 管理的平台目录。升级时必须保留 runtime state，并显式执行 schema/index migration。早期数据库的 `code_repository_schema_migrations` 可能只有 `name` 列；schema 初始化必须先幂等增加 `applied_at_ms INTEGER NOT NULL DEFAULT 0`，再运行任何会写 capability marker 的 retention、search-owner 或其他迁移，不能要求 operator 重建数据库或手工补列。
 Code-search ownership v2 升级不会在同步 database open 期间重写 legacy FTS 数据。Startup 安装 non-replacing writer 与 exact metadata serving gate，以 `search-owner-v2-writer-and-serving-gate` 一次性把既有 scope 及其 active repository 标 stale，并把 source-scope identity 推进到 `search-owner-v2` fact component。该 marker 只证明 writer 与 serving boundary 已安装，不认证旧 FTS row 或 imported FTS row。每个 FTS `MATCH` read 都要求 metadata ownership 的 rowid/scope/kind/record/path 精确匹配；随后由普通 durable full-index task 复用既有 lease、checkpoint 与 publication fence 替换 stale scope。Database import 只有在 attached source 具有该 marker、完整 search/metadata schema shape、每个 indexed metadata row 都按 rowid 与完整 identity JOIN 到一个 FTS row，并且 fact-versioned Git scope 的 identity 与 imported repository、tree、filters 和当前 fact version 匹配时，才能保留 search freshness。Import 与 incremental clone 以 indexed metadata owner 表为枚举权威，只复制这些 JOIN row；绝不通过 FTS 的 `UNINDEXED` scope/kind 列做反向 COUNT。没有 metadata 的 raw FTS row 不复制、不服务，并保留给受界 `search_orphans` GC。Metadata-side orphan、duplicate owner identity 或 affected-count mismatch 必须让 repository metadata、facts、已复制 search row 与 scope publication 一起回滚。缺少该 capability 的 legacy import 可以保留 base facts 以便恢复，但不得复制 search row，并且必须用 full-reindex 原因持久化为 stale；owner exact 但 fact-version identity 过旧的 import 同样必须显式 stale。Manual/custom 非 fact scope 继续遵守既有兼容合同。Upgrade 与 doctor output 不能仅因 database open、marker 创建或 base-fact import 完成就把 search ownership 报告为 fresh。
 

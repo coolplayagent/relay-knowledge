@@ -94,6 +94,82 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
 
 After setting `RELAY_KNOWLEDGE_HOME`, config, data, state, cache, logs, temp, runtime, and service directories are placed under that root. See [Chapter 12: Advanced Configuration](12-advanced-configuration.md) for the full directory override list.
 
+New Windows installations store SQLite in
+`D:\relay-knowledge\users\<user-sid>\data\relay-knowledge.sqlite`, with shards
+under `stores/repositories/` in the same data directory. The user SID comes from
+the Windows process token, so profile relocation and LocalAppData changes do not
+change the default store. When SQLite is opened, new account directories receive a protected ACL for
+the account, SYSTEM, and Administrators. Unsafe existing ACLs, reparse points,
+or ancestors granting other accounts deletion or permission changes are rejected.
+Existing database/recovery files and shard directories must also have private
+ACLs and no links; files moved from shared directories are checked explicitly.
+Service paths pinned to the SID layout retain this policy and revalidate ACLs
+and reparse points on every new service startup. Install/upgrade/rollback execution
+also provisions or validates these directories before service-manager steps;
+plans and uninstall do not provision storage. Existing managed ACLs must retain
+full access for the account, SYSTEM, and Administrators; deny rules are rejected.
+An administrator provisions missing shared D: ancestors with an Administrators
+owner and restricted shared ACL. Each account SID directory also requires initial
+administrator provisioning; ordinary users cannot create siblings under the shared
+root. Existing shared ACLs with account creation/write rights are rejected without
+repair. Elevated administrators may provision or validate another installer's SID
+path; its original account retains full access. UNC and volume-GUID roots, along
+with ambiguous Win32 spellings, are rejected; use an absolute local drive-letter path. Legacy/custom
+paths keep operator-managed ACLs, but service preflight/startup and LocalSystem
+fresh opens reject reparse points in ancestors and SQLite/recovery files.
+Synchronous storage APIs use a bounded owned security worker; async callers use
+the factory. Up to 16 callers may wait for the single security worker, for at most
+11 seconds; only queue overflow or timeout reports `Busy`. A synchronous
+partitioned open validates the control path before directory creation, SQLite
+opening, or schema migration. Full graph inspection supports at most 1,024 active
+shards: it reads the existing control handle, validates the tree once on its worker,
+and reads each shard without initializing schema. Cancellation stops the security
+child or the remaining shard opens; health probes still reuse cached handles.
+Legacy directory discovery uses native Windows APIs and does not require PowerShell. This layout requires Windows PowerShell 5.1 and an ACL-capable local volume;
+use an explicitly configured private directory if D: cannot meet these conditions. `status --format json`
+shows the resolved directory. Config, logs, and other runtime directories retain
+their AppData/TEMP defaults. Linux and macOS defaults are unchanged.
+
+Data directory precedence is `RELAY_KNOWLEDGE_DATA_DIR` >
+`RELAY_KNOWLEDGE_HOME/data` > existing Windows LocalAppData data directory > new
+platform default. Without an explicit override, startup preserves
+`%LOCALAPPDATA%\relay-knowledge\data` whenever that directory exists, including
+its database, recovery files, and shards. If both the old directory and the new
+account directory exist, startup requires `RELAY_KNOWLEDGE_DATA_DIR` to select
+one explicitly. Directory inspection errors or timeouts are reported instead
+of silently opening an empty database elsewhere.
+
+To choose another directory for SQLite in PowerShell:
+
+```powershell
+$env:RELAY_KNOWLEDGE_DATA_DIR = 'E:\KnowledgeData'
+relay-knowledge status --format json
+# Optional: persist for future shells of the current user.
+[Environment]::SetEnvironmentVariable('RELAY_KNOWLEDGE_DATA_DIR', 'E:\KnowledgeData', 'User')
+```
+
+The value is a directory, not a database filename. Empty values, relative paths,
+and paths containing `..` are rejected. For a new installation, if D: is absent
+or its directory is not writable, database creation/opening fails; choose an
+accessible absolute path. Existing LocalAppData stores remain usable without D:.
+
+Upgrades retain existing databases in place rather than moving them. You can
+also pin the old Windows location explicitly, including for a service:
+
+```powershell
+$env:RELAY_KNOWLEDGE_DATA_DIR = Join-Path $env:LOCALAPPDATA 'relay-knowledge\data'
+```
+
+To migrate, stop the managed service and other writers, back up the complete
+data directory consistently, then copy the main database, any WAL/SHM recovery
+files, and `stores/repositories` together to the selected directory. Retain the
+old copy for rollback. Configure every CLI/service with the same directory;
+installed services retain the explicit data path in their service definition,
+so changing a shell variable alone does not relocate an existing service.
+Regenerate and apply its lifecycle plan, then check `status`, `health`, and
+`service doctor`. Follow the [upgrade and rollback contract](../03-architecture-specs/19-installation-release-and-upgrade.md)
+when restoring a previous binary. Uninstall preserves runtime data by default.
+
 ## 1.5 Configuration Readiness
 
 If you are not sure whether the machine is ready, start with the read-only configuration diagnostic:
@@ -110,6 +186,11 @@ relay-knowledge service doctor --format json
 ```
 
 to check graph storage, index freshness, worker/service live health, and telemetry state.
+With partitioned storage, `storage_cold` means active shards have no validated open
+handles yet: health remains stale/unhealthy and does not open them. Business
+requests warm shards; use `status` or `service doctor` for storage inventory.
+Windows upgrade/rollback validates the old service definition's pinned storage
+before stopping the service; a missing or unsafe old directory must be corrected first.
 
 ## 1.6 Network and Path Boundaries
 

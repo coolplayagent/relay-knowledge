@@ -60,6 +60,220 @@ Exact code-source fallback is implemented inside the product and must not requir
 
 ## 4. Runtime State
 
+New Windows installations default to `D:\relay-knowledge\users\<user-sid>\data`,
+containing `relay-knowledge.sqlite` and shards under `stores/repositories/`.
+The user SID comes directly from the current Windows process token through
+`OpenProcessToken` / `GetTokenInformation` and the safe WinSafe advapi wrapper,
+so account identity survives profile and LocalAppData relocation without a script engine.
+The paths boundary locates PowerShell through the OS `GetSystemDirectoryW` API
+(using the MSRV-compatible WinSafe kernel wrapper), never through SystemRoot or
+PATH. Its child receives only OS-derived SystemRoot/WINDIR and the system module
+directory, excluding inherited module/profiler injection settings. Noninteractive
+commands use a 10-second deadline per process, a 4096-byte output cap, and child
+termination on timeout or cancellation. No process environment values or account
+names serve as SID fallbacks. Other Windows runtime directories retain AppData/TEMP defaults; Linux and macOS defaults are
+unchanged. Data-directory precedence is `RELAY_KNOWLEDGE_DATA_DIR` >
+`RELAY_KNOWLEDGE_HOME/data` > existing Windows LocalAppData data directory > new
+platform default. Environment overrides must be nonempty absolute directories
+without `..`. New installations require a writable D: directory or an explicit
+override. `RuntimePaths::resolve` requires an explicit Windows data/home override;
+application startup uses `resolve_for_runtime` to obtain the SID and preserve
+existing storage through at most
+two asynchronous metadata probes, each in a terminable native child of the running
+binary with a five-second deadline. The internal `--internal-windows-storage-probe`
+mode calls `GetFileAttributesW` and exits before CLI configuration or storage startup.
+The helper inherits no environment, accepts one bounded path, and returns bounded output.
+CLI bootstrap registers its own absolute executable once; embedded library hosts
+must call `paths::initialize_windows_probe_executable` with the installed CLI before
+Windows path discovery, preventing accidental recursion into an arbitrary host.
+Legacy discovery and lifecycle existence probes therefore do not require PowerShell. Filesystem I/O stays in that child, so a hung redirected
+LocalAppData path cannot leave a detached Tokio blocking task delaying shutdown.
+Explicit data/home overrides bypass discovery. Missing legacy directories select
+the new default; existing legacy directories and symlinks remain selected.
+Non-directory paths, inspection errors, or timeouts fail visibly. Two existing
+old/new directories require an explicit data override instead of guessing which
+store is authoritative. No database is opened or moved during path resolution.
+
+Path resolution retains the selected SID policy without creating directories.
+The factory serializes initial ACL verification with an async mutex. Read-only
+diagnostics never authorize a later SQLite open: every factory open revalidates.
+After a successful open, the factory retains an actual read-only control connection
+for topology snapshots; it never treats a cached permission result as authorization
+for another pathname open. Cold topology reads validate their control database,
+recovery files, and ancestors before each fresh connection. Missing managed control
+files fail visibly on those path opens. This targeted check avoids unrelated shards.
+The synchronous partitioned entry point validates its control pathname with
+open-or-create policy before creating directories, opening SQLite, or running any
+schema migration. Immediately before SQLite opens, its factory creates the SID directory and `data`
+child with a protected DACL owned by the creating account, LocalSystem, or the
+Administrators group for delegated provisioning. It grants inheritable full
+control only to the account, SYSTEM, and Administrators. ACLs apply atomically at directory
+creation. Existing private directories and payload files must explicitly grant full control
+to all three principals, with both inheritance flags on directories. Deny ACEs
+(including group denies) and applicable ancestor deny ACEs are conservatively rejected
+rather than guessing effective group membership. Existing directories must already satisfy that policy; the storage boundary never
+silently rewrites permissions or adopts a permissive directory. Ancestors are
+checked from the volume root downward (at most 32): reparse points, untrusted
+owners, and grants allowing other accounts to delete, change attributes, change
+permissions, or take ownership are rejected. Volume ancestors may allow child
+creation; the two application-owned shared ancestors permit ordinary accounts
+only read/traverse rights, preventing SID-directory squatting. Existing payloads are also validated, including
+SQLite databases, WAL/SHM/journal files, repository directories, and shards.
+Files with untrusted owners or foreign allow ACEs and all descendant reparse
+points are rejected; directory inheritance alone is insufficient for moved files.
+The initial walk enumerates lazily with limits of 65,536 entries and 32 levels,
+within the ten-second process deadline. Hitting a limit fails explicitly. Each
+first shard open additionally validates its own path components and sidecars in
+the existing blocking worker, owned by `catalog::store_access` and using the bounded async child process; cached
+shard handles skip that extra launch. The shared cache lock is released during
+security checks so unrelated cached repositories are not held behind them. Fresh shard diagnostic connections perform
+one request-scoped tree validation for full graph inspection. The active-shard
+list comes from the retained control handle with a 1,024-shard cap, checked before
+filesystem work; exceeding it fails explicitly. Once its worker is admitted, the
+request validates the tree exactly once and consumes its read-only shard opens
+there, without another PowerShell process per shard. Managed trees retain full
+ACL checks; LocalSystem legacy/custom trees receive bounded reparse checks.
+The result never authorizes another request or writable open. Missing shards
+remain labeled errors and are never created. Cancellation terminates an active
+security child or stops before the next shard; only one SQLite reader is open
+at a time. The 500 ms health path instead
+reads the retained control pool and cached shard handles, preserving aggregate WAL,
+maintenance diagnostics and repository totals for warm shards. If any active shard
+has no cached handle, health returns stale, unhealthy `storage_cold` diagnostics
+without launching ACL checks, writable opens, or a full-inspection fallback.
+Business requests validate and open cold shards; repeated health probes do not
+warm them. Use status/doctor for the read-only missing-shard inventory. Health
+never repeats a full payload scan. Each first publication-fence `ATTACH` separately
+revalidates the control database, sidecars, and ancestors immediately before SQLite
+attaches it; subsequent fenced mutations reuse the attached handle.
+Every fresh catalog read/write connection also recovers the reserved SID policy
+from its pathname and rechecks the database, sidecars, and ancestors immediately
+before opening. The same worker boundary guards repository-import attachments;
+full inspection uses the request-scoped batch above. Cold factory topology reads keep their
+cancellable async validation immediately before the read-only worker open; they
+do not launch a second security process inside that worker. Path decoding is capped at 4096
+bytes; security checks remain bounded child processes. Retained connections do
+not authorize later pathname opens, and health continues to use cached handles.
+Synchronous entry points do not require an ambient Tokio runtime: a scoped
+security thread owns its current-thread runtime and joins before return. Only
+one such worker/child is admitted. Up to 16 waiters use a condition variable
+with an 11-second admission deadline; ordinary overlap waits for the active
+check. Queue overflow or admission timeout returns observable `Busy`. These APIs remain blocking; async applications
+use the factory/SQLite worker boundaries. Cold topology diagnostics retain
+cancellable async admission; health never uses this synchronous worker to warm shards.
+Read-only checks never provision directories or repair existing ACLs.
+A missing or insecure D: volume fails visibly when storage is opened;
+an administrator must initially provision missing shared `relay-knowledge` and
+`users` ancestors. Creation atomically assigns an Administrators owner and a
+protected DACL: SYSTEM/Administrators have full control; Authenticated Users have
+read/traverse rights on that shared directory only. Existing shared roots owned
+by an ordinary user, inheriting ACLs, or granting ordinary accounts creation/write
+rights are rejected without repair. Each SID directory requires initial elevated
+administrator or LocalSystem provisioning; ordinary users subsequently use their
+private directories and cannot create siblings. Elevated administrators can
+validate or provision a different installer's SID path, using the Administrators
+group as owner for newly created directories while preserving the original
+account's full-control grants. Other ordinary accounts remain unauthorized.
+The volume and other ancestors must also meet the shared trust policy. Users may
+instead explicitly choose a private location. HOME/DATA overrides outside the reserved SID layout and retained legacy
+storage keep their operator-managed ACL policy. Windows service preflight also
+checks those paths, all ancestors, and SQLite recovery files for reparse points
+without rewriting their ACLs. LocalSystem repeats this check at startup and
+before fresh catalog/import/diagnostic opens, so replacing a legacy directory
+with a junction after installation cannot bypass service admission. User-mode
+legacy discovery still accepts retained directory links. Service checks require
+Windows PowerShell 5.1 and use the same bounded process deadline.
+Win32 trailing-period/space, parent traversal, device, and short aliases of the
+reserved D: root are rejected before SID policy recovery. UNC and volume-GUID
+roots are unsupported, including administrative shares and extended UNC paths;
+Windows storage requires an absolute local drive-letter path. The reserved
+`D:\relay-knowledge\users\<user-sid>\data` layout always restores the original SID
+policy, including explicit overrides pinned in service definitions. Each new
+service process therefore checks existing ACLs and reparse points again before
+opening SQLite; lifecycle preflight cannot replace this startup check. Only the
+original account, LocalSystem, or an elevated administrator can access this managed layout through the
+storage boundary. LocalSystem creates missing private directories with itself
+as owner while retaining grants for the original account, SYSTEM, and Administrators. Before executing install, upgrade, or rollback, the lifecycle boundary also
+provisions or validates managed SID storage, before any service-manager step can
+pin the directory as an explicit override and start LocalSystem. The plan warns
+about this preflight; failure prevents service changes. This creates no SQLite
+database. Dry-runs and uninstall skip this provisioning.
+Before Windows upgrade or explicit rollback stops the live service, it also reads
+the old installed definition or checkpointed definition (at most 64 KiB, XML depth
+32, a single service root, no additional roots or non-whitespace text outside it,
+no DTD or duplicate storage settings), resolves its pinned DATA_DIR/HOME with
+DATA_DIR precedence, and validates that storage read-only. Missing old databases
+and unsafe SID ACLs or junctions fail before service changes, even when the
+current runtime selects another directory. The old definition must pin storage;
+preflight never provisions a missing rollback database. The database pathname must
+identify a regular file; directories and reparse/symlink entries fail preflight. Startup repeats validation.
+Executed install/upgrade/rollback also reject a file at the data directory or any
+ancestor on Linux/macOS before mutating lifecycle steps. Dry-run plans and
+uninstall remain storage-free; a missing directory can still be provisioned later.
+The native Windows CI gate also runs restored-definition parsing and old/checkpointed
+storage preflight regressions, including Windows drive paths, SID recovery, shared-owner
+stability across principals, alias rejection, synchronous runtime independence,
+replacement of a retained legacy directory by a link, validation before the first
+control open, bounded concurrent admission, and read-only inspection capacity
+and cancellation. Inspection also tests retained catalog reads without path
+reopening and preserves shard-specific missing-database errors.
+Native ACL regressions restore disposable fixtures from saved SDDL and verify
+the persisted permissions and protection before later cases, independent of
+Windows SDDL control-flag normalization, so injected permissions cannot leak.
+The public `KnowledgeStoreFactory::validate_lifecycle_storage` hook defaults to a
+no-op for catalog-free factories, retaining source compatibility; SQLite overrides
+it to enforce its catalog and permission checks.
+Lifecycle plans and execution inspect an existing control catalog read-only
+without initializing graph storage or schemas. An active partitioned catalog with
+`single_sqlite` selected fails before rendering or running manager steps; specify
+`RELAY_KNOWLEDGE_STORAGE_TOPOLOGY=partitioned_sqlite`. Missing database paths
+permit plans and uninstall without provisioning; inaccessible existing catalogs
+fail visibly. Plans report graph version zero until storage is already open.
+Generated systemd, launchd, and Windows service definitions pin both the selected
+data directory and topology, so a fresh service does not lose that setting.
+No ACL migration runs on uninstall or rollback. These rules use Microsoft's
+[SID identity contract](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers)
+[system-directory lookup](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw),
+[directory creation with security](https://learn.microsoft.com/en-us/dotnet/api/system.io.directoryinfo.create?view=netframework-4.8.1),
+[file ACL inspection](https://learn.microsoft.com/en-us/dotnet/api/system.io.fileinfo.getaccesscontrol?view=netframework-4.8.1),
+and [link attribute behavior](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileattributesa).
+
+This default change does not alter SQLite schemas or automatically move old
+`%LOCALAPPDATA%\relay-knowledge\data` databases. Upgrades automatically retain
+that directory when present, keeping CLI/Web aligned with services that pinned
+the original location. To relocate, stop the service and all writers,
+back up and copy the main database, WAL/SHM files, and all repository shards
+together, retaining the old copy. Service definitions must preserve the resolved
+data directory; changing the installation shell environment alone cannot move
+an existing service, so regenerate and apply its lifecycle plan. Rollback must
+explicitly select the old directory and obey database backup requirements.
+Uninstall still retains data by default. Path unit tests cover the Windows main
+database/shard isolation, stable account identities, environment precedence,
+legacy selection, conflicting directories, and probe errors. Integration tests
+verify overridden persistence across CLI processes and reopen a populated legacy
+graph through upgraded CLI/Web configuration for both storage topologies.
+Native ACL fixtures restore saved access descriptors through a fresh FileSecurity
+object, marking the access section modified before writing it. This follows
+[.NET Framework ACL persistence](https://github.com/microsoft/referencesource/blob/main/mscorlib/system/security/accesscontrol/filesecurity.cs);
+a descriptor that was only read does not persist a reset.
+Native regressions remove each required principal and add account, service,
+administrator, and Everyone deny rules to directories and files, asserting rejection
+without ACL repair. Grant-removal fixtures rebuild explicit test ACEs because
+[`PurgeAccessRules` preserves inherited ACEs](https://github.com/microsoft/referencesource/blob/main/mscorlib/system/security/accesscontrol/acl.cs#L2674); they read the persisted DACL back and
+verify the intended revocation or denial before testing the validator.
+Warm-health tests fail if a full payload scan returns, and topology
+tests redirect future paths while verifying that the retained handle still reads its catalog.
+The `windows-storage` PR job runs native PowerShell ACL checks, Windows Rust unit
+tests, and legacy SQLite upgrade integration tests. It covers protected child/file
+inheritance, persisted ACL preservation across validation, unsafe existing and ancestor ACLs, junction rejection, stable SIDs,
+populated legacy stores, counterfeit SystemRoot/module/profiler settings, and
+read-only validation without directory creation. Storage-factory and service tests
+prove that policy failures precede SQLite open and lifecycle plans work with an
+unavailable data path. A lifecycle preflight test covers install/upgrade/rollback
+rejection before execution and dry-run/uninstall bypass, with external steps
+removed so regression testing cannot change an installed service. Linux unit tests cover subprocess failures, output
+limits, timeout, and cancellation; they do not impersonate a Windows token.
+
 Configuration, databases, indexes, logs, caches, temporary files, and dead-letter data live in platform directories owned by `paths`. Upgrades preserve runtime state and explicitly run schema/index migrations. Early databases may have a `code_repository_schema_migrations` table containing only the `name` column; schema initialization must idempotently add `applied_at_ms INTEGER NOT NULL DEFAULT 0` before running retention, search-owner, or any other migration that writes a capability marker, without requiring operators to rebuild the database or add the column manually.
 The code-search ownership v2 upgrade does not rewrite legacy FTS data during synchronous database open. Startup installs the non-replacing writer and exact metadata serving gate, marks existing scopes and their active repositories stale once under `search-owner-v2-writer-and-serving-gate`, and advances source-scope identity with the `search-owner-v2` fact component. The marker proves only that the writer and serving boundary are installed; it does not certify old or imported FTS rows. Every FTS `MATCH` read requires exact rowid/scope/kind/record/path metadata ownership, while an ordinary durable full-index task with its existing lease, checkpoint, and publication fence replaces the stale scope. Database import preserves search freshness only when the attached source has this marker, the complete search/metadata schema shape, every indexed metadata row joins one FTS row by rowid and full identity, and—when the scope is a fact-versioned Git snapshot—an identity matching the imported repository, tree, filters, and current fact version. Import and incremental clone enumerate the indexed metadata owner table and copy only those joined rows; they never reverse-count FTS through its `UNINDEXED` scope/kind columns. A raw FTS row without metadata is not copied or served and remains isolated for bounded `search_orphans` GC. A metadata-side orphan, duplicate owner identity, or affected-count mismatch rolls back repository metadata, facts, copied search rows, and scope publication together. A legacy import without that capability may retain base facts for recovery, but copies no search rows and is persisted stale with a full-reindex reason; an otherwise exact import with an old fact-version identity is likewise explicitly stale. Manual/custom non-fact scopes retain their compatibility contract. Upgrade and doctor output must not report search ownership fresh merely because database open, marker creation, or base-fact import completed.
 

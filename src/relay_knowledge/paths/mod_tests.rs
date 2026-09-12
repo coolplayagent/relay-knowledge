@@ -148,8 +148,14 @@ fn windows_temp_dir_is_scoped_under_application_directory() {
         temp_dir: Some(PathBuf::from("/shared-temp")),
     };
 
-    let paths = RuntimePaths::resolve(&environment, &PathEnvOverrides::default())
-        .expect("windows paths should resolve");
+    // Exercise Windows defaults without interpreting drive letters on a Unix host.
+    let paths = windows_defaults(
+        &environment,
+        Some(Path::new(
+            "D:/relay-knowledge/users/S-1-5-21-1-2-3-1001/data",
+        )),
+    )
+    .expect("windows defaults should resolve");
 
     assert_eq!(
         paths.temp_dir,
@@ -230,8 +236,13 @@ fn windows_falls_back_to_home_appdata_paths() {
         temp_dir: None,
     };
 
-    let paths = RuntimePaths::resolve(&environment, &PathEnvOverrides::default())
-        .expect("windows fallback should resolve");
+    let paths = windows_defaults(
+        &environment,
+        Some(Path::new(
+            "D:/relay-knowledge/users/S-1-5-21-1-2-3-1001/data",
+        )),
+    )
+    .expect("windows fallback should resolve");
 
     assert_eq!(
         paths.config_dir,
@@ -239,7 +250,7 @@ fn windows_falls_back_to_home_appdata_paths() {
     );
     assert_eq!(
         paths.data_dir,
-        PathBuf::from("/Users/Alice/AppData/Local/relay-knowledge/data")
+        windows_data_directory("S-1-5-21-1-2-3-1001").unwrap()
     );
     assert_eq!(
         paths.temp_dir,
@@ -300,4 +311,142 @@ fn repository_shard_paths_are_safe_and_stable_under_data_dir() {
             .and_then(|value| value.to_str())
             .is_some_and(|name| name.starts_with("git__srv_repos_core-"))
     );
+}
+
+#[test]
+fn windows_sqlite_defaults_use_d_drive_for_main_database_and_shards() {
+    let base = std::env::temp_dir().join("relay-knowledge-windows-paths");
+    let config = crate::env::EnvironmentConfig::from_pairs(
+        PlatformKind::Windows,
+        [
+            ("APPDATA", base.join("roaming")),
+            ("LOCALAPPDATA", base.join("local")),
+        ],
+    )
+    .expect("environment should parse");
+    let paths = windows_defaults(
+        &config.platform,
+        Some(Path::new(
+            "D:/relay-knowledge/users/S-1-5-21-1-2-3-1001/data",
+        )),
+    )
+    .expect("Windows defaults should resolve");
+
+    assert!(paths.data_dir.starts_with("D:/relay-knowledge/users"));
+    assert!(paths.data_dir.ends_with("data"));
+    assert_eq!(
+        paths.database_file(),
+        paths.data_dir.join("relay-knowledge.sqlite")
+    );
+    assert_eq!(
+        paths.repository_shards_dir(),
+        paths.data_dir.join("stores/repositories")
+    );
+    assert!(
+        paths
+            .repository_shard_database_file("repo:example")
+            .starts_with(paths.repository_shards_dir())
+    );
+    assert_eq!(paths.config_dir, base.join("roaming/relay-knowledge"));
+    assert_eq!(paths.state_dir, base.join("local/relay-knowledge/state"));
+
+    // The complete resolver uses native std::path validation on Windows.
+    #[cfg(windows)]
+    assert_eq!(
+        RuntimePaths::resolve(
+            &config.platform,
+            &PathEnvOverrides {
+                data_dir: Some(paths.data_dir.clone()),
+                ..config.paths.clone()
+            }
+        )
+        .expect("absolute Windows paths"),
+        RuntimePaths {
+            windows_data_sid: Some("S-1-5-21-1-2-3-1001".to_owned()),
+            ..paths
+        }
+    );
+}
+
+#[test]
+fn sqlite_data_environment_override_takes_precedence_over_runtime_home() {
+    let base = std::env::temp_dir().join("relay-knowledge-path-overrides");
+    for platform in [
+        PlatformKind::Unix,
+        PlatformKind::Macos,
+        PlatformKind::Windows,
+    ] {
+        for use_home in [false, true] {
+            let mut pairs = vec![
+                ("HOME", base.join("user")),
+                ("TMPDIR", base.join("tmp")),
+                ("APPDATA", base.join("roaming")),
+                ("LOCALAPPDATA", base.join("local")),
+                ("RELAY_KNOWLEDGE_DATA_DIR", base.join("custom data")),
+            ];
+            if use_home {
+                pairs.push(("RELAY_KNOWLEDGE_HOME", base.join("runtime")));
+            }
+            let config = crate::env::EnvironmentConfig::from_pairs(platform, pairs)
+                .expect("environment should parse");
+            let paths = RuntimePaths::resolve(&config.platform, &config.paths)
+                .expect("data override should resolve");
+
+            assert_eq!(paths.data_dir, base.join("custom data"));
+            assert_eq!(
+                paths.database_file(),
+                base.join("custom data/relay-knowledge.sqlite")
+            );
+            assert_eq!(
+                paths.repository_shards_dir(),
+                base.join("custom data/stores/repositories")
+            );
+            if use_home {
+                assert_eq!(paths.config_dir, base.join("runtime/config"));
+            }
+        }
+    }
+}
+
+#[test]
+fn windows_runtime_home_overrides_default_data_volume() {
+    let root = std::env::temp_dir().join("relay-knowledge-custom-home");
+    let config = crate::env::EnvironmentConfig::from_pairs(
+        PlatformKind::Windows,
+        [("RELAY_KNOWLEDGE_HOME", &root)],
+    )
+    .expect("environment should parse");
+    let paths = RuntimePaths::resolve(&config.platform, &config.paths)
+        .expect("explicit home needs no AppData defaults");
+
+    assert_eq!(
+        paths.database_file(),
+        root.join("data/relay-knowledge.sqlite")
+    );
+    assert_eq!(
+        paths.repository_shards_dir(),
+        root.join("data/stores/repositories")
+    );
+}
+
+#[test]
+fn sqlite_data_environment_rejects_relative_and_parent_paths() {
+    let root = std::env::temp_dir().join("relay-knowledge-invalid-data");
+    for data_dir in [
+        PathBuf::from("relative-data"),
+        PathBuf::from("D:relative-data"),
+        root.join("data/../elsewhere"),
+    ] {
+        let config = crate::env::EnvironmentConfig::from_pairs(
+            PlatformKind::current(),
+            [
+                ("RELAY_KNOWLEDGE_HOME", &root),
+                ("RELAY_KNOWLEDGE_DATA_DIR", &data_dir),
+            ],
+        )
+        .expect("environment should parse");
+        let error = RuntimePaths::resolve(&config.platform, &config.paths)
+            .expect_err("unsafe data override must fail");
+        assert_eq!(error.purpose, PathPurpose::Data);
+    }
 }

@@ -98,6 +98,66 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
 
 设置 `RELAY_KNOWLEDGE_HOME` 后，配置、数据、状态、缓存、日志、临时、runtime 和 service 目录都会落在该根目录下的子目录中。完整目录覆盖项见 [第 12 章 高级配置参考](12-advanced-configuration.md)。
 
+Windows 新安装的主库为
+`D:\relay-knowledge\users\<user-sid>\data\relay-knowledge.sqlite`，
+仓库分片位于同一数据目录下的 `stores/repositories/`。
+SID 来自 Windows 进程令牌，迁移用户配置目录或修改 LocalAppData 不会改变默认库。
+实际打开 SQLite 或执行服务安装/升级/回滚预检时创建账户目录并设置受保护 ACL，仅允许该账户、SYSTEM 和 Administrators；
+服务计划和卸载不创建数据目录。服务固定的 SID 路径仍保留权限策略，
+每次启动的新服务进程都会重新校验 ACL 和重解析点。
+已有目录 ACL 不安全、存在重解析点，或父目录允许其他账户删除或修改权限时会报错。
+已有数据库、恢复文件和分片也会检查 ACL 与链接，不能仅依靠私有父目录保护搬入的文件。
+已有受管理目录和文件必须保留账户、SYSTEM、Administrators 完整权限，拒绝 deny 规则。
+缺失的共享 D: 父目录需管理员首次配置稳定的 Administrators owner 和受限共享 ACL，
+每个账户的 SID 目录也需管理员首次配置，普通账户不能在共享根下抢占其他 SID。
+已有共享 ACL 若授予普通账户创建或写入权限会被拒绝，不自动修复。提权管理员可代为配置
+或校验其他安装者的 SID 路径，原账户保留完全控制。拒绝 UNC、卷 GUID 根和有歧义的
+Win32 路径写法，需使用本地盘符绝对路径。旧目录和自定义
+路径继续由操作者管理 ACL，但服务预检、启动及 LocalSystem 新建打开会检查父目录、
+SQLite 和恢复文件的重解析点。同步存储入口使用有界的独立校验线程，异步调用者使用工厂；
+单个校验线程最多允许 16 个调用者等待，等待上限 11 秒，仅队列溢出或超时返回 `Busy`。
+同步分片存储入口在创建目录、打开 SQLite 或迁移 schema 前校验 control 路径。完整图谱诊断
+最多支持 1,024 个 active 分片：从已有 control 句柄读取清单，在 worker 内一次校验整树，
+随后只读检查分片而不初始化 schema。取消请求会终止权限子进程或停止剩余分片打开；
+健康检查仍复用缓存句柄。
+旧目录发现使用原生 Windows API，不依赖 PowerShell。自动默认路径需要 Windows PowerShell 5.1 和支持 ACL 的本地卷；D: 不满足条件时，
+请显式指定已配置私有权限的数据目录。
+`status --format json` 会显示实际目录。配置、日志等其他目录仍使用 AppData/TEMP 默认值，
+Linux、macOS 的数据目录规则不变。
+
+数据目录优先级为 `RELAY_KNOWLEDGE_DATA_DIR` > `RELAY_KNOWLEDGE_HOME/data` >
+已有的 Windows LocalAppData 数据目录 > 新的平台默认值。
+没有显式覆盖时，只要 `%LOCALAPPDATA%\relay-knowledge\data` 目录存在，启动就继续使用它，
+保留主库、恢复文件和全部分片。旧目录与新的用户目录同时存在时，必须通过
+`RELAY_KNOWLEDGE_DATA_DIR` 明确选择。探测目录失败或超时会报错，不会在其他位置另开空库。
+
+在 PowerShell 中指定其他 SQLite 存储目录：
+
+```powershell
+$env:RELAY_KNOWLEDGE_DATA_DIR = 'E:\KnowledgeData'
+relay-knowledge status --format json
+# 可选：持久化到当前用户环境，供后续新终端使用。
+[Environment]::SetEnvironmentVariable('RELAY_KNOWLEDGE_DATA_DIR', 'E:\KnowledgeData', 'User')
+```
+
+变量值是目录，不是数据库文件名。空值、相对路径和包含 `..` 的路径会被拒绝。
+新安装时，D 盘不存在或目标目录不可写会导致创建或打开数据库失败，需要指定可访问的绝对路径。
+已有 LocalAppData 数据库在没有 D 盘时仍可继续使用。
+
+升级会原地保留已有数据库，不会自动搬迁。也可以显式固定原 Windows 目录，包括服务配置：
+
+```powershell
+$env:RELAY_KNOWLEDGE_DATA_DIR = Join-Path $env:LOCALAPPDATA 'relay-knowledge\data'
+```
+
+需要迁移时，先停止托管服务及其他 writer，对完整数据目录做一致性备份，再把主库、
+存在的 WAL/SHM 恢复文件和 `stores/repositories` 一起复制到目标目录，保留原副本以便回滚。
+所有 CLI 和服务必须使用同一数据目录。已安装服务会在服务定义中保存显式数据路径，
+只修改终端变量不会改变已有服务；应重新生成并应用生命周期计划，再运行 `status`、
+`health` 和 `service doctor` 检查。恢复旧二进制还需遵守
+[升级与回滚合同](../03-architecture-specs/19-installation-release-and-upgrade.md)。
+卸载默认保留运行时数据。
+
 ## 1.5 配置 readiness
 
 不确定当前机器是否 ready 时，先运行只读配置诊断:
@@ -114,6 +174,10 @@ relay-knowledge service doctor --format json
 ```
 
 确认 graph storage、index freshness、worker/service live health 和 telemetry 状态。
+分片存储的 `storage_cold` 表示 active 分片尚无已校验的打开句柄，健康状态会标记
+stale/unhealthy，探针不会打开分片；业务请求负责预热，存储清单可用 `status` 或
+`service doctor` 查询。Windows 升级/回滚会在停止服务前校验旧服务定义固定的数据目录，
+旧目录缺失或权限不安全时需先修正。
 
 ## 1.6 网络与路径边界
 

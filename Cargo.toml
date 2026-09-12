@@ -38,7 +38,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_norway = "0.9.42"
 sha2 = "0.10.9"
-tokio = { version = "1.48", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.48", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6.10", features = ["limit", "timeout", "trace"] }
 tracing = "0.1"
@@ -79,6 +79,10 @@ notify = { version = "8.2.0", default-features = false, features = ["macos_fseve
 unicode-ident = "1.0"
 url = "2.5.8"
 quick-xml = "0.41"
+
+[target.'cfg(windows)'.dependencies]
+# Safe GetSystemDirectory wrapper compatible with the crate's Rust 1.85 MSRV.
+winsafe = { version = "0.0.23", features = ["advapi", "kernel"] }
 
 [dev-dependencies]
 proc-macro2 = { version = "1.0", features = ["span-locations"] }

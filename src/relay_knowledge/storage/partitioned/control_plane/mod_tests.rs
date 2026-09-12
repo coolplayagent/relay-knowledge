@@ -11,10 +11,11 @@ async fn empty_control_plane_lists_no_repository_shards() {
     let control = Arc::new(SqliteGraphStore::open_in_memory().expect("control store should open"));
     let paths = runtime_paths();
     let store = super::super::PartitionedSqliteKnowledgeStore {
-        control,
+        control: Arc::clone(&control),
         catalog: Arc::new(SqliteShardCatalog::new(
             paths.data_dir.join("control.db"),
             paths,
+            control,
         )),
     };
 
@@ -28,6 +29,7 @@ async fn empty_control_plane_lists_no_repository_shards() {
 
 fn runtime_paths() -> RuntimePaths {
     RuntimePaths {
+        windows_data_sid: None,
         config_dir: PathBuf::from("/tmp/relay-knowledge/config"),
         data_dir: PathBuf::from("/tmp/relay-knowledge/data"),
         state_dir: PathBuf::from("/tmp/relay-knowledge/state"),

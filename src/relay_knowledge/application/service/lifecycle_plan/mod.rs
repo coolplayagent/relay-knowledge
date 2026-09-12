@@ -9,7 +9,7 @@ use crate::{
         ServicePackageManifestCheck,
     },
     identity::stable_hash64,
-    paths::RuntimePaths,
+    paths::{RuntimePaths, StorageDirectoryAccess},
     project::{PROJECT_NAME, SERVICE_LIFECYCLE_CHECKPOINT_FILE_NAME},
     storage::StorageTopology,
 };
@@ -79,6 +79,28 @@ impl RelayKnowledgeService {
         &self,
         plan: &ServiceDefinitionPlan,
     ) -> Result<ServiceLifecycleExecutionReport, ApiError> {
+        validate_restored_storage(plan, &self.runtime.paths)
+            .await
+            .map_err(ApiError::storage_unavailable)?;
+        self.storage
+            .validate_lifecycle_storage()
+            .await
+            .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
+        // A service pins this path as an explicit override and can start as
+        // LocalSystem, so automatic directories must be protected before any
+        // install/upgrade/rollback step can hand storage to the service.
+        if !plan.dry_run && plan.action != ServiceManagerAction::Uninstall {
+            self.runtime
+                .paths
+                .ensure_storage_access(StorageDirectoryAccess::OpenOrCreate)
+                .await
+                .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
+            self.runtime
+                .paths
+                .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
+                .await
+                .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
+        }
         let plan = plan.clone();
         let current_executable = self.runtime.process.current_executable.clone();
         let report = tokio::task::spawn_blocking(move || {
@@ -93,6 +115,39 @@ impl RelayKnowledgeService {
         Ok(report)
     }
 }
+
+async fn validate_restored_storage(
+    plan: &ServiceDefinitionPlan,
+    current: &RuntimePaths,
+) -> Result<(), String> {
+    if plan.dry_run
+        || plan.platform != "windows"
+        || !matches!(
+            plan.action,
+            ServiceManagerAction::Upgrade | ServiceManagerAction::Rollback
+        )
+    {
+        return Ok(());
+    }
+    let plan = plan.clone();
+    let definition = tokio::task::spawn_blocking(move || {
+        if plan.action == ServiceManagerAction::Rollback {
+            checkpoint::restored_definition(&plan)
+        } else {
+            checkpoint::read_bounded_definition(Path::new(&plan.definition_path))
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let Some(definition) = definition else {
+        return Ok(());
+    };
+    current.validate_restored_service_storage(&definition).await
+}
+
+#[cfg(test)]
+#[path = "checkpoint_storage_tests.rs"]
+mod checkpoint_storage_tests;
 
 fn service_execution_error(report: &ServiceLifecycleExecutionReport) -> Option<ApiError> {
     let failed_step_id = report.failed_step_id.as_deref()?;
@@ -130,6 +185,7 @@ fn render_service_plan_for_platform(
         platform,
         &binary_path.display().to_string(),
         &paths.data_dir.display().to_string(),
+        topology,
     );
     let checksum = format!("{:016x}", stable_hash64(definition.as_bytes()));
     let mut runtime_state_paths = vec![
@@ -143,6 +199,12 @@ fn render_service_plan_for_platform(
         "dry-run is the default; pass --execute to run local file steps and platform service-manager commands".to_owned(),
         "runtime state is preserved unless an operator explicitly removes it after reviewing runtime_state_paths".to_owned(),
     ];
+    if paths.windows_data_sid.is_some() && request.action != ServiceManagerAction::Uninstall {
+        warnings.push(format!(
+            "before execution, automatic Windows storage at '{}' and its account directory will be created or validated with protected account/SYSTEM/Administrators permissions; dry-run does not provision storage",
+            paths.data_dir.display()
+        ));
+    }
     if topology == StorageTopology::PartitionedSqlite {
         runtime_state_paths.push(paths.repository_shards_dir().display().to_string());
         warnings.push(

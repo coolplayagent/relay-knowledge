@@ -41,9 +41,14 @@ impl RelayKnowledgeService {
                 *self.health_cache.write().await = Some(response.clone());
                 Ok(response)
             }
-            Ok(Err(StorageError::Busy(message))) => Ok(self
-                .degraded_cached_health(context, format!("storage_busy: {message}"))
-                .await),
+            Ok(Err(StorageError::Busy(message))) => {
+                let reason = if message.starts_with("storage_cold:") {
+                    message
+                } else {
+                    format!("storage_busy: {message}")
+                };
+                Ok(self.degraded_cached_health(context, reason).await)
+            }
             Ok(Err(error)) => Err(storage_api_error(error)),
             Err(_) => Ok(self
                 .degraded_cached_health(context, "storage_busy: health snapshot timed out")
@@ -105,6 +110,11 @@ impl RelayKnowledgeService {
     ) -> Result<HealthStorageReport, StorageError> {
         let snapshot = match self.storage_health_snapshot(store).await {
             Ok(snapshot) => snapshot,
+            Err(StorageError::Busy(message)) if message.starts_with("storage_cold:") => {
+                // Preserve an explicit cold state without invoking full graph
+                // inspection or opening shards from a health fallback.
+                return Err(StorageError::Busy(message));
+            }
             Err(error) => {
                 let storage = self.storage_topology_diagnostics().await;
                 if storage.missing_shard_count == 0 {

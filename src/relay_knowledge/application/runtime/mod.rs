@@ -77,7 +77,8 @@ impl RuntimeConfiguration {
         let watcher = crate::watcher::WatcherConfig::from_environment(&environment.watcher);
 
         Ok(Self {
-            paths: RuntimePaths::resolve(&environment.platform, &environment.paths)
+            paths: RuntimePaths::resolve_for_runtime(&environment.platform, &environment.paths)
+                .await
                 .map_err(RuntimeConfigurationError::Paths)?,
             process,
             network: NetworkRuntime::from_config(network),
