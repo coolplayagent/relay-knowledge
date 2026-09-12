@@ -8,7 +8,7 @@ pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     if input.language_id == "bash" {
-        return super::shell::extract(input);
+        return super::shell::extract(input, false);
     }
     let mut records = Vec::new();
     let mut offset = 0;
@@ -256,3 +256,7 @@ pub(super) fn quoted(raw: &str) -> Option<(String, usize)> {
     }
     None
 }
+
+#[cfg(test)]
+#[path = "files_tests.rs"]
+mod tests;

@@ -31,6 +31,19 @@ pub struct CodeConfigMetadata {
     /// Declared Java field names and access levels, including nonconstant hiding fields.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub java_fields: std::collections::BTreeMap<String, String>,
+    /// Same-package alternatives for wildcard-ambiguous supertypes.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub same_package_parents: std::collections::BTreeMap<String, String>,
+    /// String-compatible platform-name member signatures and visibility.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub java_methods: std::collections::BTreeMap<String, String>,
+    /// Lexical member signature that takes precedence over a static platform import.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub static_import_reference: Option<String>,
+    /// False fallback supplied by a proven Boolean conversion of a nullable property.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub boolean_null_fallback: bool,
+
     /// Java getter visibility: public, protected, private, or package.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub getter_visibility: Option<String>,
@@ -85,11 +98,14 @@ impl CodeConfigFilter {
             }
         }
         if self.source.as_deref().is_some_and(|source| {
-            !matches!(source, "java" | "properties" | "ini" | "ctmpl" | "shell")
+            !matches!(
+                source,
+                "java" | "properties" | "ini" | "ctmpl" | "shell" | "dotenv"
+            )
         }) {
             return Err(DomainError::invalid(
                 "source",
-                "expected java, properties, ini, ctmpl or shell",
+                "expected java, properties, ini, ctmpl, shell or dotenv",
             ));
         }
         Ok(self)

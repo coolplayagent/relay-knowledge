@@ -3,6 +3,7 @@ use super::*;
 pub(super) struct Hierarchy {
     declarations: BTreeSet<String>,
     fields: BTreeMap<String, String>,
+    methods: BTreeMap<String, String>,
     packages: BTreeMap<String, String>,
     parents: BTreeMap<String, BTreeSet<String>>,
     children: BTreeMap<String, BTreeSet<String>>,
@@ -26,8 +27,17 @@ impl Hierarchy {
         let mut declarations = BTreeSet::new();
         let mut packages = BTreeMap::new();
         let mut fields = BTreeMap::new();
+        let mut methods = BTreeMap::new();
+        let declared_types = rows
+            .iter()
+            .filter(|r| r.edge_kind == "config_type_declaration")
+            .map(|r| r.source_key.clone())
+            .collect::<BTreeSet<_>>();
         for row in rows {
             if row.edge_kind == "config_type_declaration" {
+                for (name, visibility) in row.metadata.java_methods {
+                    methods.insert(format!("{}.{name}", row.source_key), visibility);
+                }
                 for (name, visibility) in row.metadata.java_fields {
                     fields.insert(format!("{}.{name}", row.source_key), visibility);
                 }
@@ -38,6 +48,13 @@ impl Hierarchy {
                 continue;
             }
             for parent in row.metadata.bindings {
+                let parent = row
+                    .metadata
+                    .same_package_parents
+                    .get(&parent)
+                    .filter(|candidate| declared_types.contains(*candidate))
+                    .cloned()
+                    .unwrap_or(parent);
                 parents
                     .entry(row.source_key.clone())
                     .or_default()
@@ -51,6 +68,7 @@ impl Hierarchy {
         Ok(Self {
             parents,
             fields,
+            methods,
             children,
             declarations,
             packages,
@@ -74,6 +92,7 @@ impl Hierarchy {
                 .iter()
                 .chain(row.metadata.reference.iter())
                 .chain(row.metadata.same_package_reference.iter())
+                .chain(row.metadata.static_import_reference.iter())
             {
                 if let Some((owner, _)) = symbol.rsplit_once('.') {
                     closure.insert(owner.to_owned());
@@ -105,8 +124,9 @@ impl Hierarchy {
                 let related_list = vec!["?"; related.len()].join(",");
                 params.extend(related.iter().cloned().map(Value::Text));
                 params.extend(related.iter().cloned().map(Value::Text));
+                params.extend(related.iter().cloned().map(Value::Text));
                 let sql = format!(
-                    "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND ((flag.edge_kind='config_type_declaration' AND flag.source_key IN ({list})) OR (flag.edge_kind='config_type_hierarchy' AND (flag.source_key IN ({related_list}) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding WHERE binding.value IN ({related_list}))))) LIMIT {}",
+                    "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND ((flag.edge_kind='config_type_declaration' AND flag.source_key IN ({list})) OR (flag.edge_kind='config_type_hierarchy' AND (flag.source_key IN ({related_list}) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding WHERE binding.value IN ({related_list})) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.same_package_parents') candidate WHERE candidate.value IN ({related_list}))))) LIMIT {}",
                     filter.where_clause,
                     MAX_ROWS + 1
                 );
@@ -114,6 +134,7 @@ impl Hierarchy {
                     if row.edge_kind == "config_type_hierarchy" {
                         closure.insert(row.source_key.clone());
                         closure.extend(row.metadata.bindings.iter().cloned());
+                        closure.extend(row.metadata.same_package_parents.values().cloned());
                         owners.extend(closure.iter().cloned());
                     }
                     if seen.insert(row.usage_id.clone()) {
@@ -133,10 +154,15 @@ impl Hierarchy {
     }
     pub(super) fn filter_platform_reads(&self, rows: &mut Vec<FeatureFlagRow>) {
         rows.retain(|row| {
-            row.metadata
-                .implicit_platform_owner
+            !row.metadata
+                .static_import_reference
                 .as_ref()
-                .is_none_or(|owner| !self.declarations.contains(owner))
+                .is_some_and(|reference| self.shadows_import(reference))
+                && row
+                    .metadata
+                    .implicit_platform_owner
+                    .as_ref()
+                    .is_none_or(|owner| !self.declarations.contains(owner))
         });
         for row in rows {
             if let Some(candidate) = &row.metadata.same_package_reference {
@@ -154,9 +180,46 @@ impl Hierarchy {
                 .any(|owner| self.declarations.contains(owner))
             {
                 row.metadata.bindings.clear();
+                if row.metadata.boolean_null_fallback {
+                    row.metadata.default_value = None;
+                    row.metadata.value_type = None;
+                }
                 row.metadata.flow_incomplete = Some("shadowed_platform_conversion".into());
             }
         }
+    }
+    fn shadows_import(&self, reference: &str) -> bool {
+        let Some((owner, method)) = reference.rsplit_once('.') else {
+            return false;
+        };
+        let package = self.packages.get(owner);
+        let mut pending = vec![(owner.to_owned(), false)];
+        let mut seen = BTreeSet::new();
+        while let Some((owner, crossed)) = pending.pop() {
+            if !seen.insert((owner.clone(), crossed)) {
+                continue;
+            }
+            let crossed = crossed
+                || package
+                    .zip(self.packages.get(&owner))
+                    .is_some_and(|(a, b)| a != b);
+            let key = format!("{owner}.{method}");
+            if self
+                .methods
+                .get(&key)
+                .is_some_and(|v| v != "private" && (v != "package" || !crossed))
+            {
+                return true;
+            }
+            pending.extend(
+                self.parents
+                    .get(&owner)
+                    .into_iter()
+                    .flatten()
+                    .map(|p| (p.clone(), crossed)),
+            );
+        }
+        false
     }
     fn related(&self, symbol: &str, descendants: bool) -> Result<BTreeSet<String>, StorageError> {
         let Some((owner, method)) = symbol.rsplit_once('.') else {

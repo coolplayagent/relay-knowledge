@@ -9,6 +9,9 @@ mod shell;
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
+    if input.path.to_ascii_lowercase().ends_with(".env") {
+        return shell::extract(input, true);
+    }
     match input.language_id {
         "java" => java::extract(input),
         "gotemplate" if input.path.to_ascii_lowercase().ends_with(".ctmpl") => {
@@ -69,10 +72,14 @@ fn line_number(prefix: &str) -> usize {
 }
 
 pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadata {
-    let format = match input.language_id {
-        "gotemplate" => "ctmpl",
-        "bash" => "shell",
-        other => other,
+    let format = if input.path.to_ascii_lowercase().ends_with(".env") {
+        "dotenv"
+    } else {
+        match input.language_id {
+            "gotemplate" => "ctmpl",
+            "bash" => "shell",
+            other => other,
+        }
     };
     let mut meta = CodeConfigMetadata {
         source_format: format.to_owned(),
@@ -175,5 +182,8 @@ fn value_type(value: &str) -> &'static str {
     }
 }
 #[cfg(test)]
-#[path = "registry_tests.rs"]
+#[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod test_support;

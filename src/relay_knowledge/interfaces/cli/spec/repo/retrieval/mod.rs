@@ -329,7 +329,7 @@ pub(in crate::interfaces::cli::spec) fn repo_feature_flags() -> CliCommandSpec {
                 false,
                 "Filter source-format evidence while retaining linked usages.",
                 None,
-                &["java", "properties", "ini", "ctmpl", "shell"]
+                &["java", "properties", "ini", "ctmpl", "shell", "dotenv"]
             ),
             opt(
                 "--hot-reload",

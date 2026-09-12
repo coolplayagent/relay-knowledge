@@ -90,6 +90,7 @@ fn search_bounded(
     )?;
     if rows.iter().any(|row| {
         row.metadata.implicit_platform_owner.is_some()
+            || row.metadata.static_import_reference.is_some()
             || !row.metadata.conversion_platform_owners.is_empty()
             || row.metadata.same_package_reference.is_some()
     }) {

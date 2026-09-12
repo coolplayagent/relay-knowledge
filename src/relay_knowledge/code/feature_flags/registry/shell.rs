@@ -6,6 +6,7 @@ mod options;
 mod values;
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
+    dotenv: bool,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     let mut parser = tree_sitter::Parser::new();
     parser
@@ -19,10 +20,11 @@ pub(super) fn extract(
     while let Some(node) = pending.pop() {
         if node.kind() == "variable_assignment"
             && unconditional(node)
-            && (node
-                .parent()
-                .and_then(|parent| export_mode(parent, input.content))
-                == Some(true)
+            && (dotenv
+                || node
+                    .parent()
+                    .and_then(|parent| export_mode(parent, input.content))
+                    == Some(true)
                 || options::allexport(node, input.content)?
                 || shell_external(
                     node,
@@ -38,7 +40,7 @@ pub(super) fn extract(
                 rows.push(row);
             }
         }
-        if export_mode(node, input.content) == Some(true) && unconditional(node) {
+        if !dotenv && export_mode(node, input.content) == Some(true) && unconditional(node) {
             let mut cursor = node.walk();
             for name in node
                 .named_children(&mut cursor)
@@ -58,7 +60,7 @@ pub(super) fn extract(
                 }
             }
         }
-        if matches!(node.kind(), "simple_expansion" | "expansion") {
+        if !dotenv && matches!(node.kind(), "simple_expansion" | "expansion") {
             let mut cursor = node.walk();
             if let Some(name) = node
                 .named_children(&mut cursor)
@@ -268,10 +270,25 @@ fn prior_assignment<'a>(
     key: &str,
     content: &str,
 ) -> Result<Option<(Node<'a>, bool)>, DomainError> {
-    let mut previous = export.prev_named_sibling();
+    let mut scope = export;
+    let mut previous = scope.prev_named_sibling();
     let mut budget = 1024_usize;
     let mut uncertain = false;
-    while let Some(statement) = previous {
+    loop {
+        let Some(statement) = previous else {
+            let Some(parent) = scope.parent().filter(|p| p.kind() == "compound_statement") else {
+                break;
+            };
+            budget = budget.checked_sub(1).ok_or_else(|| {
+                DomainError::invalid(
+                    "configuration",
+                    "shell prior assignment analysis incomplete: node budget exceeded",
+                )
+            })?;
+            scope = parent;
+            previous = scope.prev_named_sibling();
+            continue;
+        };
         let mut pending = vec![(statement, false)];
         while let Some((node, conditional)) = pending.pop() {
             budget = budget.checked_sub(1).ok_or_else(|| {
@@ -319,3 +336,7 @@ fn prior_assignment<'a>(
     }
     Ok(None)
 }
+
+#[cfg(test)]
+#[path = "shell_tests.rs"]
+mod tests;

@@ -22,11 +22,11 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
         ),
         (
             "src/DerivedKeys.java",
-            "package a; class DerivedKeys extends Keys {}",
+            "package a; import java.util.*; class DerivedKeys extends Keys {}",
         ),
         (
             "src/KeyReader.java",
-            "package a; class KeyReader { String read() { return System.getProperty(DerivedKeys.CONFIG_KEY); } }",
+            "package a; import static a.Keys.*; class KeyReader { String read() { System.getProperty(CONFIG_KEY); return System.getProperty(DerivedKeys.CONFIG_KEY); } }",
         ),
     ] {
         repo.write(path, source);

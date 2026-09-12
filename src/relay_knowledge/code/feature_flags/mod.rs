@@ -34,6 +34,9 @@ pub(crate) fn extract_feature_flags(
     input: FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     let mut records = registry::extract(&input)?;
+    if input.path.to_ascii_lowercase().ends_with(".env") {
+        return Ok(records);
+    }
     let mut byte_start = 0usize;
     let config_file = looks_like_config_file(input.path);
     let mut comment_state = CommentState::default();
@@ -155,11 +158,7 @@ fn collect_config_fact_records(
         }
         records.push(feature_flag_record_from_range(
             input,
-            if input.path.to_ascii_lowercase().ends_with(".env") {
-                "env_var"
-            } else {
-                "config_key"
-            },
+            "config_key",
             &fact.name,
             "defines_config",
             fact.range,
@@ -280,15 +279,7 @@ fn collect_line_records(
     }
     if context.config_file {
         for key in boolean_config_keys(context.scan_line) {
-            line_records.push((
-                if context.input.path.to_ascii_lowercase().ends_with(".env") {
-                    "env_var"
-                } else {
-                    "config_key"
-                },
-                key,
-                "defines_config",
-            ));
+            line_records.push(("config_key", key, "defines_config"));
         }
     }
 

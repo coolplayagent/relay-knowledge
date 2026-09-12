@@ -118,7 +118,7 @@ fn helm_inventory_does_not_require_consul_keys() {
 fn dotenv_definition_satisfies_environment_read_consistency() {
     let db = fixture();
     for (path, language_id, content) in [
-        (".env", "unknown", "FEATURE=true"),
+        (".env", "unknown", "FEATURE=production"),
         (
             "src/app.js",
             "javascript",
@@ -219,4 +219,156 @@ fn late_loaded_getter_checks_its_conversion_shadow() {
         groups.is_empty(),
         "a shadowed conversion cannot supply getter evidence: {groups:?}"
     );
+}
+
+fn java_files(db: &Connection, files: &[(&str, &str)]) {
+    for (path, content) in files {
+        for row in crate::code::feature_flags::extract_feature_flags(
+            crate::code::feature_flags::FeatureFlagFileInput {
+                repository_id: "repo",
+                source_scope: "scope",
+                file_id: "file",
+                path,
+                language_id: "java",
+                content,
+                config_facts: &[],
+            },
+        )
+        .unwrap()
+        {
+            add(
+                db,
+                &row.source_key,
+                &row.source_kind,
+                &row.edge_kind,
+                row.metadata,
+            );
+            db.execute(
+                "UPDATE code_repository_feature_flags SET path=? WHERE rowid=last_insert_rowid()",
+                [path],
+            )
+            .unwrap();
+        }
+    }
+}
+#[test]
+fn wildcard_supertype_and_constant_bindings_reconcile_snapshot_types() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[
+            (
+                "Base.java",
+                r#"package app; class Base { public boolean isX(){return Boolean.getBoolean("feature");} }"#,
+            ),
+            (
+                "Child.java",
+                "package app; import java.util.*; class Child extends Base {}",
+            ),
+            (
+                "Keys.java",
+                r#"package app; class Keys { public static final String FEATURE_KEY="feature"; }"#,
+            ),
+            (
+                "Reader.java",
+                r#"package app; import static app.Keys.*; class Reader { void run(Child config){if(config.isX()){} System.getProperty(FEATURE_KEY);} }"#,
+            ),
+        ],
+    );
+    let mut query = request(None, CodeConfigFilter::default());
+    query.repository.path_filters = vec!["Reader.java".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].source_key, "feature");
+    assert!(
+        groups[0]
+            .usages
+            .iter()
+            .any(|u| u.edge_kind == "guards_code")
+    );
+    assert!(
+        groups[0]
+            .usages
+            .iter()
+            .any(|u| u.metadata.reference.as_deref() == Some("app.Keys.FEATURE_KEY"))
+    );
+}
+#[test]
+fn inherited_members_precede_static_platform_imports() {
+    for (access, parameter, shadow) in [
+        ("public", "String", true),
+        ("protected", "String", true),
+        ("private", "String", false),
+        ("public", "int", false),
+    ] {
+        let db = fixture();
+        java_files(
+            &db,
+            &[
+                (
+                    "Base.java",
+                    &format!(
+                        "package app; class Base {{ {access} String getProperty({parameter} key) {{ return null; }} }}"
+                    ),
+                ),
+                (
+                    "Reader.java",
+                    r#"package app; import static java.lang.System.getProperty; class Reader extends Base { String read(){return getProperty("feature");} }"#,
+                ),
+            ],
+        );
+        let groups = search(
+            &db,
+            &status(),
+            &request(Some("feature"), CodeConfigFilter::default()),
+        )
+        .unwrap();
+        assert_eq!(
+            groups.is_empty(),
+            shadow,
+            "{access} {parameter}: {groups:?}"
+        );
+    }
+}
+#[test]
+fn template_output_is_definition_evidence_but_java_constant_is_not() {
+    for format in ["ctmpl", "java"] {
+        let db = fixture();
+        add(
+            &db,
+            "feature",
+            "config_key",
+            "declares_config_key",
+            CodeConfigMetadata {
+                source_format: format.into(),
+                ..Default::default()
+            },
+        );
+        add(
+            &db,
+            "feature",
+            "config_key",
+            "reads_config",
+            CodeConfigMetadata::default(),
+        );
+        let groups = search(
+            &db,
+            &status(),
+            &request(
+                None,
+                CodeConfigFilter {
+                    consistency: true,
+                    ..Default::default()
+                },
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            groups[0]
+                .consistency_diagnostics
+                .iter()
+                .any(|d| d == "read_without_definition"),
+            format == "java"
+        );
+    }
 }

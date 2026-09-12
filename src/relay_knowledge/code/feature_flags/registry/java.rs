@@ -51,7 +51,27 @@ pub(super) fn extract(
                     row.metadata.reference.as_deref().and_then(|reference| {
                         names::same_package_reference(node, reference, input.content)
                     });
-                if let Some((method, shadows)) = flow::returning_method(node, input.content) {
+                if let Some((method, shadows, boolean_conversion)) =
+                    flow::returning_method(node, input.content)
+                {
+                    if boolean_conversion
+                        && row.metadata.default_value.is_none()
+                        && node
+                            .child_by_field_name("name")
+                            .is_some_and(|n| text(n, input.content) == "getProperty")
+                        && node
+                            .child_by_field_name("arguments")
+                            .is_some_and(|n| n.named_child_count() == 1)
+                        && (node.child_by_field_name("object").is_some_and(|n| {
+                            matches!(text(n, input.content), "System" | "java.lang.System")
+                        }) || (node.child_by_field_name("object").is_none()
+                            && names::static_owner(node, "getProperty", input.content)
+                                == Some("java.lang.System")))
+                    {
+                        row.metadata.boolean_null_fallback = true;
+                        row.metadata.default_value = Some("false".into());
+                        row.metadata.value_type = Some("boolean".into());
+                    }
                     row.metadata.bindings = hierarchy.bindings(method, input.content)?;
                     row.metadata.declared_getter = row.metadata.bindings.first().cloned();
                     row.metadata.java_package = Some(names::package_name(method, input.content));
@@ -79,6 +99,10 @@ pub(super) fn extract(
                     )?;
                     usage.metadata.reference.clone_from(&row.metadata.reference);
                     usage.metadata.exact_reference = row.metadata.exact_reference;
+                    usage
+                        .metadata
+                        .static_import_reference
+                        .clone_from(&row.metadata.static_import_reference);
                     usage
                         .metadata
                         .same_package_reference
@@ -268,6 +292,13 @@ fn read(
             node.end_byte(),
         )?;
         row.metadata.reference = reference;
+        if object.is_none() && (is_system || is_boolean) {
+            row.metadata.static_import_reference = Some(format!(
+                "{}/{}",
+                field_symbol(node, method, input.content),
+                arguments.named_child_count()
+            ));
+        }
         row.metadata.implicit_platform_owner =
             platform.and_then(|owner| types::platform_shadow(node, owner, input.content));
         row.metadata.value_type = Some(
@@ -523,3 +554,7 @@ fn contains_name(
     }
     Ok(false)
 }
+
+#[cfg(test)]
+#[path = "java_tests.rs"]
+mod tests;

@@ -57,7 +57,10 @@ pub(super) fn check(group: &mut CodeFeatureFlagGraph, formats: &BTreeSet<String>
             .push("incomplete_analysis: absence cannot be proven".into());
         return;
     }
-    let definitions = group.usages.iter().any(|u| u.edge_kind == "defines_config");
+    let definitions = group.usages.iter().any(|u| {
+        u.edge_kind == "defines_config"
+            || (u.edge_kind == "declares_config_key" && u.metadata.source_format == "ctmpl")
+    });
     if matches!(group.source_kind.as_str(), "config_key" | "env_var")
         && !definitions
         && group.usages.iter().any(|u| u.edge_kind == "reads_config")

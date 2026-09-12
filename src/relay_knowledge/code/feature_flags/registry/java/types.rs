@@ -137,6 +137,19 @@ impl Hierarchy {
                 end,
             )?;
             row.metadata.bindings = parents.clone();
+            let package = names::package_name(node, input.content);
+            for parent in parents {
+                if let Some(simple) = parent.strip_prefix("<ambiguous-import>.") {
+                    row.metadata.same_package_parents.insert(
+                        parent.clone(),
+                        if package.is_empty() {
+                            simple.into()
+                        } else {
+                            format!("{package}.{simple}")
+                        },
+                    );
+                }
+            }
             facts.push(row);
         }
         {
@@ -150,6 +163,54 @@ impl Hierarchy {
             )?;
             declaration.metadata.java_package = Some(names::package_name(node, input.content));
             if let Some(body) = node.child_by_field_name("body") {
+                let mut cursor = body.walk();
+                for method in body
+                    .named_children(&mut cursor)
+                    .filter(|n| n.kind() == "method_declaration")
+                {
+                    let Some(name) = method.child_by_field_name("name") else {
+                        continue;
+                    };
+                    let name = names::text(name, input.content);
+                    if !matches!(name, "getProperty" | "getenv" | "getBoolean") {
+                        continue;
+                    }
+                    let Some(parameters) = method.child_by_field_name("parameters") else {
+                        continue;
+                    };
+                    let mut cursor = parameters.walk();
+                    let parameters = parameters.named_children(&mut cursor).collect::<Vec<_>>();
+                    let varargs = parameters
+                        .last()
+                        .is_some_and(|p| p.kind() == "spread_parameter");
+                    if parameters.iter().any(|p| {
+                        p.child_by_field_name("type").is_some_and(|ty| {
+                            matches!(
+                                names::text(ty, input.content),
+                                "int"
+                                    | "long"
+                                    | "boolean"
+                                    | "float"
+                                    | "double"
+                                    | "byte"
+                                    | "short"
+                                    | "char"
+                            )
+                        })
+                    }) {
+                        continue;
+                    }
+                    for arity in 1..=2 {
+                        if (varargs && arity >= parameters.len().saturating_sub(1))
+                            || (!varargs && arity == parameters.len())
+                        {
+                            declaration
+                                .metadata
+                                .java_methods
+                                .insert(format!("{name}/{arity}"), visibility(method).into());
+                        }
+                    }
+                }
                 let mut cursor = body.walk();
                 for field in body
                     .named_children(&mut cursor)
@@ -330,3 +391,7 @@ pub(super) fn platform_shadow(mut node: Node<'_>, owner: &str, content: &str) ->
         format!("{package}.{owner}")
     })
 }
+
+#[cfg(test)]
+#[path = "types_tests.rs"]
+mod tests;

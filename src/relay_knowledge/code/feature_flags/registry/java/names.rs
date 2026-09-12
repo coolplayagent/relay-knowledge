@@ -589,6 +589,7 @@ pub(super) fn key_symbol(node: Node<'_>, content: &str) -> Option<String> {
                 }
                 return None;
             }
+            let mut wildcard = std::collections::BTreeSet::new();
             let mut cursor = root(node).walk();
             for import in root(node)
                 .named_children(&mut cursor)
@@ -602,9 +603,19 @@ pub(super) fn key_symbol(node: Node<'_>, content: &str) -> Option<String> {
                     if path.rsplit('.').next() == Some(name) {
                         return Some(path.to_owned());
                     }
+                    if let Some(owner) = path.strip_suffix(".*") {
+                        wildcard.insert(owner);
+                        if wildcard.len() > 64 {
+                            return Some(format!("<ambiguous-import>.{name}"));
+                        }
+                    }
                 }
             }
-            None
+            match wildcard.len() {
+                0 => None,
+                1 => Some(format!("{}.{name}", wildcard.first().unwrap())),
+                _ => Some(format!("<ambiguous-import>.{name}")),
+            }
         }
         "field_access" => {
             let object = node.child_by_field_name("object")?;
@@ -787,3 +798,7 @@ fn abrupt_exit(mut node: Node<'_>) -> bool {
     }
     false
 }
+
+#[cfg(test)]
+#[path = "names_tests.rs"]
+mod tests;

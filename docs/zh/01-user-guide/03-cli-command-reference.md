@@ -166,6 +166,8 @@ Kind 取值按命令家族隔离：
 不要跨命令家族复用 kind 取值。影响分析使用 `repo impact`，Angular/Vue template 语义使用
 Java 继承字符串常量通过已索引父类型解析；子类声明同名字段（包括非常量字段）会阻断继承别名，并保留 private/package 访问边界。类型证据仅加载相关符号所属类型、平台遮蔽候选及受界的关联继承关系（1,000 个类型、64 轮、4 MiB），无关 Java 声明不会耗尽简单读取查询的预算。dotenv 布尔定义归入环境变量命名空间，使已索引定义可满足环境变量读取的一致性检查。Consul 抽取及模板存在性检查要求 `.ctmpl` 扩展名；Helm 清单与通用 Go 模板不会产生 Consul 配置分组。
 
+dotenv（.env）赋值均索引为环境变量定义，包括布尔、字符串、数字及未知值；--source dotenv 可筛选其证据。Consul 动态输出键计为定义，Java 键常量本身不计为定义。单一 owner 的静态通配键导入保留符号并在快照内解析，多 owner 保持歧义；存在通配歧义的父类型依据同包声明校正。静态平台导入会先检查已索引继承成员签名及 Java 可见性。已证明的 Boolean 转换为无默认值的 System.getProperty 读取保留 false 回退；转换类型被遮蔽时撤销该回退。无条件 Shell 大括号组中的 export 可查找外层赋值，并在 unset 或执行作用域边界停止。提取测试由 Java、names、types、files 和 Shell owner 直接挂载；registry facade 仅保留元数据及装配契约，fixture 放在 test_support。
+
 `repo framework`，feature flag 使用 `repo feature-flags`；它们不是 `repo query --kind` 的取值。
 
 `--path` 是 CLI 中 path filter 的参数名。`repo register --path` 保存索引范围，`repo query --path`、`repo framework --path` 和 `repo feature-flags --path` 只在该已索引范围内收窄读取。`repo index` 不接受 `--path`，它使用注册范围和选定的 `--ref`。非 Git 源码目录的常规移动文件系统快照使用 `HEAD`，状态里会记录解析后的 `filesystem:<hash>` commit。`worktree` 是 Git worktree overlay selector，不是非 Git 目录的默认 ref。
@@ -194,7 +196,7 @@ Java 继承字符串常量通过已索引父类型解析；子类声明同名字
 
 `repo feature-flags` 读取索引阶段写入的配置驱动特性开关图事实，默认列出所选 repository scope 内的开关、配置来源和代码使用关系；`--query` 只做名称、配置 key、路径或 excerpt 过滤。JSON 响应包含与 `repo query` 相同的 `freshness` 对象，包括 pending task、checkpoint cursor、index lag、stale/degraded reason，以及返回 feature-flag usage 文件的 direct-source-read paths。抽取器识别环境变量、config/settings key、布尔配置声明，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用。它不会同步 provider 控制面的状态、策略、segment 或 rollout variant。该命令不会在查询时扫描全仓库源码；新增或修正开关抽取逻辑后，需要重新 `repo index` 或 `repo update` 才能看到新事实。
 
-配置注册表支持 `--domain <domain>`（显式注释中的领域值）、`--source java|properties|ini|ctmpl|shell` 和 `--hot-reload true|false`。来源和领域值不区分大小写；未知领域或热加载元数据不匹配显式过滤条件。过滤条件选择配置分组，并保留其关联使用关系。`--query` 使用 Unicode 小写匹配。`--consistency` 增加读取未定义、缺少格式和默认值冲突诊断；`conflicting_default_sources` 给出每个默认值对应的路径、行号和 excerpt。关联绑定未解析或值流不受支持时，相应分组标记 `analysis_complete: false`，不推断缺失，但仍报告已加载默认值证明的冲突；数据过期或降级时不输出确定的一致性结论；无关分组仍可独立分析。使用关系、字节、符号、展开深度或 SQLite 查询超出预算时返回明确的分析不完整错误，需要收窄查询范围。Java 嵌套类型及带显式注释的常量字段参与绑定解析。配置行号范围不包含末尾换行符。 绑定结果和配置证据按引用及剩余深度缓存，避免接口使用关系重复扫描全部实现。Java getter 标记计入每文件 10,000 条事实预算，getter 收集也受限。局部变量守卫不匹配无关的同名方法或字段。Shell 定义要求主 shell 中无条件的赋值和导出；条件分支、延迟执行函数及子 shell 内的导出不能证明主 shell 配置已定义。
+配置注册表支持 `--domain <domain>`（显式注释中的领域值）、`--source java|properties|ini|ctmpl|shell|dotenv` 和 `--hot-reload true|false`。来源和领域值不区分大小写；未知领域或热加载元数据不匹配显式过滤条件。过滤条件选择配置分组，并保留其关联使用关系。`--query` 使用 Unicode 小写匹配。`--consistency` 增加读取未定义、缺少格式和默认值冲突诊断；`conflicting_default_sources` 给出每个默认值对应的路径、行号和 excerpt。关联绑定未解析或值流不受支持时，相应分组标记 `analysis_complete: false`，不推断缺失，但仍报告已加载默认值证明的冲突；数据过期或降级时不输出确定的一致性结论；无关分组仍可独立分析。使用关系、字节、符号、展开深度或 SQLite 查询超出预算时返回明确的分析不完整错误，需要收窄查询范围。Java 嵌套类型及带显式注释的常量字段参与绑定解析。配置行号范围不包含末尾换行符。 绑定结果和配置证据按引用及剩余深度缓存，避免接口使用关系重复扫描全部实现。Java getter 标记计入每文件 10,000 条事实预算，getter 收集也受限。局部变量守卫不匹配无关的同名方法或字段。Shell 定义要求主 shell 中无条件的赋值和导出；条件分支、延迟执行函数及子 shell 内的导出不能证明主 shell 配置已定义。
 
 配置注解只接受相应格式的注释语法，执行语句和字符串不能提供元数据。Java 无接收者的零参数 getter 调用仅绑定可见的已声明方法，字符串按有界 Java 转义规则解码。Shell 条件赋值后仍保留可能的继承环境变量读取。绑定或流分析不完整时不推断缺失，但保留已加载默认值能够证明的冲突及其来源位置。
 
