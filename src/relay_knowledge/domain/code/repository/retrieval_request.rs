@@ -152,6 +152,8 @@ impl CodeRetrievalRequest {
 /// Feature-flag graph query over an indexed repository scope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeFeatureFlagRequest {
+    #[serde(default)]
+    pub filters: super::CodeConfigFilter,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
     pub repository: CodeRepositorySelector,
@@ -160,6 +162,12 @@ pub struct CodeFeatureFlagRequest {
 }
 
 impl CodeFeatureFlagRequest {
+    /// Validate configuration filters at the shared domain boundary.
+    pub fn with_filters(mut self, filters: super::CodeConfigFilter) -> Result<Self, DomainError> {
+        self.filters = filters.validate()?;
+        Ok(self)
+    }
+
     /// Validates optional filter text and bounds the number of returned flags.
     pub fn new(
         query: Option<String>,
@@ -177,6 +185,7 @@ impl CodeFeatureFlagRequest {
             .transpose()?;
 
         Ok(Self {
+            filters: super::CodeConfigFilter::default(),
             query,
             repository,
             limit,

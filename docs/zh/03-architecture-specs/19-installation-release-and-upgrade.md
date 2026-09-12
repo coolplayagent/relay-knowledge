@@ -203,4 +203,7 @@ Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_re
 
 导航: 上一章: [18. 可观测性、诊断与 SLO](18-observability-diagnostics-and-slo.md) | 下一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md)
 
+配置事实增加 `config-registry-v31` 作用域组件。即使源码 HEAD 未变，普通 `repo index <alias> --ref HEAD` 也会重建旧二进制产生的 completed scope，无需 `--reset`。SQLite 为配置使用关系增加默认空对象的 `metadata_json` 列，热启动 schema 检查在复用当前库前验证该能力；启动时不扫描源码或回填事实。持久快照复制包含元数据。查询索引计划 ordinal 与 Python/C++ 事实版本不变。切换版本前先用兼容二进制完成或取消未完成任务；备份和回滚时同时保留数据库、WAL 与检查点。
+
+从旧数据库导入时，若源表缺少 `metadata_json` 列，按空元数据对象复制使用关系，保留旧快照及其过期状态，再通过正常重新索引生成配置事实。
 `xml-lossless-windows-v1` 代码事实身份使曾裁掉边界空白的旧 XML 源码窗口失效。升级后重新索引仓库以发布无损 POM 证据，无需删除数据库或修改配置。POM 证据不完整时，保留的 Maven 软件事实持续显示 degraded，直到修复并重新索引。

@@ -3,6 +3,24 @@
 use serde_json::json;
 
 use super::*;
+#[test]
+fn feature_flag_operation_rejects_non_string_filters() {
+    let base = json!({"alias":"repo", "ref":"HEAD", "freshness":"allow-stale", "limit":10});
+    assert!(code_feature_flag_request(&base).is_ok());
+    for field in ["domain", "source"] {
+        for invalid in [json!(7), json!([]), json!({}), json!(true), json!("")] {
+            let mut payload = base.clone();
+            payload[field] = invalid;
+            assert!(code_feature_flag_request(&payload).is_err(), "{payload}");
+        }
+    }
+    let mut payload = base;
+    payload["domain"] = json!("ÜBER");
+    payload["source"] = json!("JAVA");
+    let request = code_feature_flag_request(&payload).unwrap();
+    assert_eq!(request.filters.domain.as_deref(), Some("über"));
+    assert_eq!(request.filters.source.as_deref(), Some("java"));
+}
 
 #[test]
 fn software_cursor_is_forwarded_and_invalid_types_or_kinds_are_rejected() {

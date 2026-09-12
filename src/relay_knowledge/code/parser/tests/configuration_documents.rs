@@ -19,7 +19,8 @@ fn conf_files_reuse_ini_tree_sitter_indexing() {
         snapshot
             .feature_flags
             .iter()
-            .any(|record| record.source_key == "enabled" && record.edge_kind == "defines_config"),
+            .any(|record| record.source_key == "server.enabled"
+                && record.edge_kind == "defines_config"),
         ".conf boolean keys should feed feature-flag definitions: {:?}",
         snapshot.feature_flags
     );

@@ -324,6 +324,7 @@ pub async fn run_repo(
             )
         }
         RepoCommand::FeatureFlags {
+            filters,
             alias,
             query,
             limit,
@@ -338,6 +339,7 @@ pub async fn run_repo(
                 limit,
                 freshness,
             )
+            .and_then(|request| request.with_filters(filters))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .query_code_repository_feature_flags(request, context)

@@ -131,6 +131,8 @@ pub struct CodeRouteRecord {
 /// Feature flag or runtime configuration relationship extracted from code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeFeatureFlagRecord {
+    #[serde(default)]
+    pub metadata: super::CodeConfigMetadata,
     pub repository_id: String,
     pub source_scope: String,
     pub feature_flag_id: String,

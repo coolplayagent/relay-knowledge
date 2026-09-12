@@ -34,7 +34,7 @@ pub fn checkout_enabled() -> bool {
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
     let (server, service) =
-        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "fixture")]).await;
+        server_and_service(&repo, [("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "fixture")]).await;
     register_and_index_fixture(&service, &repo, "fixture").await;
 
     let outcome = run_cancellable_tool_call(
@@ -90,7 +90,7 @@ const emit = defineEmits<{ change: [value: string] }>()
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
     let (server, service) =
-        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "fixture")]).await;
+        server_and_service(&repo, [("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "fixture")]).await;
     register_and_index_fixture(&service, &repo, "fixture").await;
 
     let outcome = run_cancellable_tool_call(
@@ -162,17 +162,21 @@ async fn register_and_index_fixture(
 }
 
 async fn server_and_service<const N: usize>(
+    repo: &FixtureRepo,
     pairs: [(&str, &str); N],
 ) -> (McpServer, RelayKnowledgeService) {
+    let home = repo.path.join("runtime").display().to_string();
     let mut base = vec![
-        ("HOME", "/home/alice"),
-        ("TMPDIR", "/tmp"),
-        ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+        ("HOME", home.as_str()),
+        ("USERPROFILE", home.as_str()),
+        ("TMPDIR", home.as_str()),
+        ("TEMP", home.as_str()),
+        ("RELAY_KNOWLEDGE_HOME", home.as_str()),
         ("RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED", "true"),
     ];
     base.extend(pairs);
-    let environment =
-        EnvironmentConfig::from_pairs(PlatformKind::Unix, base).expect("environment should parse");
+    let environment = EnvironmentConfig::from_pairs(PlatformKind::current(), base)
+        .expect("environment should parse");
     let runtime = RuntimeConfiguration::from_environment(&environment)
         .await
         .expect("runtime should compose");

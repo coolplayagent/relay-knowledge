@@ -317,3 +317,28 @@ When `repo query` returns no results, check in order:
 6. Whether files were diagnosed as unsupported, binary, oversized, invalid UTF-8, or parser failed.
 
 `repo impact` requires an indexed snapshot for `--head`. Run `repo index repo --ref <head>` or `repo update repo --base <base> --head <head>` before impact analysis.
+
+### Configuration keys, reads and guarded code
+
+`repo feature-flags` combines Java system-property and environment reads, constant keys and zero-argument configuration getters with properties, INI, Consul-template (`.ctmpl`) and exported shell variables. Configuration symbols are resolved inside the served repository snapshot. This capability is independent of canonical callers/callees queries and does not alter Python or C++ parsing. Runtime production switch values are outside this static registry.
+
+A `defines_config` usage supplies a file definition. `declares_config_key` identifies a Java constant or a template output key. `reads_config` identifies a concrete read. A `guards_code` usage contains `metadata.read_usage_id`, linking its condition to the read that supplied it. Java local bindings stop propagating after a write; deferred class/method/lambda bodies do not overwrite the enclosing binding. Field, parameter and local getter receivers use lexical type evidence. Anonymous receivers and unknown dynamic values are not assumed to use a default implementation. Conflicting configuration-symbol targets remain unresolved.
+
+Each usage carries source format and optional default value, value type, owning domain and hot-reload support. Unknown values stay absent. An adjacent comment such as `# @config domain=business hot-reload=true` supplies explicit ownership metadata. Properties continuation/Unicode escapes and INI sections preserve their key/value identity; section keys use `section.key`. Environment variables use a separate namespace from system properties.
+
+```powershell
+relay-knowledge repo feature-flags demo --query feature_x --domain business --source properties --hot-reload true --format json
+relay-knowledge repo feature-flags demo --query feature_y --consistency --format json
+```
+
+Source filtering selects matching groups and retains their linked Java usages. Consistency compares observed formats in the selected scope and reports `read_without_definition`, `missing_from_format` and `conflicting_defaults`. A missing key is a diagnostic, not an assertion about production configuration. Stale or unresolved analysis cannot prove absence. Query limits apply to returned groups; completeness budgets remain separate. Registering with `--path src` is only a scope example, not a required repository layout.
+
+Remote CLI and the Web repository endpoint accept the same domain request, with a `filters` object containing `domain`, `source`, `hot_reload` and `consistency`. MCP exposes those four fields directly in `relay_code_feature_flags` arguments.
+
+Java getter flow follows proven java.lang Boolean/Integer/Long/Double parsing and boxing conversions. Unsupported getter result flow sets `metadata.flow_incomplete` and prevents complete consistency claims. String constants become public configuration declarations only when a visible configuration read references them, they have explicit `@config domain=...` / `hot-reload=...` metadata, or follow the declaration convention of a containing type ending in `Keys` or a field ending in `_KEY`. Other strings remain internal symbol candidates, excluded from registry results and general configuration views.
+
+Consistency format coverage comes from the scoped indexed file inventory, including empty/comment-only templates, and respects repository path/language restrictions. `conflicting_default_sources` contains the usage records for conflicting defaults: `metadata.default_value`, `path`, `line_range`, `excerpt`, and `usage_id` directly identify each source. The compact `conflicting_defaults` diagnostic remains available.
+
+Java SDK feature flags continue through the existing SDK extractor alongside configuration reads. Static platform imports ignore unrelated sibling/nested classes and inapplicable method overloads. Shell assignments exported by a later unconditional command retain their source defaults; properties escape decoding does not alter INI/template backslashes. Expanded and consistency usages retain containing-symbol evidence. The result limit applies after symbolic keys are resolved and ranked: candidates are bounded by the 10,000-usage budget, with an explicit incomplete-analysis error on overflow or SQLite time/step interruption. A served stale snapshot cannot emit definitive consistency diagnostics, even when its stored status originally recorded a completed fresh index.
+
+Consistency queries apply query terms before the fact budget and expand only connected bindings; the file-format inventory remains scoped independently. Referenced constant bindings are collected once instead of rescanning all records per declaration. Java receiver names erase generic arguments, simple assignments to existing local variables propagate to subsequent conditions until reassignment, and explicit static imports take precedence over wildcard imports. Shell `set -a` / `set -o allexport` applies to subsequent assignments; disabling allexport does not remove an existing variable's export attribute. General codebase and software views exclude raw symbolic getter rows; resolved configuration usage remains available through `feature-flags`.

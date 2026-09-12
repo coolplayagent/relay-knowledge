@@ -10,6 +10,7 @@ use super::{
 mod comments;
 mod config;
 mod extractors;
+mod registry;
 
 use comments::CommentState;
 use config::{boolean_config_keys, looks_like_config_file};
@@ -32,7 +33,10 @@ pub(crate) struct FeatureFlagFileInput<'a> {
 pub(crate) fn extract_feature_flags(
     input: FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
-    let mut records = Vec::new();
+    let mut records = registry::extract(&input)?;
+    if input.path.to_ascii_lowercase().ends_with(".env") {
+        return Ok(records);
+    }
     let mut byte_start = 0usize;
     let config_file = looks_like_config_file(input.path);
     let mut comment_state = CommentState::default();
@@ -88,19 +92,24 @@ pub(crate) fn extract_feature_flags(
             }
         }
         let sdk_keys = sdk_flag_keys_for_line(&scan_line, &mut sdk_receivers, brace_depth);
-        collect_line_records(
-            &mut records,
-            LineContext {
-                input: &input,
-                line,
-                scan_line: &scan_line,
-                line_number: line_index.saturating_add(1),
-                byte_start,
-                config_file,
-                continued_sdk_key,
-                sdk_keys,
-            },
-        )?;
+        if !matches!(
+            input.language_id,
+            "properties" | "ini" | "gotemplate" | "bash"
+        ) {
+            collect_line_records(
+                &mut records,
+                LineContext {
+                    input: &input,
+                    line,
+                    scan_line: &scan_line,
+                    line_number: line_index.saturating_add(1),
+                    byte_start,
+                    config_file,
+                    continued_sdk_key,
+                    sdk_keys,
+                },
+            )?;
+        }
         if pending_sdk_call.is_none() {
             if let Some(argument_index) = sdk_pending_argument_index(&scan_line, &sdk_receivers) {
                 pending_sdk_call = Some(PendingSdkCall {
@@ -124,7 +133,12 @@ pub(crate) fn extract_feature_flags(
         expire_scoped_sdk_receivers(&mut sdk_receivers, brace_depth);
         byte_start = byte_start.saturating_add(segment.len());
     }
-    collect_config_fact_records(&mut records, &input)?;
+    if !matches!(
+        input.language_id,
+        "java" | "properties" | "ini" | "gotemplate" | "bash"
+    ) {
+        collect_config_fact_records(&mut records, &input)?;
+    }
 
     let mut deduped = BTreeMap::new();
     for record in records {
@@ -271,18 +285,20 @@ fn collect_line_records(
 
     let mut seen = Vec::<(String, String, &'static str)>::new();
     for (source_kind, source_key, edge_kind) in line_records {
+        if context.input.language_id == "java" && source_kind != "sdk_flag_key" {
+            continue;
+        }
         if seen.iter().any(|(known_kind, known_key, known_edge)| {
             known_kind == source_kind && known_key == &source_key && known_edge == &edge_kind
         }) {
             continue;
         }
         seen.push((source_kind.to_owned(), source_key.clone(), edge_kind));
-        records.push(feature_flag_record(
-            &context,
-            source_kind,
-            &source_key,
-            edge_kind,
-        )?);
+        let mut record = feature_flag_record(&context, source_kind, &source_key, edge_kind)?;
+        if context.input.language_id == "java" {
+            record.metadata = registry::metadata(context.input, context.byte_start);
+        }
+        records.push(record);
     }
 
     Ok(())
@@ -341,11 +357,13 @@ fn feature_flag_record_from_range(
             source_kind,
             source_key,
             edge_kind,
-            &range.line_start.to_string(),
+            &range.byte_start.to_string(),
+            &range.byte_end.to_string(),
         ],
     );
 
     Ok(CodeFeatureFlagRecord {
+        metadata: crate::domain::CodeConfigMetadata::default(),
         repository_id: input.repository_id.to_owned(),
         source_scope: input.source_scope.to_owned(),
         feature_flag_id,

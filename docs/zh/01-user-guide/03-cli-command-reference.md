@@ -112,7 +112,7 @@ relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definiti
 relay-knowledge repo graph <alias> --focus <path> --path <root> [--ref <ref>] [--depth 1|2] [--node-limit <n>] [--edge-limit <n>]
 relay-knowledge repo context <alias> --query <text> [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--max-context-bytes <n>] [--no-code] [--exclude-generated]
 relay-knowledge repo framework <alias> [--query <text>] [--framework angular|vue] [--kind component|directive|pipe|template|input|output|prop|emit|model|slot|template-variable|control-flow] [--ref <ref>] [--path <filter>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
-relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
+relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>] [--domain <domain>] [--source <format>] [--hot-reload true|false] [--consistency]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
 relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|modules|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--path <prefix>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--cursor <token>]
@@ -164,6 +164,14 @@ Kind 取值按命令家族隔离：
   `ci`、`runtime`、`wiki`、`monitoring`。
 
 不要跨命令家族复用 kind 取值。影响分析使用 `repo impact`，Angular/Vue template 语义使用
+Java 继承字符串常量通过已索引父类型解析；子类声明同名字段（包括非常量字段）会阻断继承别名，并保留 private/package 访问边界。类型证据仅加载相关符号所属类型、平台遮蔽候选及受界的关联继承关系（1,000 个类型、64 轮、4 MiB），无关 Java 声明不会耗尽简单读取查询的预算。dotenv 布尔定义归入环境变量命名空间，使已索引定义可满足环境变量读取的一致性检查。Consul 抽取及模板存在性检查要求 `.ctmpl` 扩展名；Helm 清单与通用 Go 模板不会产生 Consul 配置分组。
+
+dotenv（.env）赋值均索引为环境变量定义，包括布尔、字符串、数字及未知值；--source dotenv 可筛选其证据。Consul 动态输出键计为定义，Java 键常量本身不计为定义。单一 owner 的静态通配键导入保留符号并在快照内解析，多 owner 保持歧义；存在通配歧义的父类型依据同包声明校正。静态平台导入会先检查已索引继承成员签名及 Java 可见性。已证明的 Boolean 转换为无默认值的 System.getProperty 读取保留 false 回退；转换类型被遮蔽时撤销该回退。无条件 Shell 大括号组中的 export 可查找外层赋值，并在 unset 或执行作用域边界停止。提取测试由 Java、names、types、files 和 Shell owner 直接挂载；registry facade 仅保留元数据及装配契约，fixture 放在 test_support。
+
+多个查询词可以分别命中同一配置分组的不同关联使用位置。候选选择在授权范围内匹配单个词，最终组装后的分组必须满足全部查询词。配置键的格式比较排除 Shell 文件，因为 Shell 定义属于环境变量命名空间。
+
+已证明的 Boolean 转换按有效布尔值比较显式属性回退（例如 TRUE 转为 true）；转换被同包类型遮蔽时恢复原始回退值。Shell unset 参数按引号及转义语法解码。领域注释必须非空，且小写规范化前后均不超过 128 个 UTF-8 字节；非法领域元数据被忽略，不丢弃配置事实，也不阻断索引发布。
+
 `repo framework`，feature flag 使用 `repo feature-flags`；它们不是 `repo query --kind` 的取值。
 
 `--path` 是 CLI 中 path filter 的参数名。`repo register --path` 保存索引范围，`repo query --path`、`repo framework --path` 和 `repo feature-flags --path` 只在该已索引范围内收窄读取。`repo index` 不接受 `--path`，它使用注册范围和选定的 `--ref`。非 Git 源码目录的常规移动文件系统快照使用 `HEAD`，状态里会记录解析后的 `filesystem:<hash>` commit。`worktree` 是 Git worktree overlay selector，不是非 Git 目录的默认 ref。
@@ -191,6 +199,36 @@ Kind 取值按命令家族隔离：
 `repo query --query` 支持内联过滤标签，例如 `kind:function`、`lang:rust` 或 `language:rust`、`path:storage`、`name:query`。未知 `prefix:value` 会保留为普通检索文本。查询内 language filter 与显式 `--language` 取交集；`kind` 和 language 收窄 SQL 候选，`path` 和 `name` 在打分后、截断前过滤命中。`name:` 匹配符号 identity 和 SBOM 包 identity，不匹配任意 excerpt 文本。
 
 `repo feature-flags` 读取索引阶段写入的配置驱动特性开关图事实，默认列出所选 repository scope 内的开关、配置来源和代码使用关系；`--query` 只做名称、配置 key、路径或 excerpt 过滤。JSON 响应包含与 `repo query` 相同的 `freshness` 对象，包括 pending task、checkpoint cursor、index lag、stale/degraded reason，以及返回 feature-flag usage 文件的 direct-source-read paths。抽取器识别环境变量、config/settings key、布尔配置声明，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用。它不会同步 provider 控制面的状态、策略、segment 或 rollout variant。该命令不会在查询时扫描全仓库源码；新增或修正开关抽取逻辑后，需要重新 `repo index` 或 `repo update` 才能看到新事实。
+
+配置注册表支持 `--domain <domain>`（显式注释中的领域值）、`--source java|properties|ini|ctmpl|shell|dotenv` 和 `--hot-reload true|false`。来源和领域值不区分大小写；未知领域或热加载元数据不匹配显式过滤条件。过滤条件选择配置分组，并保留其关联使用关系。`--query` 使用 Unicode 小写匹配。`--consistency` 增加读取未定义、缺少格式和默认值冲突诊断；`conflicting_default_sources` 给出每个默认值对应的路径、行号和 excerpt。关联绑定未解析或值流不受支持时，相应分组标记 `analysis_complete: false`，不推断缺失，但仍报告已加载默认值证明的冲突；数据过期或降级时不输出确定的一致性结论；无关分组仍可独立分析。使用关系、字节、符号、展开深度或 SQLite 查询超出预算时返回明确的分析不完整错误，需要收窄查询范围。Java 嵌套类型及带显式注释的常量字段参与绑定解析。配置行号范围不包含末尾换行符。 绑定结果和配置证据按引用及剩余深度缓存，避免接口使用关系重复扫描全部实现。Java getter 标记计入每文件 10,000 条事实预算，getter 收集也受限。局部变量守卫不匹配无关的同名方法或字段。Shell 定义要求主 shell 中无条件的赋值和导出；条件分支、延迟执行函数及子 shell 内的导出不能证明主 shell 配置已定义。
+
+配置注解只接受相应格式的注释语法，执行语句和字符串不能提供元数据。Java 无接收者的零参数 getter 调用仅绑定可见的已声明方法，字符串按有界 Java 转义规则解码。Shell 条件赋值后仍保留可能的继承环境变量读取。绑定或流分析不完整时不推断缺失，但保留已加载默认值能够证明的冲突及其来源位置。
+
+只指定元数据过滤条件时，带注解的符号 getter 使用关系会保留至绑定解析完成。Java 解析词法可见的嵌套类型，并在节点与闭包预算内遍历同文件父类型链。Shell 函数导出（`export -f`，含组合选项）不改变变量导出状态；ANSI-C 引号的默认值保持未知，不按普通引号误解码。Properties 支持 CR、LF、CRLF 自然行、续行和准确的来源范围。
+
+Properties 注释不跨自然行续接。模板双引号参数按有界 Go 字节及 Unicode 转义规则解码，注释分隔符不受注释内引号影响。Shell 赋值保留已证明的先前导出属性。Java 通过 AST 保留既有 config/settings/feature_flags/flags/toggles/options 字面量 key 读取形式，支持静态导入的数字转换，并明确报告守卫扫描超限。直接标记过期或降级的作用域不输出确定的一致性结论，包括已加载默认值的冲突。
+
+Java 父类型关系以内部配置层次事实持久化，跨文件解析仅使用当前提供的快照及注册授权范围。层次证据上限为 4 MiB，每个类型闭包最多 64 个类型，展开符号最多 1,000 个。条件重赋值保留可能的守卫，并标记值流不完整；直接布尔读取返回布尔类型证据。相邻 Java 块注释/Javadoc 注解限制在 8 KiB/32 行内扫描。Properties 空白仅指空格、制表符和换页符。Shell 波浪号展开的默认值保持未知，先前赋值扫描超限明确报错。SDK 管理的标志不要求仓库内定义。
+
+注释查找遇到空行即停止，兼容 CR、LF 和 CRLF 边界。Java 内联 switch 选择表达式及 Shell 的 if/elif、循环、case 和短路条件表达式会生成关联到读取的守卫关系。Shell 条件覆盖保留此前确定存在的定义，但默认值未知并标记值流不完整；追加赋值保留定义，不把追加后缀当成完整默认值。Shell 条件扫描有界，预算耗尽时显式报错。
+
+Java 字符串键中的数字加法保持未解析，不将数字错误拼接。被跟踪局部变量的复制会标记守卫值流不完整。Java 包装类型的透明转换携带同包遮蔽条件，在授权快照中核对；存在遮蔽时保留读取、移除 getter 绑定并标记值流不完整。静态或私有 getter 只绑定声明类型，跨文件继承解析也遵守此规则。
+
+显式 super 调用通过直接父类解析。构造表达式保留精确运行时类型，包括外层类型转换，派生类重写不会污染对应 getter 的解析。Java SDK 调用共享邻接注释的 domain/hot-reload 元数据解析。支持的数字字面量在比较默认值前规范化分隔符、类型后缀和进制；不支持的算术仍保持未解析。INI 保留感叹号开头的键。模板读取函数仅在管道命令位置识别，包括嵌套命令、控制和声明管道。
+
+Getter 继承在中间声明处停止，并保留精确派发；私有 getter 不被继承。Java 同包类型声明优先于通配符导入歧义。绑定、继承和一致性证据限定在注册授权范围内，请求的路径/语言筛选只用于返回的使用位置。支持带正负号的数字默认值，包括 Java 最小整数值。INI 和模板分隔符前的反斜杠按字面量处理，仅 Properties 转义分隔符。
+
+按路径/语言选中的符号调用独立于解析后的键名和元数据筛选进行加载，配置组筛选在绑定解析后执行。Java getter 提供者保留声明包与可见性。包级可见方法的传播在包边界停止，包括中间父类型；public/protected 方法保持跨包重写行为，接口方法保留隐式 public 可见性。
+
+静态 getter 调用解析可见的本地类型和显式导入类型接收者，最终查询匹配包含绑定与引用名称。Java key 必须是字符串表达式，数字和布尔字面量仍可作为默认值，未知返回类型的通用读取不再宣称返回字符串。简单 System/Boolean 调用会核对整个授权快照内的同包类型声明，即使输出路径被收窄也会检查；全限定 java.lang 调用和显式导入仍然有效。内部平台遮蔽声明不作为配置分组展示。
+
+文本查询可从匹配的 getter 路径或 excerpt 开始解析，再应用分组元数据过滤。getter 单一返回值分析忽略注释；通配导入本身不能证明接收者归属；缺少索引类型证据时保持未解析，显式导入和可见本地类型优先。Java key 常量声明按实际读取归入属性或环境变量命名空间；同一常量用于两者时分别保留声明证据。Properties 默认值保留末尾空白。Properties、INI、模板和 Shell 每文件最多抽取 10,000 条事实，模板读取动作也计入预算。
+
+查询词用于选择分组，一致性分析前加载所选分组及符号解析所得 key 在已选范围内的全部证据。`--domain`、`--source` 缺值时，即使后面紧跟另一选项也报错。Java `this.KEY` 关联声明字段。裸 key 和空白分隔赋值仅适用于 Properties；INI/模板定义必须包含 `=` 或 `:`。模板 `keyOrDefault` 的带引号回退值及类型计入默认值冲突检查。
+
+Unicode 领域注释与过滤值使用相同的小写规范化。Properties 在 EOF 处理尚未结束的续行。隐式 lambda 参数阻止向外层字段回退，无关嵌套类型不遮蔽 Java 平台 API。Shell 默认值按解析后的引号和转义处理；词法扫描超限明确报告分析不完整。行加载在保留每条记录之前检查累计字节，包括字符串及元数据，避免先分配整个结果再检查 16 MiB 事实预算。操作 payload 的 domain/source 字段接受字符串或 null（视为未提供），拒绝其他值类型。
+
+增强 for 变量在循环体内绑定 getter 接收者，未知推断类型不回退到外层字段。Java key 拼接可跟随同文件内受界的 final 字符串引用，并受深度、节点数量和值大小限制；可变或循环表达式保持未解析。模板控制动作和嵌套管道可抽取 key/env 调用，保留独立调用位置并执行每动作 token 预算。Properties 保留分号前缀及转义空白 key。Unicode 匹配在选择和排序阶段采用相同的小写规范化。
 
 `repo framework` 读取索引阶段写入的独立 Angular/Vue component-template graph。重复传入 `--framework`、`--kind` 或 `--path` 可以取交集过滤；省略时在所选 scope 内受界枚举。Graph 包含 component、template、binding、slot、template variable 和 control flow 等类型化 node，以及 ownership、render、binding、event、read/write、directive 和 slot edge。Vue SFC 的 script symbol/import 仍可通过普通 `repo query` 查询。该命令不在查询期扫描源码，也不启动索引；`wait-until-fresh` 要求 durable indexed snapshot 已包含当前 framework fact。
 
