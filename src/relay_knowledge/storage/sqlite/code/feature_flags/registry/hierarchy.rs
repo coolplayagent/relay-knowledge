@@ -2,8 +2,14 @@
 use super::*;
 pub(super) struct Hierarchy {
     declarations: BTreeSet<String>,
+    packages: BTreeMap<String, String>,
     parents: BTreeMap<String, BTreeSet<String>>,
     children: BTreeMap<String, BTreeSet<String>>,
+}
+struct Access {
+    package: Option<String>,
+    visibility: Option<String>,
+    overridable: Option<bool>,
 }
 impl Hierarchy {
     pub(super) fn load(
@@ -27,8 +33,12 @@ impl Hierarchy {
         let mut parents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut children: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut declarations = BTreeSet::new();
+        let mut packages = BTreeMap::new();
         for row in rows {
             if row.edge_kind == "config_type_declaration" {
+                if let Some(package) = row.metadata.java_package {
+                    packages.insert(row.source_key.clone(), package);
+                }
                 declarations.insert(row.source_key);
                 continue;
             }
@@ -47,6 +57,7 @@ impl Hierarchy {
             parents,
             children,
             declarations,
+            packages,
         })
     }
     pub(super) fn filter_platform_reads(&self, rows: &mut Vec<FeatureFlagRow>) {
@@ -126,6 +137,21 @@ impl Hierarchy {
             .iter()
             .filter_map(|row| row.metadata.declared_getter.clone())
             .collect::<BTreeSet<_>>();
+        let access = rows
+            .iter()
+            .filter_map(|row| {
+                row.metadata.declared_getter.clone().map(|key| {
+                    (
+                        key,
+                        Access {
+                            package: row.metadata.java_package.clone(),
+                            visibility: row.metadata.getter_visibility.clone(),
+                            overridable: row.metadata.getter_overridable,
+                        },
+                    )
+                })
+            })
+            .collect::<BTreeMap<_, _>>();
         for row in rows {
             if row.language_id != "java"
                 || matches!(
@@ -148,7 +174,7 @@ impl Hierarchy {
                 if row.metadata.getter_overridable == Some(false) {
                     bindings.insert(symbol.clone());
                 } else {
-                    bindings.extend(self.related(symbol, false)?);
+                    bindings.extend(self.overrides(symbol, &access)?);
                 }
                 if bindings.len() > 1000 {
                     return Err(incomplete("symbol binding budget exceeded"));
@@ -159,7 +185,7 @@ impl Hierarchy {
                     !original.is_empty() && row.metadata.getter_inheritable != Some(false)
                 })
             {
-                row.metadata.inherited_getters = self.inherited(own, &declared)?;
+                row.metadata.inherited_getters = self.inherited(own, &declared, access.get(own))?;
                 bindings.extend(row.metadata.inherited_getters.iter().cloned());
             }
             row.metadata.bindings = bindings.into_iter().collect();
@@ -174,6 +200,7 @@ impl Hierarchy {
         &self,
         symbol: &str,
         declared: &BTreeSet<String>,
+        access: Option<&Access>,
     ) -> Result<Vec<String>, StorageError> {
         let Some((owner, method)) = symbol.rsplit_once('.') else {
             return Ok(Vec::new());
@@ -190,6 +217,16 @@ impl Hierarchy {
                     return Err(incomplete("inherited getter closure budget exceeded"));
                 }
                 let key = format!("{child}.{method}");
+                if access.is_some_and(|access| {
+                    access.visibility.as_deref() == Some("package")
+                        && access
+                            .package
+                            .as_ref()
+                            .zip(self.packages.get(child))
+                            .is_some_and(|(own, child)| own != child)
+                }) {
+                    continue;
+                }
                 if declared.contains(&key) {
                     continue;
                 }
@@ -198,5 +235,51 @@ impl Hierarchy {
             }
         }
         Ok(inherited)
+    }
+    fn overrides(
+        &self,
+        symbol: &str,
+        access: &BTreeMap<String, Access>,
+    ) -> Result<BTreeSet<String>, StorageError> {
+        let Some((owner, method)) = symbol.rsplit_once('.') else {
+            return Ok(BTreeSet::from([symbol.into()]));
+        };
+        if !method.starts_with("get") && !method.starts_with("is") {
+            return Ok(BTreeSet::from([symbol.into()]));
+        }
+        let own = access.get(symbol);
+        let own_package = own.and_then(|a| a.package.as_ref());
+        let mut pending = vec![(owner.to_owned(), false)];
+        let mut seen = BTreeSet::from([(owner.to_owned(), false)]);
+        let mut result = BTreeSet::from([symbol.to_owned()]);
+        while let Some((owner, crossed)) = pending.pop() {
+            for parent in self.parents.get(&owner).into_iter().flatten() {
+                let key = format!("{parent}.{method}");
+                let target = access.get(&key);
+                let package = self
+                    .packages
+                    .get(parent)
+                    .or_else(|| target.and_then(|a| a.package.as_ref()));
+                let crossed = crossed || own_package.zip(package).is_some_and(|(a, b)| a != b);
+                if own.is_some_and(|a| a.visibility.as_deref() == Some("package")) && crossed {
+                    continue;
+                }
+                if target.is_some_and(|a| {
+                    a.overridable == Some(false)
+                        || a.visibility.as_deref() == Some("private")
+                        || (a.visibility.as_deref() == Some("package") && crossed)
+                }) {
+                    continue;
+                }
+                if seen.insert((parent.clone(), crossed)) {
+                    if seen.len() > 64 {
+                        return Err(incomplete("getter access closure budget exceeded"));
+                    }
+                    result.insert(key);
+                    pending.push((parent.clone(), crossed));
+                }
+            }
+        }
+        Ok(result)
     }
 }

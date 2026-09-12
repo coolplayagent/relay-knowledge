@@ -140,14 +140,16 @@ impl Hierarchy {
             facts.push(row);
         }
         {
-            facts.push(super::super::record(
+            let mut declaration = super::super::record(
                 input,
                 "config_symbol",
                 &owner,
                 "config_type_declaration",
                 node.start_byte(),
                 end,
-            )?);
+            )?;
+            declaration.metadata.java_package = Some(names::package_name(node, input.content));
+            facts.push(declaration);
         }
         Ok(facts)
     }
@@ -195,6 +197,31 @@ pub(super) fn overridable(method: Node<'_>, content: &str) -> bool {
                 .split_whitespace()
                 .any(|word| matches!(word, "static" | "private"))
     })
+}
+pub(super) fn visibility(method: Node<'_>) -> &'static str {
+    let mut cursor = method.walk();
+    if let Some(modifiers) = method
+        .named_children(&mut cursor)
+        .find(|n| n.kind() == "modifiers")
+    {
+        let mut cursor = modifiers.walk();
+        for modifier in modifiers.children(&mut cursor) {
+            match modifier.kind() {
+                "public" => return "public",
+                "protected" => return "protected",
+                "private" => return "private",
+                _ => {}
+            }
+        }
+    }
+    if method
+        .parent()
+        .is_some_and(|p| p.kind() == "interface_body")
+    {
+        "public"
+    } else {
+        "package"
+    }
 }
 pub(super) fn inheritable(method: Node<'_>, content: &str) -> bool {
     let mut cursor = method.walk();

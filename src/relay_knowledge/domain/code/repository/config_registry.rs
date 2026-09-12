@@ -25,6 +25,12 @@ pub struct CodeConfigMetadata {
     /// Private methods cannot be inherited, unlike static methods.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub getter_inheritable: Option<bool>,
+    /// Declaring Java package for internal types and getter providers, including the empty package.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub java_package: Option<String>,
+    /// Java getter visibility: public, protected, private, or package.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub getter_visibility: Option<String>,
     /// Same-package candidate to check before treating wildcard imports as ambiguous.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub same_package_reference: Option<String>,

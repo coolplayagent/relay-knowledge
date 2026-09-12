@@ -1,6 +1,78 @@
 use super::*;
 
 #[tokio::test]
+async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters() {
+    let repo = FixtureRepo::create("package-private-config-dispatch");
+    for (path, source) in [
+        (
+            "src/Base.java",
+            "package a; public class Base { boolean isX() {\n// @config domain=payments hot-reload=true\nreturn java.lang.Boolean.getBoolean(\"base_flag\"); } }",
+        ),
+        (
+            "src/Child.java",
+            "package b; public class Child extends a.Base { public boolean isX() { return java.lang.Boolean.getBoolean(\"child_flag\"); } }",
+        ),
+        (
+            "src/Reader.java",
+            "package a; class Reader { void run(Base config) { if(config.isX()) {} } }",
+        ),
+    ] {
+        repo.write(path, source);
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "fixture"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-package-config").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-package-config"),
+        )
+        .await
+        .unwrap();
+    for query in [None, Some("base_flag".to_owned())] {
+        let request = CodeFeatureFlagRequest::new(
+            query,
+            filtered_selector("fixture", "HEAD", "src/Reader.java"),
+            10,
+            FreshnessPolicy::WaitUntilFresh,
+        )
+        .unwrap()
+        .with_filters(relay_knowledge::domain::CodeConfigFilter {
+            domain: Some("payments".into()),
+            source: Some("java".into()),
+            hot_reload: Some(true),
+            consistency: false,
+        })
+        .unwrap();
+        let response = service
+            .query_code_repository_feature_flags(request, context("query-package-config"))
+            .await
+            .unwrap();
+        assert_eq!(response.flags.len(), 1, "{response:?}");
+        assert_eq!(response.flags[0].source_key, "base_flag");
+        assert!(
+            response.flags[0]
+                .usages
+                .iter()
+                .all(|u| u.path == "src/Reader.java")
+        );
+        assert!(
+            response.flags[0]
+                .usages
+                .iter()
+                .any(|u| u.edge_kind == "guards_code")
+        );
+    }
+}
+
+#[tokio::test]
 async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_active_index() {
     let repo = FixtureRepo::create("code-stale-feature-flag-scope");
     repo.write(

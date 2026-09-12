@@ -1,6 +1,38 @@
 //! Configuration syntax and exact Java receiver review regressions.
 use super::*;
 #[test]
+fn getter_visibility_retains_package_access_and_implicit_interface_public_access() {
+    for (modifier, expected) in [
+        ("", "package"),
+        ("public", "public"),
+        ("protected", "protected"),
+        ("private", "private"),
+    ] {
+        let rows = facts(
+            "java",
+            &format!(
+                "package a; class Config {{ {modifier} String getX() {{ return System.getProperty(\"flag\"); }} }}"
+            ),
+        );
+        let read = rows.iter().find(|r| r.source_key == "flag").unwrap();
+        assert_eq!(read.metadata.java_package.as_deref(), Some("a"));
+        assert_eq!(read.metadata.getter_visibility.as_deref(), Some(expected));
+    }
+    let rows = facts(
+        "java",
+        "interface Config { default String getX() { return System.getProperty(\"flag\"); } }",
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.source_key == "flag")
+            .unwrap()
+            .metadata
+            .getter_visibility
+            .as_deref(),
+        Some("public")
+    );
+}
+#[test]
 fn wildcard_getter_receivers_retain_same_package_candidates_and_types() {
     let rows = facts(
         "java",

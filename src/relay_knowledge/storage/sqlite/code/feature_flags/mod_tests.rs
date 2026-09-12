@@ -29,21 +29,22 @@ fn feature_flag_sql_applies_scope_and_bounded_candidate_budget() {
 
     assert!(query.sql.contains("WITH filtered_flags AS"));
     assert!(query.sql.contains("LIMIT ?"));
-    assert_eq!(query.sql.matches("flag.source_scope = ?").count(), 2);
+    // Key seeds, symbolic seeds, and returned usages each enforce authorization.
+    assert_eq!(query.sql.matches("flag.source_scope = ?").count(), 3);
     assert_eq!(
         query
             .sql
             .matches("flag.path = ? OR flag.path LIKE ? ESCAPE '\\'")
             .count(),
-        4
+        6
     );
-    assert_eq!(query.sql.matches("flag.language_id IN").count(), 4);
+    assert_eq!(query.sql.matches("flag.language_id IN").count(), 6);
     assert!(
         query
             .sql
             .contains("config_casefold(flag.source_key) LIKE ?")
     );
-    assert_eq!(query.params.len(), 22);
+    assert_eq!(query.params.len(), 29);
     assert!(
         query
             .params

@@ -143,6 +143,22 @@ pub(super) fn same_package_reference(
             .map_or_else(|| relative.to_owned(), |p| format!("{p}.{relative}")),
     )
 }
+pub(super) fn package_name(node: Node<'_>, content: &str) -> String {
+    let root = root(node);
+    let mut cursor = root.walk();
+    root.named_children(&mut cursor)
+        .take(4096)
+        .find(|n| n.kind() == "package_declaration")
+        .map(|n| {
+            text(n, content)
+                .trim_start_matches("package")
+                .trim()
+                .trim_end_matches(';')
+                .trim()
+                .to_owned()
+        })
+        .unwrap_or_default()
+}
 fn string_expression(node: Node<'_>, content: &str, depth: usize) -> bool {
     if depth >= 16 {
         return false;

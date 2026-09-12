@@ -146,6 +146,16 @@ fn feature_flag_sql_query(
             filter_params.push(value);
         }
     }
+    if !request.repository.path_filters.is_empty()
+        || !request.repository.language_filters.is_empty()
+    {
+        let symbolic_scope = feature_flag_sql_filter(source_scope, status, request, &[]);
+        where_clause = format!(
+            "(({where_clause}) OR (({}) AND flag.source_kind='config_symbol' AND json_extract(flag.metadata_json,'$.reference') IS NOT NULL))",
+            symbolic_scope.where_clause
+        );
+        filter_params.extend(symbolic_scope.params);
+    }
     where_clause
         .push_str(" AND flag.edge_kind NOT IN ('declares_config_getter','config_type_hierarchy','config_type_declaration')");
     if terms.is_empty()

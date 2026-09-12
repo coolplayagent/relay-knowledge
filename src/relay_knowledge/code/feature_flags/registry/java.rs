@@ -54,6 +54,8 @@ pub(super) fn extract(
                 if let Some((method, shadows)) = flow::returning_method(node, input.content) {
                     row.metadata.bindings = hierarchy.bindings(method, input.content)?;
                     row.metadata.declared_getter = row.metadata.bindings.first().cloned();
+                    row.metadata.java_package = Some(names::package_name(method, input.content));
+                    row.metadata.getter_visibility = Some(types::visibility(method).into());
                     row.metadata.getter_inheritable =
                         Some(types::inheritable(method, input.content));
                     row.metadata.conversion_platform_owners = shadows;
@@ -191,6 +193,8 @@ pub(super) fn extract(
                     )?;
                     marker.metadata.reference = Some(own.clone());
                     marker.metadata.declared_getter = Some(own.clone());
+                    marker.metadata.java_package = Some(names::package_name(method, input.content));
+                    marker.metadata.getter_visibility = Some(types::visibility(method).into());
                     marker.metadata.getter_inheritable =
                         Some(types::inheritable(method, input.content));
                     marker.metadata.getter_overridable =

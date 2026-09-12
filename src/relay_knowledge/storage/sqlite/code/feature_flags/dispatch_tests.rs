@@ -1,5 +1,126 @@
 use super::*;
 #[test]
+fn resolved_key_and_metadata_filters_do_not_discard_path_selected_callers() {
+    let db = fixture();
+    add(
+        &db,
+        "feature_x",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            bindings: vec!["Config.getX".into()],
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "feature_x",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            domain: Some("payments".into()),
+            hot_reload: Some(true),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "call",
+        "config_symbol",
+        "guards_code",
+        CodeConfigMetadata {
+            reference: Some("Config.getX".into()),
+            ..Default::default()
+        },
+    );
+    db.execute("UPDATE code_repository_feature_flags SET path='src/Reader.java' WHERE source_kind='config_symbol'",[]).unwrap();
+    for term in [None, Some("feature_x")] {
+        for filters in [
+            CodeConfigFilter::default(),
+            CodeConfigFilter {
+                domain: Some("payments".into()),
+                source: Some("properties".into()),
+                hot_reload: Some(true),
+                ..Default::default()
+            },
+        ] {
+            let mut query = request(term, filters);
+            query.repository.path_filters = vec!["src/Reader.java".into()];
+            let groups = search(&db, &status(), &query).unwrap();
+            assert_eq!(groups.len(), 1);
+            assert_eq!(groups[0].source_key, "feature_x");
+            assert!(groups[0].usages.iter().all(|u| u.path == "src/Reader.java"));
+            query.query = Some("different_key".into());
+            assert!(search(&db, &status(), &query).unwrap().is_empty());
+        }
+    }
+}
+#[test]
+fn package_private_getters_do_not_link_cross_package_overrides() {
+    for visibility in ["package", "protected", "public"] {
+        let db = fixture();
+        for (owner, package) in [("a.Base", "a"), ("b.Child", "b")] {
+            add(
+                &db,
+                owner,
+                "config_symbol",
+                "config_type_declaration",
+                CodeConfigMetadata {
+                    java_package: Some(package.into()),
+                    ..Default::default()
+                },
+            );
+        }
+        add(
+            &db,
+            "b.Child",
+            "config_symbol",
+            "config_type_hierarchy",
+            CodeConfigMetadata {
+                bindings: vec!["a.Base".into()],
+                ..Default::default()
+            },
+        );
+        for (key, owner, package, access) in [
+            ("base", "a.Base", "a", visibility),
+            ("child", "b.Child", "b", "public"),
+        ] {
+            add(
+                &db,
+                key,
+                "config_key",
+                "reads_config",
+                CodeConfigMetadata {
+                    bindings: vec![format!("{owner}.getX")],
+                    declared_getter: Some(format!("{owner}.getX")),
+                    java_package: Some(package.into()),
+                    getter_visibility: Some(access.into()),
+                    ..Default::default()
+                },
+            );
+        }
+        add(
+            &db,
+            "call",
+            "config_symbol",
+            "guards_code",
+            CodeConfigMetadata {
+                reference: Some("a.Base.getX".into()),
+                ..Default::default()
+            },
+        );
+        let mut query = request(None, CodeConfigFilter::default());
+        query.limit = 10;
+        let groups = search(&db, &status(), &query).unwrap();
+        let base = groups.iter().find(|g| g.source_key == "base").unwrap();
+        assert_eq!(
+            base.usages.iter().any(|u| u.edge_kind == "guards_code"),
+            visibility == "package"
+        );
+    }
+}
+#[test]
 fn inherited_getter_bindings_stop_when_a_child_declares_an_override() {
     let db = fixture();
     add(
