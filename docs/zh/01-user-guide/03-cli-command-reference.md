@@ -164,6 +164,8 @@ Kind 取值按命令家族隔离：
   `ci`、`runtime`、`wiki`、`monitoring`。
 
 不要跨命令家族复用 kind 取值。影响分析使用 `repo impact`，Angular/Vue template 语义使用
+Java 继承字符串常量通过已索引父类型解析；子类声明同名字段（包括非常量字段）会阻断继承别名，并保留 private/package 访问边界。类型证据仅加载相关符号所属类型、平台遮蔽候选及受界的关联继承关系（1,000 个类型、64 轮、4 MiB），无关 Java 声明不会耗尽简单读取查询的预算。dotenv 布尔定义归入环境变量命名空间，使已索引定义可满足环境变量读取的一致性检查。Consul 抽取及模板存在性检查要求 `.ctmpl` 扩展名；Helm 清单与通用 Go 模板不会产生 Consul 配置分组。
+
 `repo framework`，feature flag 使用 `repo feature-flags`；它们不是 `repo query --kind` 的取值。
 
 `--path` 是 CLI 中 path filter 的参数名。`repo register --path` 保存索引范围，`repo query --path`、`repo framework --path` 和 `repo feature-flags --path` 只在该已索引范围内收窄读取。`repo index` 不接受 `--path`，它使用注册范围和选定的 `--ref`。非 Git 源码目录的常规移动文件系统快照使用 `HEAD`，状态里会记录解析后的 `filesystem:<hash>` commit。`worktree` 是 Git worktree overlay selector，不是非 Git 目录的默认 ref。

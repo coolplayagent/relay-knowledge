@@ -11,7 +11,10 @@ pub(super) fn extract(
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     match input.language_id {
         "java" => java::extract(input),
-        "properties" | "ini" | "gotemplate" | "bash" => files::extract(input),
+        "gotemplate" if input.path.to_ascii_lowercase().ends_with(".ctmpl") => {
+            files::extract(input)
+        }
+        "properties" | "ini" | "bash" => files::extract(input),
         _ => Ok(Vec::new()),
     }
 }

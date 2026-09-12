@@ -2,6 +2,7 @@
 use super::*;
 pub(super) struct Hierarchy {
     declarations: BTreeSet<String>,
+    fields: BTreeMap<String, String>,
     packages: BTreeMap<String, String>,
     parents: BTreeMap<String, BTreeSet<String>>,
     children: BTreeMap<String, BTreeSet<String>>,
@@ -17,25 +18,19 @@ impl Hierarchy {
         scope: &str,
         status: &CodeRepositoryStatus,
         request: &CodeFeatureFlagRequest,
+        seeds: &[FeatureFlagRow],
     ) -> Result<Self, StorageError> {
-        let filter = feature_flag_sql_filter(scope, status, request, &[]);
-        let sql = format!(
-            "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND flag.edge_kind IN ('config_type_hierarchy','config_type_declaration') LIMIT {}",
-            filter.where_clause,
-            MAX_ROWS + 1
-        );
-        let params = filter.params;
-        let rows = load(connection, &sql, &params)?;
-        check_size(&rows)?;
-        if rows.iter().map(row_size).sum::<usize>() > 4 * 1024 * 1024 {
-            return Err(incomplete("type hierarchy 4 MiB evidence budget exceeded"));
-        }
+        let rows = Self::relevant_rows(connection, scope, status, request, seeds)?;
         let mut parents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut children: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut declarations = BTreeSet::new();
         let mut packages = BTreeMap::new();
+        let mut fields = BTreeMap::new();
         for row in rows {
             if row.edge_kind == "config_type_declaration" {
+                for (name, visibility) in row.metadata.java_fields {
+                    fields.insert(format!("{}.{name}", row.source_key), visibility);
+                }
                 if let Some(package) = row.metadata.java_package {
                     packages.insert(row.source_key.clone(), package);
                 }
@@ -55,10 +50,86 @@ impl Hierarchy {
         }
         Ok(Self {
             parents,
+            fields,
             children,
             declarations,
             packages,
         })
+    }
+    fn relevant_rows(
+        connection: &Connection,
+        scope: &str,
+        status: &CodeRepositoryStatus,
+        request: &CodeFeatureFlagRequest,
+        seeds: &[FeatureFlagRow],
+    ) -> Result<Vec<FeatureFlagRow>, StorageError> {
+        let mut owners = BTreeSet::new();
+        let mut closure = BTreeSet::new();
+        for row in seeds {
+            owners.extend(row.metadata.implicit_platform_owner.iter().cloned());
+            owners.extend(row.metadata.conversion_platform_owners.iter().cloned());
+            for symbol in row
+                .metadata
+                .bindings
+                .iter()
+                .chain(row.metadata.reference.iter())
+                .chain(row.metadata.same_package_reference.iter())
+            {
+                if let Some((owner, _)) = symbol.rsplit_once('.') {
+                    closure.insert(owner.to_owned());
+                }
+            }
+        }
+        owners.extend(closure.iter().cloned());
+        let mut queried = BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        let mut result = Vec::new();
+        for _ in 0..64 {
+            if owners.len() > 1000 {
+                return Err(incomplete("type owner budget exceeded"));
+            }
+            let pending = owners.difference(&queried).cloned().collect::<Vec<_>>();
+            if pending.is_empty() {
+                return Ok(result);
+            }
+            for chunk in pending.chunks(200) {
+                let filter = feature_flag_sql_filter(scope, status, request, &[]);
+                let list = vec!["?"; chunk.len()].join(",");
+                let mut params = filter.params;
+                params.extend(chunk.iter().cloned().map(Value::Text));
+                let related = chunk
+                    .iter()
+                    .filter(|owner| closure.contains(*owner))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let related_list = vec!["?"; related.len()].join(",");
+                params.extend(related.iter().cloned().map(Value::Text));
+                params.extend(related.iter().cloned().map(Value::Text));
+                let sql = format!(
+                    "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND ((flag.edge_kind='config_type_declaration' AND flag.source_key IN ({list})) OR (flag.edge_kind='config_type_hierarchy' AND (flag.source_key IN ({related_list}) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding WHERE binding.value IN ({related_list}))))) LIMIT {}",
+                    filter.where_clause,
+                    MAX_ROWS + 1
+                );
+                for row in load(connection, &sql, &params)? {
+                    if row.edge_kind == "config_type_hierarchy" {
+                        closure.insert(row.source_key.clone());
+                        closure.extend(row.metadata.bindings.iter().cloned());
+                        owners.extend(closure.iter().cloned());
+                    }
+                    if seen.insert(row.usage_id.clone()) {
+                        result.push(row);
+                    }
+                }
+                check_size(&result)?;
+                if result.iter().map(row_size).sum::<usize>() > 4 * 1024 * 1024 {
+                    return Err(incomplete("type hierarchy 4 MiB evidence budget exceeded"));
+                }
+            }
+            queried.extend(pending);
+        }
+        Err(incomplete(
+            "type closure budget exceeded (64 loading rounds)",
+        ))
     }
     pub(super) fn filter_platform_reads(&self, rows: &mut Vec<FeatureFlagRow>) {
         rows.retain(|row| {
@@ -91,9 +162,6 @@ impl Hierarchy {
         let Some((owner, method)) = symbol.rsplit_once('.') else {
             return Ok(BTreeSet::from([symbol.into()]));
         };
-        if !method.starts_with("get") && !method.starts_with("is") {
-            return Ok(BTreeSet::from([symbol.into()]));
-        }
         let mut seen = BTreeSet::from([owner.to_owned()]);
         let mut pending = vec![owner.to_owned()];
         while let Some(owner) = pending.pop() {
@@ -133,6 +201,16 @@ impl Hierarchy {
             return Ok(());
         }
         let mut retained_bytes = rows.iter().map(row_size).sum::<usize>();
+        let rows_declared_fields = rows
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.edge_kind.as_str(),
+                    "declares_config_key" | "declares_string_constant"
+                )
+            })
+            .filter_map(|r| r.metadata.bindings.first().cloned())
+            .collect::<BTreeSet<_>>();
         let declared = rows
             .iter()
             .filter_map(|row| row.metadata.declared_getter.clone())
@@ -152,16 +230,47 @@ impl Hierarchy {
                 })
             })
             .collect::<BTreeMap<_, _>>();
+        let declared_fields = self
+            .fields
+            .keys()
+            .cloned()
+            .chain(rows_declared_fields)
+            .collect();
         for row in rows {
-            if row.language_id != "java"
-                || matches!(
-                    row.edge_kind.as_str(),
-                    "declares_config_key" | "declares_string_constant"
-                )
-            {
+            if row.language_id != "java" {
                 continue;
             }
             let previous_bytes = row_size(row);
+            if matches!(
+                row.edge_kind.as_str(),
+                "declares_config_key" | "declares_string_constant"
+            ) {
+                if let Some(own) = row.metadata.bindings.first().cloned() {
+                    let visibility = self.fields.get(&own).cloned();
+                    let package = own
+                        .rsplit_once('.')
+                        .and_then(|(owner, _)| self.packages.get(owner))
+                        .cloned();
+                    let access = Access {
+                        package,
+                        visibility,
+                        overridable: Some(false),
+                    };
+                    row.metadata.bindings = vec![own.clone()];
+                    if access.visibility.as_deref() != Some("private") {
+                        row.metadata.bindings.extend(self.inherited(
+                            &own,
+                            &declared_fields,
+                            Some(&access),
+                        )?);
+                    }
+                }
+                retained_bytes = retained_bytes - previous_bytes + row_size(row);
+                if retained_bytes > MAX_BYTES {
+                    return Err(incomplete("16 MiB fact budget exceeded"));
+                }
+                continue;
+            }
             let mut bindings = BTreeSet::new();
             let original = row
                 .metadata

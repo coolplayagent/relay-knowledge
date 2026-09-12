@@ -130,7 +130,11 @@ fn dense_configuration_files_fail_at_the_shared_fact_budget() {
             repository_id: "repo",
             source_scope: "scope",
             file_id: "file",
-            path: "config",
+            path: if language == "gotemplate" {
+                "config.ctmpl"
+            } else {
+                "config"
+            },
             language_id: language,
             content: &source,
             config_facts: &[],
@@ -282,7 +286,11 @@ fn raw_facts(language: &str, source: &str) -> Vec<CodeFeatureFlagRecord> {
         repository_id: "repo",
         source_scope: "scope",
         file_id: "file",
-        path: "sample",
+        path: if language == "gotemplate" {
+            "sample.ctmpl"
+        } else {
+            "sample"
+        },
         language_id: language,
         content: source,
         config_facts: &[],

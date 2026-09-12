@@ -689,3 +689,26 @@ fn detects_common_source_key_shapes() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn consul_configuration_requires_ctmpl_extension() {
+    for path in [
+        "charts/templates/service.yaml",
+        "layout.gotmpl",
+        "layout.tmpl",
+        "layout.tpl",
+        "config.ctmpl",
+    ] {
+        let rows = extract_feature_flags(FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path,
+            language_id: "gotemplate",
+            content: "apiVersion: apps/v1\nreplicas: 3\n",
+            config_facts: &[],
+        })
+        .unwrap();
+        assert_eq!(rows.is_empty(), !path.ends_with(".ctmpl"), "{path}");
+    }
+}

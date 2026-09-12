@@ -16,6 +16,18 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
             "src/Reader.java",
             "package a; class Reader { void run(Base config) { if(config.isX()) {} } }",
         ),
+        (
+            "src/Keys.java",
+            r#"package a; class Keys { public static final String CONFIG_KEY="inherited_flag"; }"#,
+        ),
+        (
+            "src/DerivedKeys.java",
+            "package a; class DerivedKeys extends Keys {}",
+        ),
+        (
+            "src/KeyReader.java",
+            "package a; class KeyReader { String read() { return System.getProperty(DerivedKeys.CONFIG_KEY); } }",
+        ),
     ] {
         repo.write(path, source);
     }
@@ -36,6 +48,22 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
         )
         .await
         .unwrap();
+    let inherited = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                filtered_selector("fixture", "HEAD", "src/KeyReader.java"),
+                10,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap(),
+            context("query-inherited-constant"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(inherited.flags.len(), 1);
+    assert_eq!(inherited.flags[0].source_kind, "config_key");
+    assert_eq!(inherited.flags[0].source_key, "inherited_flag");
     for query in [None, Some("base_flag".to_owned())] {
         let request = CodeFeatureFlagRequest::new(
             query,

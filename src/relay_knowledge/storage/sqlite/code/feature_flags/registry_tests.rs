@@ -409,3 +409,6 @@ fn conflicts_include_located_sources_and_unknown_flow_cannot_claim_completeness(
 mod dispatch_tests;
 #[path = "review_tests.rs"]
 mod review_tests;
+
+#[path = "scope_evidence_tests.rs"]
+mod scope_evidence_tests;

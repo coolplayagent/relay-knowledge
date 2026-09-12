@@ -88,15 +88,14 @@ fn search_bounded(
         &mut seen,
         &mut evidence_groups,
     )?;
-    let mut type_hierarchy = None;
     if rows.iter().any(|row| {
         row.metadata.implicit_platform_owner.is_some()
             || !row.metadata.conversion_platform_owners.is_empty()
             || row.metadata.same_package_reference.is_some()
     }) {
-        let hierarchy = hierarchy::Hierarchy::load(connection, scope, status, &evidence_request)?;
+        let hierarchy =
+            hierarchy::Hierarchy::load(connection, scope, status, &evidence_request, &rows)?;
         hierarchy.filter_platform_reads(&mut rows);
-        type_hierarchy = Some(hierarchy);
     }
     let mut queried = BTreeSet::new();
     for round in 0..4 {
@@ -114,15 +113,8 @@ fn search_bounded(
         if keys.is_empty() {
             break;
         }
-        if type_hierarchy.is_none() {
-            type_hierarchy = Some(hierarchy::Hierarchy::load(
-                connection,
-                scope,
-                status,
-                &evidence_request,
-            )?);
-        }
-        let hierarchy = type_hierarchy.as_ref().unwrap();
+        let hierarchy =
+            hierarchy::Hierarchy::load(connection, scope, status, &evidence_request, &rows)?;
         let keys = hierarchy
             .expand(&keys)?
             .difference(&queried)
@@ -153,6 +145,8 @@ fn search_bounded(
             }
             check_size(&rows)?;
         }
+        let hierarchy =
+            hierarchy::Hierarchy::load(connection, scope, status, &evidence_request, &rows)?;
         hierarchy.filter_platform_reads(&mut rows);
         hierarchy.augment(&mut rows)?;
         check_size(&rows)?;
@@ -166,6 +160,8 @@ fn search_bounded(
             &mut seen,
             &mut evidence_groups,
         )?;
+        let hierarchy =
+            hierarchy::Hierarchy::load(connection, scope, status, &evidence_request, &rows)?;
         hierarchy.filter_platform_reads(&mut rows);
         hierarchy.augment(&mut rows)?;
         check_size(&rows)?;

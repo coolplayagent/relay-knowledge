@@ -28,6 +28,9 @@ pub struct CodeConfigMetadata {
     /// Declaring Java package for internal types and getter providers, including the empty package.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub java_package: Option<String>,
+    /// Declared Java field names and access levels, including nonconstant hiding fields.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub java_fields: std::collections::BTreeMap<String, String>,
     /// Java getter visibility: public, protected, private, or package.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub getter_visibility: Option<String>,

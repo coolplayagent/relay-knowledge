@@ -149,6 +149,32 @@ impl Hierarchy {
                 end,
             )?;
             declaration.metadata.java_package = Some(names::package_name(node, input.content));
+            if let Some(body) = node.child_by_field_name("body") {
+                let mut cursor = body.walk();
+                for field in body
+                    .named_children(&mut cursor)
+                    .filter(|n| matches!(n.kind(), "field_declaration" | "constant_declaration"))
+                {
+                    let mut cursor = field.walk();
+                    for variable in field
+                        .named_children(&mut cursor)
+                        .filter(|n| n.kind() == "variable_declarator")
+                    {
+                        if let Some(name) = variable.child_by_field_name("name") {
+                            if declaration.metadata.java_fields.len() >= 1000 {
+                                return Err(DomainError::invalid(
+                                    "configuration",
+                                    "type field budget exceeded",
+                                ));
+                            }
+                            declaration.metadata.java_fields.insert(
+                                names::text(name, input.content).into(),
+                                visibility(field).into(),
+                            );
+                        }
+                    }
+                }
+            }
             facts.push(declaration);
         }
         Ok(facts)
