@@ -1,6 +1,50 @@
 //! Configuration syntax and exact Java receiver review regressions.
 use super::*;
 #[test]
+fn wildcard_getter_receivers_retain_same_package_candidates_and_types() {
+    let rows = facts(
+        "java",
+        "package app; import java.util.*; class Reader { void run(Config config) { if(config.isEnabled()) {} } }",
+    );
+    assert!(rows.iter().any(|r| r.edge_kind == "guards_code"
+        && r.metadata.same_package_reference.as_deref() == Some("app.Config.isEnabled")));
+    assert!(
+        raw_facts("java", "package app; class Config {}")
+            .iter()
+            .any(|r| r.edge_kind == "config_type_declaration" && r.source_key == "app.Config")
+    );
+}
+#[test]
+fn ini_and_template_backslashes_do_not_escape_separators() {
+    for language in ["ini", "gotemplate"] {
+        let rows = facts(language, "feature\\=true");
+        assert_eq!(rows[0].source_key, "feature\\");
+        assert_eq!(rows[0].metadata.default_value.as_deref(), Some("true"));
+    }
+    assert_eq!(
+        facts("properties", "feature\\=true")[0].source_key,
+        "feature=true"
+    );
+}
+#[test]
+fn direct_java_reads_capture_signed_defaults() {
+    let rows = facts(
+        "java",
+        r#"class App { void run() { config.get("timeout", -1); config.get("limit", +10L); config.get("ratio", -1.25); }}"#,
+    );
+    for (key, value) in [("timeout", "-1"), ("limit", "10"), ("ratio", "-1.25")] {
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.source_key == key)
+                .unwrap()
+                .metadata
+                .default_value
+                .as_deref(),
+            Some(value)
+        );
+    }
+}
+#[test]
 fn java_super_and_constructed_receivers_preserve_exact_owner_evidence() {
     let rows = facts(
         "java",

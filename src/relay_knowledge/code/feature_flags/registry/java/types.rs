@@ -139,10 +139,7 @@ impl Hierarchy {
             row.metadata.bindings = parents.clone();
             facts.push(row);
         }
-        if matches!(
-            names::text(name, input.content),
-            "System" | "Boolean" | "Integer" | "Long" | "Double"
-        ) {
+        {
             facts.push(super::super::record(
                 input,
                 "config_symbol",
@@ -197,6 +194,15 @@ pub(super) fn overridable(method: Node<'_>, content: &str) -> bool {
             && names::text(child, content)
                 .split_whitespace()
                 .any(|word| matches!(word, "static" | "private"))
+    })
+}
+pub(super) fn inheritable(method: Node<'_>, content: &str) -> bool {
+    let mut cursor = method.walk();
+    !method.named_children(&mut cursor).any(|child| {
+        child.kind() == "modifiers"
+            && names::text(child, content)
+                .split_whitespace()
+                .any(|word| word == "private")
     })
 }
 pub(super) fn static_receiver(node: Node<'_>, content: &str) -> Option<String> {

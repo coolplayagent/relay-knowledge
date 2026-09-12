@@ -152,6 +152,8 @@ fn feature_flag_sql_query(
         && request.filters.domain.is_none()
         && request.filters.source.is_none()
         && request.filters.hot_reload.is_none()
+        && request.repository.path_filters.is_empty()
+        && request.repository.language_filters.is_empty()
     {
         where_clause.push_str(" AND (flag.source_kind != 'config_symbol' OR json_extract(flag.metadata_json,'$.target_kind') IS NOT NULL)");
     }

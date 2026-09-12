@@ -19,6 +19,15 @@ pub struct CodeConfigMetadata {
     /// Declaring getter identity, independent of inherited provider aliases.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub declared_getter: Option<String>,
+    /// Getter identities inherited without an intervening declaration.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub inherited_getters: Vec<String>,
+    /// Private methods cannot be inherited, unlike static methods.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub getter_inheritable: Option<bool>,
+    /// Same-package candidate to check before treating wildcard imports as ambiguous.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub same_package_reference: Option<String>,
     /// Construction and super calls resolve only against the declaring provider.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub exact_reference: bool,

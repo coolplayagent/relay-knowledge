@@ -198,6 +198,14 @@ async fn feature_flags_resolve_platform_shadows_and_static_getters_across_files(
     let repo = FixtureRepo::create("cross-file-platform-shadows");
     for (path, source) in [
         (
+            "src/VirtualLeaf.java",
+            "package app; class VirtualLeaf extends VirtualBase {}",
+        ),
+        (
+            "src/InheritedCaller.java",
+            "package app; import java.util.*; class InheritedCaller { void run(VirtualLeaf config) { if(config.isMode()) {} if(new VirtualLeaf().isMode()) {} } }",
+        ),
+        (
             "src/VirtualBase.java",
             "package app; class VirtualBase { boolean isMode() { return java.lang.Boolean.getBoolean(\"exact_base\"); } }",
         ),
@@ -277,6 +285,35 @@ async fn feature_flags_resolve_platform_shadows_and_static_getters_across_files(
         )
         .await
         .unwrap();
+    let inherited = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                filtered_selector("fixture", "HEAD", "src/InheritedCaller.java"),
+                10,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap(),
+            context("query-inherited-wildcard-path"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(inherited.flags.len(), 1, "{inherited:?}");
+    assert_eq!(inherited.flags[0].source_key, "exact_base");
+    assert!(
+        inherited.flags[0]
+            .usages
+            .iter()
+            .all(|u| u.path == "src/InheritedCaller.java")
+    );
+    assert_eq!(
+        inherited.flags[0]
+            .usages
+            .iter()
+            .filter(|u| u.edge_kind == "guards_code")
+            .count(),
+        2
+    );
     for path in ["src", "src/Reader.java"] {
         let response = service
             .query_code_repository_feature_flags(

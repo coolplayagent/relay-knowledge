@@ -280,6 +280,14 @@ fn empty_template_inventory_drives_scoped_missing_format_diagnostics() {
     restricted.repository.language_filters = vec!["java".into()];
     let groups = search(&db, &status(), &restricted).unwrap();
     assert!(
+        groups[0]
+            .consistency_diagnostics
+            .contains(&"missing_from_format: ctmpl".into())
+    );
+    let mut authorized = status();
+    authorized.language_filters = vec!["java".into()];
+    let groups = search(&db, &authorized, &restricted).unwrap();
+    assert!(
         !groups[0]
             .consistency_diagnostics
             .contains(&"missing_from_format: ctmpl".into())

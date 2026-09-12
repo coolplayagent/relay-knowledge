@@ -112,7 +112,7 @@ fn assignment(line: &str, properties: bool) -> Option<(&str, &str)> {
             escape = false;
             continue;
         }
-        if ch == '\\' {
+        if properties && ch == '\\' {
             escape = true;
             continue;
         }

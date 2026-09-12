@@ -14,12 +14,11 @@ impl Hierarchy {
     ) -> Result<Self, StorageError> {
         let filter = feature_flag_sql_filter(scope, status, request, &[]);
         let sql = format!(
-            "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND flag.edge_kind='config_type_hierarchy' OR (flag.source_scope=? AND flag.edge_kind='config_type_declaration') LIMIT {}",
+            "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND flag.edge_kind IN ('config_type_hierarchy','config_type_declaration') LIMIT {}",
             filter.where_clause,
             MAX_ROWS + 1
         );
-        let mut params = filter.params;
-        params.push(Value::Text(scope.to_owned()));
+        let params = filter.params;
         let rows = load(connection, &sql, &params)?;
         check_size(&rows)?;
         if rows.iter().map(row_size).sum::<usize>() > 4 * 1024 * 1024 {
@@ -58,6 +57,14 @@ impl Hierarchy {
                 .is_none_or(|owner| !self.declarations.contains(owner))
         });
         for row in rows {
+            if let Some(candidate) = &row.metadata.same_package_reference {
+                if candidate
+                    .rsplit_once('.')
+                    .is_some_and(|(owner, _)| self.declarations.contains(owner))
+                {
+                    row.metadata.reference = Some(candidate.clone());
+                }
+            }
             if row
                 .metadata
                 .conversion_platform_owners
@@ -115,9 +122,12 @@ impl Hierarchy {
             return Ok(());
         }
         let mut retained_bytes = rows.iter().map(row_size).sum::<usize>();
+        let declared = rows
+            .iter()
+            .filter_map(|row| row.metadata.declared_getter.clone())
+            .collect::<BTreeSet<_>>();
         for row in rows {
             if row.language_id != "java"
-                || row.metadata.getter_overridable == Some(false)
                 || matches!(
                     row.edge_kind.as_str(),
                     "declares_config_key" | "declares_string_constant"
@@ -127,11 +137,30 @@ impl Hierarchy {
             }
             let previous_bytes = row_size(row);
             let mut bindings = BTreeSet::new();
-            for symbol in &row.metadata.bindings {
-                bindings.extend(self.related(symbol, false)?);
+            let original = row
+                .metadata
+                .declared_getter
+                .clone()
+                .filter(|_| !row.metadata.bindings.is_empty())
+                .map_or_else(|| row.metadata.bindings.clone(), |own| vec![own]);
+            row.metadata.inherited_getters.clear();
+            for symbol in &original {
+                if row.metadata.getter_overridable == Some(false) {
+                    bindings.insert(symbol.clone());
+                } else {
+                    bindings.extend(self.related(symbol, false)?);
+                }
                 if bindings.len() > 1000 {
                     return Err(incomplete("symbol binding budget exceeded"));
                 }
+            }
+            if let Some(own) =
+                row.metadata.declared_getter.as_deref().filter(|_| {
+                    !original.is_empty() && row.metadata.getter_inheritable != Some(false)
+                })
+            {
+                row.metadata.inherited_getters = self.inherited(own, &declared)?;
+                bindings.extend(row.metadata.inherited_getters.iter().cloned());
             }
             row.metadata.bindings = bindings.into_iter().collect();
             retained_bytes = retained_bytes - previous_bytes + row_size(row);
@@ -140,5 +169,34 @@ impl Hierarchy {
             }
         }
         Ok(())
+    }
+    fn inherited(
+        &self,
+        symbol: &str,
+        declared: &BTreeSet<String>,
+    ) -> Result<Vec<String>, StorageError> {
+        let Some((owner, method)) = symbol.rsplit_once('.') else {
+            return Ok(Vec::new());
+        };
+        let mut pending = vec![owner.to_owned()];
+        let mut seen = BTreeSet::from([owner.to_owned()]);
+        let mut inherited = Vec::new();
+        while let Some(owner) = pending.pop() {
+            for child in self.children.get(&owner).into_iter().flatten() {
+                if !seen.insert(child.clone()) {
+                    continue;
+                }
+                if seen.len() > 64 {
+                    return Err(incomplete("inherited getter closure budget exceeded"));
+                }
+                let key = format!("{child}.{method}");
+                if declared.contains(&key) {
+                    continue;
+                }
+                inherited.push(key);
+                pending.push(child.clone());
+            }
+        }
+        Ok(inherited)
     }
 }

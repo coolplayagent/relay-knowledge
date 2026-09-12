@@ -37,6 +37,33 @@ pub(super) fn literal(kind: &str, source: &str) -> Option<String> {
     }
 }
 
+pub(super) fn signed_literal(kind: &str, source: &str, operator: &str) -> Option<String> {
+    if !matches!(operator, "+" | "-") || source.len() > 256 {
+        return None;
+    }
+    if operator == "-" && kind == "decimal_integer_literal" {
+        let normalized = source.replace('_', "");
+        if normalized == "2147483648" {
+            return Some(i32::MIN.to_string());
+        }
+        if normalized.eq_ignore_ascii_case("9223372036854775808L") {
+            return Some(i64::MIN.to_string());
+        }
+    }
+    let value = literal(kind, source)?;
+    if operator == "+" {
+        return Some(value);
+    }
+    if kind == "decimal_floating_point_literal" {
+        return Some((-value.parse::<f64>().ok()?).to_string());
+    }
+    if source.ends_with(['l', 'L']) {
+        Some(value.parse::<i64>().ok()?.wrapping_neg().to_string())
+    } else {
+        Some(value.parse::<i32>().ok()?.wrapping_neg().to_string())
+    }
+}
+
 #[cfg(test)]
 #[path = "numbers_tests.rs"]
 mod tests;

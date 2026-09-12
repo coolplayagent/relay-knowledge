@@ -47,9 +47,15 @@ pub(super) fn extract(
         }
         if node.kind() == "method_invocation" {
             if let Some(mut row) = read(input, node)? {
+                row.metadata.same_package_reference =
+                    row.metadata.reference.as_deref().and_then(|reference| {
+                        names::same_package_reference(node, reference, input.content)
+                    });
                 if let Some((method, shadows)) = flow::returning_method(node, input.content) {
                     row.metadata.bindings = hierarchy.bindings(method, input.content)?;
                     row.metadata.declared_getter = row.metadata.bindings.first().cloned();
+                    row.metadata.getter_inheritable =
+                        Some(types::inheritable(method, input.content));
                     row.metadata.conversion_platform_owners = shadows;
                     row.metadata.getter_overridable =
                         Some(types::overridable(method, input.content));
@@ -71,6 +77,10 @@ pub(super) fn extract(
                     )?;
                     usage.metadata.reference.clone_from(&row.metadata.reference);
                     usage.metadata.exact_reference = row.metadata.exact_reference;
+                    usage
+                        .metadata
+                        .same_package_reference
+                        .clone_from(&row.metadata.same_package_reference);
                     usage
                         .metadata
                         .implicit_platform_owner
@@ -181,6 +191,8 @@ pub(super) fn extract(
                     )?;
                     marker.metadata.reference = Some(own.clone());
                     marker.metadata.declared_getter = Some(own.clone());
+                    marker.metadata.getter_inheritable =
+                        Some(types::inheritable(method, input.content));
                     marker.metadata.getter_overridable =
                         Some(types::overridable(method, input.content));
                     marker.metadata.bindings = bindings;

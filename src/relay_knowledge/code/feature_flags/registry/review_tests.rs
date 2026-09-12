@@ -69,7 +69,7 @@ fn implicit_conversion_owners_carry_snapshot_shadow_requirements() {
             );
         }
         assert!(
-            facts("java", &format!("package app; class {owner} {{}}"))
+            raw_facts("java", &format!("package app; class {owner} {{}}"))
                 .iter()
                 .any(|r| r.source_key == format!("app.{owner}")
                     && r.edge_kind == "config_type_declaration")

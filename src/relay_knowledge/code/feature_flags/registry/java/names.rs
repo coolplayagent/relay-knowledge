@@ -118,6 +118,31 @@ pub(super) fn key_literal(node: Node<'_>, content: &str) -> Option<String> {
         .then(|| literal(node, content, 0))
         .flatten()
 }
+pub(super) fn same_package_reference(
+    node: Node<'_>,
+    reference: &str,
+    content: &str,
+) -> Option<String> {
+    let relative = reference.strip_prefix("<ambiguous-import>.")?;
+    let root = root(node);
+    let mut cursor = root.walk();
+    let package = root
+        .named_children(&mut cursor)
+        .take(4096)
+        .find(|n| n.kind() == "package_declaration")
+        .map(|n| {
+            text(n, content)
+                .trim_start_matches("package")
+                .trim()
+                .trim_end_matches(';')
+                .trim()
+        });
+    Some(
+        package
+            .filter(|p| !p.is_empty())
+            .map_or_else(|| relative.to_owned(), |p| format!("{p}.{relative}")),
+    )
+}
 fn string_expression(node: Node<'_>, content: &str, depth: usize) -> bool {
     if depth >= 16 {
         return false;
@@ -194,6 +219,14 @@ fn literal_bounded(
             ))
         }
         "true" | "false" => Some(text(node, content).to_owned()),
+        "unary_expression" => {
+            let operator = text(node.child_by_field_name("operator")?, content);
+            let operand = node.child_by_field_name("operand")?;
+            if concatenation && operand.kind() == "decimal_floating_point_literal" {
+                return None;
+            }
+            super::numbers::signed_literal(operand.kind(), text(operand, content), operator)
+        }
         "decimal_floating_point_literal" if concatenation => None,
         "decimal_integer_literal"
         | "decimal_floating_point_literal"

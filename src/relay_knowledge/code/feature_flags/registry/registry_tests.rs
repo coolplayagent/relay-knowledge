@@ -272,6 +272,12 @@ fn java_nested_getter_types_resolve_package_and_import_prefixes() {
 }
 
 fn facts(language: &str, source: &str) -> Vec<CodeFeatureFlagRecord> {
+    raw_facts(language, source)
+        .into_iter()
+        .filter(|row| row.edge_kind != "config_type_declaration")
+        .collect()
+}
+fn raw_facts(language: &str, source: &str) -> Vec<CodeFeatureFlagRecord> {
     extract(&FeatureFlagFileInput {
         repository_id: "repo",
         source_scope: "scope",

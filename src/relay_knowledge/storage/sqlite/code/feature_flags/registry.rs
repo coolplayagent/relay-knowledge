@@ -71,21 +71,34 @@ fn search_bounded(
         .unwrap_or_default();
     let query = feature_flag_sql_query(scope, status, request, &terms);
     let mut rows = load(connection, &query.sql, &query.params)?;
-    let mut type_hierarchy = None;
-    if rows.iter().any(|row| {
-        row.metadata.implicit_platform_owner.is_some()
-            || !row.metadata.conversion_platform_owners.is_empty()
-    }) {
-        let hierarchy = hierarchy::Hierarchy::load(connection, scope, status, request)?;
-        hierarchy.filter_platform_reads(&mut rows);
-        type_hierarchy = Some(hierarchy);
-    }
+    let mut evidence_request = request.clone();
+    evidence_request.repository.path_filters.clear();
+    evidence_request.repository.language_filters.clear();
     let mut seen = rows
         .iter()
         .map(|row| row.usage_id.clone())
         .collect::<BTreeSet<_>>();
-    let mut queried = BTreeSet::new();
     let mut evidence_groups = BTreeSet::new();
+    evidence::complete_groups(
+        connection,
+        scope,
+        status,
+        &evidence_request,
+        &mut rows,
+        &mut seen,
+        &mut evidence_groups,
+    )?;
+    let mut type_hierarchy = None;
+    if rows.iter().any(|row| {
+        row.metadata.implicit_platform_owner.is_some()
+            || !row.metadata.conversion_platform_owners.is_empty()
+            || row.metadata.same_package_reference.is_some()
+    }) {
+        let hierarchy = hierarchy::Hierarchy::load(connection, scope, status, &evidence_request)?;
+        hierarchy.filter_platform_reads(&mut rows);
+        type_hierarchy = Some(hierarchy);
+    }
+    let mut queried = BTreeSet::new();
     for round in 0..4 {
         let keys = rows
             .iter()
@@ -103,7 +116,10 @@ fn search_bounded(
         }
         if type_hierarchy.is_none() {
             type_hierarchy = Some(hierarchy::Hierarchy::load(
-                connection, scope, status, request,
+                connection,
+                scope,
+                status,
+                &evidence_request,
             )?);
         }
         let hierarchy = type_hierarchy.as_ref().unwrap();
@@ -118,15 +134,15 @@ fn search_bounded(
         if keys.len() + queried.len() > 1000 {
             return Err(incomplete("symbol binding budget exceeded"));
         }
-        for chunk in keys.iter().collect::<Vec<_>>().chunks(400) {
-            let filter = feature_flag_sql_filter(scope, status, request, &[]);
+        for chunk in keys.iter().collect::<Vec<_>>().chunks(200) {
+            let filter = feature_flag_sql_filter(scope, status, &evidence_request, &[]);
             let list = vec!["?"; chunk.len()].join(",");
             let mut params = filter.params;
-            for _ in 0..2 {
+            for _ in 0..3 {
                 params.extend(chunk.iter().map(|key| Value::Text((***key).to_owned())));
             }
             let sql = format!(
-                "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND (json_extract(flag.metadata_json,'$.reference') IN ({list}) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding WHERE binding.value IN ({list}))) LIMIT {}",
+                "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND (json_extract(flag.metadata_json,'$.reference') IN ({list}) OR json_extract(flag.metadata_json,'$.same_package_reference') IN ({list}) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding WHERE binding.value IN ({list}))) LIMIT {}",
                 filter.where_clause,
                 MAX_ROWS + 1
             );
@@ -145,7 +161,7 @@ fn search_bounded(
             connection,
             scope,
             status,
-            request,
+            &evidence_request,
             &mut rows,
             &mut seen,
             &mut evidence_groups,
@@ -167,7 +183,7 @@ fn search_bounded(
     }
     let providers = resolution::providers(&rows);
     let formats = if request.filters.consistency {
-        consistency::formats(connection, scope, status, request)?
+        consistency::formats(connection, scope, status, &evidence_request)?
     } else {
         BTreeSet::new()
     };
@@ -328,6 +344,12 @@ fn search_bounded(
             );
         }
     }
+    for group in &mut groups {
+        group
+            .usages
+            .retain(|usage| usage_in_request(usage, request));
+    }
+    groups.retain(|group| !group.usages.is_empty());
     groups.sort_by(|a, b| {
         b.score
             .total_cmp(&a.score)
@@ -417,6 +439,7 @@ fn row_size(row: &FeatureFlagRow) -> usize {
             .as_ref()
             .map_or(0, String::len)
         + row.related_symbol_name.as_ref().map_or(0, String::len)
+        + row.metadata.inherited_getters.capacity() * std::mem::size_of::<String>()
         + row.metadata.bindings.capacity() * std::mem::size_of::<String>()
         + row.metadata.conversion_platform_owners.capacity() * std::mem::size_of::<String>()
         + serde_json::to_vec(&row.metadata).map_or(MAX_BYTES, |value| value.len())
@@ -489,3 +512,29 @@ fn load_rows(
 #[cfg(test)]
 #[path = "registry_tests.rs"]
 mod tests;
+
+fn usage_in_request(usage: &CodeFeatureFlagUsage, request: &CodeFeatureFlagRequest) -> bool {
+    let mut paths = request
+        .repository
+        .path_filters
+        .iter()
+        .map(|p| normalize_sql_path_filter(p))
+        .filter(|p| !p.is_empty())
+        .peekable();
+    let path_matches = paths.peek().is_none()
+        || paths.any(|p| {
+            p == "."
+                || usage.path == p
+                || (usage.path.as_bytes().get(p.len()) == Some(&b'/')
+                    && usage
+                        .path
+                        .get(..p.len())
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(p)))
+        });
+    path_matches
+        && (request.repository.language_filters.is_empty()
+            || request
+                .repository
+                .language_filters
+                .contains(&usage.language_id))
+}

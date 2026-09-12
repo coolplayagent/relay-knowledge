@@ -36,6 +36,10 @@ impl Resolver<'_> {
             for index in indices {
                 if row.metadata.exact_reference
                     && self.rows[*index].metadata.declared_getter.as_ref() != Some(reference)
+                    && !self.rows[*index]
+                        .metadata
+                        .inherited_getters
+                        .contains(reference)
                 {
                     continue;
                 }
