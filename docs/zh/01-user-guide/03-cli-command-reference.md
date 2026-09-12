@@ -168,6 +168,8 @@ Java 继承字符串常量通过已索引父类型解析；子类声明同名字
 
 dotenv（.env）赋值均索引为环境变量定义，包括布尔、字符串、数字及未知值；--source dotenv 可筛选其证据。Consul 动态输出键计为定义，Java 键常量本身不计为定义。单一 owner 的静态通配键导入保留符号并在快照内解析，多 owner 保持歧义；存在通配歧义的父类型依据同包声明校正。静态平台导入会先检查已索引继承成员签名及 Java 可见性。已证明的 Boolean 转换为无默认值的 System.getProperty 读取保留 false 回退；转换类型被遮蔽时撤销该回退。无条件 Shell 大括号组中的 export 可查找外层赋值，并在 unset 或执行作用域边界停止。提取测试由 Java、names、types、files 和 Shell owner 直接挂载；registry facade 仅保留元数据及装配契约，fixture 放在 test_support。
 
+多个查询词可以分别命中同一配置分组的不同关联使用位置。候选选择在授权范围内匹配单个词，最终组装后的分组必须满足全部查询词。配置键的格式比较排除 Shell 文件，因为 Shell 定义属于环境变量命名空间。
+
 `repo framework`，feature flag 使用 `repo feature-flags`；它们不是 `repo query --kind` 的取值。
 
 `--path` 是 CLI 中 path filter 的参数名。`repo register --path` 保存索引范围，`repo query --path`、`repo framework --path` 和 `repo feature-flags --path` 只在该已索引范围内收窄读取。`repo index` 不接受 `--path`，它使用注册范围和选定的 `--ref`。非 Git 源码目录的常规移动文件系统快照使用 `HEAD`，状态里会记录解析后的 `filesystem:<hash>` commit。`worktree` 是 Git worktree overlay selector，不是非 Git 目录的默认 ref。

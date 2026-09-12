@@ -358,12 +358,17 @@ fn append_query_term_clauses(clauses: &mut Vec<String>, params: &mut Vec<Value>,
         "config_casefold(flag.excerpt) LIKE ? ESCAPE '\\'",
         "config_casefold(flag.metadata_json) LIKE ? ESCAPE '\\'",
     ];
+    let mut alternatives = Vec::new();
     for term in terms {
-        clauses.push(format!("({})", fields.join(" OR ")));
+        alternatives.push(format!("({})", fields.join(" OR ")));
         let pattern = format!("%{}%", escape_like_pattern(term));
         for _ in fields {
             params.push(Value::Text(pattern.clone()));
         }
+    }
+    if !alternatives.is_empty() {
+        // Individual usages seed the search; the assembled group must match every term.
+        clauses.push(format!("({})", alternatives.join(" OR ")));
     }
 }
 

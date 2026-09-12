@@ -372,3 +372,89 @@ fn template_output_is_definition_evidence_but_java_constant_is_not() {
         );
     }
 }
+
+#[test]
+fn unrelated_shell_files_do_not_imply_missing_config_key_definitions() {
+    let db = fixture();
+    db.execute_batch("INSERT INTO code_repository_files VALUES ('scope','scripts/deploy.sh','bash'),('scope','config.properties','properties');").unwrap();
+    add(
+        &db,
+        "feature",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            ..Default::default()
+        },
+    );
+    let groups = search(
+        &db,
+        &status(),
+        &request(
+            None,
+            CodeConfigFilter {
+                consistency: true,
+                ..Default::default()
+            },
+        ),
+    )
+    .unwrap();
+    assert!(groups[0].consistency_diagnostics.is_empty());
+}
+#[test]
+fn query_terms_match_across_connected_usages_after_resolution() {
+    let db = fixture();
+    add(
+        &db,
+        "feature_x",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "feature_x",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            bindings: vec!["Config.getX".into()],
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "Config.getX",
+        "config_symbol",
+        "guards_code",
+        CodeConfigMetadata {
+            reference: Some("Config.getX".into()),
+            ..Default::default()
+        },
+    );
+    db.execute("UPDATE code_repository_feature_flags SET path='src/Reader.java' WHERE edge_kind='guards_code'",[]).unwrap();
+    for (query, count) in [("feature_x Reader", 1), ("feature_x absent", 0)] {
+        let groups = search(
+            &db,
+            &status(),
+            &request(Some(query), CodeConfigFilter::default()),
+        )
+        .unwrap();
+        assert_eq!(groups.len(), count);
+        if count == 1 {
+            assert!(groups[0].usages.iter().any(|u| u.path == "src/Reader.java"));
+        }
+    }
+    db.execute("UPDATE code_repository_feature_flags SET source_scope='other' WHERE edge_kind='guards_code'",[]).unwrap();
+    assert!(
+        search(
+            &db,
+            &status(),
+            &request(Some("feature_x Reader"), CodeConfigFilter::default())
+        )
+        .unwrap()
+        .is_empty()
+    );
+}

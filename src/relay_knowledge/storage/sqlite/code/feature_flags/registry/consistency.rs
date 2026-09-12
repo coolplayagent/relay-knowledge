@@ -9,7 +9,7 @@ pub(super) fn formats(
     // The same path/language predicates apply to facts and the file inventory.
     let filter = feature_flag_sql_filter(scope, status, request, &[]);
     let sql = format!(
-        "SELECT DISTINCT language_id FROM code_repository_files flag WHERE ({}) AND language_id IN ('java','properties','ini','gotemplate','bash') AND (language_id != 'gotemplate' OR lower(path) LIKE '%.ctmpl') LIMIT 6",
+        "SELECT DISTINCT language_id FROM code_repository_files flag WHERE ({}) AND language_id IN ('java','properties','ini','gotemplate') AND (language_id != 'gotemplate' OR lower(path) LIKE '%.ctmpl') LIMIT 4",
         filter.where_clause
     );
     let mut statement = connection.prepare(&sql)?;
@@ -19,7 +19,6 @@ pub(super) fn formats(
     rows.map(|row| {
         row.map(|language| match language.as_str() {
             "gotemplate" => "ctmpl".into(),
-            "bash" => "shell".into(),
             _ => language,
         })
         .map_err(StorageError::from)
