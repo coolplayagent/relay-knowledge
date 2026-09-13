@@ -49,7 +49,7 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
 */}}
 {{ key ("consul/pipeline") }}
 {{ "consul/pipeline" | key }}
-{{/* generated */}}template_defined=true"#,
+{{/* generated */}}template_defined=true{{/* generated */}}"#,
     );
     repo.write("src/conditional.sh", r#"export CONDITIONAL_MODE=base; if test -f marker; then CONDITIONAL_MODE=override; fi; echo "$CONDITIONAL_MODE""#);
     repo.write("src/conditional-unset.sh", r#"export UNSET_MODE=base; if test -f marker; then unset UNSET_MODE; fi; echo "$UNSET_MODE""#);
@@ -77,6 +77,13 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
     repo.write(
         "src/large-default.env",
         &format!("LARGE_DEFAULT={}\n", "x".repeat(70000)),
+    );
+    repo.write(
+        "src/large-fallback.ctmpl",
+        &format!(
+            "{{{{ keyOrDefault \"large_fallback\" `{}` }}}}",
+            "x".repeat(70000)
+        ),
     );
     repo.write("src/fallback.env", "FALLBACK_MODE=true\n");
     repo.write("src/fallback.sh", "echo ${FALLBACK_MODE:=false}");

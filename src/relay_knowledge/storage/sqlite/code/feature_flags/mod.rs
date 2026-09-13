@@ -137,11 +137,7 @@ fn feature_flag_sql_query(
         ),
     ] {
         if let Some(value) = value {
-            let symbolic = if terms.is_empty() {
-                ""
-            } else {
-                "flag.source_kind='config_symbol' OR "
-            };
+            let symbolic = "flag.source_kind='config_symbol' OR ";
             where_clause.push_str(&format!(" AND ({symbolic}EXISTS (SELECT 1 FROM code_repository_feature_flags metadata_flag WHERE metadata_flag.source_scope=flag.source_scope AND metadata_flag.feature_flag_id=flag.feature_flag_id AND json_extract(metadata_flag.metadata_json,'$.{field}') = ?))"));
             filter_params.push(value);
         }

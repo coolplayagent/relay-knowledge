@@ -429,3 +429,64 @@ fn interrupted_format_inventory_reports_incomplete_analysis() {
     );
     db.progress_handler(0, None::<fn() -> bool>);
 }
+
+#[test]
+fn combined_metadata_filters_match_across_resolved_symbolic_usages_without_query() {
+    let db = fixture();
+    add(
+        &db,
+        "feature",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "feature",
+        "config_key",
+        "declares_config_key",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            bindings: vec!["Keys.FEATURE".into()],
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "Keys.FEATURE",
+        "config_symbol",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            domain: Some("payments".into()),
+            hot_reload: Some(true),
+            reference: Some("Keys.FEATURE".into()),
+            target_kind: Some("config_key".into()),
+            ..Default::default()
+        },
+    );
+    for domain in ["payments", "unrelated"] {
+        let result = search(
+            &db,
+            &status(),
+            &request(
+                None,
+                CodeConfigFilter {
+                    domain: Some(domain.into()),
+                    source: Some("properties".into()),
+                    hot_reload: Some(true),
+                    consistency: false,
+                },
+            ),
+        )
+        .unwrap();
+        assert_eq!(result.len(), usize::from(domain == "payments"));
+        if let Some(group) = result.first() {
+            assert_eq!(group.source_key, "feature");
+            assert_eq!(group.usages.len(), 3);
+        }
+    }
+}

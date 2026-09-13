@@ -355,3 +355,40 @@ fn oversized_configuration_defaults_retain_bounded_incomplete_facts() {
         }
     }
 }
+
+#[test]
+fn template_fallbacks_obey_decoded_and_serialized_value_budgets() {
+    for value in [
+        format!("`{}`", "x".repeat(70000)),
+        format!("\"{}\"", "\\t".repeat(40000)),
+        format!("\"{}\"", "\\a".repeat(12000)),
+    ] {
+        let rows = facts(
+            "gotemplate",
+            &format!("{{{{ keyOrDefault \"feature\" {value} }}}}"),
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].edge_kind, "reads_config");
+        assert!(rows[0].metadata.default_value.is_none());
+        assert!(rows[0].metadata.flow_incomplete.is_some());
+        assert!(serde_json::to_string(&rows[0].metadata).unwrap().len() < 65536);
+    }
+}
+#[test]
+fn template_embedded_comments_preserve_static_default_output() {
+    for source in [
+        "feature=true{{/* generated */}}\n",
+        "feature=tr{{/* generated */}}ue\n",
+        "feature=tr{{/* generated\nhidden=false\n*/}}ue\n",
+        "feature=true {{- /* generated */ -}}\n",
+    ] {
+        let rows = facts("gotemplate", source);
+        assert_eq!(rows.len(), 1, "{source}");
+        assert_eq!(rows[0].edge_kind, "defines_config");
+        assert_eq!(
+            rows[0].metadata.default_value.as_deref(),
+            Some("true"),
+            "{source}"
+        );
+    }
+}

@@ -225,3 +225,5 @@ Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_re
 超大静态配置默认值保留定义事实，将值标记为未知并记录分析不完整，不再阻断快照发布。Shell 赋值式参数默认值（`:=`/`=`）保留静态回退值；格式清单扫描超限时使用统一的分析不完整错误。 Fact version: `config-registry-v39`.
 
 Dotenv 使用独立赋值语法，支持等号两侧空格、带引号多行值与注释。超大 Shell/dotenv 默认值和 Java 父类型元数据保留有界不完整事实；依赖这些继承证据的查询报告分析不完整。条件式 allexport 变更保留可能定义及不确定性。Java `this.KEY` 可以解析继承字段，不与局部变量混淆。 Fact version: `config-registry-v40`.
+
+模板回退值使用共享静态值预算。值中或末尾不产生输出的注释动作保留静态默认值，支持多行注释。无关键词时，组合元数据筛选仍在解析后的配置组上判断，允许条件证据分布在 Java 符号使用和具体配置定义之间。 Fact version: `config-registry-v41`.

@@ -120,8 +120,9 @@ pub(super) fn extract(
             start + end,
         )?;
         if let Some(Token::Literal(value, _, _)) = fallback {
-            row.metadata.default_value = Some(value.clone());
-            row.metadata.value_type = Some(value_type(value).into());
+            set_default(&mut row.metadata, value.clone());
+        } else if *command == "keyOrDefault" {
+            row.metadata.flow_incomplete = Some("dynamic_template_fallback".into());
         }
         rows.push(row);
     }

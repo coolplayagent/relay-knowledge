@@ -25,7 +25,7 @@ pub(super) fn extract(
         let line = if input.language_id == "gotemplate" {
             template_output_line(input.content, offset, offset + line.len(), &mut comment_end)?
         } else {
-            line
+            line.to_owned()
         };
         offset += segment.len();
         if segment.ends_with('\r') && segments.peek() == Some(&"\n") {
@@ -33,10 +33,13 @@ pub(super) fn extract(
             offset += 1;
         }
         logical.push_str(if logical.is_empty() {
-            line
+            &line
         } else {
             line.trim_start_matches(PROPERTY_WHITESPACE)
         });
+        if input.language_id == "gotemplate" && comment_end > offset {
+            continue;
+        }
         if input.language_id == "properties"
             && !logical
                 .trim_start_matches(PROPERTY_WHITESPACE)
@@ -266,46 +269,62 @@ pub(super) fn quoted(raw: &str) -> Option<(String, usize)> {
 #[path = "files_tests.rs"]
 mod tests;
 
-fn template_output_line<'a>(
-    content: &'a str,
+fn template_output_line(
+    content: &str,
     start: usize,
     end: usize,
     comment_end: &mut usize,
-) -> Result<&'a str, DomainError> {
+) -> Result<String, DomainError> {
     let mut begin = start.max(*comment_end).min(end);
+    let mut output = String::new();
     for _ in 0..32 {
-        let line = content[begin..end].trim_start();
-        let Some(action) = line.strip_prefix("{{") else {
-            return Ok(line);
+        let Some(relative) = content[begin..end].find("{{") else {
+            output.push_str(&content[begin..end]);
+            return Ok(output);
         };
-        if !action
+        let open = begin + relative;
+        output.push_str(&content[begin..open]);
+        let action = &content[open + 2..];
+        let is_comment = action
             .trim_start()
             .trim_start_matches('-')
             .trim_start()
-            .starts_with("/*")
-        {
-            return Ok(line);
-        }
-        let open = end - line.len();
+            .starts_with("/*");
         let Some(close) = action_end(content, open + 2) else {
-            *comment_end = content.len();
-            return Ok("");
+            if is_comment {
+                *comment_end = content.len();
+            } else {
+                output.push_str(&content[open..end]);
+            }
+            return Ok(output);
         };
+        if !is_comment {
+            let stop = (close + 2).min(end);
+            output.push_str(&content[open..stop]);
+            begin = stop;
+            continue;
+        }
         if close - open > 8192 {
             return Err(DomainError::invalid(
                 "configuration",
-                "template leading comment byte budget exceeded",
+                "template comment byte budget exceeded",
             ));
+        }
+        if action.starts_with('-') {
+            output.truncate(output.trim_end().len());
         }
         *comment_end = close + 2;
         begin = (*comment_end).min(end);
+        if content[open..close].trim_end().ends_with('-') {
+            begin = end - content[begin..end].trim_start().len();
+        }
     }
-    let line = content[begin..end].trim_start();
-    if line.starts_with("{{") {
+    if content[begin..end].contains("{{") {
         return Err(DomainError::invalid(
             "configuration",
-            "template leading comment count budget exceeded",
+            "template action count budget exceeded",
         ));
     }
-    Ok(line)
+    output.push_str(&content[begin..end]);
+    Ok(output)
 }
