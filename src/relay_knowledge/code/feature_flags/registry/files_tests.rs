@@ -271,3 +271,20 @@ fn template_niladic_arguments_are_not_reader_commands() {
         .collect::<Vec<_>>();
     assert_eq!(keys, ["real", "condition", "assigned", "piped", "HOST"]);
 }
+
+#[test]
+fn template_pipelines_pass_literals_as_final_reader_arguments() {
+    let rows = facts(
+        "gotemplate",
+        r#"{{ "consul/feature" | key }} {{ `HOST` | env }} {{ "false" | keyOrDefault "feature" }} {{ if "condition" | key }}{{end}} {{ printf "not_a_key" | key }}"#,
+    );
+    let keys = rows
+        .iter()
+        .map(|r| r.source_key.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(keys, ["consul/feature", "HOST", "feature", "condition"]);
+    let fallback = rows.iter().find(|r| r.source_key == "feature").unwrap();
+    assert_eq!(fallback.metadata.default_value.as_deref(), Some("false"));
+    assert!(fallback.excerpt.contains("keyOrDefault"));
+    assert!(rows.iter().all(|r| r.byte_range.start < r.byte_range.end));
+}

@@ -91,3 +91,21 @@ fn getter_visibility_retains_package_access_and_implicit_interface_public_access
         Some("public")
     );
 }
+
+#[test]
+fn explicit_and_local_types_survive_unrelated_static_wildcards() {
+    for source in [
+        "import app.FeatureConfig; import static org.junit.Assert.*; class Reader {void run(){FeatureConfig.isEnabled();}}",
+        "import static org.junit.Assert.*; import app.FeatureConfig; class Reader {void run(){FeatureConfig.isEnabled();}}",
+        "import static org.junit.Assert.*; class FeatureConfig {} class Reader {void run(){FeatureConfig.isEnabled();}}",
+    ] {
+        assert!(
+            facts("java", source).iter().any(|r| r
+                .metadata
+                .reference
+                .as_deref()
+                .is_some_and(|s| s.ends_with("FeatureConfig.isEnabled"))),
+            "{source}"
+        );
+    }
+}

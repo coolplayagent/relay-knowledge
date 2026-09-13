@@ -724,3 +724,32 @@ fn path_filters_preserve_case_for_requests_and_registration() {
         assert_eq!(groups[0].usages[0].path, "src/config");
     }
 }
+
+#[test]
+fn static_wildcards_do_not_disconnect_explicit_type_getter_providers() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[
+            (
+                "FeatureConfig.java",
+                r#"package app; class FeatureConfig {public static boolean isEnabled(){return Boolean.getBoolean("feature");}}"#,
+            ),
+            (
+                "Reader.java",
+                "import app.FeatureConfig; import static org.junit.Assert.*; class Reader {void run(){if(FeatureConfig.isEnabled()) {}}}",
+            ),
+        ],
+    );
+    let mut query = request(None, CodeConfigFilter::default());
+    query.repository.path_filters = vec!["Reader.java".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].source_key, "feature");
+    assert!(
+        groups[0]
+            .usages
+            .iter()
+            .any(|u| u.edge_kind == "guards_code")
+    );
+}

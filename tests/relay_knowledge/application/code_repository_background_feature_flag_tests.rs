@@ -42,6 +42,8 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
             "x".repeat(70000)
         ),
     );
+    repo.write("src/pipeline.ctmpl", r#"{{ "consul/pipeline" | key }}"#);
+    repo.write("src/conditional.sh", r#"export CONDITIONAL_MODE=base; if test -f marker; then CONDITIONAL_MODE=override; fi; echo "$CONDITIONAL_MODE""#);
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "fixture"]);
     let service = service_with_memory_store().await;
@@ -106,6 +108,43 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
             .unwrap();
         assert_eq!(result.flags.len(), 1, "{result:?}");
         assert_eq!(result.flags[0].source_key, "TEMPLATE_MODE");
+    }
+    for (path, key) in [
+        ("src/pipeline.ctmpl", "consul/pipeline"),
+        ("src/conditional.sh", "CONDITIONAL_MODE"),
+    ] {
+        let result = service
+            .query_code_repository_feature_flags(
+                CodeFeatureFlagRequest::new(
+                    None,
+                    filtered_selector("fixture", "HEAD", path),
+                    10,
+                    FreshnessPolicy::WaitUntilFresh,
+                )
+                .unwrap()
+                .with_filters(relay_knowledge::domain::CodeConfigFilter {
+                    consistency: true,
+                    ..Default::default()
+                })
+                .unwrap(),
+                context("query-pipeline-and-shell-flow"),
+            )
+            .await
+            .unwrap();
+        assert!(
+            result.flags.iter().any(|f| f.source_key == key),
+            "{result:?}"
+        );
+        if path.ends_with(".sh") {
+            let flag = result.flags.iter().find(|f| f.source_key == key).unwrap();
+            assert!(!flag.analysis_complete);
+            assert!(
+                flag.usages
+                    .iter()
+                    .filter(|u| u.edge_kind == "defines_config")
+                    .all(|u| u.metadata.default_value.is_none())
+            );
+        }
     }
     let inherited = service
         .query_code_repository_feature_flags(

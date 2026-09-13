@@ -2,7 +2,7 @@
 use super::*;
 enum Token<'a> {
     Word(&'a str, usize),
-    Literal(String, usize),
+    Literal(String, usize, usize),
     Boundary(char),
 }
 pub(super) fn extract(
@@ -31,7 +31,7 @@ pub(super) fn extract(
                 break;
             };
             offset += consumed;
-            tokens.push(Token::Literal(value, offset));
+            tokens.push(Token::Literal(value, offset - consumed, offset));
         } else if matches!(ch, '(' | ')' | '|') {
             offset += ch.len_utf8();
             tokens.push(Token::Boundary(ch));
@@ -63,19 +63,49 @@ pub(super) fn extract(
         if !matches!(*command, "key" | "keyOrDefault" | "env") {
             continue;
         }
-        let Some(Token::Literal(key, end)) = tokens.get(index + 1) else {
-            continue;
-        };
-        let fallback = if *command == "keyOrDefault" {
-            tokens.get(index + 2)
+        let incoming = if index >= 2 && matches!(tokens[index - 1], Token::Boundary('|')) {
+            match &tokens[index - 2] {
+                token @ Token::Literal(..)
+                    if index == 2
+                        || matches!(
+                            tokens[index - 3],
+                            Token::Boundary('(' | '|')
+                                | Token::Word("if" | "with" | "range" | ":=" | "=", _)
+                        ) =>
+                {
+                    Some(token)
+                }
+                _ => None,
+            }
         } else {
             None
         };
-        let end = if let Some(Token::Literal(_, end)) = fallback {
-            *end
-        } else {
-            *end
+        let explicit = tokens.get(index + 1);
+        let key_token = match explicit {
+            Some(token @ Token::Literal(..)) => Some(token),
+            _ if *command != "keyOrDefault" => incoming,
+            _ => None,
         };
+        let Some(Token::Literal(key, key_begin, key_end)) = key_token else {
+            continue;
+        };
+        let fallback = if *command == "keyOrDefault" {
+            match tokens.get(index + 2) {
+                Some(token @ Token::Literal(..)) => Some(token),
+                _ => incoming,
+            }
+        } else {
+            None
+        };
+        let mut begin = (*begin).min(*key_begin);
+        let mut end = (*key_end).max(match token {
+            Token::Word(_, offset) => *offset + command.len(),
+            _ => *key_end,
+        });
+        if let Some(Token::Literal(_, fallback_begin, fallback_end)) = fallback {
+            begin = begin.min(*fallback_begin);
+            end = end.max(*fallback_end);
+        }
         check_fact_budget(rows.len())?;
         let mut row = record(
             input,
@@ -89,7 +119,7 @@ pub(super) fn extract(
             start + begin,
             start + end,
         )?;
-        if let Some(Token::Literal(value, _)) = fallback {
+        if let Some(Token::Literal(value, _, _)) = fallback {
             row.metadata.default_value = Some(value.clone());
             row.metadata.value_type = Some(value_type(value).into());
         }

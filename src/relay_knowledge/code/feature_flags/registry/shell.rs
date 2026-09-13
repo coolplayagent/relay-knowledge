@@ -33,7 +33,8 @@ pub(super) fn extract(
                         .unwrap_or(""),
                     input.content,
                     false,
-                )?)
+                )?
+                .0)
         {
             if let Some(row) = definition(input, node)? {
                 check_fact_budget(rows.len())?;
@@ -67,9 +68,10 @@ pub(super) fn extract(
                 .find(|child| child.kind() == "variable_name")
             {
                 let key = &input.content[name.byte_range()];
-                if shell_external(node, key, input.content, true)? {
+                let (external, uncertain) = shell_external(node, key, input.content, true)?;
+                if external {
                     check_fact_budget(rows.len())?;
-                    let row = record(
+                    let mut row = record(
                         input,
                         "env_var",
                         key,
@@ -77,6 +79,9 @@ pub(super) fn extract(
                         node.start_byte(),
                         node.end_byte(),
                     )?;
+                    if uncertain {
+                        row.metadata.flow_incomplete = Some("conditional_reassignment".into());
+                    }
                     for guard in guards::sites(node)? {
                         check_fact_budget(rows.len() + 1)?;
                         let mut usage = record(
@@ -88,6 +93,10 @@ pub(super) fn extract(
                             guard.end_byte(),
                         )?;
                         usage.metadata.read_usage_id = Some(row.usage_id.clone());
+                        usage
+                            .metadata
+                            .flow_incomplete
+                            .clone_from(&row.metadata.flow_incomplete);
                         rows.push(usage);
                     }
                     rows.push(row);
@@ -96,6 +105,28 @@ pub(super) fn extract(
         }
         let mut cursor = node.walk();
         pending.extend(node.named_children(&mut cursor));
+    }
+    let mut uncertain_reads = std::collections::BTreeMap::new();
+    for row in &rows {
+        if row.edge_kind == "reads_config"
+            && row.metadata.flow_incomplete.as_deref() == Some("conditional_reassignment")
+        {
+            uncertain_reads
+                .entry(row.source_key.clone())
+                .and_modify(|end| *end = std::cmp::max(*end, row.byte_range.start))
+                .or_insert(row.byte_range.start);
+        }
+    }
+    for row in &mut rows {
+        if row.edge_kind == "defines_config"
+            && uncertain_reads
+                .get(&row.source_key)
+                .is_some_and(|end| row.byte_range.start <= *end)
+        {
+            row.metadata.default_value = None;
+            row.metadata.value_type = None;
+            row.metadata.flow_incomplete = Some("conditional_reassignment".into());
+        }
     }
     Ok(rows)
 }
@@ -156,9 +187,10 @@ fn shell_external(
     key: &str,
     content: &str,
     inherited_external: bool,
-) -> Result<bool, DomainError> {
+) -> Result<(bool, bool), DomainError> {
     let mut budget = 1024_usize;
     let mut assigned = false;
+    let mut uncertain = false;
     while let Some(parent) = node.parent() {
         if budget == 0 {
             return Err(DomainError::invalid(
@@ -182,10 +214,10 @@ fn shell_external(
                     if let Some(exported) = export_mode(candidate, content) {
                         let names = command_names(candidate, key, content)?;
                         if names && conditional && !inherited_external {
-                            return Ok(false);
+                            return Ok((false, uncertain));
                         }
                         if names && !conditional {
-                            return Ok(exported);
+                            return Ok((exported, uncertain));
                         }
                     }
                     if candidate.kind() == "variable_assignment"
@@ -194,10 +226,11 @@ fn shell_external(
                             .is_some_and(|name| &content[name.byte_range()] == key)
                     {
                         if conditional {
+                            uncertain |= !assigned;
                             continue;
                         }
                         if options::allexport(candidate, content)? {
-                            return Ok(true);
+                            return Ok((true, uncertain));
                         }
                         assigned = true;
                         continue;
@@ -226,7 +259,7 @@ fn shell_external(
         }
         node = parent;
     }
-    Ok(inherited_external && !assigned)
+    Ok((inherited_external && !assigned, uncertain))
 }
 
 fn definition(

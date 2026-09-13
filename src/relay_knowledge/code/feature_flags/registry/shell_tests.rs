@@ -354,3 +354,38 @@ fn quoted_unset_operands_stop_prior_definition_lookup() {
     let rows = facts("bash", "FLAG=true; unset -f 'FLAG'; export FLAG");
     assert!(rows.iter().any(|r| r.edge_kind == "defines_config"));
 }
+
+#[test]
+fn conditional_assignments_clear_defaults_before_reads_but_fixed_assignments_recover() {
+    for condition in [
+        "if test -f marker; then FLAG=override; fi",
+        "test -f marker && FLAG=override",
+        "for x in one two; do FLAG=override; done",
+    ] {
+        let rows = facts(
+            "bash",
+            &format!(r#"export FLAG=base; {condition}; echo "$FLAG""#),
+        );
+        assert!(
+            rows.iter().any(|r| r.edge_kind == "defines_config"
+                && r.metadata.default_value.is_none()
+                && r.metadata.flow_incomplete.is_some()),
+            "{condition}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.edge_kind == "reads_config" && r.metadata.flow_incomplete.is_some())
+        );
+        let rows = facts(
+            "bash",
+            &format!(r#"export FLAG=base; {condition}; FLAG=fixed; echo "$FLAG""#),
+        );
+        assert!(rows.iter().any(|r| r.edge_kind == "defines_config"
+            && r.metadata.default_value.as_deref() == Some("fixed")));
+        assert!(
+            rows.iter()
+                .filter(|r| r.edge_kind == "reads_config")
+                .all(|r| r.metadata.flow_incomplete.is_none())
+        );
+    }
+}

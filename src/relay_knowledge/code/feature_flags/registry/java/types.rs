@@ -320,6 +320,7 @@ pub(super) fn static_receiver(node: Node<'_>, content: &str) -> Option<String> {
         root = parent;
     }
     let mut visible = lexical(node, head, content).is_some();
+    let mut static_candidate = false;
     let mut cursor = root.walk();
     for item in root.named_children(&mut cursor).take(4096) {
         if is_type(item)
@@ -337,12 +338,15 @@ pub(super) fn static_receiver(node: Node<'_>, content: &str) -> Option<String> {
                 .trim();
             if let Some(path) = imported.strip_prefix("static ") {
                 if path.ends_with(".*") || path.rsplit('.').next() == Some(head) {
-                    return None;
+                    static_candidate = true;
                 }
             } else if imported.rsplit('.').next() == Some(head) {
                 visible = true;
             }
         }
+    }
+    if static_candidate && !visible {
+        return None;
     }
     // A fully qualified type expression has no lexical variable at its head.
     if !visible && !(raw.contains('.') && head.chars().next().is_some_and(char::is_lowercase)) {
