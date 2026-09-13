@@ -389,3 +389,57 @@ fn conditional_assignments_clear_defaults_before_reads_but_fixed_assignments_rec
         );
     }
 }
+
+#[test]
+fn conditional_unsets_invalidate_defaults_without_affecting_function_unsets() {
+    for unset in ["unset FLAG", "unset 'FLAG'", "unset -v FLAG"] {
+        let rows = facts(
+            "bash",
+            &format!(r#"export FLAG=base; if test -f marker; then {unset}; fi; echo "$FLAG""#),
+        );
+        assert!(
+            rows.iter().any(|r| r.edge_kind == "defines_config"
+                && r.metadata.default_value.is_none()
+                && r.metadata.flow_incomplete.is_some()),
+            "{unset}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.edge_kind == "reads_config" && r.metadata.flow_incomplete.is_some())
+        );
+    }
+    let rows = facts(
+        "bash",
+        r#"export FLAG=base; if test -f marker; then unset -f FLAG; fi; echo "$FLAG""#,
+    );
+    assert!(rows.iter().all(|r| r.metadata.flow_incomplete.is_none()));
+}
+
+#[test]
+fn scoped_assignments_satisfy_reads_without_creating_parent_definitions() {
+    for body in [
+        r#"export FLAG=internal; echo "$FLAG""#,
+        r#"FLAG=internal; export FLAG; echo "$FLAG""#,
+        r#"set -a; FLAG=internal; echo "$FLAG""#,
+    ] {
+        for source in [
+            format!("f() {{ {body}; }}"),
+            format!("( {body} )"),
+            format!("if test -f marker; then {body}; fi"),
+        ] {
+            assert!(
+                facts("bash", &source)
+                    .iter()
+                    .all(|r| r.source_key != "FLAG"),
+                "{source}"
+            );
+        }
+    }
+    let rows = facts("bash", r#"f() { export FLAG; echo "$FLAG"; }"#);
+    assert!(rows.iter().any(|r| r.edge_kind == "reads_config"));
+    let rows = facts(
+        "bash",
+        r#"if test -f marker; then export FLAG=internal; else echo "$FLAG"; fi"#,
+    );
+    assert!(rows.iter().any(|r| r.edge_kind == "reads_config"));
+}

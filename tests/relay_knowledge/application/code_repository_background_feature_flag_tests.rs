@@ -44,6 +44,11 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
     );
     repo.write("src/pipeline.ctmpl", r#"{{ "consul/pipeline" | key }}"#);
     repo.write("src/conditional.sh", r#"export CONDITIONAL_MODE=base; if test -f marker; then CONDITIONAL_MODE=override; fi; echo "$CONDITIONAL_MODE""#);
+    repo.write("src/conditional-unset.sh", r#"export UNSET_MODE=base; if test -f marker; then unset UNSET_MODE; fi; echo "$UNSET_MODE""#);
+    repo.write(
+        "src/scoped-export.sh",
+        r#"f() { export INTERNAL_MODE=internal; echo "$INTERNAL_MODE"; }"#,
+    );
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "fixture"]);
     let service = service_with_memory_store().await;
@@ -112,6 +117,7 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
     for (path, key) in [
         ("src/pipeline.ctmpl", "consul/pipeline"),
         ("src/conditional.sh", "CONDITIONAL_MODE"),
+        ("src/conditional-unset.sh", "UNSET_MODE"),
     ] {
         let result = service
             .query_code_repository_feature_flags(
@@ -146,6 +152,25 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
             );
         }
     }
+    let scoped = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                filtered_selector("fixture", "HEAD", "src/scoped-export.sh"),
+                10,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap()
+            .with_filters(relay_knowledge::domain::CodeConfigFilter {
+                consistency: true,
+                ..Default::default()
+            })
+            .unwrap(),
+            context("query-scoped-shell-export"),
+        )
+        .await
+        .unwrap();
+    assert!(scoped.flags.is_empty(), "{scoped:?}");
     let inherited = service
         .query_code_repository_feature_flags(
             CodeFeatureFlagRequest::new(

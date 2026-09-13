@@ -257,3 +257,5 @@ Configuration snapshot version v32 includes dotenv file discovery (including `.e
 Configuration snapshot v33 recognizes `.env.*` templates and variants. Proven Java numeric conversions compare canonical returned defaults; invalid or unsupported numeric fallbacks remain unknown. Consistency compares the last ordered definition in each Properties, INI, dotenv or Shell file while retaining superseded usages for inspection. Repository and query path filters remain case-sensitive.
 
 Configuration snapshot v34 preserves explicit/local Java receiver types in the presence of unrelated static wildcard imports. Consul reader pipelines accept literal incoming keys and final fallback arguments. Conditional Shell reassignments before reads clear affected definition defaults and mark uncertainty; a later unconditional assignment restores known flow.
+
+Configuration snapshot v35 propagates uncertainty from conditional variable unsets while ignoring function-only unsets. Reads satisfied by assignments within the same function, subshell or conditional body are not external configuration reads; bare exports without a known local assignment retain external-read evidence.

@@ -199,7 +199,18 @@ fn shell_external(
             ));
         }
         budget -= 1;
-        if matches!(parent.kind(), "program" | "compound_statement" | "do_group") {
+        if matches!(
+            parent.kind(),
+            "program"
+                | "compound_statement"
+                | "do_group"
+                | "subshell"
+                | "else_clause"
+                | "elif_clause"
+                | "case_item"
+        ) || (parent.kind() == "if_statement"
+            && !matches!(node.kind(), "else_clause" | "elif_clause"))
+        {
             let mut previous = node.prev_named_sibling();
             while let Some(statement) = previous {
                 let mut pending = vec![(statement, false)];
@@ -213,10 +224,35 @@ fn shell_external(
                     budget -= 1;
                     if let Some(exported) = export_mode(candidate, content) {
                         let names = command_names(candidate, key, content)?;
-                        if names && conditional && !inherited_external {
-                            return Ok((false, uncertain));
+                        if names && conditional {
+                            uncertain = true;
+                            if !inherited_external {
+                                return Ok((false, uncertain));
+                            }
                         }
                         if names && !conditional {
+                            if inherited_external && exported && !unconditional(candidate) {
+                                let mut cursor = candidate.walk();
+                                let assigns =
+                                    candidate
+                                        .named_children(&mut cursor)
+                                        .take(1024)
+                                        .any(|child| {
+                                            child.kind() == "variable_assignment"
+                                                && child.child_by_field_name("name").is_some_and(
+                                                    |name| &content[name.byte_range()] == key,
+                                                )
+                                        });
+                                let prior_local = !assigns
+                                    && prior_assignment(candidate, key, content)?.is_some_and(
+                                        |(assignment, conditional)| {
+                                            !conditional && !unconditional(assignment)
+                                        },
+                                    );
+                                if assigns || prior_local {
+                                    return Ok((false, uncertain));
+                                }
+                            }
                             return Ok((exported, uncertain));
                         }
                     }
@@ -228,6 +264,9 @@ fn shell_external(
                         if conditional {
                             uncertain |= !assigned;
                             continue;
+                        }
+                        if inherited_external && !unconditional(candidate) {
+                            return Ok((false, uncertain));
                         }
                         if options::allexport(candidate, content)? {
                             return Ok((true, uncertain));
