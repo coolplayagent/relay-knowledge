@@ -185,17 +185,7 @@ impl Hierarchy {
                         .is_some_and(|p| p.kind() == "spread_parameter");
                     if parameters.iter().any(|p| {
                         p.child_by_field_name("type").is_some_and(|ty| {
-                            matches!(
-                                names::text(ty, input.content),
-                                "int"
-                                    | "long"
-                                    | "boolean"
-                                    | "float"
-                                    | "double"
-                                    | "byte"
-                                    | "short"
-                                    | "char"
-                            )
+                            super::static_imports::rejects_string(ty, input.content)
                         })
                     }) {
                         continue;

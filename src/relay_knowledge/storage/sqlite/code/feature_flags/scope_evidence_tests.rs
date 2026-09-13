@@ -504,3 +504,80 @@ fn converted_explicit_defaults_compare_effective_values_and_restore_shadowed_raw
                 && u.metadata.default_value.as_deref() == Some("TRUE"))
     );
 }
+
+#[test]
+fn inherited_fields_take_precedence_over_static_key_imports() {
+    for (visibility, package, expected) in [
+        ("public", "app", "base_key"),
+        ("protected", "other", "base_key"),
+        ("private", "app", "imported_key"),
+        ("", "other", "imported_key"),
+    ] {
+        let db = fixture();
+        java_files(
+            &db,
+            &[
+                (
+                    "Keys.java",
+                    r#"package app; class Keys { public static final String FEATURE_KEY="imported_key"; }"#,
+                ),
+                (
+                    "Base.java",
+                    &format!(
+                        r#"package app; class Base {{ {visibility} static final String FEATURE_KEY="base_key"; }}"#
+                    ),
+                ),
+                (
+                    "Child.java",
+                    &format!(
+                        r#"package {package}; import static app.Keys.FEATURE_KEY; class Child extends app.Base {{ String read(){{ return System.getProperty(FEATURE_KEY); }} }}"#
+                    ),
+                ),
+            ],
+        );
+        let mut query = request(None, CodeConfigFilter::default());
+        query.repository.path_filters = vec!["Child.java".into()];
+        let groups = search(&db, &status(), &query).unwrap();
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        assert_eq!(groups[0].source_key, expected, "{visibility} {package}");
+        let groups = search(
+            &db,
+            &status(),
+            &request(Some(expected), CodeConfigFilter::default()),
+        )
+        .unwrap();
+        assert!(
+            groups.iter().any(|g| g.source_key == expected
+                && g.usages
+                    .iter()
+                    .any(|u| u.path == "Child.java" && u.edge_kind == "reads_config")),
+            "{groups:?}"
+        );
+    }
+}
+
+#[test]
+fn inherited_inapplicable_reference_overloads_preserve_platform_imports() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[
+            (
+                "Base.java",
+                "package app; class Base { public String getenv(Integer key){return null;} }",
+            ),
+            (
+                "Child.java",
+                r#"package app; import static java.lang.System.getenv; class Child extends Base { String read(){return getenv("REAL_ENV");} }"#,
+            ),
+        ],
+    );
+    let groups = search(
+        &db,
+        &status(),
+        &request(Some("REAL_ENV"), CodeConfigFilter::default()),
+    )
+    .unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].source_kind, "env_var");
+}

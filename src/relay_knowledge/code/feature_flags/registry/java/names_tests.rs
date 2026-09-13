@@ -662,3 +662,52 @@ fn wildcard_static_key_imports_preserve_reads_and_ambiguity() {
         );
     }
 }
+
+#[test]
+fn locally_bound_non_string_key_fields_are_not_configuration_reads() {
+    for ty in ["int", "Integer", "Object", "String[]", "boolean"] {
+        let source = format!(
+            "class App {{ static final {ty} KEY = null; void run() {{ config.get(KEY); }} }}"
+        );
+        assert!(
+            !facts("java", &source)
+                .iter()
+                .any(|r| r.edge_kind == "reads_config"),
+            "{ty}"
+        );
+    }
+    assert!(
+        facts(
+            "java",
+            "class App { String KEY; void run(){config.get(KEY);} }"
+        )
+        .iter()
+        .any(|r| r.edge_kind == "reads_config")
+    );
+}
+
+#[test]
+fn inapplicable_reference_overloads_preserve_static_platform_reads() {
+    for ty in ["Integer", "java.lang.Integer", "Number", "StringBuilder"] {
+        let source = format!(
+            r#"import static java.lang.System.getenv; class App {{ String getenv({ty} key) {{return null;}} void run(){{getenv("REAL_ENV");}} }}"#
+        );
+        assert!(
+            facts("java", &source)
+                .iter()
+                .any(|r| r.source_key == "REAL_ENV"),
+            "{ty}"
+        );
+    }
+    for ty in ["String", "Object", "CharSequence"] {
+        let source = format!(
+            r#"import static java.lang.System.getenv; class App {{ String getenv({ty} key) {{return null;}} void run(){{getenv("REAL_ENV");}} }}"#
+        );
+        assert!(
+            !facts("java", &source)
+                .iter()
+                .any(|r| r.source_key == "REAL_ENV"),
+            "{ty}"
+        );
+    }
+}

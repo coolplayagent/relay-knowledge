@@ -110,6 +110,10 @@ pub(super) fn extract(
                     usage.metadata.exact_reference = row.metadata.exact_reference;
                     usage
                         .metadata
+                        .lexical_field_reference
+                        .clone_from(&row.metadata.lexical_field_reference);
+                    usage
+                        .metadata
                         .static_import_reference
                         .clone_from(&row.metadata.static_import_reference);
                     usage
@@ -300,6 +304,13 @@ fn read(
             node.start_byte(),
             node.end_byte(),
         )?;
+        if reference.is_some() && argument.kind() == "identifier" {
+            row.metadata.lexical_field_reference = Some(field_symbol(
+                argument,
+                text(argument, input.content),
+                input.content,
+            ));
+        }
         row.metadata.reference = reference;
         if object.is_none() && (is_system || is_boolean) {
             row.metadata.static_import_reference = Some(format!(

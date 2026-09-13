@@ -66,6 +66,9 @@ pub(in crate::code) fn language_id(path: &str) -> Option<&'static str> {
 
 pub(in crate::code) fn detect_language(path: &str) -> Option<LanguageSpec> {
     let file_name = Path::new(path).file_name()?.to_str()?;
+    if file_name.to_ascii_lowercase().ends_with(".env") {
+        return Some(bash());
+    }
     if matches!(
         file_name,
         ".bash_profile" | ".bashrc" | ".profile" | "bashrc" | "bash_profile"

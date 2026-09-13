@@ -93,6 +93,7 @@ impl Hierarchy {
                 .chain(row.metadata.reference.iter())
                 .chain(row.metadata.same_package_reference.iter())
                 .chain(row.metadata.static_import_reference.iter())
+                .chain(row.metadata.lexical_field_reference.iter())
             {
                 if let Some((owner, _)) = symbol.rsplit_once('.') {
                     closure.insert(owner.to_owned());
@@ -157,7 +158,7 @@ impl Hierarchy {
             !row.metadata
                 .static_import_reference
                 .as_ref()
-                .is_some_and(|reference| self.shadows_import(reference))
+                .is_some_and(|reference| self.has_accessible_member(reference, &self.methods))
                 && row
                     .metadata
                     .implicit_platform_owner
@@ -165,6 +166,11 @@ impl Hierarchy {
                     .is_none_or(|owner| !self.declarations.contains(owner))
         });
         for row in rows {
+            if let Some(candidate) = &row.metadata.lexical_field_reference {
+                if self.has_accessible_member(candidate, &self.fields) {
+                    row.metadata.reference = Some(candidate.clone());
+                }
+            }
             if let Some(candidate) = &row.metadata.same_package_reference {
                 if candidate
                     .rsplit_once('.')
@@ -190,7 +196,7 @@ impl Hierarchy {
             }
         }
     }
-    fn shadows_import(&self, reference: &str) -> bool {
+    fn has_accessible_member(&self, reference: &str, members: &BTreeMap<String, String>) -> bool {
         let Some((owner, method)) = reference.rsplit_once('.') else {
             return false;
         };
@@ -206,8 +212,7 @@ impl Hierarchy {
                     .zip(self.packages.get(&owner))
                     .is_some_and(|(a, b)| a != b);
             let key = format!("{owner}.{method}");
-            if self
-                .methods
+            if members
                 .get(&key)
                 .is_some_and(|v| v != "private" && (v != "package" || !crossed))
             {

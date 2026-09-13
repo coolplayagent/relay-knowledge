@@ -585,6 +585,12 @@ pub(super) fn key_symbol(node: Node<'_>, content: &str) -> Option<String> {
                 if declaration.parent().is_some_and(|p| {
                     matches!(p.kind(), "field_declaration" | "constant_declaration")
                 }) {
+                    let field = declaration.parent()?;
+                    if !field.child_by_field_name("type").is_some_and(|ty| {
+                        matches!(text(ty, content), "String" | "java.lang.String")
+                    }) {
+                        return None;
+                    }
                     return Some(field_symbol(declaration, name, content));
                 }
                 return None;

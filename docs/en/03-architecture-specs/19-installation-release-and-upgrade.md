@@ -251,3 +251,5 @@ Configuration facts add the `config-registry-v31` scope component. Normal `repo 
 
 Legacy database imports supply an empty metadata object when the source has no `metadata_json` column; preserve the old snapshot and its stale state so normal reindexing can regenerate configuration facts.
 The `xml-lossless-windows-v1` code fact identity invalidates older XML source windows that trimmed boundary whitespace. Reindex repositories after upgrade to publish lossless POM evidence; no database deletion or configuration change is required. Incomplete POM evidence keeps retained Maven software facts visibly degraded until repaired and reindexed.
+
+Configuration snapshot version v32 includes dotenv file discovery (including `.env`), inherited Java key fields taking precedence over static imports, rejection of known non-String local key fields, and String-incompatible reference overload handling. Existing snapshots are refreshed through the normal bounded indexing workflow.

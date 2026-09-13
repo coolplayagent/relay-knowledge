@@ -46,16 +46,39 @@ pub(super) fn shadows(method: Node<'_>, call: Node<'_>, content: &str) -> bool {
             .is_some_and(|arg| arg.kind() == "string_literal")
         {
             if let Some(ty) = param.child_by_field_name("type") {
-                let ty = text(ty, content);
-                if matches!(
-                    ty,
-                    "int" | "long" | "boolean" | "float" | "double" | "byte" | "short" | "char"
-                ) || ty.ends_with("[]")
-                {
+                if rejects_string(ty, content) {
                     return false;
                 }
             }
         }
     }
     true
+}
+
+/// Reject signatures known to be incompatible with a Java String argument.
+pub(super) fn rejects_string(ty: Node<'_>, content: &str) -> bool {
+    let name = text(ty, content);
+    if matches!(
+        name,
+        "int" | "long" | "boolean" | "float" | "double" | "byte" | "short" | "char"
+    ) || name.ends_with("[]")
+    {
+        return true;
+    }
+    let simple = name.strip_prefix("java.lang.").unwrap_or(name);
+    matches!(
+        simple,
+        "Integer"
+            | "Long"
+            | "Boolean"
+            | "Float"
+            | "Double"
+            | "Byte"
+            | "Short"
+            | "Character"
+            | "Number"
+            | "Void"
+            | "StringBuilder"
+            | "StringBuffer"
+    ) && (name.starts_with("java.lang.") || super::names::platform_visible(ty, simple, content))
 }

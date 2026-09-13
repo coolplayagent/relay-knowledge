@@ -91,6 +91,7 @@ fn search_bounded(
     if rows.iter().any(|row| {
         row.metadata.implicit_platform_owner.is_some()
             || row.metadata.static_import_reference.is_some()
+            || row.metadata.lexical_field_reference.is_some()
             || !row.metadata.conversion_platform_owners.is_empty()
             || row.metadata.same_package_reference.is_some()
     }) {
@@ -131,11 +132,11 @@ fn search_bounded(
             let filter = feature_flag_sql_filter(scope, status, &evidence_request, &[]);
             let list = vec!["?"; chunk.len()].join(",");
             let mut params = filter.params;
-            for _ in 0..3 {
+            for _ in 0..4 {
                 params.extend(chunk.iter().map(|key| Value::Text((***key).to_owned())));
             }
             let sql = format!(
-                "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND (json_extract(flag.metadata_json,'$.reference') IN ({list}) OR json_extract(flag.metadata_json,'$.same_package_reference') IN ({list}) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding WHERE binding.value IN ({list}))) LIMIT {}",
+                "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND (json_extract(flag.metadata_json,'$.reference') IN ({list}) OR json_extract(flag.metadata_json,'$.same_package_reference') IN ({list}) OR json_extract(flag.metadata_json,'$.lexical_field_reference') IN ({list}) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding WHERE binding.value IN ({list}))) LIMIT {}",
                 filter.where_clause,
                 MAX_ROWS + 1
             );

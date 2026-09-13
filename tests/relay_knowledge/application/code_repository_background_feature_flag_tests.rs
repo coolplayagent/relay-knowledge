@@ -31,6 +31,7 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
     ] {
         repo.write(path, source);
     }
+    repo.write("src/.env", "DOTENV_MODE=production\nDOTENV_PORT=8080\n");
     repo.write(
         "src/oversized.properties",
         &format!(
@@ -55,6 +56,32 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
         )
         .await
         .unwrap();
+    let dotenv = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                filtered_selector("fixture", "HEAD", "src/.env"),
+                10,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap()
+            .with_filters(relay_knowledge::domain::CodeConfigFilter {
+                source: Some("dotenv".into()),
+                ..Default::default()
+            })
+            .unwrap(),
+            context("query-indexed-dotenv"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(dotenv.flags.len(), 2, "{dotenv:?}");
+    assert!(dotenv.flags.iter().all(|f| f.source_kind == "env_var"));
+    assert!(dotenv.flags.iter().any(|f| {
+        f.source_key == "DOTENV_MODE"
+            && f.usages
+                .iter()
+                .any(|u| u.metadata.default_value.as_deref() == Some("production"))
+    }));
     let inherited = service
         .query_code_repository_feature_flags(
             CodeFeatureFlagRequest::new(

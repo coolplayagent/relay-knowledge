@@ -40,6 +40,9 @@ pub struct CodeConfigMetadata {
     /// Lexical member signature that takes precedence over a static platform import.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub static_import_reference: Option<String>,
+    /// Lexical field candidate checked before accepting a static key import.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lexical_field_reference: Option<String>,
     /// Default supplied by a proven Boolean conversion of a property read.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub boolean_converted_default: bool,

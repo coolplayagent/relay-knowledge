@@ -207,3 +207,5 @@ Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_re
 
 从旧数据库导入时，若源表缺少 `metadata_json` 列，按空元数据对象复制使用关系，保留旧快照及其过期状态，再通过正常重新索引生成配置事实。
 `xml-lossless-windows-v1` 代码事实身份使曾裁掉边界空白的旧 XML 源码窗口失效。升级后重新索引仓库以发布无损 POM 证据，无需删除数据库或修改配置。POM 证据不完整时，保留的 Maven 软件事实持续显示 degraded，直到修复并重新索引。
+
+配置快照版本 v32 补齐 dotenv 文件发现（包括 `.env`）、Java 继承键字段优先于静态导入、排除已知非 String 的本地键字段，以及不适用 String 参数的引用类型重载处理。旧快照通过现有有界索引流程刷新。
