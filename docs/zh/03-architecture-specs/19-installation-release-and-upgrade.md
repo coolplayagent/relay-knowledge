@@ -227,3 +227,5 @@ Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_re
 Dotenv 使用独立赋值语法，支持等号两侧空格、带引号多行值与注释。超大 Shell/dotenv 默认值和 Java 父类型元数据保留有界不完整事实；依赖这些继承证据的查询报告分析不完整。条件式 allexport 变更保留可能定义及不确定性。Java `this.KEY` 可以解析继承字段，不与局部变量混淆。 Fact version: `config-registry-v40`.
 
 模板回退值使用共享静态值预算。值中或末尾不产生输出的注释动作保留静态默认值，支持多行注释。无关键词时，组合元数据筛选仍在解析后的配置组上判断，允许条件证据分布在 Java 符号使用和具体配置定义之间。 Fact version: `config-registry-v41`.
+
+括号包裹的字面量管道输入保留配置读取及回退值。Shell 短路列表仅将最左操作数视为必执行。可证明的 final 局部 Java String 键直接解析，字段键仍保留符号关联；限定外层 this 接收者关联到指定外层类型。 Fact version: `config-registry-v42`.

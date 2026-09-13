@@ -392,3 +392,18 @@ fn template_embedded_comments_preserve_static_default_output() {
         );
     }
 }
+
+#[test]
+fn grouped_pipeline_inputs_retain_keys_and_fallbacks() {
+    let rows = facts(
+        "gotemplate",
+        r#"{{ ("feature") | key }} {{ (("HOST")) | env }} {{ (("false")) | keyOrDefault ("fallback") }} {{ printf ("not_key") | key }}"#,
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|r| r.source_key.as_str())
+            .collect::<Vec<_>>(),
+        ["feature", "HOST", "fallback"]
+    );
+    assert_eq!(rows[2].metadata.default_value.as_deref(), Some("false"));
+}

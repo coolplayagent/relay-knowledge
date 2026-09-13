@@ -111,7 +111,14 @@ pub(super) fn field_symbol(mut node: Node<'_>, name: &str, content: &str) -> Str
     format!("{}{}", qualified_head, &suffix[head.len()..])
 }
 pub(super) fn key_literal(node: Node<'_>, content: &str) -> Option<String> {
-    if matches!(node.kind(), "identifier" | "field_access") {
+    if node.kind() == "identifier" {
+        let declaration = binding(node, text(node, content), content)?;
+        return declaration
+            .parent()
+            .filter(|owner| owner.kind() == "local_variable_declaration")
+            .and_then(|_| literal(node, content, 1));
+    }
+    if node.kind() == "field_access" {
         return None;
     }
     string_expression(node, content, 0)
@@ -452,11 +459,25 @@ pub(super) fn receiver_type(node: Node<'_>, content: &str, depth: usize) -> Opti
         return None;
     }
     match node.kind() {
-        "this" => Some(
-            field_symbol(node, "", content)
-                .trim_end_matches('.')
-                .to_owned(),
-        ),
+        "this" => {
+            if let Some(owner) = text(node, content).strip_suffix(".this") {
+                return Some(qualified(node, owner, content));
+            }
+            if let Some(parent) = node.parent().filter(|parent| {
+                parent.kind() == "field_access" && parent.child_by_field_name("field") == Some(node)
+            }) {
+                return Some(qualified(
+                    node,
+                    text(parent.child_by_field_name("object")?, content),
+                    content,
+                ));
+            }
+            Some(
+                field_symbol(node, "", content)
+                    .trim_end_matches('.')
+                    .to_owned(),
+            )
+        }
         "super" => {
             let mut owner = node.parent();
             while let Some(current) = owner {
@@ -521,6 +542,17 @@ pub(super) fn receiver_type(node: Node<'_>, content: &str, depth: usize) -> Opti
             text(node.child_by_field_name("type")?, content),
             content,
         )),
+        "field_access"
+            if node
+                .child_by_field_name("field")
+                .is_some_and(|field| field.kind() == "this") =>
+        {
+            Some(qualified(
+                node,
+                text(node.child_by_field_name("object")?, content),
+                content,
+            ))
+        }
         "field_access"
             if node
                 .child_by_field_name("object")

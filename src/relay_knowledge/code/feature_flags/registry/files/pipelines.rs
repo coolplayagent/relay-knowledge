@@ -64,19 +64,7 @@ pub(super) fn extract(
             continue;
         }
         let incoming = if index >= 2 && matches!(tokens[index - 1], Token::Boundary('|')) {
-            match &tokens[index - 2] {
-                token @ Token::Literal(..)
-                    if index == 2
-                        || matches!(
-                            tokens[index - 3],
-                            Token::Boundary('(' | '|')
-                                | Token::Word("if" | "with" | "range" | ":=" | "=", _)
-                        ) =>
-                {
-                    Some(token)
-                }
-                _ => None,
-            }
+            pipeline_literal(&tokens, index - 1)
         } else {
             None
         };
@@ -152,4 +140,33 @@ fn literal_argument<'a, 'b>(
         index += 1;
     }
     Some((token, index))
+}
+
+fn pipeline_literal<'a, 'b>(tokens: &'a [Token<'b>], pipe: usize) -> Option<&'a Token<'b>> {
+    let mut start = pipe.checked_sub(1)?;
+    let mut depth = 0;
+    while matches!(tokens.get(start), Some(Token::Boundary(')'))) {
+        depth += 1;
+        if depth > 32 {
+            return None;
+        }
+        start = start.checked_sub(1)?;
+    }
+    if !matches!(tokens.get(start), Some(Token::Literal(..))) {
+        return None;
+    }
+    start = start.checked_sub(depth)?;
+    let (literal, end) = literal_argument(tokens, start)?;
+    if end != pipe {
+        return None;
+    }
+    if start != 0
+        && !matches!(
+            tokens[start - 1],
+            Token::Boundary('(' | '|') | Token::Word("if" | "with" | "range" | ":=" | "=", _)
+        )
+    {
+        return None;
+    }
+    Some(literal)
 }

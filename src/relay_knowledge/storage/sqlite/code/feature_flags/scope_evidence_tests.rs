@@ -885,3 +885,26 @@ fn oversized_parent_metadata_fails_only_dependent_queries() {
         "{error:?}"
     );
 }
+
+#[test]
+fn qualified_enclosing_this_getters_bind_outer_reads_and_guards() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[(
+            "Outer.java",
+            r#"package app; class Outer {boolean isEnabled(){return Boolean.getBoolean("outer_flag");} class Inner {void run(){if(Outer.this.isEnabled()) {}}}}"#,
+        )],
+    );
+    let groups = search(
+        &db,
+        &status(),
+        &request(Some("outer_flag"), CodeConfigFilter::default()),
+    )
+    .unwrap();
+    assert!(
+        groups.iter().any(|g| g.source_key == "outer_flag"
+            && g.usages.iter().any(|u| u.edge_kind == "guards_code")),
+        "{groups:?}"
+    );
+}

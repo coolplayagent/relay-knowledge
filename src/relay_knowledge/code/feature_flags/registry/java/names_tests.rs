@@ -711,3 +711,16 @@ fn inapplicable_reference_overloads_preserve_static_platform_reads() {
         );
     }
 }
+
+#[test]
+fn final_local_string_keys_resolve_but_mutable_locals_remain_unknown() {
+    let rows = facts(
+        "java",
+        r#"class Config {void run(){final String key="feature"; System.getProperty(key); String mutable="not_proven"; System.getProperty(mutable);}}"#,
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "feature" && r.edge_kind == "reads_config")
+    );
+    assert!(rows.iter().all(|r| r.source_key != "not_proven"));
+}

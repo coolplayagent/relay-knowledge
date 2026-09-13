@@ -27,8 +27,8 @@ pub(super) fn allexport(mut node: Node<'_>, content: &str) -> Result<(bool, bool
                     return Ok((mode, uncertain));
                 }
                 let conditional = match candidate.kind() {
-                    "compound_statement" => conditional,
-                    "list" | "if_statement" | "elif_clause" | "else_clause" | "while_statement"
+                    "compound_statement" | "list" => conditional,
+                    "if_statement" | "elif_clause" | "else_clause" | "while_statement"
                     | "for_statement" | "do_group" | "case_statement" | "case_item" => true,
                     _ => continue,
                 };
@@ -41,7 +41,12 @@ pub(super) fn allexport(mut node: Node<'_>, content: &str) -> Result<(bool, bool
                         ));
                     };
                     budget = remaining;
-                    pending.push((child, conditional));
+                    pending.push((
+                        child,
+                        conditional
+                            || (candidate.kind() == "list"
+                                && candidate.named_child(0) != Some(child)),
+                    ));
                 }
             }
             previous = statement.prev_named_sibling();

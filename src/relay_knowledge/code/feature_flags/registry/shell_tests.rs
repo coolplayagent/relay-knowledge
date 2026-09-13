@@ -515,3 +515,25 @@ fn conditional_allexport_retains_possible_definitions_as_incomplete() {
             .any(|r| r.source_key == "FLAG" && r.metadata.flow_incomplete.is_none())
     );
 }
+
+#[test]
+fn leading_short_circuit_exports_are_definite_but_right_operands_are_conditional() {
+    for op in ["&&", "||"] {
+        let rows = facts("bash", &format!("export FLAG=true {op} :; echo $FLAG"));
+        assert!(
+            rows.iter().any(|r| r.edge_kind == "defines_config"
+                && r.metadata.default_value.as_deref() == Some("true")),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .filter(|r| r.source_key == "FLAG")
+                .all(|r| r.metadata.flow_incomplete.is_none())
+        );
+        let rows = facts("bash", &format!(": {op} export FLAG=true; echo $FLAG"));
+        assert!(rows.iter().all(|r| r.edge_kind != "defines_config"));
+        assert!(rows.iter().any(|r| r.metadata.flow_incomplete.is_some()));
+    }
+    let rows = facts("bash", "set -a && :; FLAG=true; echo $FLAG");
+    assert!(rows.iter().any(|r| r.edge_kind == "defines_config"));
+}

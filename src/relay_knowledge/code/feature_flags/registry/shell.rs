@@ -167,6 +167,10 @@ fn unconditional(mut node: Node<'_>) -> bool {
         let Some(parent) = node.parent() else {
             return true;
         };
+        if parent.kind() == "list" && parent.named_child(0) == Some(node) {
+            node = parent;
+            continue;
+        }
         if !matches!(
             parent.kind(),
             "program" | "compound_statement" | "declaration_command"
@@ -307,10 +311,9 @@ fn shell_external(
                         continue;
                     }
                     let conditional = match candidate.kind() {
-                        "compound_statement" | "declaration_command" => conditional,
-                        "list" | "if_statement" | "elif_clause" | "else_clause"
-                        | "while_statement" | "for_statement" | "do_group" | "case_statement"
-                        | "case_item" => true,
+                        "compound_statement" | "declaration_command" | "list" => conditional,
+                        "if_statement" | "elif_clause" | "else_clause" | "while_statement"
+                        | "for_statement" | "do_group" | "case_statement" | "case_item" => true,
                         _ => continue,
                     };
                     let mut cursor = candidate.walk();
@@ -322,7 +325,12 @@ fn shell_external(
                             ));
                         }
                         budget -= 1;
-                        pending.push((child, conditional));
+                        pending.push((
+                            child,
+                            conditional
+                                || (candidate.kind() == "list"
+                                    && candidate.named_child(0) != Some(child)),
+                        ));
                     }
                 }
                 previous = statement.prev_named_sibling();
@@ -432,8 +440,8 @@ fn prior_assignment<'a>(
                 return Ok(None);
             }
             let conditional = match node.kind() {
-                "compound_statement" | "declaration_command" => conditional,
-                "list" | "if_statement" | "elif_clause" | "else_clause" | "while_statement"
+                "compound_statement" | "declaration_command" | "list" => conditional,
+                "if_statement" | "elif_clause" | "else_clause" | "while_statement"
                 | "for_statement" | "do_group" | "case_statement" | "case_item" => true,
                 _ => continue,
             };
@@ -445,7 +453,10 @@ fn prior_assignment<'a>(
                         "shell prior assignment analysis incomplete: node budget exceeded",
                     )
                 })?;
-                pending.push((child, conditional));
+                pending.push((
+                    child,
+                    conditional || (node.kind() == "list" && node.named_child(0) != Some(child)),
+                ));
             }
         }
         previous = statement.prev_named_sibling();
