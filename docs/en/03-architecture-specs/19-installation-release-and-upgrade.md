@@ -261,3 +261,5 @@ Configuration snapshot v34 preserves explicit/local Java receiver types in the p
 Configuration snapshot v35 propagates uncertainty from conditional variable unsets while ignoring function-only unsets. Reads satisfied by assignments within the same function, subshell or conditional body are not external configuration reads; bare exports without a known local assignment retain external-read evidence.
 
 Configuration snapshot v36 budgets Java field metadata before insertion. Oversized types retain bounded incomplete evidence and permit snapshot publication; queries requiring that type report an explicit incomplete-analysis error. Bodyless zero-argument getter declarations are inheritance barriers, never configuration providers.
+
+Configuration snapshot v37 emits inherited implicit getter references for bounded hierarchy resolution, retains annotation lookup at multiline SDK call openers, preserves structured Boolean facts from non-Consul Go templates, and records static Shell parameter-expansion fallbacks (`:-` and `-`). Dynamic or oversized fallbacks remain unknown with incomplete flow.

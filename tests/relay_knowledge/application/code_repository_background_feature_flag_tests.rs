@@ -62,6 +62,8 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
         "src/LargeReader.java",
         "class LargeReader {String read(){return System.getProperty(Generated.CONFIG_KEY);}}",
     );
+    repo.write("src/fallback.env", "FALLBACK_MODE=true\n");
+    repo.write("src/fallback.sh", "echo ${FALLBACK_MODE:-false}");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "fixture"]);
     let service = service_with_memory_store().await;
@@ -200,6 +202,31 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
     assert!(
         large.message.contains("type field metadata budget"),
         "{large:?}"
+    );
+    let fallback = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                Some("FALLBACK_MODE".into()),
+                filtered_selector("fixture", "HEAD", "src/fallback.sh"),
+                10,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap()
+            .with_filters(relay_knowledge::domain::CodeConfigFilter {
+                consistency: true,
+                ..Default::default()
+            })
+            .unwrap(),
+            context("query-shell-fallback-conflict"),
+        )
+        .await
+        .unwrap();
+    assert!(
+        fallback.flags.iter().any(|f| f
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.starts_with("conflicting_defaults"))),
+        "{fallback:?}"
     );
     let inherited = service
         .query_code_repository_feature_flags(

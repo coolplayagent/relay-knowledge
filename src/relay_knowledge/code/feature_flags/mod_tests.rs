@@ -712,3 +712,46 @@ fn consul_configuration_requires_ctmpl_extension() {
         assert_eq!(rows.is_empty(), !path.ends_with(".ctmpl"), "{path}");
     }
 }
+
+#[test]
+fn multiline_java_sdk_metadata_uses_the_call_opener() {
+    let source = "class App { void run() {\nvar client = OpenFeature.getClient();\n// @config domain=payments hot-reload=true\nclient.getBooleanValue(\n\"sdk_feature\", false);\n} }";
+    let rows = extract_feature_flags(FeatureFlagFileInput {
+        language_id: "java",
+        path: "App.java",
+        ..input(source)
+    })
+    .unwrap();
+    let row = rows.iter().find(|r| r.source_key == "sdk_feature").unwrap();
+    assert_eq!(row.metadata.domain.as_deref(), Some("payments"));
+    assert_eq!(row.metadata.hot_reload, Some(true));
+}
+
+#[test]
+fn non_consul_templates_retain_structured_boolean_definitions() {
+    let content = "feature: true\n{{ .Values.image }}";
+    let facts = [ConfigFact {
+        name: "feature".into(),
+        kind: "config_key",
+        value_kind: ConfigValueKind::Boolean,
+        range: ConfigRange {
+            byte_start: 0,
+            byte_end: 13,
+            line_start: 1,
+            line_end: 1,
+        },
+    }];
+    for path in ["templates/deployment.yaml", "templates/_helpers.tpl"] {
+        let rows = extract_feature_flags(FeatureFlagFileInput {
+            language_id: "gotemplate",
+            path,
+            config_facts: &facts,
+            ..input(content)
+        })
+        .unwrap();
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == "feature" && r.edge_kind == "defines_config")
+        );
+    }
+}

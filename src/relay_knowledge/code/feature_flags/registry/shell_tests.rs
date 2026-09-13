@@ -443,3 +443,38 @@ fn scoped_assignments_satisfy_reads_without_creating_parent_definitions() {
     );
     assert!(rows.iter().any(|r| r.edge_kind == "reads_config"));
 }
+
+#[test]
+fn parameter_expansions_keep_static_fallbacks_and_unknown_flow() {
+    for (expression, expected) in [
+        ("${FLAG:-false}", Some("false")),
+        ("${FLAG-false}", Some("false")),
+        ("${FLAG:-'off mode'}", Some("off mode")),
+        ("${FLAG:-}", Some("")),
+        ("${FLAG:-$OTHER}", None),
+    ] {
+        let rows = facts("bash", &format!("echo {expression}"));
+        let read = rows
+            .iter()
+            .find(|r| r.source_key == "FLAG" && r.edge_kind == "reads_config")
+            .unwrap();
+        assert_eq!(
+            read.metadata.default_value.as_deref(),
+            expected,
+            "{expression}"
+        );
+        assert_eq!(read.metadata.flow_incomplete.is_some(), expected.is_none());
+    }
+}
+
+#[test]
+fn escaped_parameter_fallbacks_respect_serialized_metadata_budget() {
+    let source = format!("echo ${{FLAG:-'{}'}}", "\\".repeat(40000));
+    let rows = facts("bash", &source);
+    let read = rows
+        .iter()
+        .find(|r| r.source_key == "FLAG" && r.edge_kind == "reads_config")
+        .unwrap();
+    assert!(read.metadata.default_value.is_none());
+    assert!(read.metadata.flow_incomplete.is_some());
+}

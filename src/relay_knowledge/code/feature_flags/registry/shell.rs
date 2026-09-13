@@ -79,6 +79,29 @@ pub(super) fn extract(
                         node.start_byte(),
                         node.end_byte(),
                     )?;
+                    if let Some(operator) = node
+                        .child_by_field_name("operator")
+                        .filter(|op| matches!(&input.content[op.byte_range()], ":-" | "-"))
+                    {
+                        let mut cursor = node.walk();
+                        let fallback = node
+                            .named_children(&mut cursor)
+                            .find(|child| child.start_byte() >= operator.end_byte());
+                        match values::static_value(fallback, input.content)?.filter(|value| {
+                            value.len() <= 60 * 1024
+                                && serde_json::to_string(value)
+                                    .is_ok_and(|json| json.len() <= 60 * 1024)
+                        }) {
+                            Some(value) => {
+                                row.metadata.value_type = Some(value_type(&value).into());
+                                row.metadata.default_value = Some(value);
+                            }
+                            None => {
+                                row.metadata.flow_incomplete =
+                                    Some("dynamic_parameter_fallback".into())
+                            }
+                        }
+                    }
                     if uncertain {
                         row.metadata.flow_incomplete = Some("conditional_reassignment".into());
                     }

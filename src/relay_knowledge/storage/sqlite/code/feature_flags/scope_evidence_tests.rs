@@ -786,3 +786,32 @@ fn abstract_redeclarations_stop_inherited_configuration_getters() {
         "{groups:?}"
     );
 }
+
+#[test]
+fn inherited_unqualified_getters_connect_child_guards() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[
+            (
+                "Base.java",
+                r#"class Base {boolean isEnabled(){return Boolean.getBoolean("feature");}}"#,
+            ),
+            (
+                "Child.java",
+                "class Child extends Base {void run(){if(isEnabled()) {}}}",
+            ),
+        ],
+    );
+    let mut query = request(None, CodeConfigFilter::default());
+    query.repository.path_filters = vec!["Child.java".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].source_key, "feature");
+    assert!(
+        groups[0]
+            .usages
+            .iter()
+            .any(|u| u.edge_kind == "guards_code")
+    );
+}

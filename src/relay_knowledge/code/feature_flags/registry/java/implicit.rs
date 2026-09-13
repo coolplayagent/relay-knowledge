@@ -45,7 +45,11 @@ pub(super) fn owner(mut node: Node<'_>, method: &str, content: &str) -> Option<S
                 p.child_by_field_name("superclass").is_some()
                     || p.child_by_field_name("interfaces").is_some()
             }) {
-                return None;
+                return Some(
+                    names::field_symbol(node, "", content)
+                        .trim_end_matches('.')
+                        .to_owned(),
+                );
             }
         }
         node = parent;
