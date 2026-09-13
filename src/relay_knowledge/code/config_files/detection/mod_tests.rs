@@ -21,3 +21,22 @@ fn recovery_requires_a_balanced_language_specific_shape() {
     assert!(manual_parse_status("gotemplate", "{{ .Values.name }}"));
     assert!(!manual_parse_status("gotemplate", "{{ .Values.name"));
 }
+
+#[test]
+fn gotemplate_feature_flag_delimiters_inside_literals_and_comments_are_balanced() {
+    for source in [
+        r#"{{ keyOrDefault "feature" `{"template":"{{value}}"}` }}"#,
+        r#"{{ key "{{quoted}}" }}"#,
+        "{{/* {{ ignored }} */}}",
+        r#"{{ key "escaped\"}}" }}"#,
+    ] {
+        assert!(manual_parse_status("gotemplate", source), "{source}");
+    }
+    for source in [
+        r#"{{ key "unterminated }}"#,
+        "{{/* unterminated }}",
+        "{{ key `value`",
+    ] {
+        assert!(!manual_parse_status("gotemplate", source), "{source}");
+    }
+}

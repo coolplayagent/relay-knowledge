@@ -85,6 +85,10 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
             "x".repeat(70000)
         ),
     );
+    repo.write(
+        "src/quoted-delimiter.ctmpl",
+        r#"{{ keyOrDefault "quoted_delimiter" `{"template":"{{value}}"}` }}"#,
+    );
     repo.write("src/fallback.env", "FALLBACK_MODE=true\n");
     repo.write("src/fallback.sh", "echo ${FALLBACK_MODE:=false}");
     repo.git(["add", "."]);
@@ -123,6 +127,10 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
         .await
         .unwrap();
     assert_eq!(dotenv.flags.len(), 2, "{dotenv:?}");
+    assert!(
+        dotenv.flags.iter().all(|flag| flag.analysis_complete),
+        "{dotenv:?}"
+    );
     assert!(dotenv.flags.iter().all(|f| f.source_kind == "env_var"));
     assert!(dotenv.flags.iter().any(|f| {
         f.source_key == "DOTENV_MODE"

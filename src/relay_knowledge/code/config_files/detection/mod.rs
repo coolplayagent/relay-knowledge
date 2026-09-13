@@ -89,7 +89,7 @@ fn gotemplate_actions_balanced(content: &str) -> bool {
             return false;
         }
         let after_start = &rest[start + "{{".len()..];
-        let Some(end) = after_start.find("}}") else {
+        let Some(end) = template_action_end(after_start, 0) else {
             return false;
         };
         rest = &after_start[end + "}}".len()..];
@@ -206,4 +206,41 @@ fn content_template_name(file_name: &str) -> bool {
 
 fn template_directory_path(path: &str) -> bool {
     path.starts_with("templates/") || path.contains("/templates/")
+}
+
+pub(in crate::code) fn template_action_end(content: &str, start: usize) -> Option<usize> {
+    let tail = content[start..]
+        .trim_start()
+        .trim_start_matches('-')
+        .trim_start();
+    if let Some(comment) = tail.strip_prefix("/*") {
+        let close = comment.find("*/")?;
+        let suffix = comment[close + 2..]
+            .trim_start()
+            .trim_start_matches('-')
+            .trim_start();
+        return suffix
+            .starts_with("}}")
+            .then_some(content.len() - suffix.len());
+    }
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, ch) in content[start..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == '\\' && q != '`' {
+                escaped = true;
+            } else if ch == q {
+                quote = None;
+            }
+        } else if matches!(ch, '"' | '`') {
+            quote = Some(ch);
+        } else if content[start + index..].starts_with("}}") {
+            return Some(start + index);
+        }
+    }
+    None
 }

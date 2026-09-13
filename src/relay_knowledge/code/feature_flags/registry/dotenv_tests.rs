@@ -44,3 +44,42 @@ fn oversized_dotenv_values_keep_definitions_without_blocking_following_keys() {
     assert!(rows[0].metadata.flow_incomplete.is_some());
     assert_eq!(rows[1].metadata.default_value.as_deref(), Some("true"));
 }
+
+#[test]
+fn dotenv_hashes_require_comment_boundaries_and_support_all_line_endings() {
+    for newline in ["\n", "\r", "\r\n"] {
+        let source = [
+            "URL=https://example.test/#fragment",
+            "TOKEN=abc#123",
+            "FLAG=true # comment",
+            "EMPTY=",
+            "LAST=false",
+        ]
+        .join(newline)
+            + newline;
+        let rows = extract(&FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path: ".env",
+            language_id: "unknown",
+            content: &source,
+            config_facts: &[],
+        })
+        .unwrap();
+        assert_eq!(rows.len(), 5);
+        for (row, expected) in rows.iter().zip([
+            "https://example.test/#fragment",
+            "abc#123",
+            "true",
+            "",
+            "false",
+        ]) {
+            assert_eq!(row.metadata.default_value.as_deref(), Some(expected));
+            assert!(
+                source[row.byte_range.start as usize..row.byte_range.end as usize]
+                    .contains(&row.source_key)
+            );
+        }
+    }
+}

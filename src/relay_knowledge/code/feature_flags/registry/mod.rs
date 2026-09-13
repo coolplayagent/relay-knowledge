@@ -173,23 +173,7 @@ pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeCo
         let Some(comment) = comment else {
             break;
         };
-        if let Some((_, annotation)) = comment.split_once("@config ") {
-            for part in annotation.split_whitespace() {
-                if let Some((key, value)) = part.split_once('=') {
-                    match key {
-                        "domain" => {
-                            meta.domain = if !value.is_empty() && value.len() <= 128 {
-                                let normalized = value.to_lowercase();
-                                (normalized.len() <= 128).then_some(normalized)
-                            } else {
-                                None
-                            };
-                        }
-                        "hot-reload" => meta.hot_reload = value.parse().ok(),
-                        _ => {}
-                    }
-                }
-            }
+        if apply_annotation(&mut meta, comment) {
             break;
         }
     }
@@ -224,4 +208,27 @@ fn set_default(metadata: &mut CodeConfigMetadata, value: String) {
         metadata.value_type = None;
         metadata.flow_incomplete = Some("configuration_value_budget_exceeded".into());
     }
+}
+
+fn apply_annotation(meta: &mut CodeConfigMetadata, comment: &str) -> bool {
+    if let Some((_, annotation)) = comment.split_once("@config ") {
+        for part in annotation.split_whitespace() {
+            if let Some((key, value)) = part.split_once('=') {
+                match key {
+                    "domain" => {
+                        meta.domain = if !value.is_empty() && value.len() <= 128 {
+                            let normalized = value.to_lowercase();
+                            (normalized.len() <= 128).then_some(normalized)
+                        } else {
+                            None
+                        };
+                    }
+                    "hot-reload" => meta.hot_reload = value.parse().ok(),
+                    _ => {}
+                }
+            }
+        }
+        return true;
+    }
+    false
 }

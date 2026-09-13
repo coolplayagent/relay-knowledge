@@ -59,6 +59,24 @@ pub(super) fn extract(
                 let key = &input.content[name.byte_range()];
                 if let Some((assignment, uncertain)) = prior_assignment(node, key, input.content)? {
                     if let Some(mut row) = definition(input, assignment)? {
+                        let site = metadata(input, node.start_byte());
+                        row.metadata.domain = site.domain.or(row.metadata.domain);
+                        row.metadata.hot_reload = site.hot_reload.or(row.metadata.hot_reload);
+                        if let Some(comment) = node
+                            .prev_named_sibling()
+                            .filter(|previous| previous.kind() == "comment")
+                        {
+                            let gap = &input.content[comment.end_byte()..node.start_byte()];
+                            if gap.trim().is_empty()
+                                && gap.matches('\n').count() <= 1
+                                && comment.byte_range().len() <= 8192
+                            {
+                                apply_annotation(
+                                    &mut row.metadata,
+                                    &input.content[comment.byte_range()],
+                                );
+                            }
+                        }
                         if uncertain {
                             row.metadata.default_value = None;
                             row.metadata.value_type = None;

@@ -1,5 +1,6 @@
 //! Properties/INI/template values and exported shell configuration facts.
 use super::*;
+use crate::code::config_files::template_action_end as action_end;
 mod go_strings;
 pub(super) const PROPERTY_WHITESPACE: [char; 3] = [' ', '\t', '\u{c}'];
 mod pipelines;
@@ -199,42 +200,6 @@ fn template_reads(
         offset = end + 2;
     }
     Ok(())
-}
-fn action_end(content: &str, start: usize) -> Option<usize> {
-    let tail = content[start..]
-        .trim_start()
-        .trim_start_matches('-')
-        .trim_start();
-    if let Some(comment) = tail.strip_prefix("/*") {
-        let close = comment.find("*/")?;
-        let suffix = comment[close + 2..]
-            .trim_start()
-            .trim_start_matches('-')
-            .trim_start();
-        return suffix
-            .starts_with("}}")
-            .then_some(content.len() - suffix.len());
-    }
-    let mut quote = None;
-    let mut escaped = false;
-    for (index, ch) in content[start..].char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if let Some(q) = quote {
-            if ch == '\\' && q != '`' {
-                escaped = true;
-            } else if ch == q {
-                quote = None;
-            }
-        } else if matches!(ch, '"' | '`') {
-            quote = Some(ch);
-        } else if content[start + index..].starts_with("}}") {
-            return Some(start + index);
-        }
-    }
-    None
 }
 pub(super) fn quoted(raw: &str) -> Option<(String, usize)> {
     let quote = raw.chars().next()?;

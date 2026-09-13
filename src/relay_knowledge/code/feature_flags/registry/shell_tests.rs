@@ -537,3 +537,21 @@ fn leading_short_circuit_exports_are_definite_but_right_operands_are_conditional
     let rows = facts("bash", "set -a && :; FLAG=true; echo $FLAG");
     assert!(rows.iter().any(|r| r.edge_kind == "defines_config"));
 }
+
+#[test]
+fn bare_exports_use_export_annotations_and_preserve_assignment_value_evidence() {
+    for source in [
+        "FLAG=true\n# @config domain=payments hot-reload=true\nexport FLAG",
+        "FLAG=true; # @config domain=payments hot-reload=true\nexport FLAG",
+    ] {
+        let rows = facts("bash", source);
+        let row = rows
+            .iter()
+            .find(|r| r.source_key == "FLAG" && r.edge_kind == "defines_config")
+            .unwrap();
+        assert_eq!(row.metadata.default_value.as_deref(), Some("true"));
+        assert_eq!(row.metadata.domain.as_deref(), Some("payments"));
+        assert_eq!(row.metadata.hot_reload, Some(true));
+        assert!(row.excerpt.contains("FLAG=true"));
+    }
+}
