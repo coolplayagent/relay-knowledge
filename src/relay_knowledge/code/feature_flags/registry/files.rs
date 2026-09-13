@@ -15,12 +15,18 @@ pub(super) fn extract(
     let mut start = 0;
     let mut logical = String::new();
     let mut section = String::new();
+    let mut comment_end = 0;
     let mut segments = input.content.split_inclusive(['\r', '\n']).peekable();
     while let Some(segment) = segments.next() {
         if logical.is_empty() {
             start = offset;
         }
         let line = segment.trim_end_matches(['\r', '\n']);
+        let line = if input.language_id == "gotemplate" {
+            template_output_line(input.content, offset, offset + line.len(), &mut comment_end)?
+        } else {
+            line
+        };
         offset += segment.len();
         if segment.ends_with('\r') && segments.peek() == Some(&"\n") {
             segments.next();
@@ -260,3 +266,47 @@ pub(super) fn quoted(raw: &str) -> Option<(String, usize)> {
 #[cfg(test)]
 #[path = "files_tests.rs"]
 mod tests;
+
+fn template_output_line<'a>(
+    content: &'a str,
+    start: usize,
+    end: usize,
+    comment_end: &mut usize,
+) -> Result<&'a str, DomainError> {
+    let mut begin = start.max(*comment_end).min(end);
+    for _ in 0..32 {
+        let line = content[begin..end].trim_start();
+        let Some(action) = line.strip_prefix("{{") else {
+            return Ok(line);
+        };
+        if !action
+            .trim_start()
+            .trim_start_matches('-')
+            .trim_start()
+            .starts_with("/*")
+        {
+            return Ok(line);
+        }
+        let open = end - line.len();
+        let Some(close) = action_end(content, open + 2) else {
+            *comment_end = content.len();
+            return Ok("");
+        };
+        if close - open > 8192 {
+            return Err(DomainError::invalid(
+                "configuration",
+                "template leading comment byte budget exceeded",
+            ));
+        }
+        *comment_end = close + 2;
+        begin = (*comment_end).min(end);
+    }
+    let line = content[begin..end].trim_start();
+    if line.starts_with("{{") {
+        return Err(DomainError::invalid(
+            "configuration",
+            "template leading comment count budget exceeded",
+        ));
+    }
+    Ok(line)
+}

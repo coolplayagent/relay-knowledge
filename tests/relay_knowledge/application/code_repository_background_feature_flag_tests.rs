@@ -42,7 +42,15 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
             "x".repeat(70000)
         ),
     );
-    repo.write("src/pipeline.ctmpl", r#"{{ "consul/pipeline" | key }}"#);
+    repo.write(
+        "src/pipeline.ctmpl",
+        r#"{{/*
+@config domain=payments hot-reload=true
+*/}}
+{{ key ("consul/pipeline") }}
+{{ "consul/pipeline" | key }}
+{{/* generated */}}template_defined=true"#,
+    );
     repo.write("src/conditional.sh", r#"export CONDITIONAL_MODE=base; if test -f marker; then CONDITIONAL_MODE=override; fi; echo "$CONDITIONAL_MODE""#);
     repo.write("src/conditional-unset.sh", r#"export UNSET_MODE=base; if test -f marker; then unset UNSET_MODE; fi; echo "$UNSET_MODE""#);
     repo.write(
@@ -156,6 +164,21 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
             result.flags.iter().any(|f| f.source_key == key),
             "{result:?}"
         );
+        if path.ends_with(".ctmpl") {
+            assert!(
+                result
+                    .flags
+                    .iter()
+                    .any(|f| f.source_key == "template_defined")
+            );
+            assert!(result.flags.iter().any(|f| {
+                f.source_key == key
+                    && f.usages.iter().any(|u| {
+                        u.metadata.domain.as_deref() == Some("payments")
+                            && u.metadata.hot_reload == Some(true)
+                    })
+            }));
+        }
         if path.ends_with(".sh") {
             let flag = result.flags.iter().find(|f| f.source_key == key).unwrap();
             assert!(!flag.analysis_complete);

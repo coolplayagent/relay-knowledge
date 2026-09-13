@@ -815,3 +815,33 @@ fn inherited_unqualified_getters_connect_child_guards() {
             .any(|u| u.edge_kind == "guards_code")
     );
 }
+
+#[test]
+fn super_qualified_key_fields_use_the_superclass_provider() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[
+            (
+                "Base.java",
+                r#"package app; class Base {protected static final String KEY="base_key";}"#,
+            ),
+            (
+                "Child.java",
+                r#"package app; class Child extends Base {static final String KEY="child_key"; String read(){return System.getProperty(super.KEY);}}"#,
+            ),
+        ],
+    );
+    let mut query = request(None, CodeConfigFilter::default());
+    query.repository.path_filters = vec!["Child.java".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert!(
+        groups.iter().any(|g| g.source_key == "base_key"
+            && g.usages.iter().any(|u| u.edge_kind == "reads_config")),
+        "{groups:?}"
+    );
+    assert!(
+        groups.iter().all(|g| g.source_key != "child_key"
+            || g.usages.iter().all(|u| u.edge_kind != "reads_config"))
+    );
+}

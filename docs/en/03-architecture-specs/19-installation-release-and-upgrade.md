@@ -263,3 +263,5 @@ Configuration snapshot v35 propagates uncertainty from conditional variable unse
 Configuration snapshot v36 budgets Java field metadata before insertion. Oversized types retain bounded incomplete evidence and permit snapshot publication; queries requiring that type report an explicit incomplete-analysis error. Bodyless zero-argument getter declarations are inheritance barriers, never configuration providers.
 
 Configuration snapshot v37 emits inherited implicit getter references for bounded hierarchy resolution, retains annotation lookup at multiline SDK call openers, preserves structured Boolean facts from non-Consul Go templates, and records static Shell parameter-expansion fallbacks (`:-` and `-`). Dynamic or oversized fallbacks remain unknown with incomplete flow.
+
+Configuration snapshot v38 resolves super-qualified Java keys against superclass providers, accepts bounded parenthesized template literals, reads adjacent multiline Go-template comment annotations, and retains static output after leading comment actions.

@@ -80,9 +80,9 @@ pub(super) fn extract(
         } else {
             None
         };
-        let explicit = tokens.get(index + 1);
+        let explicit = literal_argument(&tokens, index + 1);
         let key_token = match explicit {
-            Some(token @ Token::Literal(..)) => Some(token),
+            Some((token, _)) => Some(token),
             _ if *command != "keyOrDefault" => incoming,
             _ => None,
         };
@@ -90,8 +90,8 @@ pub(super) fn extract(
             continue;
         };
         let fallback = if *command == "keyOrDefault" {
-            match tokens.get(index + 2) {
-                Some(token @ Token::Literal(..)) => Some(token),
+            match explicit.and_then(|(_, next)| literal_argument(&tokens, next)) {
+                Some((token, _)) => Some(token),
                 _ => incoming,
             }
         } else {
@@ -126,4 +126,29 @@ pub(super) fn extract(
         rows.push(row);
     }
     Ok(())
+}
+
+fn literal_argument<'a, 'b>(
+    tokens: &'a [Token<'b>],
+    mut index: usize,
+) -> Option<(&'a Token<'b>, usize)> {
+    let mut depth = 0;
+    while matches!(tokens.get(index), Some(Token::Boundary('('))) {
+        depth += 1;
+        if depth > 32 {
+            return None;
+        }
+        index += 1;
+    }
+    let token = tokens
+        .get(index)
+        .filter(|t| matches!(t, Token::Literal(..)))?;
+    index += 1;
+    for _ in 0..depth {
+        if !matches!(tokens.get(index), Some(Token::Boundary(')'))) {
+            return None;
+        }
+        index += 1;
+    }
+    Some((token, index))
 }

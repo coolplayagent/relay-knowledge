@@ -288,3 +288,53 @@ fn template_pipelines_pass_literals_as_final_reader_arguments() {
     assert!(fallback.excerpt.contains("keyOrDefault"));
     assert!(rows.iter().all(|r| r.byte_range.start < r.byte_range.end));
 }
+
+#[test]
+fn template_grouped_literals_are_reader_arguments() {
+    let rows = facts(
+        "gotemplate",
+        r#"{{ key ("consul/feature") }} {{ env (("HOST")) }} {{ keyOrDefault ("feature") (("false")) }} {{ key (printf "not_static") }}"#,
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|r| r.source_key.as_str())
+            .collect::<Vec<_>>(),
+        ["consul/feature", "HOST", "feature"]
+    );
+    assert_eq!(rows[2].metadata.default_value.as_deref(), Some("false"));
+}
+
+#[test]
+fn template_comments_preserve_adjacent_metadata_and_following_output() {
+    let rows = facts(
+        "gotemplate",
+        "{{/*\n@config domain=payments hot-reload=true\n*/}}\n{{ key \"feature\" }}\n{{/* generated */}}feature=true\n{{- /* generated */ -}}other=false\n",
+    );
+    let read = rows.iter().find(|r| r.edge_kind == "reads_config").unwrap();
+    assert_eq!(read.metadata.domain.as_deref(), Some("payments"));
+    assert_eq!(read.metadata.hot_reload, Some(true));
+    assert!(
+        rows.iter()
+            .all(|r| matches!(r.source_key.as_str(), "feature" | "other"))
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "feature" && r.edge_kind == "defines_config")
+    );
+    assert!(
+        rows.iter().any(
+            |r| r.source_key == "other" && r.metadata.default_value.as_deref() == Some("false")
+        )
+    );
+}
+
+#[test]
+fn multiline_template_comments_hide_assignments_and_preserve_trailing_output() {
+    let rows = facts(
+        "gotemplate",
+        "{{/* generated\nhidden=false\n*/}}visible=true\n",
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].source_key, "visible");
+    assert_eq!(rows[0].metadata.default_value.as_deref(), Some("true"));
+}

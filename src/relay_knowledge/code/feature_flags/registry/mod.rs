@@ -94,14 +94,21 @@ pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeCo
         .strip_suffix("\r\n")
         .or_else(|| prefix.strip_suffix(['\r', '\n']))
         .unwrap_or(prefix);
-    let block = if input.language_id == "java"
-        && adjacent
+    let delimiters = match input.language_id {
+        "java" => Some(("/*", "*/")),
+        "gotemplate" => Some(("{{", "}}")),
+        _ => None,
+    };
+    let block = delimiters.and_then(|(open, close)| {
+        if !adjacent
             .rsplit(['\r', '\n'])
             .next()
-            .is_some_and(|line| line.trim_end().ends_with("*/"))
-    {
+            .is_some_and(|line| line.trim_end().ends_with(close))
+        {
+            return None;
+        }
         prefix
-            .rfind("/*")
+            .rfind(open)
             .filter(|begin| {
                 prefix.len() - begin <= 8192
                     && prefix[*begin..].lines().count() <= 32
@@ -109,11 +116,15 @@ pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeCo
                         .rsplit(['\r', '\n'])
                         .next()
                         .is_some_and(|line| line.trim().is_empty())
+                    && (input.language_id == "java"
+                        || prefix[*begin + 2..]
+                            .trim_start()
+                            .trim_start_matches('-')
+                            .trim_start()
+                            .starts_with("/*"))
             })
             .map(|begin| &prefix[begin..])
-    } else {
-        None
-    };
+    });
     let mut remaining = Some(adjacent);
     let lines = std::iter::from_fn(|| {
         let rest = remaining.take()?;
@@ -144,8 +155,13 @@ pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeCo
             "ini" => line.strip_prefix('#').or_else(|| line.strip_prefix(';')),
             "bash" => line.strip_prefix('#'),
             "gotemplate" => line
-                .strip_prefix("{{/*")
-                .or_else(|| line.strip_prefix("{{- /*"))
+                .strip_prefix("{{")
+                .and_then(|s| {
+                    s.trim_start()
+                        .trim_start_matches('-')
+                        .trim_start()
+                        .strip_prefix("/*")
+                })
                 .map(|s| s.split("*/").next().unwrap_or(s)),
             _ => None,
         };
