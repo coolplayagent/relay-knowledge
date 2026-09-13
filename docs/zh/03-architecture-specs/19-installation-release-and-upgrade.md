@@ -223,3 +223,5 @@ Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_re
 配置快照 v38 将 Java super 限定的键解析到父类提供者，支持有界的模板括号字面量参数，识别相邻多行 Go 模板注释中的配置标注，并保留前导注释动作之后的静态输出。
 
 超大静态配置默认值保留定义事实，将值标记为未知并记录分析不完整，不再阻断快照发布。Shell 赋值式参数默认值（`:=`/`=`）保留静态回退值；格式清单扫描超限时使用统一的分析不完整错误。 Fact version: `config-registry-v39`.
+
+Dotenv 使用独立赋值语法，支持等号两侧空格、带引号多行值与注释。超大 Shell/dotenv 默认值和 Java 父类型元数据保留有界不完整事实；依赖这些继承证据的查询报告分析不完整。条件式 allexport 变更保留可能定义及不确定性。Java `this.KEY` 可以解析继承字段，不与局部变量混淆。 Fact version: `config-registry-v40`.

@@ -227,6 +227,22 @@ pub(super) fn extract(
                     marker.metadata.bindings = bindings;
                     rows.push(marker);
                 }
+                for row in &mut rows {
+                    if serde_json::to_string(&row.metadata).is_ok_and(|json| json.len() > 65_536) {
+                        let reference = row
+                            .metadata
+                            .reference
+                            .take()
+                            .filter(|value| value.len() <= 1024);
+                        row.metadata = CodeConfigMetadata {
+                            source_format: "java".into(),
+                            target_kind: row.metadata.target_kind.take(),
+                            reference,
+                            flow_incomplete: Some("java_metadata_budget_exceeded".into()),
+                            ..Default::default()
+                        };
+                    }
+                }
                 return Ok(rows);
             }
         }

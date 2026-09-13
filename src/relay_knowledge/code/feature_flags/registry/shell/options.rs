@@ -1,11 +1,12 @@
 //! Bounded lexical allexport state; conditional and deferred changes are not assumed.
 use crate::domain::DomainError;
 use tree_sitter::Node;
-pub(super) fn allexport(mut node: Node<'_>, content: &str) -> Result<bool, DomainError> {
+pub(super) fn allexport(mut node: Node<'_>, content: &str) -> Result<(bool, bool), DomainError> {
     let mut budget = 1024usize;
+    let mut uncertain = false;
     while let Some(parent) = node.parent() {
         if parent.kind() == "function_definition" {
-            return Ok(false);
+            return Ok((false, uncertain));
         }
         let mut previous = node.prev_named_sibling();
         while let Some(statement) = previous {
@@ -19,7 +20,11 @@ pub(super) fn allexport(mut node: Node<'_>, content: &str) -> Result<bool, Domai
                 };
                 budget = remaining;
                 if let Some(mode) = mode(candidate, content) {
-                    return Ok(!conditional && mode);
+                    if conditional {
+                        uncertain = true;
+                        continue;
+                    }
+                    return Ok((mode, uncertain));
                 }
                 let conditional = match candidate.kind() {
                     "compound_statement" => conditional,
@@ -43,7 +48,7 @@ pub(super) fn allexport(mut node: Node<'_>, content: &str) -> Result<bool, Domai
         }
         node = parent;
     }
-    Ok(false)
+    Ok((false, uncertain))
 }
 fn mode(node: Node<'_>, content: &str) -> Option<bool> {
     if node.kind() != "command" {

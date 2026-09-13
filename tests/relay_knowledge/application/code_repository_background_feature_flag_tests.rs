@@ -31,7 +31,7 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
     ] {
         repo.write(path, source);
     }
-    repo.write("src/.env", "DOTENV_MODE=production\nDOTENV_PORT=8080\n");
+    repo.write("src/.env", "DOTENV_MODE = production\nDOTENV_PORT=8080\n");
     for path in ["src/.env.example", "src/.env.production"] {
         repo.write(path, "TEMPLATE_MODE=production\n");
     }
@@ -73,6 +73,10 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
     repo.write(
         "src/large-default.ini",
         &format!("large_default={}\n", "x".repeat(70000)),
+    );
+    repo.write(
+        "src/large-default.env",
+        &format!("LARGE_DEFAULT={}\n", "x".repeat(70000)),
     );
     repo.write("src/fallback.env", "FALLBACK_MODE=true\n");
     repo.write("src/fallback.sh", "echo ${FALLBACK_MODE:=false}");

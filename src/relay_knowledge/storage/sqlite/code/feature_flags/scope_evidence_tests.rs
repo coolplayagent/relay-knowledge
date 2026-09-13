@@ -845,3 +845,43 @@ fn super_qualified_key_fields_use_the_superclass_provider() {
             || g.usages.iter().all(|u| u.edge_kind != "reads_config"))
     );
 }
+
+#[test]
+fn this_qualified_inherited_keys_resolve_without_local_field_declarations() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[
+            (
+                "Base.java",
+                r#"package app; class Base {protected static final String KEY="base_key";}"#,
+            ),
+            (
+                "Child.java",
+                r#"package app; class Child extends Base {String read(){String KEY="local_key"; return System.getProperty(this.KEY);}}"#,
+            ),
+        ],
+    );
+    let mut query = request(None, CodeConfigFilter::default());
+    query.repository.path_filters = vec!["Child.java".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert!(
+        groups.iter().any(|g| g.source_key == "base_key"
+            && g.usages.iter().any(|u| u.edge_kind == "reads_config")),
+        "{groups:?}"
+    );
+}
+#[test]
+fn oversized_parent_metadata_fails_only_dependent_queries() {
+    let db = fixture();
+    let source = format!(
+        "class Child extends external.{} {{ String read() {{return System.getProperty(this.KEY);}} }}",
+        "LongType".repeat(9000)
+    );
+    java_files(&db, &[("Child.java", &source)]);
+    let error = search(&db, &status(), &request(None, CodeConfigFilter::default())).unwrap_err();
+    assert!(
+        error.to_string().contains("type parent metadata budget"),
+        "{error:?}"
+    );
+}

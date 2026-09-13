@@ -34,6 +34,9 @@ impl Hierarchy {
             .map(|r| r.source_key.clone())
             .collect::<BTreeSet<_>>();
         for row in rows {
+            if row.edge_kind == "config_type_hierarchy" && row.metadata.flow_incomplete.is_some() {
+                return Err(incomplete("Java type parent metadata budget exceeded"));
+            }
             if row.edge_kind == "config_type_declaration" {
                 if row.metadata.flow_incomplete.is_some() {
                     return Err(incomplete("Java type field metadata budget exceeded"));

@@ -140,3 +140,19 @@ fn abstract_getters_emit_barriers_without_configuration_providers() {
     assert!(marker.metadata.getter_abstract);
     assert!(!rows.iter().any(|r| r.edge_kind == "reads_config"));
 }
+
+#[test]
+fn oversized_parent_metadata_keeps_bounded_incomplete_hierarchy() {
+    let source = format!(
+        "class Child extends external.{} {{}}",
+        "LongType".repeat(9000)
+    );
+    let rows = raw_facts("java", &source);
+    let hierarchy = rows
+        .iter()
+        .find(|r| r.edge_kind == "config_type_hierarchy")
+        .unwrap();
+    assert!(hierarchy.metadata.flow_incomplete.is_some());
+    assert!(hierarchy.metadata.bindings.is_empty());
+    assert!(serde_json::to_string(&hierarchy.metadata).unwrap().len() < 65536);
+}

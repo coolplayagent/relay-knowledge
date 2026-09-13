@@ -6,7 +6,6 @@ mod options;
 mod values;
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
-    dotenv: bool,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     let mut parser = tree_sitter::Parser::new();
     parser
@@ -18,30 +17,40 @@ pub(super) fn extract(
     let mut pending = vec![tree.root_node()];
     let mut rows = Vec::new();
     while let Some(node) = pending.pop() {
-        if node.kind() == "variable_assignment"
-            && unconditional(node)
-            && (dotenv
-                || node
-                    .parent()
-                    .and_then(|parent| export_mode(parent, input.content))
-                    == Some(true)
-                || options::allexport(node, input.content)?
-                || shell_external(
-                    node,
-                    node.child_by_field_name("name")
-                        .map(|name| &input.content[name.byte_range()])
-                        .unwrap_or(""),
-                    input.content,
-                    false,
-                )?
-                .0)
-        {
-            if let Some(row) = definition(input, node)? {
-                check_fact_budget(rows.len())?;
-                rows.push(row);
+        if node.kind() == "variable_assignment" && unconditional(node) {
+            let explicit = node
+                .parent()
+                .and_then(|parent| export_mode(parent, input.content))
+                == Some(true)
+                || {
+                    let (external, _) = shell_external(
+                        node,
+                        node.child_by_field_name("name")
+                            .map(|name| &input.content[name.byte_range()])
+                            .unwrap_or(""),
+                        input.content,
+                        false,
+                    )?;
+                    external
+                };
+            let (enabled, uncertain) = if explicit {
+                (false, false)
+            } else {
+                options::allexport(node, input.content)?
+            };
+            if explicit || enabled || uncertain {
+                if let Some(mut row) = definition(input, node)? {
+                    if uncertain && !explicit {
+                        row.metadata.flow_incomplete = Some("conditional_allexport".into());
+                        row.metadata.default_value = None;
+                        row.metadata.value_type = None;
+                    }
+                    check_fact_budget(rows.len())?;
+                    rows.push(row);
+                }
             }
         }
-        if !dotenv && export_mode(node, input.content) == Some(true) && unconditional(node) {
+        if export_mode(node, input.content) == Some(true) && unconditional(node) {
             let mut cursor = node.walk();
             for name in node
                 .named_children(&mut cursor)
@@ -61,7 +70,7 @@ pub(super) fn extract(
                 }
             }
         }
-        if !dotenv && matches!(node.kind(), "simple_expansion" | "expansion") {
+        if matches!(node.kind(), "simple_expansion" | "expansion") {
             let mut cursor = node.walk();
             if let Some(name) = node
                 .named_children(&mut cursor)
@@ -290,8 +299,9 @@ fn shell_external(
                         if inherited_external && !unconditional(candidate) {
                             return Ok((false, uncertain));
                         }
-                        if options::allexport(candidate, content)? {
-                            return Ok((true, uncertain));
+                        let (enabled, conditional_mode) = options::allexport(candidate, content)?;
+                        if enabled || conditional_mode {
+                            return Ok((true, uncertain || conditional_mode));
                         }
                         assigned = true;
                         continue;
@@ -346,8 +356,7 @@ fn definition(
     } else {
         values::static_value(node.child_by_field_name("value"), input.content)?
     } {
-        row.metadata.value_type = Some(value_type(&value).to_owned());
-        row.metadata.default_value = Some(value);
+        set_default(&mut row.metadata, value);
     }
     Ok(Some(row))
 }

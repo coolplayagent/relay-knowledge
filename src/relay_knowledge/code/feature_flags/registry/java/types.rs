@@ -150,6 +150,13 @@ impl Hierarchy {
                     );
                 }
             }
+            if serde_json::to_string(&row.metadata).is_ok_and(|json| json.len() > 60 * 1024) {
+                row.metadata = crate::domain::CodeConfigMetadata {
+                    source_format: "java".into(),
+                    flow_incomplete: Some("type_parent_metadata_budget_exceeded".into()),
+                    ..Default::default()
+                };
+            }
             facts.push(row);
         }
         {

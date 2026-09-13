@@ -482,3 +482,36 @@ fn escaped_parameter_fallbacks_respect_serialized_metadata_budget() {
     assert!(read.metadata.default_value.is_none());
     assert!(read.metadata.flow_incomplete.is_some());
 }
+
+#[test]
+fn oversized_exported_shell_defaults_retain_incomplete_definitions() {
+    for value in ["x".repeat(70000), "\\".repeat(40000)] {
+        let rows = facts("bash", &format!("export CERT='{value}'\n"));
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].metadata.default_value.is_none());
+        assert!(rows[0].metadata.flow_incomplete.is_some());
+    }
+}
+#[test]
+fn conditional_allexport_retains_possible_definitions_as_incomplete() {
+    for source in [
+        "set -a; if test -f marker; then set +a; fi; FLAG=value; echo $FLAG",
+        "if test -f marker; then set -a; fi; FLAG=value; echo $FLAG",
+    ] {
+        let rows = facts("bash", source);
+        let definition = rows
+            .iter()
+            .find(|r| r.source_key == "FLAG" && r.edge_kind == "defines_config")
+            .unwrap();
+        assert!(definition.metadata.flow_incomplete.is_some(), "{rows:?}");
+        assert!(definition.metadata.default_value.is_none());
+    }
+    let rows = facts(
+        "bash",
+        "set -a; if test -f marker; then set +a; fi; set -a; FLAG=value",
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "FLAG" && r.metadata.flow_incomplete.is_none())
+    );
+}

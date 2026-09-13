@@ -8,7 +8,7 @@ pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     if input.language_id == "bash" {
-        return super::shell::extract(input, false);
+        return super::shell::extract(input);
     }
     let mut records = Vec::new();
     let mut offset = 0;
@@ -93,16 +93,7 @@ pub(super) fn extract(
                         } else {
                             raw.trim().to_owned()
                         };
-                        if value.len() <= 60 * 1024
-                            && serde_json::to_string(&value)
-                                .is_ok_and(|json| json.len() <= 60 * 1024)
-                        {
-                            row.metadata.value_type = Some(value_type(&value).to_owned());
-                            row.metadata.default_value = Some(value);
-                        } else {
-                            row.metadata.flow_incomplete =
-                                Some("configuration_value_budget_exceeded".into());
-                        }
+                        set_default(&mut row.metadata, value);
                     }
                     records.push(row);
                 }

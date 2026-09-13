@@ -2,6 +2,7 @@
 use super::{FeatureFlagFileInput, feature_flag_record_from_range};
 use crate::code::config_files::ConfigRange;
 use crate::domain::{CodeConfigMetadata, CodeFeatureFlagRecord, DomainError};
+mod dotenv;
 mod files;
 mod java;
 mod shell;
@@ -10,7 +11,7 @@ pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     if crate::code::language_metadata::is_dotenv(input.path) {
-        return shell::extract(input, true);
+        return dotenv::extract(input);
     }
     match input.language_id {
         "java" => java::extract(input),
@@ -163,6 +164,7 @@ pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeCo
                         .strip_prefix("/*")
                 })
                 .map(|s| s.split("*/").next().unwrap_or(s)),
+            _ if format == "dotenv" => line.strip_prefix('#'),
             _ => None,
         };
         if line.is_empty() {
@@ -210,3 +212,16 @@ mod tests;
 
 #[cfg(test)]
 mod test_support;
+
+fn set_default(metadata: &mut CodeConfigMetadata, value: String) {
+    if value.len() <= 60 * 1024
+        && serde_json::to_string(&value).is_ok_and(|json| json.len() <= 60 * 1024)
+    {
+        metadata.value_type = Some(value_type(&value).into());
+        metadata.default_value = Some(value);
+    } else {
+        metadata.default_value = None;
+        metadata.value_type = None;
+        metadata.flow_incomplete = Some("configuration_value_budget_exceeded".into());
+    }
+}
