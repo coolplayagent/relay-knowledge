@@ -449,6 +449,10 @@ fn parameter_expansions_keep_static_fallbacks_and_unknown_flow() {
     for (expression, expected) in [
         ("${FLAG:-false}", Some("false")),
         ("${FLAG-false}", Some("false")),
+        ("${FLAG:=false}", Some("false")),
+        ("${FLAG=false}", Some("false")),
+        ("${FLAG:=$OTHER}", None),
+        ("${FLAG=$OTHER}", None),
         ("${FLAG:-'off mode'}", Some("off mode")),
         ("${FLAG:-}", Some("")),
         ("${FLAG:-$OTHER}", None),

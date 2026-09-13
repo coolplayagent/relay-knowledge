@@ -70,8 +70,12 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
         "src/LargeReader.java",
         "class LargeReader {String read(){return System.getProperty(Generated.CONFIG_KEY);}}",
     );
+    repo.write(
+        "src/large-default.ini",
+        &format!("large_default={}\n", "x".repeat(70000)),
+    );
     repo.write("src/fallback.env", "FALLBACK_MODE=true\n");
-    repo.write("src/fallback.sh", "echo ${FALLBACK_MODE:-false}");
+    repo.write("src/fallback.sh", "echo ${FALLBACK_MODE:=false}");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "fixture"]);
     let service = service_with_memory_store().await;

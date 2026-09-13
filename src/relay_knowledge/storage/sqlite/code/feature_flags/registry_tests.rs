@@ -412,3 +412,20 @@ mod review_tests;
 
 #[path = "scope_evidence_tests.rs"]
 mod scope_evidence_tests;
+
+#[test]
+fn interrupted_format_inventory_reports_incomplete_analysis() {
+    let db = fixture();
+    db.progress_handler(1, Some(|| true));
+    let error = consistency::formats(
+        &db,
+        "scope",
+        &status(),
+        &request(None, CodeConfigFilter::default()),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, StorageError::InvalidInput(message) if message.contains("configuration analysis incomplete") && message.contains("SQLite query time or step budget exceeded"))
+    );
+    db.progress_handler(0, None::<fn() -> bool>);
+}

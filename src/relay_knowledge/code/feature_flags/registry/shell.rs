@@ -79,10 +79,9 @@ pub(super) fn extract(
                         node.start_byte(),
                         node.end_byte(),
                     )?;
-                    if let Some(operator) = node
-                        .child_by_field_name("operator")
-                        .filter(|op| matches!(&input.content[op.byte_range()], ":-" | "-"))
-                    {
+                    if let Some(operator) = node.child_by_field_name("operator").filter(|op| {
+                        matches!(&input.content[op.byte_range()], ":-" | "-" | ":=" | "=")
+                    }) {
                         let mut cursor = node.walk();
                         let fallback = node
                             .named_children(&mut cursor)

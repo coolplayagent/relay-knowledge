@@ -265,3 +265,5 @@ Configuration snapshot v36 budgets Java field metadata before insertion. Oversiz
 Configuration snapshot v37 emits inherited implicit getter references for bounded hierarchy resolution, retains annotation lookup at multiline SDK call openers, preserves structured Boolean facts from non-Consul Go templates, and records static Shell parameter-expansion fallbacks (`:-` and `-`). Dynamic or oversized fallbacks remain unknown with incomplete flow.
 
 Configuration snapshot v38 resolves super-qualified Java keys against superclass providers, accepts bounded parenthesized template literals, reads adjacent multiline Go-template comment annotations, and retains static output after leading comment actions.
+
+Oversized static configuration defaults retain their definition with unknown value and incomplete-flow metadata instead of blocking snapshot publication. Shell assignment-style parameter defaults (`:=`/`=`) preserve statically known fallback values. Format-inventory interruptions use the same actionable incomplete-analysis error as other bounded query stages. Fact version: `config-registry-v39`.

@@ -338,3 +338,20 @@ fn multiline_template_comments_hide_assignments_and_preserve_trailing_output() {
     assert_eq!(rows[0].source_key, "visible");
     assert_eq!(rows[0].metadata.default_value.as_deref(), Some("true"));
 }
+
+#[test]
+fn oversized_configuration_defaults_retain_bounded_incomplete_facts() {
+    for language in ["properties", "ini", "gotemplate"] {
+        for value in ["x".repeat(70000), "x\t".repeat(22000)] {
+            let rows = facts(language, &format!("large={value}end\nsmall=true\n"));
+            let large = rows.iter().find(|r| r.source_key == "large").unwrap();
+            assert!(large.metadata.default_value.is_none());
+            assert!(large.metadata.flow_incomplete.is_some());
+            assert!(serde_json::to_string(&large.metadata).unwrap().len() < 65536);
+            assert!(
+                rows.iter().any(|r| r.source_key == "small"
+                    && r.metadata.default_value.as_deref() == Some("true"))
+            );
+        }
+    }
+}

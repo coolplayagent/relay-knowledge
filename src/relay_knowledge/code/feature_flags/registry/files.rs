@@ -93,8 +93,16 @@ pub(super) fn extract(
                         } else {
                             raw.trim().to_owned()
                         };
-                        row.metadata.value_type = Some(value_type(&value).to_owned());
-                        row.metadata.default_value = Some(value);
+                        if value.len() <= 60 * 1024
+                            && serde_json::to_string(&value)
+                                .is_ok_and(|json| json.len() <= 60 * 1024)
+                        {
+                            row.metadata.value_type = Some(value_type(&value).to_owned());
+                            row.metadata.default_value = Some(value);
+                        } else {
+                            row.metadata.flow_incomplete =
+                                Some("configuration_value_budget_exceeded".into());
+                        }
                     }
                     records.push(row);
                 }

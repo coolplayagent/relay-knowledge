@@ -12,16 +12,23 @@ pub(super) fn formats(
         "SELECT DISTINCT language_id FROM code_repository_files flag WHERE ({}) AND language_id IN ('java','properties','ini','gotemplate') AND (language_id != 'gotemplate' OR lower(path) LIKE '%.ctmpl') LIMIT 4",
         filter.where_clause
     );
-    let mut statement = connection.prepare(&sql)?;
-    let rows = statement.query_map(params_from_iter(filter.params.iter()), |row| {
-        row.get::<_, String>(0)
-    })?;
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(StorageError::from)
+        .map_err(query_error)?;
+    let rows = statement
+        .query_map(params_from_iter(filter.params.iter()), |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(StorageError::from)
+        .map_err(query_error)?;
     rows.map(|row| {
         row.map(|language| match language.as_str() {
             "gotemplate" => "ctmpl".into(),
             _ => language,
         })
         .map_err(StorageError::from)
+        .map_err(query_error)
     })
     .collect()
 }
