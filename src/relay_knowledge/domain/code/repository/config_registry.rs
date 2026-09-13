@@ -46,6 +46,9 @@ pub struct CodeConfigMetadata {
     /// Default supplied by a proven Boolean conversion of a property read.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub boolean_converted_default: bool,
+    /// Numeric conversion changed or invalidated the raw property fallback.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub numeric_converted_default: bool,
     /// Raw property fallback restored if the apparent Boolean conversion is shadowed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unconverted_default: Option<String>,

@@ -34,7 +34,7 @@ fn feature_flag_sql_applies_scope_and_bounded_candidate_budget() {
     assert_eq!(
         query
             .sql
-            .matches("flag.path = ? OR flag.path LIKE ? ESCAPE '\\'")
+            .matches("flag.path = ? OR instr(flag.path, ?) = 1")
             .count(),
         6
     );
@@ -53,7 +53,7 @@ fn feature_flag_sql_applies_scope_and_bounded_candidate_budget() {
     assert!(
         query
             .params
-            .contains(&Value::Text("src/payments/%".to_owned()))
+            .contains(&Value::Text("src/payments/".to_owned()))
     );
     assert!(
         query

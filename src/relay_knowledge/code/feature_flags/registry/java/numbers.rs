@@ -64,6 +64,63 @@ pub(super) fn signed_literal(kind: &str, source: &str, operator: &str) -> Option
     }
 }
 
+/// Apply proven wrapper conversions to static property fallbacks, retaining raw evidence.
+pub(super) fn convert_default(
+    metadata: &mut crate::domain::CodeConfigMetadata,
+    conversions: &[String],
+    nullable: bool,
+) {
+    if metadata.default_value.is_none() && !nullable {
+        return;
+    }
+    metadata.unconverted_default = metadata.default_value.clone();
+    for conversion in conversions {
+        if conversion == "Boolean" {
+            metadata.boolean_converted_default = true;
+            metadata.default_value = Some(
+                metadata
+                    .default_value
+                    .as_ref()
+                    .is_some_and(|v| v.eq_ignore_ascii_case("true"))
+                    .to_string(),
+            );
+            metadata.value_type = Some("boolean".into());
+            continue;
+        }
+        metadata.numeric_converted_default = true;
+        metadata.value_type = Some("number".into());
+        if metadata.default_value.is_none() {
+            break;
+        }
+        metadata.default_value = metadata.default_value.as_deref().and_then(|raw| {
+            if raw.len() > 256 {
+                return None;
+            }
+            match conversion.as_str() {
+                "Integer" => raw.parse::<i32>().ok().map(|v| v.to_string()),
+                "Long" => raw.parse::<i64>().ok().map(|v| v.to_string()),
+                "Double" => {
+                    let raw = raw.trim_matches(|c| c <= '\u{20}');
+                    let raw = if raw.ends_with(['d', 'D', 'f', 'F']) {
+                        &raw[..raw.len() - 1]
+                    } else {
+                        raw
+                    };
+                    raw.parse::<f64>()
+                        .ok()
+                        .filter(|v| v.is_finite())
+                        .map(|v| v.to_string())
+                }
+                _ => None,
+            }
+        });
+        if metadata.default_value.is_none() {
+            metadata.flow_incomplete = Some("invalid_or_unsupported_numeric_default".into());
+            break;
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "numbers_tests.rs"]
 mod tests;

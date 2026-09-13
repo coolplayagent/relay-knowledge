@@ -9,7 +9,7 @@ mod shell;
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
-    if input.path.to_ascii_lowercase().ends_with(".env") {
+    if crate::code::language_metadata::is_dotenv(input.path) {
         return shell::extract(input, true);
     }
     match input.language_id {
@@ -72,7 +72,7 @@ fn line_number(prefix: &str) -> usize {
 }
 
 pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadata {
-    let format = if input.path.to_ascii_lowercase().ends_with(".env") {
+    let format = if crate::code::language_metadata::is_dotenv(input.path) {
         "dotenv"
     } else {
         match input.language_id {

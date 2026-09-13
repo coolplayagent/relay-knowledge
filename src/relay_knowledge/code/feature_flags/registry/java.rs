@@ -51,10 +51,10 @@ pub(super) fn extract(
                     row.metadata.reference.as_deref().and_then(|reference| {
                         names::same_package_reference(node, reference, input.content)
                     });
-                if let Some((method, shadows, boolean_conversion)) =
+                if let Some((method, shadows, conversions)) =
                     flow::returning_method(node, input.content)
                 {
-                    if boolean_conversion
+                    if !conversions.is_empty()
                         && node
                             .child_by_field_name("name")
                             .is_some_and(|n| text(n, input.content) == "getProperty")
@@ -64,22 +64,10 @@ pub(super) fn extract(
                             && names::static_owner(node, "getProperty", input.content)
                                 == Some("java.lang.System")))
                     {
-                        let converted = row
-                            .metadata
-                            .default_value
-                            .as_ref()
-                            .map(|v| v.eq_ignore_ascii_case("true"))
-                            .or_else(|| {
-                                node.child_by_field_name("arguments")
-                                    .filter(|n| n.named_child_count() == 1)
-                                    .map(|_| false)
-                            });
-                        if let Some(value) = converted {
-                            row.metadata.boolean_converted_default = true;
-                            row.metadata.unconverted_default = row.metadata.default_value.take();
-                            row.metadata.default_value = Some(value.to_string());
-                            row.metadata.value_type = Some("boolean".into());
-                        }
+                        let nullable = node
+                            .child_by_field_name("arguments")
+                            .is_some_and(|n| n.named_child_count() == 1);
+                        numbers::convert_default(&mut row.metadata, &conversions, nullable);
                     }
                     row.metadata.bindings = hierarchy.bindings(method, input.content)?;
                     row.metadata.declared_getter = row.metadata.bindings.first().cloned();

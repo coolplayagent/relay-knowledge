@@ -32,6 +32,9 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
         repo.write(path, source);
     }
     repo.write("src/.env", "DOTENV_MODE=production\nDOTENV_PORT=8080\n");
+    for path in ["src/.env.example", "src/.env.production"] {
+        repo.write(path, "TEMPLATE_MODE=production\n");
+    }
     repo.write(
         "src/oversized.properties",
         &format!(
@@ -82,6 +85,28 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
                 .iter()
                 .any(|u| u.metadata.default_value.as_deref() == Some("production"))
     }));
+    for path in ["src/.env.example", "src/.env.production"] {
+        let result = service
+            .query_code_repository_feature_flags(
+                CodeFeatureFlagRequest::new(
+                    None,
+                    filtered_selector("fixture", "HEAD", path),
+                    10,
+                    FreshnessPolicy::WaitUntilFresh,
+                )
+                .unwrap()
+                .with_filters(relay_knowledge::domain::CodeConfigFilter {
+                    source: Some("dotenv".into()),
+                    ..Default::default()
+                })
+                .unwrap(),
+                context("query-dotenv-template"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.flags.len(), 1, "{result:?}");
+        assert_eq!(result.flags[0].source_key, "TEMPLATE_MODE");
+    }
     let inherited = service
         .query_code_repository_feature_flags(
             CodeFeatureFlagRequest::new(

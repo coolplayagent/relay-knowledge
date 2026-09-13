@@ -49,3 +49,28 @@ fn numeric_literals_preserve_values_across_java_spellings_and_bounds() {
     }
     assert!(literal("decimal_integer_literal", &"1".repeat(257)).is_none());
 }
+
+#[test]
+fn converted_numeric_fallbacks_use_decimal_runtime_values_and_reject_invalid_inputs() {
+    for (kind, raw, expected) in [
+        ("Integer", "08", Some("8")),
+        ("Integer", "+0008", Some("8")),
+        ("Long", "9223372036854775807", Some("9223372036854775807")),
+        ("Double", " 8.0D ", Some("8")),
+        ("Double", "1e2", Some("100")),
+        ("Integer", "2147483648", None),
+        ("Integer", " 8", None),
+        ("Long", "8L", None),
+        ("Integer", "0x10", None),
+        ("Double", "NaN", None),
+    ] {
+        let mut metadata = crate::domain::CodeConfigMetadata {
+            default_value: Some(raw.into()),
+            ..Default::default()
+        };
+        convert_default(&mut metadata, &[kind.into()], false);
+        assert_eq!(metadata.default_value.as_deref(), expected, "{kind} {raw}");
+        assert_eq!(metadata.unconverted_default.as_deref(), Some(raw));
+        assert_eq!(metadata.flow_incomplete.is_some(), expected.is_none());
+    }
+}

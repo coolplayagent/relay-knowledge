@@ -186,7 +186,8 @@ impl Hierarchy {
                 .any(|owner| self.declarations.contains(owner))
             {
                 row.metadata.bindings.clear();
-                if row.metadata.boolean_converted_default {
+                if row.metadata.boolean_converted_default || row.metadata.numeric_converted_default
+                {
                     row.metadata
                         .default_value
                         .clone_from(&row.metadata.unconverted_default);

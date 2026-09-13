@@ -307,9 +307,9 @@ fn append_path_filter_clause(
         if filter.is_empty() {
             continue;
         }
-        fragments.push("(flag.path = ? OR flag.path LIKE ? ESCAPE '\\')".to_owned());
+        fragments.push("(flag.path = ? OR instr(flag.path, ?) = 1)".to_owned());
         params.push(Value::Text(filter.to_owned()));
-        params.push(Value::Text(format!("{}/%", escape_like_pattern(filter))));
+        params.push(Value::Text(format!("{filter}/")));
     }
 
     if fragments.is_empty() {

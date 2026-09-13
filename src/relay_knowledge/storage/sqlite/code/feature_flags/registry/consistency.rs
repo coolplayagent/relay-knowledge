@@ -33,15 +33,38 @@ pub(super) fn check(group: &mut CodeFeatureFlagGraph, formats: &BTreeSet<String>
             .push("incomplete_analysis: served scope is stale or degraded".into());
         return;
     }
-    let defaults = group
+    let mut last = BTreeMap::new();
+    for usage in &group.usages {
+        if usage.edge_kind == "defines_config"
+            && matches!(
+                usage.metadata.source_format.as_str(),
+                "properties" | "ini" | "dotenv" | "shell"
+            )
+        {
+            let position = (usage.byte_range.start, usage.byte_range.end);
+            last.entry((&usage.path, &usage.metadata.source_format))
+                .and_modify(|p| *p = std::cmp::max(*p, position))
+                .or_insert(position);
+        }
+    }
+    let effective = group
         .usages
+        .iter()
+        .filter(|u| {
+            u.edge_kind != "defines_config"
+                || last
+                    .get(&(&u.path, &u.metadata.source_format))
+                    .is_none_or(|position| *position == (u.byte_range.start, u.byte_range.end))
+        })
+        .collect::<Vec<_>>();
+    let defaults = effective
         .iter()
         .filter_map(|u| u.metadata.default_value.as_ref())
         .collect::<BTreeSet<_>>();
     if defaults.len() > 1 {
-        group.conflicting_default_sources = group
-            .usages
+        group.conflicting_default_sources = effective
             .iter()
+            .copied()
             .filter(|u| u.metadata.default_value.is_some())
             .cloned()
             .collect();

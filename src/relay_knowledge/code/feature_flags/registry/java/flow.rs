@@ -5,8 +5,8 @@ use tree_sitter::Node;
 pub(super) fn returning_method<'a>(
     mut node: Node<'a>,
     content: &str,
-) -> Option<(Node<'a>, Vec<String>, bool)> {
-    let mut boolean_conversion = false;
+) -> Option<(Node<'a>, Vec<String>, Vec<String>)> {
+    let mut conversions = Vec::new();
     let mut shadows = std::collections::BTreeSet::new();
     for _ in 0..32 {
         let parent = node.parent()?;
@@ -15,7 +15,7 @@ pub(super) fn returning_method<'a>(
             "argument_list" if parent.named_child_count() == 1 => {
                 let call = parent.parent()?;
                 let owner = conversion(call, content)?;
-                boolean_conversion |= matches!(owner, "Boolean" | "java.lang.Boolean");
+                conversions.push(owner.strip_prefix("java.lang.").unwrap_or(owner).to_owned());
                 if let Some(shadow) = super::types::platform_shadow(call, owner, content) {
                     shadows.insert(shadow);
                 }
@@ -41,7 +41,7 @@ pub(super) fn returning_method<'a>(
                                 .child_by_field_name("parameters")
                                 .is_some_and(|p| p.named_child_count() == 0)
                     })
-                    .map(|method| (method, shadows.into_iter().collect(), boolean_conversion));
+                    .map(|method| (method, shadows.into_iter().collect(), conversions));
             }
             _ => return None,
         }

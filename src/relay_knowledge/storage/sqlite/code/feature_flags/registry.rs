@@ -524,10 +524,7 @@ fn usage_in_request(usage: &CodeFeatureFlagUsage, request: &CodeFeatureFlagReque
             p == "."
                 || usage.path == p
                 || (usage.path.as_bytes().get(p.len()) == Some(&b'/')
-                    && usage
-                        .path
-                        .get(..p.len())
-                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(p)))
+                    && usage.path.get(..p.len()).is_some_and(|prefix| prefix == p))
         });
     path_matches
         && (request.repository.language_filters.is_empty()

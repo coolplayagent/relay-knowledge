@@ -34,7 +34,7 @@ pub(crate) fn extract_feature_flags(
     input: FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     let mut records = registry::extract(&input)?;
-    if input.path.to_ascii_lowercase().ends_with(".env") {
+    if crate::code::language_metadata::is_dotenv(input.path) {
         return Ok(records);
     }
     let mut byte_start = 0usize;

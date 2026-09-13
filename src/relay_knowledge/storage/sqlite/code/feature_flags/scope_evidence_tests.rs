@@ -581,3 +581,146 @@ fn inherited_inapplicable_reference_overloads_preserve_platform_imports() {
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].source_kind, "env_var");
 }
+
+#[test]
+fn numeric_getter_fallbacks_compare_effective_values() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[(
+            "Config.java",
+            r#"class Config { int getPort(){return Integer.parseInt(System.getProperty("port", "08"));} }"#,
+        )],
+    );
+    add(
+        &db,
+        "port",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            default_value: Some("8".into()),
+            ..Default::default()
+        },
+    );
+    let groups = search(
+        &db,
+        &status(),
+        &request(
+            Some("port"),
+            CodeConfigFilter {
+                consistency: true,
+                ..Default::default()
+            },
+        ),
+    )
+    .unwrap();
+    assert!(
+        !groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.starts_with("conflicting_defaults"))
+    );
+    assert!(
+        groups[0]
+            .usages
+            .iter()
+            .any(|u| u.metadata.numeric_converted_default)
+    );
+}
+
+#[test]
+fn consistency_uses_last_definition_per_file_and_keeps_source_provenance() {
+    for format in ["properties", "ini", "dotenv", "shell"] {
+        let db = fixture();
+        for (offset, value) in [(0, Some("false")), (10, Some("true"))] {
+            add(
+                &db,
+                "feature",
+                "config_key",
+                "defines_config",
+                CodeConfigMetadata {
+                    source_format: format.into(),
+                    default_value: value.map(str::to_owned),
+                    ..Default::default()
+                },
+            );
+            db.execute("UPDATE code_repository_feature_flags SET byte_start=?1,byte_end=?1+1 WHERE rowid=?2",params![offset,db.last_insert_rowid()]).unwrap();
+        }
+        let query = request(
+            None,
+            CodeConfigFilter {
+                consistency: true,
+                ..Default::default()
+            },
+        );
+        let groups = search(&db, &status(), &query).unwrap();
+        assert!(
+            !groups[0]
+                .consistency_diagnostics
+                .iter()
+                .any(|d| d.starts_with("conflicting_defaults")),
+            "{format}"
+        );
+        assert_eq!(groups[0].usages.len(), 2);
+        add(
+            &db,
+            "feature",
+            "config_key",
+            "defines_config",
+            CodeConfigMetadata {
+                source_format: format.into(),
+                default_value: Some("false".into()),
+                ..Default::default()
+            },
+        );
+        db.execute(
+            "UPDATE code_repository_feature_flags SET path='other/config' WHERE rowid=?1",
+            [db.last_insert_rowid()],
+        )
+        .unwrap();
+        let groups = search(&db, &status(), &query).unwrap();
+        assert_eq!(groups[0].conflicting_default_sources.len(), 2);
+        assert!(
+            groups[0]
+                .conflicting_default_sources
+                .iter()
+                .all(|u| u.path != "src/config" || u.byte_range.start == 10)
+        );
+        db.execute("UPDATE code_repository_feature_flags SET metadata_json=json_remove(metadata_json,'$.default_value') WHERE byte_start=10",[]).unwrap();
+        let groups = search(&db, &status(), &query).unwrap();
+        assert!(groups[0].conflicting_default_sources.is_empty());
+    }
+}
+
+#[test]
+fn path_filters_preserve_case_for_requests_and_registration() {
+    let db = fixture();
+    for path in ["src/config", "SRC/config"] {
+        add(
+            &db,
+            "feature",
+            "config_key",
+            "reads_config",
+            CodeConfigMetadata::default(),
+        );
+        db.execute(
+            "UPDATE code_repository_feature_flags SET path=?1 WHERE rowid=?2",
+            params![path, db.last_insert_rowid()],
+        )
+        .unwrap();
+    }
+    for registration in [false, true] {
+        let mut status = status();
+        let mut query = request(None, CodeConfigFilter::default());
+        if registration {
+            status.path_filters = vec!["src".into()];
+        } else {
+            query.repository.path_filters = vec!["src".into()];
+        }
+        let groups = search(&db, &status, &query).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].usages.len(), 1);
+        assert_eq!(groups[0].usages[0].path, "src/config");
+    }
+}
