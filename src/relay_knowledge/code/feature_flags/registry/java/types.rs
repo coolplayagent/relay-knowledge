@@ -201,8 +201,12 @@ impl Hierarchy {
                         }
                     }
                 }
+                let mut metadata_bytes = serde_json::to_vec(&declaration.metadata)
+                    .map_err(|e| DomainError::invalid("configuration", e.to_string()))?
+                    .len()
+                    + 128;
                 let mut cursor = body.walk();
-                for field in body
+                'fields: for field in body
                     .named_children(&mut cursor)
                     .filter(|n| matches!(n.kind(), "field_declaration" | "constant_declaration"))
                 {
@@ -212,19 +216,44 @@ impl Hierarchy {
                         .filter(|n| n.kind() == "variable_declarator")
                     {
                         if let Some(name) = variable.child_by_field_name("name") {
-                            if declaration.metadata.java_fields.len() >= 1000 {
-                                return Err(DomainError::invalid(
-                                    "configuration",
-                                    "type field budget exceeded",
-                                ));
+                            let name = names::text(name, input.content);
+                            let visibility = visibility(field);
+                            if name.len() > 60 * 1024
+                                || declaration.metadata.java_fields.len() >= 1000
+                            {
+                                declaration.metadata.flow_incomplete =
+                                    Some("type_field_metadata_budget_exceeded".into());
+                                break 'fields;
                             }
-                            declaration.metadata.java_fields.insert(
-                                names::text(name, input.content).into(),
-                                visibility(field).into(),
-                            );
+                            let field_bytes = serde_json::to_string(name)
+                                .map_err(|e| DomainError::invalid("configuration", e.to_string()))?
+                                .len()
+                                + visibility.len()
+                                + 4;
+                            if metadata_bytes.saturating_add(field_bytes) > 60 * 1024 {
+                                declaration.metadata.flow_incomplete =
+                                    Some("type_field_metadata_budget_exceeded".into());
+                                break 'fields;
+                            }
+                            metadata_bytes += field_bytes;
+                            declaration
+                                .metadata
+                                .java_fields
+                                .insert(name.into(), visibility.into());
                         }
                     }
                 }
+            }
+            if serde_json::to_vec(&declaration.metadata)
+                .map_err(|e| DomainError::invalid("configuration", e.to_string()))?
+                .len()
+                > 65_536
+            {
+                declaration.metadata = crate::domain::CodeConfigMetadata {
+                    source_format: "java".into(),
+                    flow_incomplete: Some("type_field_metadata_budget_exceeded".into()),
+                    ..Default::default()
+                };
             }
             facts.push(declaration);
         }

@@ -19,6 +19,9 @@ pub struct CodeConfigMetadata {
     /// Declaring getter identity, independent of inherited provider aliases.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub declared_getter: Option<String>,
+    /// Bodyless getter declarations block inheritance without supplying a value.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub getter_abstract: bool,
     /// Getter identities inherited without an intervening declaration.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub inherited_getters: Vec<String>,

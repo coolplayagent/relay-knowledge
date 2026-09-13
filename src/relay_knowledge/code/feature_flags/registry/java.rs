@@ -32,7 +32,6 @@ pub(super) fn extract(
                 let name = text(name, input.content);
                 name.starts_with("get") || name.starts_with("is")
             })
-            && node.child_by_field_name("body").is_some()
             && node
                 .child_by_field_name("parameters")
                 .is_some_and(|p| p.named_child_count() == 0)
@@ -218,6 +217,7 @@ pub(super) fn extract(
                     )?;
                     marker.metadata.reference = Some(own.clone());
                     marker.metadata.declared_getter = Some(own.clone());
+                    marker.metadata.getter_abstract = method.child_by_field_name("body").is_none();
                     marker.metadata.java_package = Some(names::package_name(method, input.content));
                     marker.metadata.getter_visibility = Some(types::visibility(method).into());
                     marker.metadata.getter_inheritable =

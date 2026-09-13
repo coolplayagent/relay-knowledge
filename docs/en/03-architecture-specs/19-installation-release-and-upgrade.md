@@ -259,3 +259,5 @@ Configuration snapshot v33 recognizes `.env.*` templates and variants. Proven Ja
 Configuration snapshot v34 preserves explicit/local Java receiver types in the presence of unrelated static wildcard imports. Consul reader pipelines accept literal incoming keys and final fallback arguments. Conditional Shell reassignments before reads clear affected definition defaults and mark uncertainty; a later unconditional assignment restores known flow.
 
 Configuration snapshot v35 propagates uncertainty from conditional variable unsets while ignoring function-only unsets. Reads satisfied by assignments within the same function, subshell or conditional body are not external configuration reads; bare exports without a known local assignment retain external-read evidence.
+
+Configuration snapshot v36 budgets Java field metadata before insertion. Oversized types retain bounded incomplete evidence and permit snapshot publication; queries requiring that type report an explicit incomplete-analysis error. Bodyless zero-argument getter declarations are inheritance barriers, never configuration providers.

@@ -35,6 +35,9 @@ impl Hierarchy {
             .collect::<BTreeSet<_>>();
         for row in rows {
             if row.edge_kind == "config_type_declaration" {
+                if row.metadata.flow_incomplete.is_some() {
+                    return Err(incomplete("Java type field metadata budget exceeded"));
+                }
                 for (name, visibility) in row.metadata.java_methods {
                     methods.insert(format!("{}.{name}", row.source_key), visibility);
                 }

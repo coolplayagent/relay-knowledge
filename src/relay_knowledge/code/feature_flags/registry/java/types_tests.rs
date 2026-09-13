@@ -109,3 +109,34 @@ fn explicit_and_local_types_survive_unrelated_static_wildcards() {
         );
     }
 }
+
+#[test]
+fn long_field_names_produce_persistable_incomplete_type_evidence() {
+    let fields = (0..900)
+        .map(|i| format!("int field_{i}_{};", "x".repeat(90)))
+        .collect::<String>();
+    let rows = raw_facts("java", &format!("class Generated {{ {fields} }}"));
+    let declaration = rows
+        .iter()
+        .find(|r| r.edge_kind == "config_type_declaration")
+        .unwrap();
+    assert!(declaration.metadata.flow_incomplete.is_some());
+    assert!(!declaration.metadata.java_fields.is_empty());
+    assert!(declaration.metadata.java_fields.len() < 900);
+    assert!(serde_json::to_vec(&declaration.metadata).unwrap().len() <= 65_536);
+}
+
+#[test]
+fn abstract_getters_emit_barriers_without_configuration_providers() {
+    let rows = raw_facts(
+        "java",
+        "abstract class Mid extends Base { abstract boolean getX(); }",
+    );
+    let marker = rows
+        .iter()
+        .find(|r| r.edge_kind == "declares_config_getter")
+        .unwrap();
+    assert_eq!(marker.metadata.declared_getter.as_deref(), Some("Mid.getX"));
+    assert!(marker.metadata.getter_abstract);
+    assert!(!rows.iter().any(|r| r.edge_kind == "reads_config"));
+}

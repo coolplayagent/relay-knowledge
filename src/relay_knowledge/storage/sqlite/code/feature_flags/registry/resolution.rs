@@ -3,6 +3,9 @@ use super::*;
 pub(super) fn providers(rows: &[FeatureFlagRow]) -> HashMap<String, Vec<usize>> {
     let mut providers = HashMap::<String, Vec<usize>>::new();
     for (index, row) in rows.iter().enumerate() {
+        if row.edge_kind == "declares_config_getter" && row.metadata.getter_abstract {
+            continue;
+        }
         for binding in &row.metadata.bindings {
             providers.entry(binding.clone()).or_default().push(index);
         }

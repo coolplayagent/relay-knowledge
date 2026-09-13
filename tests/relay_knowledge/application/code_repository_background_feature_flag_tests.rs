@@ -49,6 +49,19 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
         "src/scoped-export.sh",
         r#"f() { export INTERNAL_MODE=internal; echo "$INTERNAL_MODE"; }"#,
     );
+    let fields = (0..900)
+        .map(|i| format!("int field_{i}_{};", "x".repeat(90)))
+        .collect::<String>();
+    repo.write(
+        "src/Generated.java",
+        &format!(
+            r#"class Generated {{ {fields} static final String CONFIG_KEY="large_type_flag"; }}"#
+        ),
+    );
+    repo.write(
+        "src/LargeReader.java",
+        "class LargeReader {String read(){return System.getProperty(Generated.CONFIG_KEY);}}",
+    );
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "fixture"]);
     let service = service_with_memory_store().await;
@@ -171,6 +184,23 @@ async fn feature_flags_keep_package_private_dispatch_and_resolved_path_filters()
         .await
         .unwrap();
     assert!(scoped.flags.is_empty(), "{scoped:?}");
+    let large = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                None,
+                filtered_selector("fixture", "HEAD", "src/LargeReader.java"),
+                10,
+                FreshnessPolicy::WaitUntilFresh,
+            )
+            .unwrap(),
+            context("query-bounded-field-metadata"),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        large.message.contains("type field metadata budget"),
+        "{large:?}"
+    );
     let inherited = service
         .query_code_repository_feature_flags(
             CodeFeatureFlagRequest::new(

@@ -753,3 +753,36 @@ fn static_wildcards_do_not_disconnect_explicit_type_getter_providers() {
             .any(|u| u.edge_kind == "guards_code")
     );
 }
+
+#[test]
+fn abstract_redeclarations_stop_inherited_configuration_getters() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[
+            (
+                "Base.java",
+                r#"class Base { boolean getX(){return Boolean.getBoolean("base_flag");} }"#,
+            ),
+            (
+                "Mid.java",
+                "abstract class Mid extends Base {abstract boolean getX();}",
+            ),
+            (
+                "Child.java",
+                "class Child extends Mid {boolean getX(){return false;}}",
+            ),
+            (
+                "Reader.java",
+                "class Reader {void run(Mid a, Child b){if(a.getX()){} if(b.getX()) {}}}",
+            ),
+        ],
+    );
+    let mut query = request(None, CodeConfigFilter::default());
+    query.repository.path_filters = vec!["Reader.java".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert!(
+        groups.iter().all(|g| g.source_key != "base_flag"),
+        "{groups:?}"
+    );
+}
