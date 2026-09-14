@@ -19,7 +19,7 @@ pub(super) fn allexport(mut node: Node<'_>, content: &str) -> Result<(bool, bool
                     ));
                 };
                 budget = remaining;
-                if let Some(mode) = mode(candidate, content) {
+                if let Some(mode) = mode(candidate, content)? {
                     if conditional {
                         uncertain = true;
                         continue;
@@ -55,21 +55,25 @@ pub(super) fn allexport(mut node: Node<'_>, content: &str) -> Result<(bool, bool
     }
     Ok((false, uncertain))
 }
-fn mode(node: Node<'_>, content: &str) -> Option<bool> {
+fn mode(node: Node<'_>, content: &str) -> Result<Option<bool>, DomainError> {
     if node.kind() != "command" {
-        return None;
+        return Ok(None);
     }
-    let mut words = content[node.byte_range()].split_whitespace();
-    if words.next() != Some("set") {
-        return None;
+    let mut cursor = node.walk();
+    let mut words = node
+        .named_children(&mut cursor)
+        .filter(|child| !child.is_extra())
+        .map(|word| super::values::static_value(Some(word), content));
+    if words.next().transpose()?.flatten().as_deref() != Some("set") {
+        return Ok(None);
     }
     let mut mode = None;
-    while let Some(word) = words.next() {
+    while let Some(word) = words.next().transpose()?.flatten() {
         if word == "--" {
             break;
         }
-        if matches!(word, "-o" | "+o") {
-            if words.next() == Some("allexport") {
+        if matches!(word.as_str(), "-o" | "+o") {
+            if words.next().transpose()?.flatten().as_deref() == Some("allexport") {
                 mode = Some(word == "-o");
             }
         } else if word.starts_with(['-', '+']) {
@@ -80,5 +84,5 @@ fn mode(node: Node<'_>, content: &str) -> Option<bool> {
             break;
         }
     }
-    mode
+    Ok(mode)
 }

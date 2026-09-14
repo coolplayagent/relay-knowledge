@@ -614,3 +614,52 @@ fn quoted_export_option_matrix_matches_unquoted_options() {
         );
     }
 }
+
+#[test]
+fn quoted_set_option_matrix_preserves_allexport_state() {
+    for enable in [
+        r#"set "-a""#,
+        "set '-a'",
+        r#"set -"a""#,
+        r#"set \-a"#,
+        r#"set "-o" "allexport""#,
+    ] {
+        let rows = facts("bash", &format!("{enable}; FLAG=true; echo $FLAG"));
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == "FLAG" && r.edge_kind == "defines_config"),
+            "{enable}: {rows:?}"
+        );
+        for disable in [r#"set "+a""#, r#"set "+o" "allexport""#] {
+            let rows = facts(
+                "bash",
+                &format!("{enable}; {disable}; FLAG=true; echo $FLAG"),
+            );
+            assert!(
+                !rows.iter().any(|r| r.source_key == "FLAG"),
+                "{enable}; {disable}: {rows:?}"
+            );
+        }
+    }
+    let rows = facts("bash", r#"set "--" "-a"; FLAG=true; echo $FLAG"#);
+    assert!(!rows.iter().any(|r| r.source_key == "FLAG"));
+}
+
+#[test]
+fn allexport_static_word_budget_errors_are_observable() {
+    let source = format!("set -{}; FLAG=true", "\"a\"".repeat(1100));
+    let error = extract(&FeatureFlagFileInput {
+        repository_id: "repo",
+        source_scope: "scope",
+        file_id: "file",
+        path: "config.sh",
+        language_id: "bash",
+        content: &source,
+        config_facts: &[],
+    })
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("lexical budget exceeded"),
+        "{error}"
+    );
+}
