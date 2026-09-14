@@ -6,7 +6,10 @@ use crate::{
         CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
         RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeSymbolRecord,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 const TEST_SOURCE_SCOPE: &str = "code:test:line-context";
@@ -148,6 +151,8 @@ fn snapshot_with_connector_service_context() -> CodeIndexSnapshot {
         calls: vec![call],
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),

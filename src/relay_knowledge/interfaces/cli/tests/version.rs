@@ -38,9 +38,7 @@ async fn run_process_does_not_append_notice_when_not_interactive() {
     assert!(output.stderr.is_empty());
 }
 
-#[tokio::test]
-async fn process_update_notice_skips_noninteractive_commands() {
-    let notice = process_update_notice(["status"], false).await;
-
-    assert!(notice.is_none());
+#[test]
+fn process_update_notice_policy_skips_noninteractive_commands() {
+    assert!(update_notice_command(["status"], false).is_none());
 }

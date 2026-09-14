@@ -14,6 +14,19 @@
 tracked report，记录 revision/report digest、profile、product binary、selected/executed/skipped、
 预算、环境和结果，而不能把本机 patch cache 当作 acceptance 证明。
 
+## Issue #232：软件本体分类与 provenance 护栏
+
+- 分类契约：`software_global_fixture` 固定普通 README 的 “Getting Started”/“Chapter Index” 只能成为 documentation，Dockerfile/Containerfile 必须成为 build definition，GitHub Actions/GitLab CI job 不得成为 IaC resource；Terraform、Kubernetes、Compose、systemd 的 deployment/resource 类型和显式 metadata 晋升 system/API 的路径同时受保护。
+- 本体契约：targets 覆盖 `systems`、`apis`、`resources`、`tests`、`deployments`、`releases`、`statements`、`conflicts`，并要求 `ontology_version=1.0.0`、`projection_schema_version=7`、机器可读 OpenAPI provenance、`completeness_basis_points=10000`。产品定向测试另行固定稳定 `entity_key`、snapshot `occurrence_id`、shape failure、跨 scope 引用、冲突并存和九阶段 durable checkpoint。
+- 性能与状态：相同 cases 会被 `--categories performance` 选中，继续使用 software fixture 的索引与 query p50/p95 预算，不放宽 queue、batch、SQLite writer、lease、checkpoint 或查询 limit。当前排序优化的 release-binary 验收见[2026-08-31 验证记录](../06-verification/14-software-global-evidence-priority-2026-08-31.md)；该记录只采纳其 focused performance 范围，不把结果外推为完整 release readiness。
+
+## 已采纳：software-global-typed-evidence-priority
+
+- 基线证据：`fast --categories performance` 的 release product binary 基线通过 368/368 gates、132/132 cases，performance=1.0，但 `software_global_fixture` 的 API、resource、deployment、topic 和 design 主证据分别只位于第 2、3、4、3、2 名；全局 accuracy=0.978456、foundational=0.968750、competitive=0.988162。`statements` 主 provenance 仍位于第 7 名，作为后续需要独立索引/查询计划验证的剩余缺口，不在本候选中以全 scope CASE sort 冒险处理。
+- 算法与边界：typed entity query 在已有 kind/path/language filter 后按 source/provider 权威排序，兼容 topic/design query 按文档特异性和设计元素层级排序，再使用 name/path/identity 确定性 tie-break。规则只使用物化列，不读取 live source、不扩大 limit、不枚举 fixture 标识，也不改变 ontology schema、projection version、lease/checkpoint 或写入路径。
+- 采纳证据：最终 release 报告 `manual-evaluate-1788132786594001932-0-1437486.json` 的 368/368 gates、132/132 cases、307 commands 与 80 metrics 全部通过，score=0.998941、accuracy=0.997592、`score_accepted=true`、`adoption_status=would_accept`；manual evaluation 未创建 commit。API/resource/deployment/topic/design 全部提升至 rank 1，software cold index 651/15,000 ms、query p50 80/100 ms、p95 90/250 ms。直属排序测试和当前工作树的 90.05% 行覆盖率门禁通过；完整 digest、两次未丢弃的拒绝轮与 skipped suite 边界记录在[带日期证据](../06-verification/14-software-global-evidence-priority-2026-08-31.md)中。
+- 剩余风险：statement provenance 保持 rank 7，必须通过独立的有界索引或查询计划处理；最终 C syntax p95 为 180/180 ms，继续作为稳定性监测信号。本条不替代 exhaustive、Kubernetes 或整体发版门禁。
+
 ## 候选优化说明：cold-build-safe-bm25-quality-gate
 
 - 根因与证据：多次干净构建或 incremental cache 失效的 evaluation 都在旧 `bm25_hierarchy_suite` 120 秒上限处退出，当时 Cargo 仍在编译或链接，尚未启动任何测试；精确 lib test target 已构建后，50 条测试约 9 秒完成。把冷编译计入 suite 的 30 秒指标还会让算法观测描述构建状态，而不是 BM25 行为。
@@ -544,7 +557,7 @@ tracked report，记录 revision/report digest、profile、product binary、sele
 - 风险：qualified 查询会额外给其子词命中的候选加分，少数只匹配通用包名的结果可能上移；风险受去重、两字符下限、现有 FTS bounded candidates、layer-specific bonuses 和 top-k 截断控制，未加入仓库、路径、case、模型或 provider 特殊分支。
 ## 20260517-20260519 历史候选记录归档
 
-- 2026-05-16 至 2026-05-19 的连续候选说明已原样迁至[2026-08-13 归档](archive/self-iteration-accepted-optimizations-20260813.md)，以显著降低主记录体量并保留完整历史事实；当前实现、case inventory 和验收结论仍以本页较新的记录及实际报告为准。
+- 2026-05-16 至 2026-05-19 的连续候选说明已原样迁至[2026-08-13 归档](archive/2026-08-13-self-iteration-optimization-archive.md)，以显著降低主记录体量并保留完整历史事实；当前实现、case inventory 和验收结论仍以本页较新的记录及实际报告为准。
 ## 候选优化说明：自迭代文档与 patch 长期记忆
 - 目标：让自迭代候选在修改代码、测试、benchmark 或 harness 策略时，同时留下可供后续迭代理解的算法与架构说明，避免只有 patch 和评分而缺少设计意图。
 - 方法：候选 diff 只要包含非文档文件，就追加 `self_iteration_algorithm_documentation` gate，要求同步更新本文档；prompt 明确要求写出算法、架构、不变量、预期 case/metric 影响和风险。该 gate 在候选评估完成后、评分前加入，作为硬质量门禁参与 `quality gates failed` 拒绝原因。
@@ -567,13 +580,13 @@ tracked report，记录 revision/report digest、profile、product binary、sele
 - summary: 多轮围绕 HTTP graceful shutdown/QoS 测试的 listener 绑定、请求启动信号、in-memory stream 和 timeout 同步边界做稳定性修复，目标是恢复 cargo test stability gate；原始 patch 仍保留在对应 `.git/relay-knowledge-self-iteration/patches/<run>.patch` 长期记忆中。
 - invariants: 不改变生产 HTTP/QoS runtime、SQLite、code retrieval、semantic/vector、provider/env、judge、安装发布或 CLI/API 行为；只修正测试同步条件。
 ## 20260517 early detailed entries
-- archived in `docs/zh/05-benchmarks/archive/self-iteration-accepted-optimizations-20260517.md` to keep each tracked documentation file below the 1000-line hard limit.
+- archived in `docs/zh/05-benchmarks/archive/2026-05-17-self-iteration-optimization-archive.md` to keep each tracked documentation file below the 1000-line hard limit.
 - compacted summary: `20260517T070951Z` through `20260517T210331Z` provider/ranking, import target lookup, semantic/vector identifier-aware retrieval, read-model cache reuse, code-query scoring/support, CLI index race repair, bounded line context, request token reuse, prompt filtering, and identifier token cache records are archived in the 20260517 archive and progressive memory; the primary log keeps this compact pointer to preserve the tracked-file line cap.
 ## 20260517T212719Z-to-run-1779619958 archived
-- archived in `docs/zh/05-benchmarks/archive/self-iteration-accepted-optimizations-20260531.md` to keep this primary benchmark log below the 1000-line hard cap. The archive preserves compacted summaries for accepted retrieval/ranking, parser, indexing, repository-set, source fallback, semantic/vector, and Hybrid chunk-gate records from `20260517T212719Z` through `run-1779619958`.
+- archived in `docs/zh/05-benchmarks/archive/2026-05-31-self-iteration-optimization-archive.md` to keep this primary benchmark log below the 1000-line hard cap. The archive preserves compacted summaries for accepted retrieval/ranking, parser, indexing, repository-set, source fallback, semantic/vector, and Hybrid chunk-gate records from `20260517T212719Z` through `run-1779619958`.
 
 ## 20260524-20260526 late detailed entries
-- archived in `docs/zh/05-benchmarks/archive/self-iteration-accepted-optimizations-20260524.md` to keep this primary benchmark log below the 1000-line hard cap. The archive preserves run details for `run-1779620755` through `run-1779722194`, including SBOM dependency inventory, internal source fallback, query-aware candidate recovery, release glibc policy, and code-index lease recovery records.
+- archived in `docs/zh/05-benchmarks/archive/2026-05-24-self-iteration-optimization-archive.md` to keep this primary benchmark log below the 1000-line hard cap. The archive preserves run details for `run-1779620755` through `run-1779722194`, including SBOM dependency inventory, internal source fallback, query-aware candidate recovery, release glibc policy, and code-index lease recovery records.
 - 2026-05-26 registration language guardrail: application and lower code registration now reject non-empty language filters so mixed C/C++ repositories cannot silently drop `.c` or `.cpp` files at registration; query-time `--language` remains the supported narrowing mechanism. Fast self-iteration adds a cross-language generated fixture guardrail that expects `repo register --language cpp` to fail with the stable registration-language error.
 - 2026-05-26 code-index SQLite lock guardrail: fast self-iteration adds `code_index_sqlite_lock_cases` so duplicate-process file-backed SQLite indexing reuses the active task/checkpoint and distinct task fingerprints can claim independent leases without waiting behind another running task. Architecture invariants: keep one bounded SQLite writer lane, do not kill competing processes, do not add unbounded busy waits, and keep parsing outside write transactions.
 - 2026-05-27 CLI skill shell-policy guardrail: fast self-iteration adds `skill_metadata_policy_cases` through the shared skill metadata validator so Windows `.exe`, drive-letter, and `assets/windows-*` command examples cannot appear in bash/POSIX code fences. Algorithm and architecture: keep the fix in agent-facing docs plus a deterministic parser over fenced code blocks, not in ad hoc release grep checks. Invariants: POSIX examples must use POSIX binaries or `PATH`; Windows examples must stay in PowerShell or cmd.exe fences; metadata version and description checks remain unchanged. Expected impact: issue #173-style bash execution of Windows asset paths is rejected locally, in fast self-iteration, PR CI, and release validation. Risk: the validator may require docs to spell shell examples more explicitly, which is intentional for agent safety.
@@ -582,17 +595,17 @@ tracked report，记录 revision/report digest、profile、product binary、sele
 - 2026-05-27 structured hybrid chunk-first planning: accepted `run-1779854063` scored 0.981768 with 92/92 cases passed; Hybrid retrieval extracts chunk-first eligibility into a bounded planner and admits dense structured identifier sequences plus C/C++ language-filtered procedural queries. It applies only to Hybrid, rejects single-symbol identities and broad unstructured queries without procedural filters, keeps strict candidate limits and the existing dense non-`text_fallback` proof, and leaves indexing, semantic/vector retrieval, source fallback, repo-set overlay scoring, freshness, and QoS unchanged.
 - 2026-05-30 软件全域自迭代 case 扩展：fast self-iteration 新增 `software_global_fixture` 与 `software_query_cases`，通过真实 `repo register`、`repo index`、`repo software` 覆盖 dependencies、sdks、files、topics、relationships、build、iac、design 和 all 投影 kind。算法/架构不变量：仅扩展独立 harness、生成式 fixture、case 和文档，不改变产品 CLI/API、SQLite schema、parser、索引队列、查询热路径、env/paths/net 边界或外部 provider 配置；投影事实必须来自已索引仓库证据，不扫描包缓存、云 API、SDK 目录或未授权外部源码。预期影响：后续候选若破坏软件全域模型的依赖/SDK unresolved metadata、文件角色、文档 topic、跨域关系、构建 target、IaC resource 或 design element，会在默认 fast guardrail 中暴露。风险：生成式 fixture 增加少量索引与查询时间，受独立 software query p50/p95 指标和 guardrail case 控制。
 ## run-1779847461-to-run-1779852601 compacted
-- summary: accepted #191 code-query self-iteration ranking records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.972124 to 0.997401 with 92/92 cases passing; full metrics and changed paths are preserved in `docs/zh/05-benchmarks/archive/self-iteration-accepted-optimizations-20260524.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.
+- summary: accepted #191 code-query self-iteration ranking records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.972124 to 0.997401 with 92/92 cases passing; full metrics and changed paths are preserved in `docs/zh/05-benchmarks/archive/2026-05-24-self-iteration-optimization-archive.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.
 ## run-1779847089-to-run-1779856832 compacted
-- summary: accepted API-dense hybrid symbol FTS elision, parser reference dedup indexing, bulk call/import search finalize, and filtered call identity fast path records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.960406 to 0.979657 with 91/91 cases passing on each run; full metrics, changed paths, and degradations are preserved in `docs/zh/05-benchmarks/archive/self-iteration-accepted-optimizations-20260524.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.
+- summary: accepted API-dense hybrid symbol FTS elision, parser reference dedup indexing, bulk call/import search finalize, and filtered call identity fast path records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.960406 to 0.979657 with 91/91 cases passing on each run; full metrics, changed paths, and degradations are preserved in `docs/zh/05-benchmarks/archive/2026-05-24-self-iteration-optimization-archive.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.
 
 ## run-1780149073-to-run-1780159030 compacted
 - summary: accepted scoped symbol lookup pushdown (`run-1780149073`) and C/C++ header recovery (`run-1780150399`) records stayed under protected foundational, competitive, semantic_vector, and stability floors; full patches, metrics, and remaining LevelDB recovery-manifest miss remain in `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
 - summary: Hybrid direct-evidence graph-fanout gate was proposed and accepted in `run-1780153116`, scoring 0.960929 with 105/105 cases passed; it gates only direct non-edge evidence and preserves graph expansion for sparse, fallback-only, call/import, and broad single-token queries.
 - summary: accepted software-global evidence priority (`run-1780155576`) scored 0.971906 with foundational=1.0, semantic_vector=1.0, stability=1.0, and 105/105 cases passed; changed software lifecycle/projection/tests and preserved full metrics in the self-iteration patch/report memory.
-- summary: accepted import query extraction (`run-1780159030`) scored 0.978136 with 105/105 cases passed; detailed metrics were archived in `docs/zh/05-benchmarks/archive/self-iteration-accepted-optimizations-20260524.md` to keep this primary benchmark log below the 1000-line cap.
+- summary: accepted import query extraction (`run-1780159030`) scored 0.978136 with 105/105 cases passed; detailed metrics were archived in `docs/zh/05-benchmarks/archive/2026-05-24-self-iteration-optimization-archive.md` to keep this primary benchmark log below the 1000-line cap.
 ## run-1780212377-to-run-1780213983 compacted
-- summary: accepted bounded overlay evidence index (`run-1780212377`) and streaming chunk row scoring (`run-1780213983`) records were compacted to keep this primary benchmark log below the 1000-line hard cap. Full algorithms, invariants, scores, metrics, changed paths, and adopted notes remain in `docs/zh/05-benchmarks/archive/self-iteration-accepted-optimizations-20260531.md`, `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
+- summary: accepted bounded overlay evidence index (`run-1780212377`) and streaming chunk row scoring (`run-1780213983`) records were compacted to keep this primary benchmark log below the 1000-line hard cap. Full algorithms, invariants, scores, metrics, changed paths, and adopted notes remain in `docs/zh/05-benchmarks/archive/2026-05-31-self-iteration-optimization-archive.md`, `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
 
 ## run-1780216181-to-run-1780217458 compacted
 - summary: accepted language-scoped workflow chunk-first and import fallback intent-aware dynamic boost details were compacted to keep this primary benchmark log below the 1000-line hard cap; full metrics, patch paths, changed paths, degradations, and adopted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory, with algorithm sections preserved above.
@@ -605,7 +618,7 @@ tracked report，记录 revision/report digest、profile、product binary、sele
 
 ## run-1780397808-to-run-1785677193 archived
 
-- summary: Rust workflow/import planning, Hybrid direct coverage, exact-symbol/read-model recovery, semantic/vector validation, research planning, bounded Git indexing, and `run-1785677193` details moved to `archive/self-iteration-accepted-optimizations-20260803.md` to keep this primary benchmark log below the tracked-file 1000-line hard cap. Raw patches, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/`.
+- summary: Rust workflow/import planning, Hybrid direct coverage, exact-symbol/read-model recovery, semantic/vector validation, research planning, bounded Git indexing, and `run-1785677193` details moved to `archive/2026-08-03-self-iteration-optimization-archive.md` to keep this primary benchmark log below the tracked-file 1000-line hard cap. Raw patches, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/`.
 
 ## run-1785683424
 
@@ -628,7 +641,7 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - 预期影响：降低 overlay 较大时多仓查询的 CPU 与 p95，并让开销随命中 selector 而不是全 overlay 边数增长；索引维护仍位于有界 refresh/write 边界。
 - 风险：首次升级需一次性构建两个索引，overlay refresh 会承担少量复合索引写放大；升级/回滚文档要求保留增量列、索引和既有 edge facts。
 
-后续两条历史运行详情已移至[2026-08-11 归档](archive/self-iteration-accepted-optimizations-20260811.md)。完整历史导航见[归档索引](archive/README.md)。
+后续两条历史运行详情已移至[2026-08-11 归档](archive/2026-08-11-self-iteration-optimization-archive.md)。完整历史导航见[归档索引](archive/README.md)。
 
 ## 2026-08-25 受界 source-fallback 多样性与高扇出 case 语义
 
@@ -664,3 +677,11 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - 不变量：不修改仓库或 case 预算，不特判仓库、路径、query、symbol 或 fixture，不改变 durable task lease/checkpoint、SQLite writer、索引阶段、freshness、ranking、semantic/vector、env/paths/net、安装发布与产品 CLI/API。
 - 预期影响与回归：fast 冷索引和查询性能不再由 debug 产品 binary 测量；benchmark CI 会拒绝未记录 release 产品 profile/path 的 performance report。UT 覆盖 non-smoke release、smoke 无产品 workload、release build 命令、workload baseline 隔离，以及旧 fast-debug 高分不能成为 release acceptance floor。
 - 风险：首次 fast release 运行没有兼容 workload baseline，性能分会回到预算归一化；release build 时间高于已有 debug 增量 build，但避免把编译优化口径差异误判为产品性能回归。
+
+## 2026-08-31 已采纳：持久 worktree delta 分批与固定 overlay 查询
+
+- 根因：当 worktree overlay 的完整 base clone 与 dirty mutation 超过一个 SQLite writer quantum 时，storage 返回 `DurableStagingRequired`，而 application fallback 有意只允许 clean incremental mode。既有 durable clone 虽可按 page 复制 immutable base，但 terminal delta 仍是单事务。另一个独立缺陷是 `repo context --ref worktree` 首次查询固定 synthetic overlay identity 后，后续内部查询又错误地把该 identity 送入 Git ref resolution。
+- 算法与所有权：worktree 保留 direct-first。遇到类型化超预算准入时，同一 task、attempt-scoped fence、重绑定的 synthetic scope 与冻结 budget 先 clone clean base，再由 `durable_delta` 按 file ownership 确定性划分 dirty fact。每个 worker step 最多提交一个 replay-safe batch；call 计入 owner 的 row budget，并在 finalization 从 call-shaped reference 重建。Terminal transaction 共同准入 affected-owner cleanup、tombstone、固定 control row 与 task-bound 多批 receipt，从完整 target 恢复 `last_path`，再把未发布 scope 交给既有 full finalizer。已解析的 `worktree:<base>:<hash>` selector 现在被识别为 immutable identity，nested query 不再进入 Git ref parsing。
+- 不变量：没有增大 queue、file、byte、row、retry 或 lease 上限。Base 缺失/不兼容、orphan fact、snapshot digest 改变、stale generation、terminal-control overflow 或 target mismatch 都 fail closed。Worktree task 绝不重新解释为 clean full index；checkpoint replay、每仓库一个 active writer、query-index repair、reference/import/call finalization、publication、workspace/business/software barrier、freshness 与 synthetic identity 均保留。Auto-workspace overlay 保持显式 fail-closed，不会丢失 manifest。Release 与安装行为不变。
+- 回归与预期影响：`code_index_task_` fast/performance filter 现在强制形成两个 dirty batch，在两批之间使 lease 过期并重新 claim，并验证精确两批 receipt、44 次 delta write、总计三批 checkpoint 和真实 terminal path。Planner 测试覆盖确定性 ownership、超预算不可分文件与 orphan rejection；owner 测试覆盖 terminal quantum、删除密集与多 batch receipt decode、worktree identity 互斥与 pinned context selection。预期改进是让大型 dirty-worktree 索引在内存和事务工作量受冻结 batch budget 约束的前提下完成，同时不改变小 overlay direct path。剩余成本是每个 step 会重新读取 immutable in-memory delta plan；采纳证据必须继续通过既有 fast 性能预算，不能把源码级 mechanism test 当成 wall-time 结论。
+- 采纳证据：第一轮完整 release-product run 因 release build 184,379 ms 超过未调整的 180,000-ms 预算而保留为 rejected。下一轮 `manual-evaluate-1788148749661647156-0-1647985.json` 通过 368/368 gates、132/132 cases、307/307 command contracts 与全部 performance budgets，score `0.9989406099518459`、`adoption_status=would_accept`。Recovery cases 为 24,438/60,000 ms，many-file incremental index 为 784/3,000 ms，software query p95 为 81/250 ms。[带日期验证记录](../06-verification/15-durable-worktree-delta-and-pinned-query-2026-08-31.md)保留 report/patch digest、全量测试与覆盖率、真实仓库回放、skipped suites 和 auto-workspace 边界。

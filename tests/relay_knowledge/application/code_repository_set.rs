@@ -19,8 +19,8 @@ use relay_knowledge::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeRepositorySetMemberSeed, CodeRepositorySetSeed, CodeRepositoryStore, KnowledgeStore,
-        SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeRepositorySetMemberSeed, CodeRepositorySetSeed,
+        CodeRepositorySetStore as _, KnowledgeStore, RepositoryCatalogStore as _, SqliteGraphStore,
     },
 };
 
@@ -755,6 +755,8 @@ fn snapshot_for_scope(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![RepositoryCodeChunkRecord {
             repository_id: repository_id.to_owned(),

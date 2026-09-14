@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Callable
 
 
-DEFAULT_MAX_GLIBC = "2.31"
+DEFAULT_MAX_GLIBC = "2.28"
+LINUX_BUILDERS = {
+    "quay.io/pypa/manylinux_2_28_x86_64@sha256:41abc24b9e23d18f6aa8dfe5dd0baed8036d158e35bd03c575d9e68bfbe194a9",
+    "quay.io/pypa/manylinux_2_28_aarch64@sha256:15ac47b9d4ff96443e73bd2165e26fa412c3044a962e96bc1593bd5798b1dc65",
+}
 GLIBC_VERSION_PATTERN = re.compile(r"\bGLIBC_(\d+)\.(\d+)(?:\.(\d+))?\b")
 
 
@@ -25,7 +29,7 @@ def parse_version(value: str) -> Version:
         normalized = normalized.removeprefix("GLIBC_")
     parts = normalized.split(".")
     if len(parts) not in {2, 3} or not all(part.isdigit() for part in parts):
-        raise ValueError(f"glibc version must look like 2.31 or GLIBC_2.31: {value}")
+        raise ValueError(f"glibc version must look like 2.28 or GLIBC_2.28: {value}")
     major, minor = int(parts[0]), int(parts[1])
     patch = int(parts[2]) if len(parts) == 3 else 0
     return (major, minor, patch)
@@ -105,16 +109,33 @@ def verify_workflow_policy(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     required_fragments = [
         "tools/release/check_linux_glibc_compat.py",
-        "ubuntu:20.04",
-        "linux_glibc_max: '2.31'",
+        "ubuntu-24.04-arm",
+        "getconf GNU_LIBC_VERSION",
+        'expected_glibc="glibc ${MAX_GLIBC}"',
+        '"target/${TARGET}/release/${BIN_NAME}" --version',
+        "timeout-minutes: 45",
+        "download_with_retry()",
+        "--connect-timeout 15 --max-time 120 --continue-at -",
+        "https://static.rust-lang.org/rustup/dist/${TARGET}/rustup-init",
+        "rustup-init checksum verification failed for $TARGET",
+        "timeout 900 env RUSTUP_MAX_RETRIES=5",
+        'timeout 300 env RUSTUP_MAX_RETRIES=5 rustup target add "$TARGET"',
+        "--max 2.28",
         "Verify Linux GNU glibc compatibility",
         "verify CLI skill Linux asset glibc compatibility",
     ]
+    required_fragments.extend(LINUX_BUILDERS)
     missing = [fragment for fragment in required_fragments if fragment not in text]
     if missing:
         raise RuntimeError(
             f"{path} is missing Linux glibc compatibility release policy: "
             + ", ".join(missing)
+        )
+    baseline_count = text.count("linux_glibc_max: '2.28'")
+    if baseline_count != 2:
+        raise RuntimeError(
+            f"{path} must declare exactly two Linux glibc 2.28 matrix entries; "
+            f"found {baseline_count}"
         )
     print(f"workflow policy OK: {path}")
 
@@ -122,21 +143,21 @@ def verify_workflow_policy(path: Path) -> None:
 def run_self_test() -> None:
     sample = """
       0x0010:   Name: GLIBC_2.2.5  Flags: none  Version: 5
-      0x0020:   Name: GLIBC_2.31  Flags: none  Version: 4
+      0x0020:   Name: GLIBC_2.28  Flags: none  Version: 4
       0x0030:   Name: GLIBC_2.17  Flags: none  Version: 3
       0x0040:   Name: GLIBC_PRIVATE  Flags: none  Version: 2
     """
     assert glibc_versions_from_readelf(sample) == {
         (2, 2, 5),
         (2, 17, 0),
-        (2, 31, 0),
+        (2, 28, 0),
     }
-    assert parse_version("2.31") == (2, 31, 0)
-    assert parse_version("GLIBC_2.31") == (2, 31, 0)
-    assert compatibility_error(set(), (2, 31, 0)) is None
-    assert compatibility_error({(2, 31, 0), (2, 17, 0)}, (2, 31, 0)) is None
-    assert "GLIBC_2.34" in (
-        compatibility_error({(2, 31, 0), (2, 34, 0)}, (2, 31, 0)) or ""
+    assert parse_version("2.28") == (2, 28, 0)
+    assert parse_version("GLIBC_2.28") == (2, 28, 0)
+    assert compatibility_error(set(), (2, 28, 0)) is None
+    assert compatibility_error({(2, 28, 0), (2, 17, 0)}, (2, 28, 0)) is None
+    assert "GLIBC_2.29" in (
+        compatibility_error({(2, 28, 0), (2, 29, 0)}, (2, 28, 0)) or ""
     )
 
     def ok_runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -145,7 +166,7 @@ def run_self_test() -> None:
     assert readelf_glibc_versions(Path("fake-binary"), runner=ok_runner) == {
         (2, 2, 5),
         (2, 17, 0),
-        (2, 31, 0),
+        (2, 28, 0),
     }
 
     def missing_runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:

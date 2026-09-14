@@ -3,7 +3,10 @@ use crate::domain::{
     CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord,
     RepositoryCodeRange, RepositoryCodeSymbolRecord,
 };
-use crate::storage::{CodeRepositoryStore, SqliteGraphStore};
+use crate::storage::{
+    CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+    SqliteGraphStore,
+};
 use rusqlite::limits::Limit;
 
 const TEST_SOURCE_SCOPE: &str = "code:test:import-target:commit:tree";
@@ -245,6 +248,8 @@ fn snapshot_with_import_target_outside_importer_scope() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
@@ -308,6 +313,8 @@ fn snapshot_with_generated_import_target_noise() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
@@ -372,6 +379,8 @@ fn snapshot_with_generated_target_symbol_noise() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
@@ -415,6 +424,8 @@ fn snapshot_with_python_vendor_target() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
@@ -465,6 +476,8 @@ fn snapshot_with_many_target_symbol_hints() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),

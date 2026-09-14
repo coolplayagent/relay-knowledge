@@ -6,7 +6,10 @@ use relay_knowledge::{
         CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
         CodeIndexSession, CodeIndexTaskState, CodeQueryKind, CodeRetrievalRequest, FreshnessPolicy,
     },
-    storage::{CodeIndexTaskClaimRequest, CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskStore as _,
+        RepositoryCatalogStore as _, SqliteGraphStore,
+    },
 };
 
 #[tokio::test]
@@ -898,3 +901,5 @@ mod feature_flag_tests;
 #[path = "code_repository_background_support.rs"]
 mod support;
 use support::*;
+#[path = "code_repository_config_registry.rs"]
+mod config_registry;

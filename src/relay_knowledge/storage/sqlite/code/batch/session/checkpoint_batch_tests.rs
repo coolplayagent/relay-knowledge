@@ -3,7 +3,7 @@
 use super::tests::{batch, file, registered_store, search, session_for_scope, symbol};
 use crate::{
     domain::{CodeIndexBatch, CodeParseStatus, CodeQueryKind},
-    storage::{CodeRepositoryStore, StorageError},
+    storage::{CodeIndexPublicationStore as _, RepositoryCatalogStore as _, StorageError},
 };
 
 #[tokio::test]

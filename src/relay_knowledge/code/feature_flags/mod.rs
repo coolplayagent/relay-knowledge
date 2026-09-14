@@ -10,6 +10,7 @@ use super::{
 mod comments;
 mod config;
 mod extractors;
+mod registry;
 
 use comments::CommentState;
 use config::{boolean_config_keys, looks_like_config_file};
@@ -32,7 +33,10 @@ pub(crate) struct FeatureFlagFileInput<'a> {
 pub(crate) fn extract_feature_flags(
     input: FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
-    let mut records = Vec::new();
+    let mut records = registry::extract(&input)?;
+    if crate::code::language_metadata::is_dotenv(input.path) {
+        return Ok(records);
+    }
     let mut byte_start = 0usize;
     let config_file = looks_like_config_file(input.path);
     let mut comment_state = CommentState::default();
@@ -57,13 +61,14 @@ pub(crate) fn extract_feature_flags(
         let mut continued_sdk_key = None;
         if let Some(pending) = pending_sdk_call.take() {
             if let Some(key) = sdk_continued_flag_key(&scan_line, pending.argument_index) {
-                continued_sdk_key = Some((key, pending.edge_kind));
+                continued_sdk_key = Some((key, pending.edge_kind, pending.opener));
             } else if let Some(argument_index) =
                 extractors::sdk_next_pending_argument_index(&scan_line, pending.argument_index)
             {
                 pending_sdk_call = Some(PendingSdkCall {
                     argument_index,
                     edge_kind: pending.edge_kind,
+                    opener: pending.opener,
                 });
             }
         }
@@ -88,24 +93,30 @@ pub(crate) fn extract_feature_flags(
             }
         }
         let sdk_keys = sdk_flag_keys_for_line(&scan_line, &mut sdk_receivers, brace_depth);
-        collect_line_records(
-            &mut records,
-            LineContext {
-                input: &input,
-                line,
-                scan_line: &scan_line,
-                line_number: line_index.saturating_add(1),
-                byte_start,
-                config_file,
-                continued_sdk_key,
-                sdk_keys,
-            },
-        )?;
+        if !matches!(
+            input.language_id,
+            "properties" | "ini" | "gotemplate" | "bash"
+        ) {
+            collect_line_records(
+                &mut records,
+                LineContext {
+                    input: &input,
+                    line,
+                    scan_line: &scan_line,
+                    line_number: line_index.saturating_add(1),
+                    byte_start,
+                    config_file,
+                    continued_sdk_key,
+                    sdk_keys,
+                },
+            )?;
+        }
         if pending_sdk_call.is_none() {
             if let Some(argument_index) = sdk_pending_argument_index(&scan_line, &sdk_receivers) {
                 pending_sdk_call = Some(PendingSdkCall {
                     argument_index,
                     edge_kind: usage_edge_kind(&scan_line),
+                    opener: byte_start,
                 });
             }
         }
@@ -124,7 +135,12 @@ pub(crate) fn extract_feature_flags(
         expire_scoped_sdk_receivers(&mut sdk_receivers, brace_depth);
         byte_start = byte_start.saturating_add(segment.len());
     }
-    collect_config_fact_records(&mut records, &input)?;
+    if !matches!(input.language_id, "java" | "properties" | "ini" | "bash")
+        && (input.language_id != "gotemplate"
+            || !input.path.to_ascii_lowercase().ends_with(".ctmpl"))
+    {
+        collect_config_fact_records(&mut records, &input)?;
+    }
 
     let mut deduped = BTreeMap::new();
     for record in records {
@@ -142,6 +158,7 @@ fn collect_config_fact_records(
         if fact.kind != "config_key" || fact.value_kind != ConfigValueKind::Boolean {
             continue;
         }
+        registry::check_fact_budget(records.len())?;
         records.push(feature_flag_record_from_range(
             input,
             "config_key",
@@ -224,6 +241,7 @@ fn brace_counts(line: &str) -> (usize, usize) {
 }
 
 struct PendingSdkCall {
+    opener: usize,
     argument_index: usize,
     edge_kind: &'static str,
 }
@@ -235,7 +253,7 @@ struct LineContext<'a, 'input> {
     line_number: usize,
     byte_start: usize,
     config_file: bool,
-    continued_sdk_key: Option<(String, &'static str)>,
+    continued_sdk_key: Option<(String, &'static str, usize)>,
     sdk_keys: Vec<String>,
 }
 
@@ -260,7 +278,7 @@ fn collect_line_records(
             usage_edge_kind(context.scan_line),
         ));
     }
-    if let Some((key, edge_kind)) = &context.continued_sdk_key {
+    if let Some((key, edge_kind, _)) = &context.continued_sdk_key {
         line_records.push(("sdk_flag_key", key.clone(), *edge_kind));
     }
     if context.config_file {
@@ -271,18 +289,26 @@ fn collect_line_records(
 
     let mut seen = Vec::<(String, String, &'static str)>::new();
     for (source_kind, source_key, edge_kind) in line_records {
+        if context.input.language_id == "java" && source_kind != "sdk_flag_key" {
+            continue;
+        }
         if seen.iter().any(|(known_kind, known_key, known_edge)| {
             known_kind == source_kind && known_key == &source_key && known_edge == &edge_kind
         }) {
             continue;
         }
         seen.push((source_kind.to_owned(), source_key.clone(), edge_kind));
-        records.push(feature_flag_record(
-            &context,
-            source_kind,
-            &source_key,
-            edge_kind,
-        )?);
+        registry::check_fact_budget(records.len())?;
+        let mut record = feature_flag_record(&context, source_kind, &source_key, edge_kind)?;
+        if context.input.language_id == "java" {
+            let metadata_offset = context
+                .continued_sdk_key
+                .as_ref()
+                .filter(|(key, _, _)| source_kind == "sdk_flag_key" && key == &source_key)
+                .map_or(context.byte_start, |(_, _, opener)| *opener);
+            record.metadata = registry::metadata(context.input, metadata_offset);
+        }
+        records.push(record);
     }
 
     Ok(())
@@ -341,11 +367,13 @@ fn feature_flag_record_from_range(
             source_kind,
             source_key,
             edge_kind,
-            &range.line_start.to_string(),
+            &range.byte_start.to_string(),
+            &range.byte_end.to_string(),
         ],
     );
 
     Ok(CodeFeatureFlagRecord {
+        metadata: crate::domain::CodeConfigMetadata::default(),
         repository_id: input.repository_id.to_owned(),
         source_scope: input.source_scope.to_owned(),
         feature_flag_id,

@@ -2,6 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::storage::StorageError;
 
+use super::columns::CODE_REPOSITORY_FILES_COLUMNS;
 use super::introspection::{
     index_has_columns, table_column_is_not_null, table_columns_have_no_defaults, table_exists,
     table_has_columns, table_has_exact_columns, table_has_exact_plain_columns,
@@ -10,10 +11,10 @@ use super::introspection::{
 };
 
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
-// Version 7 adds scoped ontology identity columns and the repository business
-// knowledge projection. Bumping the marker is required so existing databases
-// run the additive schema initializer instead of retaining the v6 surface.
-pub(super) const SCHEMA_MARKER_VERSION: i64 = 7;
+// Version 8 adds the software ontology occurrence, statement, validation, and
+// provenance-status surfaces. Existing databases must run the additive schema
+// initializer before a v6 software projection can be published.
+pub(super) const SCHEMA_MARKER_VERSION: i64 = 8;
 pub(in crate::storage::sqlite) const SEARCH_OWNER_V2_MIGRATION: &str =
     "search-owner-v2-writer-and-serving-gate";
 pub(in crate::storage::sqlite) const REFERENCE_SEARCH_GROUP_V2_MIGRATION: &str =
@@ -173,19 +174,7 @@ const CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS: &[&str] = &[
     "created_at_ms",
 ];
 const CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE: &[&str] = &["set_id", "package_name", "ecosystem"];
-const CODE_REPOSITORY_FILES_COLUMNS: &[&str] = &[
-    "repository_id",
-    "source_scope",
-    "file_id",
-    "path",
-    "language_id",
-    "blob_hash",
-    "byte_len",
-    "line_count",
-    "parse_status",
-    "is_generated",
-    "degraded_reason",
-];
+
 const FILE_INDEX_ROOT_COLUMNS: &[&str] = &[
     "scope_id",
     "root_id",
@@ -477,6 +466,7 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
         || !reference_resolution_progress_schema_is_current(connection)?
         || !super::incremental_clone_marker::schema_is_current(connection)?
         || !reference_search_group_schema_is_current(connection)?
+        || !table_column_is_not_null(connection, "code_repository_feature_flags", "metadata_json")?
     {
         return Ok(false);
     }

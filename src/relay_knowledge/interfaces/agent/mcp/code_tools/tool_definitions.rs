@@ -8,8 +8,8 @@ use crate::{
 };
 
 use super::super::tool_registry::{
-    CODE_BUSINESS_QUERY_TOOL, CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL,
-    CODE_QUERY_TOOL, CODE_REPOSITORY_GRAPH_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL,
+    CODE_BUSINESS_QUERY_TOOL, CODE_CONTEXT_TOOL, CODE_FEATURE_FLAGS_TOOL, CODE_FRAMEWORK_TOOL,
+    CODE_IMPACT_TOOL, CODE_QUERY_TOOL, CODE_REPOSITORY_GRAPH_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL,
     CODE_SOFTWARE_QUERY_TOOL,
 };
 
@@ -112,6 +112,10 @@ pub(in crate::interfaces::agent::mcp) fn code_feature_flags_tool_definition() ->
         "inputSchema": {
             "type": "object",
             "properties": {
+                "domain": {"type":"string","minLength":1,"maxLength":128},
+                "source": {"type":"string","enum":["java","properties","ini","ctmpl","shell","dotenv"]},
+                "hot_reload": {"type":"boolean"},
+                "consistency": {"type":"boolean"},
                 "repository": {"type": "string", "minLength": 1},
                 "query": {"type": "string", "maxLength": MAX_AGENT_QUERY_CHARS},
                 "limit": {"type": "integer", "minimum": 1},
@@ -128,6 +132,27 @@ pub(in crate::interfaces::agent::mcp) fn code_feature_flags_tool_definition() ->
     })
 }
 
+pub(in crate::interfaces::agent::mcp) fn code_framework_tool_definition() -> Value {
+    json!({
+        "name": CODE_FRAMEWORK_TOOL,
+        "description": "Read a bounded Angular/Vue component and template graph from an authorized indexed repository. This tool does not scan the live worktree or trigger indexing.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repository": {"type": "string", "minLength": 1},
+                "query": {"type": "string", "maxLength": MAX_AGENT_QUERY_CHARS},
+                "frameworks": {"type": "array", "maxItems": 2, "items": {"type": "string", "enum": ["angular", "vue"]}},
+                "kinds": {"type": "array", "maxItems": 16, "items": {"type": "string", "enum": ["component", "directive", "pipe", "template", "input", "output", "prop", "emit", "model", "slot", "template_variable", "control_flow"]}},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                "ref_selector": {"type": "string"},
+                "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
+                "freshness": {"type": "string", "enum": ["allow-stale", "wait-until-fresh", "graph-only"]}
+            },
+            "required": ["repository"]
+        }
+    })
+}
+
 pub(in crate::interfaces::agent::mcp) fn code_software_query_tool_definition() -> Value {
     json!({
         "name": CODE_SOFTWARE_QUERY_TOOL,
@@ -138,15 +163,20 @@ pub(in crate::interfaces::agent::mcp) fn code_software_query_tool_definition() -
                 "repository": {"type": "string", "minLength": 1},
                 "kind": {
                     "type": "string",
-                    "enum": ["dependency", "dependencies", "sdk", "sdks", "file", "files", "topic", "topics", "relationship", "relationships", "config", "configuration", "configurations", "build", "iac", "design", "model", "models", "all"]
+                    "enum": ["dependency", "dependencies", "sdk", "sdks", "file", "files", "topic", "topics", "relationship", "relationships", "config", "configuration", "configurations", "build", "modules", "iac", "design", "model", "models", "system", "systems", "api", "apis", "resource", "resources", "test", "tests", "deployment", "deployments", "release", "releases", "statement", "statements", "conflict", "conflicts", "all"]
                 },
-                "limit": {"type": "integer", "minimum": 1},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+                "cursor": {"type": "string", "minLength": 1, "maxLength": 4096},
                 "ref_selector": {"type": "string"},
                 "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
                 "language_filters": {"type": "array", "items": {"type": "string"}},
                 "freshness": {
                     "type": "string",
                     "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
+                },
+                "export_profile": {
+                    "type": "string",
+                    "enum": ["spdx-3", "cyclonedx-1.7", "prov-o"]
                 }
             },
             "required": ["repository"]
@@ -157,7 +187,7 @@ pub(in crate::interfaces::agent::mcp) fn code_software_query_tool_definition() -
 pub(in crate::interfaces::agent::mcp) fn code_business_query_tool_definition() -> Value {
     json!({
         "name": CODE_BUSINESS_QUERY_TOOL,
-        "description": "Read route-authorized business terms, aliases, semantics, conflicts, evidence, and declared technical mappings from one indexed repository snapshot.",
+        "description": "Read route-authorized business terms, aliases, semantics, conflicts, evidence, and declared technical mappings from one indexed repository snapshot. The response separates request.mode, result.status/match_type, knowledge.state and freshness; diagnostics provide actionable guidance.",
         "inputSchema": {
             "type": "object",
             "properties": {

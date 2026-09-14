@@ -4,7 +4,9 @@ use std::{future::Future, time::Duration};
 
 use crate::{
     api::{ApiError, ErrorKind},
-    domain::{CodeIndexCheckpoint, CodeIndexSession, CodeIndexSummary},
+    domain::{
+        CodeIndexCheckpoint, CodeIndexMode, CodeIndexSession, CodeIndexSummary, CodeIndexTaskState,
+    },
     storage::{
         CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE, CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
         CodeIndexFinalizationStep, StorageError, code_index_finalization_max_steps,
@@ -60,6 +62,88 @@ pub(super) struct CodeIndexTaskLeaseContext {
     pub(super) path_filters: Vec<String>,
     pub(super) language_filters: Vec<String>,
     pub(super) resource_budget: crate::domain::CodeIndexResourceBudget,
+}
+
+/// Reloads the content identity that a fenced worktree attempt durably rebound.
+///
+/// The pending worktree scope exists only until storage verifies the materialized
+/// overlay. A crash can therefore leave a caller holding the pre-rebind in-memory
+/// lease while the only resumable checkpoint is owned by the content-addressed
+/// task record. The persisted record is authoritative only when every
+/// attempt-scoped field still matches the live fence.
+pub(super) async fn restore_rebound_worktree_task_lease(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    mode: &CodeIndexMode,
+    lease: Option<CodeIndexTaskLeaseContext>,
+) -> Result<Option<CodeIndexTaskLeaseContext>, ApiError> {
+    let Some(lease) = lease else {
+        return Ok(None);
+    };
+    if !matches!(mode, CodeIndexMode::WorktreeOverlay) {
+        return Ok(Some(lease));
+    }
+    let task = store
+        .code_index_task(lease.task_id.clone())
+        .await
+        .map_err(storage_api_error)?
+        .ok_or_else(|| {
+            ApiError::internal(format!(
+                "code index worktree task '{}' disappeared before recovery",
+                lease.task_id
+            ))
+        })?;
+    let attempt_matches = task.task_id == lease.task_id
+        && lease.publication_fence.task_id == lease.task_id
+        && lease.publication_fence.lease_owner == lease.lease_owner
+        && lease.publication_fence.attempt_count == lease.attempt_count
+        && task.repository_id == lease.publication_fence.repository_id
+        && task.mode == CodeIndexMode::WorktreeOverlay
+        && task.state == CodeIndexTaskState::Running
+        && task.lease_owner.as_deref() == Some(lease.lease_owner.as_str())
+        && task.attempt_count == lease.attempt_count
+        && task.publication_generation == lease.publication_fence.generation
+        && task.path_filters == lease.path_filters
+        && task.language_filters == lease.language_filters
+        && task.resource_budget == lease.resource_budget;
+    if !attempt_matches {
+        return Err(ApiError::internal(format!(
+            "code index worktree task '{}' changed attempt identity before recovery",
+            lease.task_id
+        )));
+    }
+    code_index_task_lease_for_target(
+        &lease,
+        &task.repository_id,
+        task.source_scope,
+        task.resolved_commit_sha,
+        task.tree_hash,
+    )
+    .map(Some)
+}
+
+pub(super) fn code_index_task_lease_for_target(
+    lease: &CodeIndexTaskLeaseContext,
+    repository_id: &str,
+    source_scope: String,
+    resolved_commit_sha: String,
+    tree_hash: String,
+) -> Result<CodeIndexTaskLeaseContext, ApiError> {
+    if repository_id != lease.publication_fence.repository_id
+        || source_scope.trim().is_empty()
+        || resolved_commit_sha.trim().is_empty()
+        || tree_hash.trim().is_empty()
+    {
+        return Err(ApiError::internal(format!(
+            "code index task '{}' produced an invalid publication target",
+            lease.task_id
+        )));
+    }
+    Ok(CodeIndexTaskLeaseContext {
+        source_scope,
+        resolved_commit_sha,
+        tree_hash,
+        ..lease.clone()
+    })
 }
 
 pub(super) async fn refresh_code_index_task_lease(

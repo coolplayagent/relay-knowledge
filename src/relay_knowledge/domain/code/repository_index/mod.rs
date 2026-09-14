@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
+    CodeFrameworkEdgeRecord, CodeFrameworkNodeRecord,
     dependencies::CodeDependencyRecord,
     error::DomainError,
     repository::{
@@ -15,6 +16,7 @@ use super::{
 
 mod incremental_clone;
 mod reference_resolution;
+mod software_projection;
 
 pub(crate) use self::incremental_clone::{
     CodeIncrementalClonePhase, code_incremental_clone, code_incremental_clone_state,
@@ -24,6 +26,9 @@ pub(crate) use self::reference_resolution::{
     code_reference_resolution, code_reference_resolution_cursor_digest,
     code_reference_resolution_query_index_repair,
     code_reference_resolution_query_index_repair_state, code_reference_resolution_state,
+};
+pub(crate) use self::software_projection::{
+    CodeSoftwareProjectionPhase, SOFTWARE_PROJECTION_CHECKPOINT, code_software_projection_phase,
 };
 
 /// Parsed index changes ready to commit into storage.
@@ -49,6 +54,10 @@ pub struct CodeIndexSnapshot {
     pub calls: Vec<CodeCallRecord>,
     pub dependencies: Vec<CodeDependencyRecord>,
     pub feature_flags: Vec<CodeFeatureFlagRecord>,
+    #[serde(default)]
+    pub framework_nodes: Vec<CodeFrameworkNodeRecord>,
+    #[serde(default)]
+    pub framework_edges: Vec<CodeFrameworkEdgeRecord>,
     pub routes: Vec<CodeRouteRecord>,
     pub chunks: Vec<RepositoryCodeChunkRecord>,
     #[serde(default)]
@@ -153,6 +162,10 @@ pub struct CodeIndexBatch {
     pub imports: Vec<CodeImportRecord>,
     pub dependencies: Vec<CodeDependencyRecord>,
     pub feature_flags: Vec<CodeFeatureFlagRecord>,
+    #[serde(default)]
+    pub framework_nodes: Vec<CodeFrameworkNodeRecord>,
+    #[serde(default)]
+    pub framework_edges: Vec<CodeFrameworkEdgeRecord>,
     pub routes: Vec<CodeRouteRecord>,
     pub chunks: Vec<RepositoryCodeChunkRecord>,
     pub diagnostics: Vec<CodeFileDiagnostic>,
@@ -167,6 +180,8 @@ impl CodeIndexBatch {
             .saturating_add(self.imports.len())
             .saturating_add(self.dependencies.len())
             .saturating_add(self.feature_flags.len())
+            .saturating_add(self.framework_nodes.len())
+            .saturating_add(self.framework_edges.len())
             .saturating_add(self.routes.len())
             .saturating_add(self.chunks.len())
             .saturating_add(self.diagnostics.len())
@@ -639,7 +654,8 @@ impl CodeIncrementalSummaryReceipt {
             || self.affected_path_count > affected_surface
             || self.degraded_file_count > self.parsed_file_count
             || self.sqlite_write_count < minimum_sqlite_writes
-            || self.batch_count != 1
+            || self.batch_count == 0
+            || self.batch_count > self.parsed_file_count.max(1)
         {
             return Err(DomainError::invalid(
                 "incremental_summary",

@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    AuditEventRecord, GraphVersion, IndexKind, IndexModality, IndexStatus, ProposalConflictRecord,
-    ProposalRecord, ProposalState, ServiceOperatorState, ServiceOperatorStatus, WorkerStatus,
-    WorkerTaskRecord,
+    AuditEventRecord, GraphVersion, IndexCursor, IndexKind, IndexModality, IndexRefreshDiagnostics,
+    IndexStatus, ProposalConflictRecord, ProposalRecord, ProposalState, ServiceOperatorState,
+    ServiceOperatorStatus, WorkerStatus, WorkerTaskRecord,
 };
 
 use super::{
@@ -248,26 +248,6 @@ fn unavailable_file_index_storage<T>() -> StorageFuture<'static, T> {
     })
 }
 
-/// Scoped cursor for a derived index read model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IndexCursor {
-    pub kind: IndexKind,
-    pub source_scope: String,
-    pub modality: IndexModality,
-    pub index_version: u64,
-    pub indexed_graph_version: GraphVersion,
-    pub state: crate::domain::IndexState,
-    pub last_error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_hash: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub backend_cursor: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_dimension: Option<u32>,
-}
-
 /// Persistent index refresh task lifecycle state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -358,41 +338,6 @@ pub struct IndexRefreshFailure {
     pub retry_backoff_ms: u64,
     pub max_attempts: u32,
     pub now_ms: u64,
-}
-
-/// Per-kind lag included in diagnostics snapshots.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IndexLag {
-    pub kind: IndexKind,
-    pub lag_versions: u64,
-}
-
-/// Structured reason explaining why an index family or scoped cursor is stale.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IndexStalenessReason {
-    pub kind: IndexKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_scope: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub modality: Option<IndexModality>,
-    pub reason: String,
-    pub lag_versions: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_error: Option<String>,
-}
-
-/// Snapshot for queue, dead-letter, and stale-index diagnostics.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IndexRefreshDiagnostics {
-    pub queue_depth: usize,
-    pub running_count: usize,
-    pub retrying_count: usize,
-    pub dead_letter_count: usize,
-    pub oldest_unfinished_age_ms: Option<u64>,
-    pub index_lag_by_kind: Vec<IndexLag>,
-    pub max_index_lag_versions: u64,
-    pub stale_index_count: usize,
-    pub stale_reasons: Vec<IndexStalenessReason>,
 }
 
 #[cfg(test)]

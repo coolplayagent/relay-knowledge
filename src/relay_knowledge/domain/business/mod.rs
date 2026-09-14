@@ -3,6 +3,11 @@
 mod glossary;
 mod projection;
 mod query;
+mod result;
+pub use result::{
+    BusinessKnowledgeMatchType, BusinessKnowledgeResult, BusinessKnowledgeResultStatus,
+    BusinessKnowledgeState, BusinessKnowledgeSummary,
+};
 
 pub use super::core::{OntologyEntityKind, OntologyIdentity};
 pub use glossary::{
@@ -18,5 +23,5 @@ pub use projection::{
     BusinessKnowledgeStatus, BusinessTechnicalMapping, BusinessTerm,
 };
 pub use query::{
-    BusinessKnowledgeQueryKind, BusinessKnowledgeQueryRequest, BusinessKnowledgeResolution,
+    BusinessKnowledgeQueryKind, BusinessKnowledgeQueryMode, BusinessKnowledgeQueryRequest,
 };

@@ -391,9 +391,9 @@ fn feature_flags(
         SELECT repository_id, source_scope, feature_flag_id, usage_id, file_id, path,
                language_id, name, source_kind, source_key, edge_kind,
                confidence_basis_points, confidence_tier, byte_start, byte_end,
-               line_start, line_end, excerpt
+               line_start, line_end, excerpt, metadata_json
         FROM code_repository_feature_flags
-        WHERE source_scope = ?1
+        WHERE source_scope = ?1 AND source_kind != 'config_symbol' AND edge_kind NOT IN ('declares_string_constant','declares_config_getter')
         ",
         source_scope,
         request,
@@ -407,6 +407,13 @@ fn feature_flags(
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(params_from_iter(values.iter()), |row| {
         Ok(CodeFeatureFlagRecord {
+            metadata: serde_json::from_str(&row.get::<_, String>(18)?).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    18,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?,
             repository_id: row.get(0)?,
             source_scope: row.get(1)?,
             feature_flag_id: row.get(2)?,

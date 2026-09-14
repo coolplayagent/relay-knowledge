@@ -9,8 +9,9 @@ use crate::{
         code_snapshot_scope_id,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeRepositoryStore,
-        SqliteGraphStore, StorageError,
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskFailure,
+        CodeIndexTaskSeed, CodeIndexTaskStore as _, RepositoryCatalogStore as _, SqliteGraphStore,
+        StorageError,
     },
 };
 
@@ -172,6 +173,8 @@ async fn direct_checkpoint_cannot_be_overtaken_or_continue_after_task_adoption()
             imports: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            framework_nodes: Vec::new(),
+            framework_edges: Vec::new(),
             routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
@@ -328,6 +331,8 @@ fn snapshot(_label: &str, resolved_commit_sha: &str, tree_hash: &str) -> CodeInd
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),

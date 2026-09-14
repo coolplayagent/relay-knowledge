@@ -239,14 +239,14 @@ fn checkpoint_capture_does_not_overwrite_previous_backup() {
 
     std::fs::write(&definition_path, b"old definition v1")
         .expect("first definition should be written");
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
     let first_report = execute_service_plan_blocking(&plan, &mut runner);
     assert_eq!(first_report.failed_step_id, None);
     let first_backup = checkpoint_definition_backup(&plan);
 
     std::fs::write(&definition_path, b"old definition v2")
         .expect("second definition should be written");
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
     let second_report = execute_service_plan_blocking(&plan, &mut runner);
     assert_eq!(second_report.failed_step_id, None);
     let second_backup = checkpoint_definition_backup(&plan);
@@ -296,6 +296,10 @@ fn runtime_paths_at(root: &Path) -> RuntimePaths {
     RuntimePaths::resolve(&environment.platform, &environment.paths).expect("paths should resolve")
 }
 
+fn process_step_runner() -> ProcessStepRunner {
+    ProcessStepRunner::new(std::env::current_exe().expect("test executable should resolve"))
+}
+
 fn unique_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "relay-knowledge-lifecycle-review-followup-{name}-{}",
@@ -334,7 +338,7 @@ impl StepRunner for ProcessBackedFailingRunner {
         match step.id.as_str() {
             "capture-rollback-checkpoint"
             | "remove-service-definition"
-            | "restore-service-definition" => ProcessStepRunner.run(plan, step),
+            | "restore-service-definition" => process_step_runner().run(plan, step),
             id if id == self.fail_step => Err("forced failure".to_owned()),
             _ => Ok("ok".to_owned()),
         }

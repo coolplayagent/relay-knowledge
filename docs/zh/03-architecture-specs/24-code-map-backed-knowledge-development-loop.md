@@ -10,7 +10,7 @@
 
 本规格把两个 issue 收敛为一个可执行的 Knowledge 开发闭环：
 
-1. repository bootstrap 必须同时建立 `.knowledge/knowledge-map.yaml` 导航契约和版本化代码地图；只完成其中一个不能报告初始化成功。
+1. repository bootstrap 必须同时建立 `codespec/codespec-map.yaml`、`knowledge/knowledge-map.yaml` 和版本化代码地图；只完成其中一个 surface 不能报告初始化成功。
 2. Git commit 是已跟踪源码事实的权威源；代码地图是针对精确 commit/source scope 发布的符号、调用、依赖和检索证据视图。软件全域模型是与该代码地图同 scope、同发布边界的派生读模型。
 3. YAML 保存稳定的知识路由和模型入口，不复制会随 commit 变化的架构摘要、构建 target 或部署事实。实际 `design`、`build`、`iac`、`relationships` 事实由 `repo software` 返回，并携带 ref、source scope、新鲜度和证据。
 4. spec 编写和 agent 编码前必须消费同一个固定 ref 的 `business-knowledge` 路由、业务术语/映射、软件模型、architecture/business-domain 视图和代码上下文；commit 后必须刷新同一 fenced projection 并再次验证 YAML。
@@ -24,13 +24,13 @@
 | 状态面 | 权威内容 | 所有者 | 一致性身份 |
 | --- | --- | --- | --- |
 | Git repository | 源码、文档、manifest、CI、部署配置 | Git | immutable commit 或显式 worktree overlay |
-| Knowledge map | topic、source、route、有限 recent history 和稳定软件模型入口 | `.knowledge/knowledge-map.yaml` 根 manifest、`.knowledge/topics/` 分片、`.knowledge/history/` 归档 | `schema_version`、`map_version`、SHA-256 digest |
+| Repository maps | 强类型 CodeSpec/Knowledge 目录及 topic、source、route、有限 history 和软件模型入口 | `codespec/codespec-map.yaml`、`knowledge/knowledge-map.yaml`、`knowledge/topics/` | `schema_version`、`map_type`、`map_version`、SHA-256 digest |
 | Code map | file、symbol、reference、call、import、chunk 和变更事实 | code repository index | repository id、resolved commit、tree hash、source scope |
-| Software model | dependency、SDK、file、topic、relationship、build、IaC、design 投影 | software global projection | 与 code map 相同的 source scope 和 graph version |
+| Software model | 兼容投影、稳定 ontology entity、snapshot occurrence、provenance statement、shape/conflict diagnostic | software global projection v6 | 与 code map 相同的 source scope 和 graph version；Knowledge Map 只保存稳定路由，不复制这些派生行 |
 | Business model | domain、canonical term、alias、semantics、definition conflict 与技术映射 | Git-authored glossary 的 fenced projection | 与 code map 相同的 resolved commit、source scope 和 graph version |
 | Agent context | map route、software/view/context/impact 的有界组合 | skill workflow | 固定 base/head、freshness、evidence id |
 
-`.knowledge/knowledge-map.yaml` 的默认稳定入口为：
+`knowledge/knowledge-map.yaml` 的默认稳定入口为：
 
 - topic id: `software-model`
 - source id: `repository-software-model`
@@ -40,11 +40,21 @@
 
 该 source 表示“当前仓库的 code-map-backed 软件模型入口”，而不是一份生成结果缓存。`map init` 对新旧 map 都必须幂等确保该入口存在；如果保留 id 已被用于不兼容的 topic、kind、URI 或 scope，命令必须报告冲突，不能静默覆盖用户契约。
 
-`map init` 同时确保 `business-knowledge` topic、`repository-business-glossary` file source、`.knowledge/business-glossary.yaml` URI 和 `repo` scope。该 route 只负责授权；glossary 保存 authored 业务事实，索引后才成为绑定 commit、scope、freshness 和 evidence 的图事实。已有 glossary 必须保留，保留 route/source 冲突必须失败。
+`map init` 同时确保 `business-knowledge` topic、`repository-business-glossary` file source、`knowledge/glossary/business-glossary.yaml` URI 和 `repo` scope。该 route 只负责授权；glossary 保存 authored 业务事实，索引后才成为绑定 commit、scope、freshness 和 evidence 的图事实。已有 glossary 必须保留，保留 route/source 冲突必须失败。
 
-Knowledge Map v2 的根 manifest 只保存 topic 摘要、每个 topic 的有序 source-id 摘要、内容寻址分片 ref、map version 与最多 16 条 recent history。持久 artifact schema v2 与 `map show` 使用的有界 `KnowledgeMapView` 是不同类型，部分 history 视图不能被回写为存储 contract。根摘要必须在加载任一分片前拒绝跨 topic 的重复 source id、history 版本溢出，以及非法 topic/archive ref 或 digest。各 topic 的 source/route 位于 `.knowledge/topics/`；超出窗口的完整历史位于 `.knowledge/history/` 的内容寻址归档。`map route <topic>` 只加载根 manifest 与目标分片；`map show` 加载当前分片但不读取 history archive，并返回 `archived_through`、`complete` 与 recent entries；`map history` 显式提供单页最多 256 条的有界读取。根 manifest 的可选 `history.index` 指向 fanout 64、最大高度 10 的内容寻址 B+ tree；节点 range 必须连续、无重叠且完整覆盖 `1..=archived_through`，因此定位一个归档最多读取 11 个节点和一个归档，与归档总数无关。缺 index 的早期 v2 只允许 show、route 和完整 validate，并要求分页前通过受锁 `map init` 表示层迁移；读取路径禁止回扫 reverse chain。`map validate` 与所有 mutation 仍完整验证 archive chain 和 index 一致性。mutation 使用等待上限十秒的 OS advisory repository lock，活跃 writer 保持独占，异常退出则自动释放 owner。code parser 分别产生根授权事实与 digest 验证后的 shard 事实，software projection 通过 join 只接纳当前根引用的 shard，同时继续兼容 v1 根 topic。
+`map validate` 必须要求两个保留 source 具有上述精确字段，并要求每个 source 继续属于对应的保留 topic route。两个 topic 下仍可包含其他符合普通 source 契约的 source；这些 source 不得被误当成 business glossary 文档解析，visible v4 glossary source 必须使用 canonical URI。持有 writer lock 的 `map init` 把此前接受的 legacy glossary URI 当作迁移输入，发布 canonical shard，并把持久变更记录为 `source.migrate` 而不是 history compaction，同时保持只读 visible-v4 校验严格。source removal 也不得删除任一保留入口。`map source add` 首次创建 Knowledge Map 时，必须先在内存中完成整个 mutation 的领域校验，不能先创建 writer lock 或 contract 文件；校验成功后，在发布 root 前创建受治理的 baseline README 和缺失的最小 glossary。被拒绝的首次 add 不得留下可见、legacy 或 CodeSpec map artifact。每个受控 source mutation 都通过 current-path lock 串行化 legacy-state 探测，并在发布 v4 与安装 legacy redirect 前针对 live legacy snapshot 完成校验；被拒绝的 mutation 不得发布迁移状态。
 
-所有分片与归档 ref 必须限制在 `.knowledge/` 的指定真实目录，拒绝绝对路径、`..`、root/backup 或 artifact 叶子符号链接、指定 artifact 目录符号链接和逃逸仓库的符号链接。多文件 mutation 使用同一个仓库级 writer lock，只追加刚完成的 history chunk，先发布不可变内容寻址 artifact，最后发布根 manifest；artifact 临时文件在 write 或 rename 失败时必须删除，root 发布失败则恢复到上一个有效 root。成功发布后保留上一代 recovery manifest 及其引用；更旧 shard 第一次失去引用时创建 retirement marker，并从该时刻计算至少 60 秒宽限期，再做 best-effort 清理，使已读取旧 root 的并发 reader 能完成分片读取。清理只接纳严格符合内容寻址 shard 命名的文件，必须保留 `.knowledge/topics/` 中的 README、`.gitkeep` 和其他用户文件。Map 仍只保存稳定导航，不得写入 snapshot-bound code、build、IaC、framework scan 或 design projection facts。
+Repository Map v4 在两个可见根文件中保留强类型 `directories`。`codespec` 固定要求 `requirements`、`design`、`api`、`test`、`decisions`；`knowledge` 固定要求 `domain`、`guides`、`ops`、`glossary`、`best-practices`，同时允许扩展受限的自定义目录。条目包含 purpose、content scope、key files、load policy、强类型限定关系和 update policy。Knowledge Map 保存 topic 摘要、有序 source id、内容寻址 shard ref、map version、`omitted_through` checkpoint 与最多 16 条 recent history；topic 位于 `knowledge/topics/`，两张 map 都不再创建 history 归档目录。`map route <topic> --type knowledge` 只加载目标 shard；聚合读取默认处理两张 map，定向写入必须指定具体 type。v4 history 在 CLI、内置 schema 与 code-index fact extraction 中按字段存在性拒绝 legacy `archived_through`、`archive`、`index` key，同时继续允许无关 future field；root 与引用的 topic-shard schema version 必须一致。跨文件 digest、目录存在性、关系目标与环、recent-history 连续性、路径边界和保留 route 均由 `map validate` 校验，不能只依赖 JSON Schema。
+
+所有生成 ref 必须限制在所选 map 根下的指定真实目录，拒绝绝对路径、`..`、symlink/reparse 逃逸和 map type/path 不匹配。多文件 mutation 先发布不可变 artifact，最后发布根文件。legacy 迁移在发布 `knowledge/knowledge-map.yaml` 前校验引用的 topic 与 history artifact；只有可见 v4 root 及其 artifact 已完成校验后，才把 `.knowledge/knowledge-map.yaml` 替换为 v4 redirect。退役 history artifact 前，迁移会重复发布，直到 current 与 `.previous` reader root 都是 v4，再等待 60 秒 reader grace 后有界删除。cleanup 只接受 owned contract directory 内名称严格匹配的普通 archive/index 文件及自有 grace marker，每个删除 attempt 最多处理 1,024 个 archive，拒绝 link 与未知文件，并通过 `map init` 重试续跑。长期审计与回滚使用 Git 或仓库备份；卸载不得删除仓库拥有的 map 内容。
+
+`map show`、`map route`、`map validate` 和 `map history` 是严格只读边界。legacy v1 reader 只会在校验前归一化历史 glossary URI，visible-v4 校验仍坚持 canonical URI。`map validate` 会校验 legacy archive chain，但不得改写它；只有持有 writer lock 的显式初始化/迁移路径可以发布 v4 并删除已验证的 archive tree。v4 下省略 `map history --from` 会从 `omitted_through + 1` 开始；显式请求更早版本必须报错，不能合成或搜索不可用历史，每次最多返回 16 条。
+
+空间维护不需要制造新的 map version。`map source update` 在字段校验及文本归一化后，如果 source、保留 route 和 schema 均不需要变化，则保持 source version、recent history、分片和根文件不变；legacy 迁移或保留 route 修复仍必须发布。`map init` 也执行已有分片回收，即使没有后续内容写入，也可清理超过 60 秒退役宽限期的未引用分片。每次最多处理 1,024 个未引用普通分片，保留 current、previous 和其他 recovery manifest 的引用，未知文件和链接不删除；CodeSpec 不为维护创建空 topics 目录。长期恢复依赖 Git/backup。
+
+`tools/self_iteration` fast 的 `map_storage_regression_cases` 固定验证 32 次相同更新新增 0 文件、0 字节并保持 mtime，空闲后 init 回收、年轻退役标记保护、恢复根保留、分批续跑及相同内容仍触发必要迁移。字节结果来自确定性 fixture，不代表全仓 SQLite 压缩率。
+
+staging-lock 清理测试显式 unlock 后再验证回收，与生产 guard 的释放协议一致；并行测试启动子进程时，不能把文件描述符 drop 等同于锁立即释放。
 
 ## 3. 为什么 YAML 不复制派生模型
 
@@ -147,6 +157,11 @@ Agent 在验收时必须给出“requirement → authoritative evidence → test
 | KDL-08 | 文档与发布包不会回退到旧提示词 | shared skill metadata/policy self-test、PR gate、release bundle gate |
 | KDL-09 | 仓库交付通过全量质量门禁 | fmt、clippy、all-target tests、coverage、package、publish dry-run 和相关 self-iteration cases |
 | KDL-10 | 业务模型与代码/软件模型使用同一发布身份 | 端到端测试串联 business route、glossary authoring、index、business/view/context，并断言 commit、scope、freshness、evidence 与 publication fence 一致 |
+| KDL-11 | validate 要求两个精确保留 route，同时允许普通同 topic source | application tests 分别移除两个保留 shard，并增加一个非 glossary 的 business source |
+| KDL-12 | 首次 source add 发布完整 baseline，拒绝的请求零副作用 | application 与 CLI tests 校验 baseline README/glossary，并覆盖空 id 与保留 id 冲突 preflight |
+| KDL-13 | 所有 source mutation 都保留内置 route 与 recent-only history 边界 | application tests 覆盖保留 source 删除、legacy migration 校验、有界历史与 archive cleanup |
+
+图谱验收覆盖 map 初始化与有序路由、八个 topic 维度、dependency/SDK/build/IaC/design/ontology 投影、端点闭合、删除 source 后保留空 authored topic、退休 shard 排除与不可变 base 重放。兼容边存储用例覆盖 4,096 topic 的零边写入、精确去重计数、limit 前路径/语言准入及 unresolved 外部元数据；fast 自迭代门禁执行这些存储回归。
 
 ---
 

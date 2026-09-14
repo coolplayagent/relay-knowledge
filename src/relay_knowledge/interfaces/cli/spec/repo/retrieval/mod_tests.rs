@@ -1,6 +1,6 @@
 use super::{
-    repo_business, repo_context, repo_feature_flags, repo_graph, repo_impact, repo_query,
-    repo_software, repo_view,
+    repo_business, repo_context, repo_feature_flags, repo_framework, repo_graph, repo_impact,
+    repo_query, repo_software, repo_software_export, repo_view,
 };
 
 #[test]
@@ -10,9 +10,11 @@ fn retrieval_specs_expose_each_read_surface_with_bounded_result_options() {
         repo_graph(),
         repo_context(),
         repo_feature_flags(),
+        repo_framework(),
         repo_impact(),
         repo_view(),
         repo_software(),
+        repo_software_export(),
         repo_business(),
     ];
     assert_eq!(
@@ -25,9 +27,11 @@ fn retrieval_specs_expose_each_read_surface_with_bounded_result_options() {
             Some("graph"),
             Some("context"),
             Some("feature-flags"),
+            Some("framework"),
             Some("impact"),
             Some("view"),
             Some("software"),
+            Some("export"),
             Some("business"),
         ]
     );

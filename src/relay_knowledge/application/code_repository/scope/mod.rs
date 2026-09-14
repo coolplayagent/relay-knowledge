@@ -7,11 +7,12 @@ use crate::{
     code::{repository_uses_filesystem_source, resolve_repository_ref_with_filters},
     domain::{
         CodeFeatureFlagRequest, CodeIndexTaskRecord, CodeRepositorySelector, CodeRepositoryStatus,
-        CodeRetrievalRequest, code_snapshot_scope_is_fact_versioned,
+        CodeRetrievalRequest, FrameworkGraphRequest, code_snapshot_scope_is_fact_versioned,
         code_snapshot_scope_matches_identity,
     },
 };
 
+use super::worktree_ref::worktree_overlay_base_commit;
 use super::{blocking::run_blocking_code, errors::storage_api_error};
 
 pub(super) async fn retrieval_request_at_indexed_ref(
@@ -32,6 +33,20 @@ pub(super) async fn feature_flag_request_at_indexed_ref(
     mut request: CodeFeatureFlagRequest,
     status: &CodeRepositoryStatus,
 ) -> Result<CodeFeatureFlagRequest, ApiError> {
+    request.repository.ref_selector = indexed_commit_for_selector(
+        status,
+        &request.repository,
+        request.repository.ref_selector.clone(),
+    )
+    .await?;
+
+    Ok(request)
+}
+
+pub(super) async fn framework_graph_request_at_indexed_ref(
+    mut request: FrameworkGraphRequest,
+    status: &CodeRepositoryStatus,
+) -> Result<FrameworkGraphRequest, ApiError> {
     request.repository.ref_selector = indexed_commit_for_selector(
         status,
         &request.repository,
@@ -333,6 +348,12 @@ pub(super) async fn indexed_commit_for_selector(
     selector: &CodeRepositorySelector,
     ref_selector: String,
 ) -> Result<String, ApiError> {
+    // Context expansion pins the first worktree query to its immutable overlay
+    // identity. That identity is already resolved and must never be sent back
+    // through Git's ref parser on subsequent graph queries.
+    if worktree_overlay_base_commit(&ref_selector).is_some() {
+        return Ok(ref_selector);
+    }
     if ref_selector == "worktree" {
         if is_worktree_overlay(status) {
             return status.last_indexed_commit.clone().ok_or_else(|| {

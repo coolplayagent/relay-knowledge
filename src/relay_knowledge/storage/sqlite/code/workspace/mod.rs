@@ -33,7 +33,7 @@ pub(crate) fn resolve_workspace_imports(
         return Ok(());
     }
 
-    let now = set_state::current_timestamp_ms();
+    let now = crate::clock::system_now_millis_or_zero();
     let set = set_state::ensure_workspace_set(transaction, repository_id, source_scope, now)?;
     mapping::replace_workspace_package_mappings(
         transaction,

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     domain::{CodeParseStatusCounts, CodeRepositoryTotals, CodeSymbolGenerationCounts},
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{CodeQueryReadStore, SqliteGraphStore, StorageError},
 };
 
 use super::{catalog::SqliteShardCatalog, routing::source_scope_store};

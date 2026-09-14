@@ -1,21 +1,33 @@
 //! Deterministic software-projection file role classification.
 
-use crate::project::{KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX};
+use crate::project::{
+    KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX,
+    LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
+};
 
 pub(super) fn file_role(
     path: &str,
     language_id: &str,
     authorized_topic_shard: bool,
 ) -> &'static str {
-    if path == KNOWLEDGE_MAP_RELATIVE_PATH {
+    if matches!(
+        path,
+        KNOWLEDGE_MAP_RELATIVE_PATH | LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH
+    ) {
         return "knowledge_map_manifest";
     }
-    if authorized_topic_shard && path.starts_with(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX) {
+    if authorized_topic_shard
+        && (path.starts_with(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX)
+            || path.starts_with(".knowledge/topics/"))
+    {
         return "knowledge_map_topic_shard";
     }
     let file_name = path.rsplit('/').next().unwrap_or(path);
     if language_id == "markdown" {
         return "documentation";
+    }
+    if api_schema_path(file_name, language_id) {
+        return "api_schema";
     }
     if dependency_manifest_path(path, file_name) {
         return "dependency_manifest";
@@ -37,6 +49,16 @@ pub(super) fn file_role(
     }
 
     "source"
+}
+
+fn api_schema_path(file_name: &str, language_id: &str) -> bool {
+    if !matches!(language_id, "json" | "yaml") {
+        return false;
+    }
+    file_name
+        .to_ascii_lowercase()
+        .split(['.', '-', '_'])
+        .any(|segment| matches!(segment, "openapi" | "swagger"))
 }
 
 fn dependency_manifest_path(path: &str, file_name: &str) -> bool {
@@ -81,15 +103,17 @@ fn build_manifest_path(file_name: &str, language_id: &str) -> bool {
             | "BSDmakefile"
             | "CMakeLists.txt"
             | "build.ninja"
-    ) || matches!(language_id, "cmake" | "make" | "ninja" | "starlark")
+    ) || file_name.starts_with("Dockerfile")
+        || file_name.starts_with("Containerfile")
+        || matches!(
+            language_id,
+            "cmake" | "make" | "ninja" | "starlark" | "dockerfile"
+        )
 }
 
 fn deployment_path(path: &str, file_name: &str, language_id: &str) -> bool {
-    file_name.starts_with("Dockerfile")
-        || file_name.starts_with("Containerfile")
-        || matches!(language_id, "dockerfile")
-        || (deployment_service_path(path)
-            && (deployment_manifest_language(language_id) || service_manager_file_name(file_name)))
+    (deployment_service_path(path)
+        && (deployment_manifest_language(language_id) || service_manager_file_name(file_name)))
         || (kubernetes_manifest_path(path) && deployment_manifest_language(language_id))
 }
 

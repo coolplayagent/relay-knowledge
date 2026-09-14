@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="relay-knowledge 1.1.16 发布说明：强类型仓库地图、框架图抽取、耐久索引边界与跨平台安装包。"
+    />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.16 发布说明</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="页面导航">
+        <a href="../">中文文档</a>
+        <a href="../../en/releases/1.1.16.html">English</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.16">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.16 发布说明</h1>
+        <p>
+          1.1.16 将仓库拥有的 CodeSpec 与 Knowledge Map 收敛为强类型、agent 可发现的合同，
+          并加强耐久代码索引与软件投影的生命周期边界。这一版还新增 Angular 和 Vue
+          框架图抽取，更新了跨平台发布基线。
+        </p>
+        <p>发布日期：2026 年 8 月 30 日。</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.16">发布与下载</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.16">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.16/checksums.txt">Checksums</a>
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>安装与验证</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.16 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json</code></pre>
+        <p class="notice">
+          迁移可见的 Repository Map v3 合同前，应先升级所有共享该仓库的 writer 与 reader。
+          迁移前备份或提交仓库拥有的 map 文件；替换常驻服务二进制前，先运行文档规定的
+          service lifecycle dry-run。
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>强类型 CodeSpec 与 Knowledge Map</h2>
+        <p>
+          Repository Map v3 使用可见的 <code>codespec/</code> 与 <code>knowledge/</code> 根目录。
+          CLI 通过统一的校验、查看、路由和迁移入口暴露两种 map，agent 不必再从文件布局猜测仓库合同。
+        </p>
+        <ul>
+          <li><code>map validate --type all</code> 同时校验两个受治理根目录，只报告诊断，不重写内容。</li>
+          <li><code>map show</code> 暴露强类型目录范围、关键文件、加载策略、更新策略和跨 map 关系。</li>
+          <li><code>map route</code> 解析仓库业务词汇表等 authored source。</li>
+          <li>CLI skill 包含 Knowledge Map、CodeSpec Map 与 Business Glossary 的 Draft 2020-12 schema。</li>
+          <li>Foundational 自迭代用例保护 help 发现、双 map 校验、目录过滤与业务路由。</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>框架图与软件全域覆盖</h2>
+        <p>
+          仓库图现在抽取 Angular 和 Vue 框架证据，并让软件投影与代码事实绑定到同一已提交 source scope。
+          授权范围外缺失的外部包继续表示为 unresolved edge metadata，不会被误报为仓库损坏。
+        </p>
+        <ul>
+          <li>框架查询按证据暴露组件、路由、依赖和相关图边。</li>
+          <li>软件投影通过耐久、lease-aware 工作发布，不绕过索引 ownership。</li>
+          <li>Repository status 持续暴露 freshness、active task、checkpoint 和 publication state。</li>
+        </ul>
+        <pre><code>relay-knowledge repo framework &lt;alias&gt; \
+  --framework angular --kind component \
+  --ref &lt;commit&gt; --freshness wait-until-fresh --format json
+
+relay-knowledge repo software &lt;alias&gt; \
+  --kind relationships --ref &lt;commit&gt; \
+  --freshness wait-until-fresh --format json</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>耐久索引与架构边界</h2>
+        <ul>
+          <li>索引编排拆分为明确的 start、session、worker、recovery、snapshot、projection 和 publication 职责。</li>
+          <li>仓库工作保留 durable task lease、有界重试、checkpoint、single-writer ownership 与 publication fence。</li>
+          <li>更强的架构门禁约束 clock、identity、runtime、storage、network 和 service lifecycle ownership。</li>
+          <li>大型软件投影使用 lease-friendly 的有界工作，避免 maintenance 阻塞查询热路径。</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>发布产物</h2>
+        <p>
+          Release 包含六个平台压缩包、<code>checksums.txt</code>、artifact attestation 和版本化 CLI skill。
+          Linux GNU 二进制在发布前使用 glibc 2.28 基线构建并实际启动验证。
+        </p>
+        <ul>
+          <li>Linux x64 与 ARM64</li>
+          <li>macOS Intel 与 Apple Silicon</li>
+          <li>Windows x64 与 ARM64</li>
+          <li>用于 agent CLI 工作流的 <code>relay-knowledge-cli-skill-v1.1.16.tar.gz</code></li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>进一步阅读</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.16/docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md">安装、发布与升级</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.16/docs/zh/03-architecture-specs/21-software-global-domain-modeling.md">软件全域模型</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.16/docs/zh/03-architecture-specs/24-code-map-backed-knowledge-development-loop.md">Knowledge 开发闭环</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.16/docs/zh/03-architecture-specs/26-git-commit-knowledge-development-loop.md">Git commit 知识闭环</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

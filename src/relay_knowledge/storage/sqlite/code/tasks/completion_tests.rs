@@ -17,8 +17,9 @@ use crate::{
         code_snapshot_scope_id_with_workspace_detection,
     },
     storage::{
-        CodeIndexPublicationTarget, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
-        CodeIndexTaskFailure, CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeIndexPublicationTarget, CodeIndexTaskClaimRequest,
+        CodeIndexTaskCompletion, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeIndexTaskStore as _,
+        RepositoryCatalogStore as _, SoftwareProjectionStore as _, SqliteGraphStore,
     },
 };
 
@@ -658,6 +659,8 @@ async fn a_new_worktree_task_adopts_an_exact_config_aware_publication_without_mu
             calls: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            framework_nodes: Vec::new(),
+            framework_edges: Vec::new(),
             routes: Vec::new(),
             chunks: Vec::new(),
             workspaces: Vec::new(),

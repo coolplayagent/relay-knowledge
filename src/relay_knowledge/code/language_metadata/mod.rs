@@ -64,8 +64,24 @@ pub(in crate::code) fn language_id(path: &str) -> Option<&'static str> {
     detect_language(path).map(|language| language.id)
 }
 
+/// Recognize environment files and their checked-in templates or named variants.
+pub(in crate::code) fn is_dotenv(path: &str) -> bool {
+    let name = path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(path)
+        .to_ascii_lowercase();
+    name.ends_with(".env")
+        || name
+            .strip_prefix(".env.")
+            .is_some_and(|suffix| !suffix.is_empty())
+}
+
 pub(in crate::code) fn detect_language(path: &str) -> Option<LanguageSpec> {
     let file_name = Path::new(path).file_name()?.to_str()?;
+    if is_dotenv(path) {
+        return Some(bash());
+    }
     if matches!(
         file_name,
         ".bash_profile" | ".bashrc" | ".profile" | "bashrc" | "bash_profile"
@@ -271,6 +287,11 @@ fn language_for_extension(extension: &str) -> Option<LanguageSpec> {
             language: || tree_sitter_javascript::LANGUAGE.into(),
             tags_query: tree_sitter_javascript::TAGS_QUERY,
         }),
+        "html" | "htm" => Some(LanguageSpec {
+            id: "html",
+            language: || tree_sitter_html::LANGUAGE.into(),
+            tags_query: CONFIG_TAGS_QUERY,
+        }),
         "ts" | "mts" | "cts" => Some(LanguageSpec {
             id: "typescript",
             language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
@@ -280,6 +301,11 @@ fn language_for_extension(extension: &str) -> Option<LanguageSpec> {
             id: "tsx",
             language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
             tags_query: tree_sitter_typescript::TAGS_QUERY,
+        }),
+        "vue" => Some(LanguageSpec {
+            id: "vue",
+            language: || tree_sitter_html::LANGUAGE.into(),
+            tags_query: CONFIG_TAGS_QUERY,
         }),
         "go" => Some(LanguageSpec {
             id: "go",

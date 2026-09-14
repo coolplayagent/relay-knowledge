@@ -18,7 +18,7 @@ use crate::{
     application::RelayKnowledgeService,
     domain::{
         CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind,
-        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy,
+        CodeRepositorySelector, CodeRetrievalRequest, FrameworkGraphRequest, FreshnessPolicy,
         RepositoryGraphNeighborhoodRequest, SoftwareGlobalKind, SoftwareGlobalRequest,
     },
     env::{EnvironmentConfig, PlatformKind},
@@ -359,6 +359,27 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     );
     assert_eq!(feature_flags["freshness"]["state"], "fresh");
 
+    let framework_request = FrameworkGraphRequest::new(
+        None,
+        selector.clone(),
+        Vec::new(),
+        Vec::new(),
+        10,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("framework request should validate");
+    let framework = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/framework-graph",
+        Some(json!(framework_request)),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(framework["graph"]["nodes"], json!([]));
+    assert_eq!(framework["graph"]["edges"], json!([]));
+    assert_eq!(framework["freshness"]["state"], "fresh");
+
     let zero_impact_limit = request_json(
         router.clone(),
         "POST",
@@ -428,6 +449,46 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     .await;
     assert_eq!(software["request"]["kind"], "relationships");
 
+    let export_request = SoftwareGlobalRequest::new(
+        selector.clone(),
+        SoftwareGlobalKind::All,
+        FreshnessPolicy::AllowStale,
+        10,
+    )
+    .expect("software export request should validate");
+    let export = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/software/export/prov-o",
+        Some(json!(export_request)),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(export["profile"], "prov-o");
+    assert_eq!(export["media_type"], "application/ld+json");
+    assert_eq!(
+        export["document"]["@context"]["prov"],
+        "http://www.w3.org/ns/prov#"
+    );
+
+    let invalid_export = request_json(
+        router.clone(),
+        "POST",
+        "/api/v1/code/repositories/fixture/software/export/unknown",
+        Some(json!(
+            SoftwareGlobalRequest::new(
+                selector.clone(),
+                SoftwareGlobalKind::All,
+                FreshnessPolicy::AllowStale,
+                10,
+            )
+            .expect("software export request should validate")
+        )),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(invalid_export["error_kind"], "invalid_argument");
+
     let mismatch = request_json(
         router,
         "POST",
@@ -441,15 +502,24 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
 
 async fn test_service(label: &str) -> RelayKnowledgeService {
     let home = unique_temp_dir(label);
+    let home_path = home.as_path().to_str().expect("utf8 path");
     let environment = EnvironmentConfig::from_pairs(
-        PlatformKind::Unix,
+        if cfg!(windows) {
+            PlatformKind::Windows
+        } else {
+            PlatformKind::Unix
+        },
         [
-            ("HOME", "/tmp"),
-            (
-                "RELAY_KNOWLEDGE_HOME",
-                home.as_path().to_str().expect("utf8 path"),
-            ),
-        ],
+            "HOME",
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "TEMP",
+            "TMPDIR",
+            "RELAY_KNOWLEDGE_HOME",
+        ]
+        .into_iter()
+        .map(|key| (key, home_path)),
     )
     .expect("environment should parse");
 
@@ -564,3 +634,6 @@ fn unique_temp_dir(label: &str) -> PathBuf {
 
     std::env::temp_dir().join(format!("relay-knowledge-web-{label}-{now}"))
 }
+
+#[path = "pagination_tests.rs"]
+mod pagination_tests;

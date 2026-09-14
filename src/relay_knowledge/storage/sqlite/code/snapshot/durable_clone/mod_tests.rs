@@ -77,30 +77,6 @@ fn page_control_counts_long_scope_and_repository_in_both_durable_rows() {
     );
 }
 
-#[test]
-fn terminal_cleanup_surface_counts_every_frozen_path_and_progress_owner() {
-    let budget = CodeIndexResourceBudget::new(8, 1_000_000, 16).expect("budget should validate");
-    let progress = sample_progress("target", "repo", budget);
-    let paths = ["a.rs".to_owned(), "nested/b.rs".to_owned()]
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-
-    let (rows, bytes) =
-        progress::cleanup_surface(&progress, &paths).expect("cleanup should measure");
-    let path_bytes = paths
-        .iter()
-        .map(|path| {
-            super::admission::ROW_STORAGE_OVERHEAD_BYTES + progress.source_scope.len() + path.len()
-        })
-        .sum::<usize>();
-
-    assert_eq!(rows, paths.len() + 1);
-    assert!(
-        bytes > path_bytes,
-        "progress deletion must also be reserved"
-    );
-}
-
 fn proof_database(
     committed_fact_row_count: usize,
     max_rows_per_batch: usize,

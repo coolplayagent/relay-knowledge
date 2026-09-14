@@ -1,0 +1,153 @@
+schema_version: 4
+artifact_kind: map
+map_type: knowledge
+map_version: 26
+updated_at: unix:1788492340
+directories:
+- directory: domain
+  purpose: Domain concepts, models, and business rules.
+  content_scope:
+  - knowledge/domain/**
+  key_files:
+  - knowledge/domain/README.md
+  load_hint: on_demand
+  relations:
+  - kind: related_to
+    target: codespec:requirements
+  update_rule: reviewed
+- directory: guides
+  purpose: Task-oriented repository knowledge guides.
+  content_scope:
+  - knowledge/guides/**
+  key_files:
+  - knowledge/guides/README.md
+  load_hint: on_demand
+  relations:
+  - kind: documents
+    target: codespec:requirements
+  update_rule: reviewed
+- directory: ops
+  purpose: Operational procedures and diagnostics.
+  content_scope:
+  - knowledge/ops/**
+  key_files:
+  - knowledge/ops/README.md
+  load_hint: on_demand
+  relations: []
+  update_rule: reviewed
+- directory: glossary
+  purpose: Business terminology, aliases, and technical mappings.
+  content_scope:
+  - knowledge/glossary/**
+  key_files:
+  - knowledge/glossary/README.md
+  load_hint: on_demand
+  relations: []
+  update_rule: reviewed
+- directory: best-practices
+  purpose: Reviewed engineering and knowledge-management practices.
+  content_scope:
+  - knowledge/best-practices/**
+  key_files:
+  - knowledge/best-practices/README.md
+  load_hint: on_demand
+  relations: []
+  update_rule: reviewed
+topics:
+- id: architecture
+  title: Architecture knowledge
+  description: Architecture specs and hard constraints that guide implementation.
+  source_ids:
+  - architecture-hard-constraints
+  - code-map-knowledge-development-loop
+  - commit-driven-code-index-loop
+  - durable-worktree-delta-design
+  - git-commit-knowledge-development-loop
+  - partitioned-sqlite-catalog-read-fast-path
+  - software-global-domain-model
+  ref: topics/topic-4ca303a3bf7ddf7b-b1c4ed6504c17950bc35e64c1880f89d9bd02f9825161b0505339d108ca3781d.yaml
+  digest: b1c4ed6504c17950bc35e64c1880f89d9bd02f9825161b0505339d108ca3781d
+- id: benchmarks
+  title: Benchmark knowledge
+  description: Self-iteration and benchmark guardrail documentation.
+  source_ids:
+  - code-index-fact-versioning
+  - durable-worktree-delta-verification-2026-08-31
+  - profile-all-performance-source-surface-2026-06-04
+  - software-global-evidence-priority-verification-2026-08-31
+  - software-global-ranking-evaluation
+  ref: topics/topic-cb1d2fdcc86ce72a-89b546186126348428cbe7f41ae078342963fc553113d2c25c6d363e16d18dee.yaml
+  digest: 89b546186126348428cbe7f41ae078342963fc553113d2c25c6d363e16d18dee
+- id: business-knowledge
+  title: Business knowledge
+  description: Version-controlled business domains, terminology, aliases, semantics, and technical mappings.
+  source_ids:
+  - repository-business-glossary
+  ref: topics/topic-17438b0266842113-d054e16723063999154e9ac168ec10521b02b5a4a46e22b49e56fbc1f7ee336f.yaml
+  digest: d054e16723063999154e9ac168ec10521b02b5a4a46e22b49e56fbc1f7ee336f
+- id: cli
+  title: CLI knowledge
+  description: CLI command reference and agent workflow guidance.
+  source_ids:
+  - cli-command-reference
+  - cli-skill-workflows
+  ref: topics/topic-99bb88401742848e-92d24f0fea8b084f22203d0680ebd9c6c96c92b08ef83b46542979554215c74e.yaml
+  digest: 92d24f0fea8b084f22203d0680ebd9c6c96c92b08ef83b46542979554215c74e
+- id: release-documentation
+  title: Release documentation knowledge
+  description: Release-readiness documentation, navigation, and validation records.
+  source_ids:
+  - documentation-release-readiness-2026-06-05
+  - documentation-self-iteration-readiness-2026-08-18
+  ref: topics/topic-06be3638d1633e1a-32bef6245e90fdb3f57bafd15b2fbbd7ff9684d66e10d5253d80bcfc42ec9ba9.yaml
+  digest: 32bef6245e90fdb3f57bafd15b2fbbd7ff9684d66e10d5253d80bcfc42ec9ba9
+- id: software-model
+  title: Whole-software model
+  description: Code-map-backed architecture, build, deployment, dependency, configuration, and design knowledge.
+  source_ids:
+  - repository-software-model
+  ref: topics/topic-247e2a0d6f43d185-ac637c335d170f7adca9bdd5a8632f3ed04bd7f8a7346a4bfb6fe50044d4a761.yaml
+  digest: ac637c335d170f7adca9bdd5a8632f3ed04bd7f8a7346a4bfb6fe50044d4a761
+history:
+  omitted_through: 16
+  recent:
+  - version: 17
+    action: source.add
+    actor: cli
+    summary: Added source 'software-global-ranking-evaluation' to topic 'benchmarks'.
+  - version: 18
+    action: source.update
+    actor: cli
+    summary: Updated source 'architecture-hard-constraints'.
+  - version: 19
+    action: source.update
+    actor: cli
+    summary: Updated source 'software-global-ranking-evaluation'.
+  - version: 20
+    action: source.add
+    actor: cli
+    summary: Added source 'software-global-evidence-priority-verification-2026-08-31' to topic 'benchmarks'.
+  - version: 21
+    action: source.add
+    actor: cli
+    summary: Added source 'durable-worktree-delta-design' to topic 'architecture'.
+  - version: 22
+    action: source.update
+    actor: cli
+    summary: Updated source 'commit-driven-code-index-loop'.
+  - version: 23
+    action: source.update
+    actor: cli
+    summary: Updated source 'architecture-hard-constraints'.
+  - version: 24
+    action: source.update
+    actor: cli
+    summary: Updated source 'software-global-ranking-evaluation'.
+  - version: 25
+    action: source.add
+    actor: cli
+    summary: Added source 'durable-worktree-delta-verification-2026-08-31' to topic 'benchmarks'.
+  - version: 26
+    action: history.compact
+    actor: cli
+    summary: Migrated repository map to bounded recent-only history storage.

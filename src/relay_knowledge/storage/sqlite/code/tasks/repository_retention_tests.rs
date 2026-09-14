@@ -4,7 +4,7 @@ use rusqlite::params;
 
 use crate::{
     domain::{CodeIndexResourceBudget, CodeRepositoryRegistration},
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeScopeRetentionStore as _, RepositoryCatalogStore as _, SqliteGraphStore},
 };
 
 #[tokio::test]

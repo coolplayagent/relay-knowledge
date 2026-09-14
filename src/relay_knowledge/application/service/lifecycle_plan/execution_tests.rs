@@ -133,7 +133,7 @@ fn install_rejects_existing_service_definition_before_writing_files() {
         .collect();
     plan.lifecycle_steps
         .retain(|step| step.id == "verify-service-definition-target");
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
 
     let report = execute_service_plan_blocking(&plan, &mut runner);
 
@@ -309,7 +309,7 @@ fn upgrade_rollback_removes_definition_when_checkpoint_has_no_backup() {
     .expect("plan should render");
     plan.lifecycle_steps
         .retain(|step| step.id == "restore-service-definition");
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
 
     let report = execute_service_plan_blocking(&plan, &mut runner);
 
@@ -372,7 +372,7 @@ fn explicit_rollback_removes_no_backup_upgrade_binary_without_install_dir_flag()
 
     plan.lifecycle_steps
         .retain(|step| step.id == "restore-binary");
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
 
     let report = execute_service_plan_blocking(&plan, &mut runner);
 
@@ -636,7 +636,7 @@ fn explicit_rollback_accepts_no_backup_upgrade_definition_checkpoint() {
     plan.lifecycle_steps.retain(|step| {
         step.id == "validate-rollback-checkpoint" || step.id == "restore-service-definition"
     });
-    let mut runner = ProcessStepRunner;
+    let mut runner = process_step_runner();
 
     let report = execute_service_plan_blocking(&plan, &mut runner);
 
@@ -744,6 +744,10 @@ fn runtime_paths_at(root: &Path) -> RuntimePaths {
     )
     .expect("environment should parse");
     RuntimePaths::resolve(&environment.platform, &environment.paths).expect("paths should resolve")
+}
+
+fn process_step_runner() -> ProcessStepRunner {
+    ProcessStepRunner::new(std::env::current_exe().expect("test executable should resolve"))
 }
 
 fn unique_root(name: &str) -> PathBuf {

@@ -4,8 +4,9 @@ use crate::{
     api::{ApiError, ApiMetadata, BusinessKnowledgeQueryResponse, RequestContext},
     application::service::RelayKnowledgeService,
     domain::{
-        BusinessKnowledgeQueryRequest, BusinessKnowledgeResolution, BusinessKnowledgeStatus,
-        FreshnessPolicy, GraphVersion,
+        BusinessKnowledgeQueryRequest, BusinessKnowledgeResult, BusinessKnowledgeResultStatus,
+        BusinessKnowledgeState, BusinessKnowledgeStatus, BusinessKnowledgeSummary, FreshnessPolicy,
+        GraphVersion,
     },
 };
 
@@ -27,7 +28,7 @@ impl RelayKnowledgeService {
     ) -> Result<BusinessKnowledgeQueryResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let repository_status =
-            required_code_repository(&store, &request.repository.repository).await?;
+            required_code_repository(store.as_ref(), &request.repository.repository).await?;
         if request.freshness_policy == FreshnessPolicy::GraphOnly {
             let graph_version = store
                 .current_graph_version()
@@ -38,23 +39,38 @@ impl RelayKnowledgeService {
                 &request.repository,
                 request.repository.ref_selector.clone(),
             );
+            let status = BusinessKnowledgeStatus {
+                repository_id: repository_status.repository_id,
+                source_scope: scope.scope_id.clone(),
+                resolved_commit_sha: scope.resolved_commit_sha.clone(),
+                projected_graph_version: GraphVersion::ZERO,
+                stale: true,
+                source_count: 0,
+                domain_count: 0,
+                term_count: 0,
+                mapping_count: 0,
+                last_error: Some("graph_only freshness policy selected".to_owned()),
+            };
+            let knowledge = BusinessKnowledgeSummary {
+                state: BusinessKnowledgeState::Unknown,
+                projection: status,
+            };
+            let result = BusinessKnowledgeResult {
+                status: BusinessKnowledgeResultStatus::Unavailable,
+                match_type: None,
+                returned_term_count: 0,
+                returned_mapping_count: 0,
+                truncated: false,
+            };
             return Ok(BusinessKnowledgeQueryResponse {
+                diagnostics: crate::api::BusinessKnowledgeDiagnostics::for_query(
+                    &knowledge, &request, &result,
+                ),
                 metadata: ApiMetadata::graph_only(&context, graph_version),
-                status: BusinessKnowledgeStatus {
-                    repository_id: repository_status.repository_id,
-                    source_scope: scope.scope_id.clone(),
-                    resolved_commit_sha: scope.resolved_commit_sha.clone(),
-                    projected_graph_version: GraphVersion::ZERO,
-                    stale: true,
-                    source_count: 0,
-                    domain_count: 0,
-                    term_count: 0,
-                    mapping_count: 0,
-                    last_error: Some("graph_only freshness policy selected".to_owned()),
-                },
+                knowledge,
+                result,
                 scope,
                 request,
-                resolution: BusinessKnowledgeResolution::NotFound,
                 domains: Vec::new(),
                 terms: Vec::new(),
             });
@@ -144,12 +160,18 @@ impl RelayKnowledgeService {
         if scoped_status.stale || served_stale_scope {
             status.stale = true;
         }
+        let knowledge = BusinessKnowledgeSummary::from_projection(status);
         Ok(BusinessKnowledgeQueryResponse {
+            diagnostics: crate::api::BusinessKnowledgeDiagnostics::for_query(
+                &knowledge,
+                &request,
+                &projection.result,
+            ),
             metadata,
             scope,
             request,
-            status,
-            resolution: projection.resolution,
+            knowledge,
+            result: projection.result,
             domains: projection.domains,
             terms: projection.terms,
         })

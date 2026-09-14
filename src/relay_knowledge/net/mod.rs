@@ -13,7 +13,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::env::{EnvError, EnvironmentConfig, NetworkEnvOverrides};
+use crate::env::{EnvironmentConfig, NetworkEnvOverrides};
 
 pub mod http;
 pub mod qos;
@@ -91,15 +91,6 @@ impl NetworkRuntime {
     ) -> Result<NetworkConfig, NetworkConfigError> {
         self.refresh_from_overrides(&environment.network)
     }
-
-    /// Re-reads the current process environment and applies network changes.
-    pub fn refresh_from_process_environment(&self) -> Result<NetworkConfig, NetworkRuntimeError> {
-        let environment =
-            EnvironmentConfig::from_process().map_err(NetworkRuntimeError::Environment)?;
-
-        self.refresh_from_environment(&environment)
-            .map_err(NetworkRuntimeError::Config)
-    }
 }
 
 /// Network configuration error grouped by owning submodule.
@@ -119,24 +110,6 @@ impl fmt::Display for NetworkConfigError {
 }
 
 impl Error for NetworkConfigError {}
-
-/// Error raised while refreshing network config from live environment state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NetworkRuntimeError {
-    Environment(EnvError),
-    Config(NetworkConfigError),
-}
-
-impl fmt::Display for NetworkRuntimeError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Environment(error) => write!(formatter, "{error}"),
-            Self::Config(error) => write!(formatter, "{error}"),
-        }
-    }
-}
-
-impl Error for NetworkRuntimeError {}
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]

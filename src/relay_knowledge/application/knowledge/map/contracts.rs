@@ -1,36 +1,106 @@
 //! Public request/response contracts and typed Knowledge Map mutation state.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use serde::Serialize;
 
 use crate::{
     api::{ApiMetadata, RequestContext},
+    clock::system_now_millis_or_zero,
     domain::{
-        KnowledgeMap, KnowledgeMapHistoryEntry, KnowledgeMapRoute, KnowledgeMapSource,
-        KnowledgeMapSourceKind, KnowledgeMapTopic,
+        DirectoryLoadHint, DirectoryUpdateRule, KnowledgeMap, KnowledgeMapHistoryEntry,
+        KnowledgeMapRoute, KnowledgeMapSource, KnowledgeMapSourceKind, KnowledgeMapTopic,
+        RepositoryMapDirectory, RepositoryMapType,
     },
 };
 
-use super::artifact::{KnowledgeMapArchiveRef, KnowledgeMapHistoryIndexRef};
+use super::artifact::ARTIFACT_SCHEMA_VERSION;
 
 pub(super) struct MutableKnowledgeMap {
+    pub(super) map_type: RepositoryMapType,
+    pub(super) directories: Vec<RepositoryMapDirectory>,
     pub(super) map: KnowledgeMap,
-    pub(super) archived_through: u64,
-    pub(super) archive: Option<KnowledgeMapArchiveRef>,
-    pub(super) history_index: Option<KnowledgeMapHistoryIndexRef>,
+    pub(super) omitted_through: u64,
     pub(super) requires_publish: bool,
+    pub(super) legacy_glossary_uri_normalized: bool,
 }
 
 impl MutableKnowledgeMap {
-    pub(super) fn initial(updated_at: String) -> Self {
+    pub(super) fn initial(map_type: RepositoryMapType, updated_at: String) -> Self {
         Self {
-            map: KnowledgeMap::initial(updated_at),
-            archived_through: 0,
-            archive: None,
-            history_index: None,
+            map: match map_type {
+                RepositoryMapType::Knowledge => KnowledgeMap::initial(updated_at),
+                RepositoryMapType::Codespec => KnowledgeMap::empty(updated_at),
+            },
+            map_type,
+            directories: baseline_directories(map_type),
+            omitted_through: 0,
             requires_publish: false,
+            legacy_glossary_uri_normalized: false,
         }
+    }
+
+    pub(super) fn record_required_publication(
+        &mut self,
+        source_schema_version: u16,
+        updated_at: String,
+    ) -> String {
+        let glossary_only =
+            source_schema_version == ARTIFACT_SCHEMA_VERSION && self.legacy_glossary_uri_normalized;
+        let (action, history_summary, response_summary) = if glossary_only {
+            (
+                "source.migrate",
+                "Migrated the reserved business glossary source URI to the canonical artifact.",
+                "migrated Knowledge Map legacy glossary URI to the canonical artifact",
+            )
+        } else {
+            (
+                "history.compact",
+                "Migrated repository map to bounded recent-only history storage.",
+                "migrated repository map to schema v4 recent-only history",
+            )
+        };
+        self.map
+            .record_change(action, history_summary.to_owned(), updated_at);
+        response_summary.to_owned()
+    }
+}
+
+pub(super) fn baseline_directories(map_type: RepositoryMapType) -> Vec<RepositoryMapDirectory> {
+    map_type
+        .required_directories()
+        .iter()
+        .map(|directory| RepositoryMapDirectory {
+            directory: (*directory).to_owned(),
+            purpose: baseline_purpose(map_type, directory).to_owned(),
+            content_scope: vec![format!("{}/{directory}/**", map_type.as_str())],
+            key_files: vec![format!("{}/{directory}/README.md", map_type.as_str())],
+            load_hint: DirectoryLoadHint::OnDemand,
+            relations: Vec::new(),
+            update_rule: DirectoryUpdateRule::Reviewed,
+        })
+        .collect()
+}
+
+fn baseline_purpose(map_type: RepositoryMapType, directory: &str) -> &'static str {
+    match (map_type, directory) {
+        (RepositoryMapType::Codespec, "requirements") => {
+            "Product requirements and acceptance criteria."
+        }
+        (RepositoryMapType::Codespec, "design") => {
+            "Architecture and implementation design records."
+        }
+        (RepositoryMapType::Codespec, "api") => "Public interface and schema contracts.",
+        (RepositoryMapType::Codespec, "test") => "Verification strategy, fixtures, and evidence.",
+        (RepositoryMapType::Codespec, "decisions") => "Durable architecture and product decisions.",
+        (RepositoryMapType::Knowledge, "domain") => "Domain concepts, models, and business rules.",
+        (RepositoryMapType::Knowledge, "guides") => "Task-oriented repository knowledge guides.",
+        (RepositoryMapType::Knowledge, "ops") => "Operational procedures and diagnostics.",
+        (RepositoryMapType::Knowledge, "glossary") => {
+            "Business terminology, aliases, and technical mappings."
+        }
+        (RepositoryMapType::Knowledge, "best-practices") => {
+            "Reviewed engineering and knowledge-management practices."
+        }
+        _ => "Repository navigation knowledge.",
     }
 }
 
@@ -39,10 +109,7 @@ pub(super) fn metadata(context: &RequestContext) -> ApiMetadata {
 }
 
 pub(super) fn now_stamp() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
+    let seconds = system_now_millis_or_zero() / 1_000;
     format!("unix:{seconds}")
 }
 
@@ -60,8 +127,11 @@ pub struct KnowledgeMapSourceAddRequest {
 /// Response shared by map mutation commands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KnowledgeMapMutationResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub business_bootstrap: Option<crate::api::BusinessKnowledgeBootstrap>,
     pub metadata: ApiMetadata,
     pub path: String,
+    pub map_type: RepositoryMapType,
     pub map_version: u64,
     pub summary: String,
 }
@@ -71,6 +141,7 @@ pub struct KnowledgeMapMutationResponse {
 pub struct KnowledgeMapShowResponse {
     pub metadata: ApiMetadata,
     pub path: String,
+    pub map_type: RepositoryMapType,
     pub map: KnowledgeMapView,
 }
 
@@ -80,6 +151,7 @@ pub struct KnowledgeMapView {
     pub artifact_schema_version: u16,
     pub map_version: u64,
     pub updated_at: String,
+    pub directories: Vec<RepositoryMapDirectory>,
     pub topics: Vec<KnowledgeMapTopic>,
     pub sources: Vec<KnowledgeMapSource>,
     pub routes: Vec<KnowledgeMapRoute>,
@@ -89,17 +161,20 @@ pub struct KnowledgeMapView {
 /// Recent history and the checkpoint for history intentionally omitted from a show response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KnowledgeMapHistoryWindow {
-    pub archived_through: u64,
+    pub omitted_through: u64,
     pub complete: bool,
     pub recent: Vec<KnowledgeMapHistoryEntry>,
 }
 
-/// One explicitly bounded page of complete Knowledge Map history.
+/// One explicitly bounded page from the retained recent repository-map history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KnowledgeMapHistoryResponse {
     pub metadata: ApiMetadata,
     pub path: String,
+    pub map_type: RepositoryMapType,
     pub map_version: u64,
+    pub omitted_through: u64,
+    pub earliest_available_version: u64,
     pub from_version: u64,
     pub through_version: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -112,6 +187,7 @@ pub struct KnowledgeMapHistoryResponse {
 pub struct KnowledgeMapRouteResponse {
     pub metadata: ApiMetadata,
     pub path: String,
+    pub map_type: RepositoryMapType,
     pub topic: String,
     pub route: Option<KnowledgeMapRoute>,
     pub sources: Vec<KnowledgeMapSource>,
@@ -122,6 +198,7 @@ pub struct KnowledgeMapRouteResponse {
 pub struct KnowledgeMapValidationResponse {
     pub metadata: ApiMetadata,
     pub path: String,
+    pub map_type: RepositoryMapType,
     pub valid: bool,
     pub diagnostics: Vec<String>,
 }

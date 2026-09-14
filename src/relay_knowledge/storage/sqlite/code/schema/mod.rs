@@ -6,6 +6,7 @@ mod index_task_schema;
 mod migrations;
 mod repository_schema;
 mod repository_set_schema;
+mod retention_activity_trigger_schema;
 pub(in crate::storage::sqlite) mod retention_schema;
 mod route_schema;
 mod search_schema;
@@ -34,6 +35,7 @@ use super::super::schema::marker::{
 pub(super) const GENERATED_DETECTION_REINDEX_MIGRATION: &str = "generated-detection-reindex-v1";
 pub(super) const LOSSLESS_MARKDOWN_REINDEX_MIGRATION: &str =
     "lossless-markdown-source-windows-reindex-v1";
+pub(super) const FRAMEWORK_GRAPH_REINDEX_MIGRATION: &str = "framework-graph-reindex-v1";
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
     let reference_search_owner_was_current =
         super::super::schema::marker::reference_search_group_schema_is_current(connection)?;
@@ -47,6 +49,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     initialize_index_task_schema(connection)?;
     initialize_repository_set_schema(connection)?;
     initialize_search_schema(connection)?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_feature_flags",
+        "metadata_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
     initialize_retention_schema(connection)?;
     super::super::schema::columns::ensure_column(
         connection,
@@ -64,6 +72,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     mark_legacy_generated_detection_scopes_stale_once(connection)?;
     mark_legacy_route_extraction_scopes_stale_once(connection)?;
     mark_legacy_markdown_scopes_stale_once(connection)?;
+    mark_legacy_framework_graph_scopes_stale_once(connection)?;
     mark_legacy_search_owner_scopes_stale_once(connection)?;
     mark_legacy_reference_search_group_scopes_stale_once(
         connection,
@@ -73,6 +82,26 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     validate_existing_query_indexes(connection)?;
 
     Ok(())
+}
+
+fn mark_legacy_framework_graph_scopes_stale_once(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, FRAMEWORK_GRAPH_REINDEX_MIGRATION)? {
+        return Ok(());
+    }
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute("UPDATE code_repository_scopes SET stale = 1", [])?;
+    transaction.execute(
+        "UPDATE code_repositories
+         SET stale = 1
+         WHERE last_indexed_scope_id IN (
+             SELECT source_scope FROM code_repository_scopes WHERE stale != 0
+         )",
+        [],
+    )?;
+    mark_code_schema_migration(&transaction, FRAMEWORK_GRAPH_REINDEX_MIGRATION)?;
+    transaction.commit().map_err(StorageError::from)
 }
 
 fn mark_legacy_markdown_scopes_stale_once(connection: &Connection) -> Result<(), StorageError> {

@@ -15,9 +15,12 @@ use crate::domain::{
 use crate::project::{
     AGENT_CONTRACT_DIR_NAME, KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH,
     KNOWLEDGE_MAP_TOPICS_DIR_NAME, KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX,
+    LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
 };
 
-const ARTIFACT_SCHEMA_VERSION: u16 = 2;
+const LEGACY_ARTIFACT_SCHEMA_VERSION: u16 = 2;
+const DIRECTORY_ARTIFACT_SCHEMA_VERSION: u16 = 3;
+const ARTIFACT_SCHEMA_VERSION: u16 = 4;
 const RECENT_HISTORY_LIMIT: usize = 16;
 
 #[derive(Deserialize)]
@@ -48,7 +51,10 @@ struct RootTopicRef {
 
 #[derive(Deserialize)]
 struct RootHistory {
+    #[serde(default)]
     archived_through: u64,
+    #[serde(default)]
+    omitted_through: u64,
     #[serde(default)]
     archive: Option<RootArchiveRef>,
     #[serde(default)]
@@ -108,14 +114,22 @@ pub(super) fn facts(
         return;
     }
 
-    if path == KNOWLEDGE_MAP_RELATIVE_PATH {
-        record_root_facts(content, definitions);
+    if matches!(
+        path,
+        KNOWLEDGE_MAP_RELATIVE_PATH | LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH
+    ) {
+        let contract_dir = if path == LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH {
+            crate::project::LEGACY_AGENT_CONTRACT_DIR_NAME
+        } else {
+            AGENT_CONTRACT_DIR_NAME
+        };
+        record_root_facts(content, contract_dir, definitions);
     } else if topic_shard_path(path).is_some() {
         record_topic_shard_fact(path, content, definitions);
     }
 }
 
-fn record_root_facts(content: &str, definitions: &mut Vec<ConfigFact>) {
+fn record_root_facts(content: &str, contract_dir: &str, definitions: &mut Vec<ConfigFact>) {
     let Ok(probe) = serde_norway::from_str::<SchemaProbe>(content) else {
         return;
     };
@@ -123,8 +137,27 @@ fn record_root_facts(content: &str, definitions: &mut Vec<ConfigFact>) {
         record_root_topic_ids(content, definitions);
         return;
     }
-    if probe.schema_version != ARTIFACT_SCHEMA_VERSION {
+    if !matches!(
+        probe.schema_version,
+        LEGACY_ARTIFACT_SCHEMA_VERSION
+            | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+            | ARTIFACT_SCHEMA_VERSION
+    ) {
         return;
+    }
+    if probe.schema_version == ARTIFACT_SCHEMA_VERSION {
+        let Ok(document) = serde_norway::from_str::<serde_norway::Value>(content) else {
+            return;
+        };
+        let Some(history) = document.get("history") else {
+            return;
+        };
+        if ["archived_through", "archive", "index"]
+            .into_iter()
+            .any(|field| history.get(field).is_some())
+        {
+            return;
+        }
     }
     let Ok(manifest) = serde_norway::from_str::<RootManifest>(content) else {
         return;
@@ -141,7 +174,7 @@ fn record_root_facts(content: &str, definitions: &mut Vec<ConfigFact>) {
         };
         push_definition(
             definitions,
-            format!("{AGENT_CONTRACT_DIR_NAME}/{}", topic.shard_ref),
+            format!("{contract_dir}/{}", topic.shard_ref),
             "knowledge_map_topic_shard_ref",
             range,
         );
@@ -166,7 +199,13 @@ fn record_root_facts(content: &str, definitions: &mut Vec<ConfigFact>) {
 }
 
 fn valid_manifest(manifest: &RootManifest) -> bool {
-    if manifest.schema_version != ARTIFACT_SCHEMA_VERSION || manifest.map_version == 0 {
+    if !matches!(
+        manifest.schema_version,
+        LEGACY_ARTIFACT_SCHEMA_VERSION
+            | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+            | ARTIFACT_SCHEMA_VERSION
+    ) || manifest.map_version == 0
+    {
         return false;
     }
     let mut topic_ids = HashSet::new();
@@ -193,6 +232,10 @@ fn valid_manifest(manifest: &RootManifest) -> bool {
         return false;
     }
     valid_recent_history(manifest)
+        && (manifest.schema_version != ARTIFACT_SCHEMA_VERSION
+            || (manifest.history.archived_through == 0
+                && manifest.history.archive.is_none()
+                && manifest.history.index.is_none()))
         && manifest.history.archive.as_ref().is_none_or(|archive| {
             scoped_contract_ref(&archive.archive_ref, KNOWLEDGE_MAP_HISTORY_DIR_NAME)
                 && lower_hex(&archive.digest, 64)
@@ -214,7 +257,15 @@ fn valid_recent_history(manifest: &RootManifest) -> bool {
     if manifest.history.recent.is_empty() || manifest.history.recent.len() > RECENT_HISTORY_LIMIT {
         return false;
     }
-    let Some(mut expected) = manifest.history.archived_through.checked_add(1) else {
+    let checkpoint = if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        manifest.history.omitted_through
+    } else {
+        if manifest.history.omitted_through != 0 {
+            return false;
+        }
+        manifest.history.archived_through
+    };
+    let Some(mut expected) = checkpoint.checked_add(1) else {
         return false;
     };
     for entry in &manifest.history.recent {
@@ -230,8 +281,13 @@ fn valid_recent_history(manifest: &RootManifest) -> bool {
         };
         expected = next;
     }
-    if expected.saturating_sub(1) != manifest.map_version
-        || (manifest.history.archived_through == 0) != manifest.history.archive.is_none()
+    if expected.saturating_sub(1) != manifest.map_version {
+        return false;
+    }
+    if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        return true;
+    }
+    if (manifest.history.archived_through == 0) != manifest.history.archive.is_none()
         || (manifest.history.archived_through == 0 && manifest.history.index.is_some())
     {
         return false;
@@ -347,8 +403,12 @@ fn record_topic_shard_fact(path: &str, content: &str, definitions: &mut Vec<Conf
     let Ok(shard) = serde_norway::from_str::<TopicShard>(content) else {
         return;
     };
-    if shard.schema_version != ARTIFACT_SCHEMA_VERSION
-        || stable_id(&shard.topic.id) != path_topic_id
+    if !matches!(
+        shard.schema_version,
+        LEGACY_ARTIFACT_SCHEMA_VERSION
+            | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+            | ARTIFACT_SCHEMA_VERSION
+    ) || stable_id(&shard.topic.id) != path_topic_id
         || !valid_topic_shard(&shard)
     {
         return;
@@ -458,7 +518,8 @@ fn valid_topic_ref(topic: &RootTopicRef) -> bool {
 
 fn topic_shard_path(path: &str) -> Option<(String, String)> {
     let name = path
-        .strip_prefix(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX)?
+        .strip_prefix(KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX)
+        .or_else(|| path.strip_prefix(".knowledge/topics/"))?
         .strip_prefix("topic-")?
         .strip_suffix(".yaml")?;
     if name.contains('/') || name.contains('\\') || name.len() != 16 + 1 + 64 {

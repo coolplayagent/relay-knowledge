@@ -460,6 +460,177 @@ export type GraphCanvasResponse = {
   };
 };
 
+export type CodeRepositoryStatus = {
+  repository_id: string;
+  alias: string;
+  root_path: string;
+  path_filters: string[];
+  language_filters: string[];
+  last_indexed_scope_id?: string;
+  last_indexed_commit?: string;
+  tree_hash?: string;
+  state: string;
+  indexed_file_count: number;
+  symbol_count: number;
+  reference_count: number;
+  chunk_count: number;
+  stale: boolean;
+  degraded_reason?: string;
+};
+
+export type CodeRepositoryListResponse = {
+  metadata: ApiMetadata;
+  repositories: CodeRepositoryStatus[];
+};
+
+export type SoftwareEntityKind =
+  | "domain"
+  | "software_system"
+  | "component"
+  | "api"
+  | "resource"
+  | "configuration"
+  | "build_definition"
+  | "deployment_unit"
+  | "runtime_service"
+  | "test_case"
+  | "release_artifact"
+  | "package_component"
+  | "sdk"
+  | "documentation_unit"
+  | "pipeline"
+  | "build_job"
+  | "repository_snapshot"
+  | "file_revision"
+  | "build_run"
+  | "deployment_revision"
+  | "runtime_observation";
+
+export type SoftwareSourceKind =
+  | "manifest"
+  | "lockfile"
+  | "sbom"
+  | "build_attestation"
+  | "build_file"
+  | "ci"
+  | "iac"
+  | "service_definition"
+  | "api_schema"
+  | "documentation"
+  | "code"
+  | "test"
+  | "runtime"
+  | "connector";
+
+export type SoftwareEvidenceRef = {
+  evidence_id: string;
+  source_scope: string;
+  path: string;
+  line_range: {
+    start: number;
+    end: number;
+  };
+};
+
+export type SoftwareEntity = {
+  entity_key: string;
+  occurrence_id: string;
+  repository_id: string;
+  source_scope: string;
+  entity_kind: SoftwareEntityKind;
+  name: string;
+  namespace?: string;
+  source_kind: SoftwareSourceKind;
+  evidence_refs: SoftwareEvidenceRef[];
+  attributes: Record<string, string>;
+  created_graph_version: number;
+};
+
+export type SoftwareStatement = {
+  statement_id: string;
+  subject_id: string;
+  predicate: string;
+  object_id?: string;
+  object_value?: string;
+  source_scope: string;
+  source_kind: SoftwareSourceKind;
+  evidence_refs: SoftwareEvidenceRef[];
+  assertion_mode: "declared" | "extracted" | "observed" | "verified" | "inferred";
+  resolution_state: "resolved" | "unresolved" | "ambiguous" | "external" | "conflicting";
+  valid_from?: number;
+  valid_to?: number;
+  observed_at?: number;
+  extractor_id: string;
+  extractor_version: string;
+  confidence_basis_points: number;
+  fact_state: "active" | "conflicting" | "superseded" | "rejected";
+};
+
+export type SoftwareShapeDiagnostic = {
+  diagnostic_id: string;
+  shape_id: string;
+  code: string;
+  severity: "error" | "warning";
+  statement_id?: string;
+  entity_key?: string;
+  field: string;
+  message: string;
+};
+
+export type SoftwareGlobalStatus = {
+  repository_id: string;
+  source_scope: string;
+  projected_graph_version: number;
+  stale: boolean;
+  ontology_version: string;
+  projection_schema_version: number;
+  source_coverage: {
+    source_kinds: SoftwareSourceKind[];
+    source_path_count: number;
+    evidence_ref_count: number;
+  };
+  completeness_basis_points: number;
+  freshness: "fresh" | "stale" | "degraded";
+  conflict_count: number;
+  entity_count: number;
+  statement_count: number;
+  diagnostic_count: number;
+  component_count: number;
+  sdk_usage_count: number;
+  file_count: number;
+  topic_count: number;
+  relationship_count: number;
+  build_target_count: number;
+  iac_resource_count: number;
+  design_element_count: number;
+  last_error?: string;
+};
+
+export type SoftwareGlobalResponse = {
+  metadata: ApiMetadata;
+  scope: {
+    scope_id: string;
+    repository_id: string;
+    alias: string;
+    requested_ref: string;
+    resolved_commit_sha: string;
+    tree_hash: string;
+    path_filters: string[];
+    language_filters: string[];
+    indexed_file_count: number;
+    index_versions: string[];
+    stale: boolean;
+  };
+  request: {
+    kind: string;
+    limit: number;
+  };
+  status: SoftwareGlobalStatus;
+  entities: SoftwareEntity[];
+  statements: SoftwareStatement[];
+  diagnostics: SoftwareShapeDiagnostic[];
+};
+
 export type WebOperationSnapshot = {
   id: string;
   name: string;

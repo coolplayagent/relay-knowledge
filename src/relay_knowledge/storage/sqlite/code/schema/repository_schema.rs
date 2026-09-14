@@ -211,6 +211,53 @@ pub(super) fn initialize_repository_schema(connection: &Connection) -> Result<()
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS code_repository_framework_nodes (
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            node_id TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            framework TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            detail TEXT,
+            symbol_snapshot_id TEXT,
+            byte_start INTEGER NOT NULL,
+            byte_end INTEGER NOT NULL,
+            line_start INTEGER NOT NULL,
+            line_end INTEGER NOT NULL,
+            PRIMARY KEY (source_scope, node_id),
+            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS code_repository_framework_nodes_lookup
+            ON code_repository_framework_nodes(source_scope, framework, kind, name, path);
+        CREATE INDEX IF NOT EXISTS code_repository_framework_nodes_target
+            ON code_repository_framework_nodes(source_scope, framework, detail, path);
+
+        CREATE TABLE IF NOT EXISTS code_repository_framework_edges (
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            edge_id TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            framework TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            source_node_id TEXT NOT NULL,
+            target_node_id TEXT,
+            target_hint TEXT,
+            resolution_state TEXT NOT NULL,
+            confidence_basis_points INTEGER NOT NULL,
+            confidence_tier TEXT NOT NULL,
+            byte_start INTEGER NOT NULL,
+            byte_end INTEGER NOT NULL,
+            line_start INTEGER NOT NULL,
+            line_end INTEGER NOT NULL,
+            PRIMARY KEY (source_scope, edge_id),
+            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS code_repository_framework_edges_lookup
+            ON code_repository_framework_edges(source_scope, framework, kind, target_hint, path);
+
         CREATE TABLE IF NOT EXISTS code_repository_routes (
             repository_id TEXT NOT NULL,
             source_scope TEXT NOT NULL,

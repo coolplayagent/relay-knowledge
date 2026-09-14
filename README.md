@@ -33,11 +33,15 @@ target/debug/relay-knowledge help --format json
 
 ## Installing Releases
 
+Version 1.1.17 introduces Repository Map v4 with the latest 16 history entries.
+See the [1.1.17 release notes](pages/en/releases/1.1.17.html) for migration,
+backup, and installation guidance.
+
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)
 provide prebuilt archives for Linux x64/ARM64, macOS Intel/Apple Silicon, and
 Windows x64/ARM64. Verify the selected archive with `checksums.txt` before
 putting the binary on `PATH`; GitHub artifact attestations cover the same
-archive digests. Linux GNU archives target a glibc 2.31 baseline.
+archive digests. Linux GNU archives target a glibc 2.28 baseline.
 
 Rust users can install from crates.io:
 
@@ -54,6 +58,12 @@ that use the CLI instead of MCP/ACP. See the
 for platform details, verification, service installation, upgrade, rollback,
 and uninstall behavior.
 
+Builds using software projection schema 8 derive compatibility relationships
+from indexed facts without storing duplicate edge payloads. Existing scopes
+require a durable projection refresh. Before downgrading to a schema-7 reader,
+stop the service and restore the pre-upgrade database and shards, or reindex in
+a separate runtime home; the old reader requires its own materialized edges.
+
 ## Capability Snapshot
 
 - Hybrid GraphRAG context packs combine BM25, local or external semantic/vector
@@ -67,9 +77,13 @@ and uninstall behavior.
   context, impact, feature flags, SBOM evidence, and multi-repository sets.
 - Durable bounded queues, leases, checkpoints, backpressure, recovery, and
   observable maintenance protect long-running indexing and background work.
-- Software-wide projections and authorized local-file indexing expose
-  dependencies, SDKs, files, topics, build/IaC/design evidence, and
-  relationships without query-time repository scans.
+- Remote embedding and provider HTTP always pass through shared QoS admission;
+  rejection, timeout, cancellation, and permit release remain observable.
+- Software-wide projections and authorized local-file indexing expose typed
+  systems, APIs, resources, tests, build/deployment/release evidence,
+  provenance statements, conflicts, and legacy-compatible slices without
+  query-time repository scans. The Web Software page reads that same bounded,
+  snapshot-pinned application service.
 - CLI, Web, MCP Streamable HTTP, and local ACP modes share the same application
   behavior, scope policy, QoS, cancellation, audit, and diagnostics.
 
@@ -92,7 +106,7 @@ responsibility-specific documentation, not in this navigation page.
 Two development-loop chapters have distinct responsibilities:
 
 - [Chapter 24: Code-Map-Backed Knowledge Development Loop](docs/en/03-architecture-specs/24-code-map-backed-knowledge-development-loop.md)
-- [Chapter 27: Business Knowledge to Technical Graph Mapping](docs/en/03-architecture-specs/27-business-knowledge-technical-mapping.md)
+- [Chapter 27: Business Knowledge to Technical Graph Mapping](docs/en/03-architecture-specs/27-business-knowledge-technical-mapping.md) — author and commit the glossary before indexing; `map init` and `repo business` provide bootstrap guidance and empty-result diagnostics.
   is the executable operating contract.
 - [Chapter 26: Git Commit + Knowledge Development Philosophy and Iteration Loop](docs/en/03-architecture-specs/26-git-commit-knowledge-development-loop.md)
   explains the commit fact boundary, derived knowledge, decision context,
@@ -126,9 +140,20 @@ relay-knowledge repo status repository --format json
 relay-knowledge repo query repository --query retry_policy \
   --kind definition --ref HEAD --path src --freshness wait-until-fresh \
   --limit 10 --format json
+relay-knowledge repo framework repository --framework vue --kind component \
+  --ref HEAD --path src --freshness wait-until-fresh --format json
 relay-knowledge repo software repository --kind relationships \
   --ref HEAD --format json
+relay-knowledge repo software repository --kind statements \
+  --ref HEAD --format json
+relay-knowledge repo software export repository --profile cyclonedx-1.7 \
+  --ref HEAD --format json
 ```
+
+Software responses retain stable entity identity, snapshot occurrences,
+statement provenance, freshness, completeness, and conflicts. Dockerfiles and
+CI jobs are build surfaces rather than IaC resources, and ordinary README
+headings remain documentation unless controlled metadata promotes them.
 
 Indexing returns a durable task and makes progress observable through
 `repo status`. If a one-shot CLI cannot finish a large cold index before the
@@ -178,17 +203,36 @@ Use the repository scripts by responsibility:
 ./run.sh status
 ./run.sh stop --force
 ./check.sh
+./check.sh --deep
 ```
 
 The principal local quality gates are:
 
 ```bash
 cargo fmt --all -- --check
+cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
+cargo test --lib --bins --all-features
+cargo test --test relay_knowledge --all-features
+cargo test --test benchmarks --all-features
+cargo test --test relay_knowledge architecture_boundaries --all-features
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 python3 tools/docs/check_docs.py --self-test-and-check
 ```
+
+The default `./check.sh` profile uses the stable toolchain and is suitable for
+routine changes. The deep profile additionally runs the deterministic benchmark,
+Miri over the FFI-free core-domain invariants, and AddressSanitizer over the
+library and binaries. Install its nightly prerequisites first:
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+Miri and sanitizer checks also run as Linux pull-request jobs. They stay out of
+the ordinary commit hook because they require nightly, rebuild instrumented
+artifacts, and are materially slower than the stable check/Clippy/test loop.
 
 Architecture boundaries, async and resource-budget requirements, unit-test
 coverage, documentation completeness, and the requirement that hand-written
@@ -232,4 +276,6 @@ databases, private datasets, or generated build output. See
 [Installation and Runtime Directories](docs/en/01-user-guide/01-install-and-runtime.md).
 
 Optional local hooks: `pre-commit install` and
-`pre-commit run --all-files`.
+`pre-commit run --all-files`. Rust changes run `cargo check`, Clippy, and tests
+before the commit is accepted; the test command includes the deterministic
+benchmark target through `--all-targets`.

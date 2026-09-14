@@ -5,7 +5,7 @@ use super::{prune_scopes, retention_status};
 use crate::{
     domain::{CodeIndexMode, CodeIndexResourceBudget, CodeRepositoryRegistration},
     storage::{
-        CodeIndexTaskSeed, CodeRepositoryStore, CodeScopeRetentionRequest, SqliteGraphStore,
+        CodeIndexTaskSeed, CodeScopeRetentionRequest, RepositoryCatalogStore as _, SqliteGraphStore,
     },
 };
 

@@ -1,0 +1,455 @@
+{
+  "repositories": {
+    "repository_map_graph_fixture": {
+      "generated_fixture": "repository_map_graph_v4",
+      "alias": "repository-map-graph-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "isolated_index_home": true,
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 100,
+      "query_p95_budget_ms": 250
+    }
+  },
+  "cli_contract_cases": [
+    {
+      "id": "repository_map_help_exposes_typed_contracts",
+      "command": [
+        "help",
+        "map",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "stdout_contains": [
+        "CodeSpec and Knowledge map contracts",
+        "--type",
+        "codespec",
+        "knowledge"
+      ]
+    },
+    {
+      "id": "repository_map_validation_covers_codespec_and_knowledge",
+      "command": [
+        "map",
+        "validate",
+        "--type",
+        "all",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "results": [
+          {
+            "path": "codespec/codespec-map.yaml",
+            "map_type": "codespec",
+            "valid": true,
+            "diagnostics": []
+          },
+          {
+            "path": "knowledge/knowledge-map.yaml",
+            "map_type": "knowledge",
+            "valid": true,
+            "diagnostics": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "codespec_test_directory_contract_is_visible",
+      "command": [
+        "map",
+        "show",
+        "--type",
+        "codespec",
+        "--directory",
+        "test",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "codespec/codespec-map.yaml",
+        "map_type": "codespec",
+        "map": {
+          "directories": [
+            {
+              "directory": "test",
+              "content_scope": [
+                "codespec/test/**"
+              ],
+              "key_files": [
+                "codespec/test/README.md"
+              ],
+              "load_hint": "on_demand",
+              "update_rule": "reviewed"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "knowledge_guides_directory_contract_is_visible",
+      "command": [
+        "map",
+        "show",
+        "--type",
+        "knowledge",
+        "--directory",
+        "guides",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "knowledge/knowledge-map.yaml",
+        "map_type": "knowledge",
+        "map": {
+          "directories": [
+            {
+              "directory": "guides",
+              "content_scope": [
+                "knowledge/guides/**"
+              ],
+              "key_files": [
+                "knowledge/guides/README.md"
+              ],
+              "load_hint": "on_demand",
+              "relations": [
+                {
+                  "kind": "documents",
+                  "target": "codespec:requirements"
+                }
+              ],
+              "update_rule": "reviewed"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "knowledge_business_route_preserves_authored_glossary",
+      "command": [
+        "map",
+        "route",
+        "business-knowledge",
+        "--type",
+        "knowledge",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "knowledge/knowledge-map.yaml",
+        "map_type": "knowledge",
+        "topic": "business-knowledge",
+        "route": {
+          "topic": "business-knowledge",
+          "source_order": [
+            "repository-business-glossary"
+          ],
+          "fallback": "bounded-search"
+        },
+        "sources": [
+          {
+            "id": "repository-business-glossary",
+            "kind": "file",
+            "uri": "knowledge/glossary/business-glossary.yaml",
+            "source_scope": "repo",
+            "status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "id": "knowledge_software_model_route_preserves_code_map_entry",
+      "command": [
+        "map",
+        "route",
+        "software-model",
+        "--type",
+        "knowledge",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "knowledge/knowledge-map.yaml",
+        "map_type": "knowledge",
+        "topic": "software-model",
+        "route": {
+          "topic": "software-model",
+          "source_order": [
+            "repository-software-model"
+          ]
+        },
+        "sources": [
+          {
+            "id": "repository-software-model",
+            "topic": "software-model",
+            "kind": "repo",
+            "uri": ".",
+            "source_scope": "repo",
+            "status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "id": "knowledge_architecture_route_assembles_ordered_v4_shard_sources",
+      "command": [
+        "map",
+        "route",
+        "architecture",
+        "--type",
+        "knowledge",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "knowledge/knowledge-map.yaml",
+        "map_type": "knowledge",
+        "topic": "architecture",
+        "route": {
+          "topic": "architecture",
+          "source_order": [
+            "commit-driven-code-index-loop",
+            "architecture-hard-constraints",
+            "code-map-knowledge-development-loop",
+            "git-commit-knowledge-development-loop",
+            "partitioned-sqlite-catalog-read-fast-path",
+            "software-global-domain-model",
+            "durable-worktree-delta-design"
+          ],
+          "fallback": "bounded-search"
+        },
+        "sources": [
+          {
+            "id": "commit-driven-code-index-loop",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "architecture-hard-constraints",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "code-map-knowledge-development-loop",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "git-commit-knowledge-development-loop",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "partitioned-sqlite-catalog-read-fast-path",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "software-global-domain-model",
+            "topic": "architecture",
+            "kind": "doc"
+          },
+          {
+            "id": "durable-worktree-delta-design",
+            "topic": "architecture",
+            "kind": "doc"
+          }
+        ]
+      }
+    },
+    {
+      "id": "knowledge_history_defaults_to_earliest_retained_recent_entry",
+      "command": [
+        "map",
+        "history",
+        "--type",
+        "knowledge",
+        "--limit",
+        "4",
+        "--format",
+        "json"
+      ],
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "json_expect": {
+        "path": "knowledge/knowledge-map.yaml",
+        "map_type": "knowledge",
+        "omitted_through": 16,
+        "earliest_available_version": 17,
+        "from_version": 17,
+        "through_version": 20,
+        "next_from_version": 21,
+        "entries": [
+          {
+            "version": 17,
+            "action": "source.add"
+          },
+          {
+            "version": 18,
+            "action": "source.update"
+          },
+          {
+            "version": 19,
+            "action": "source.update"
+          },
+          {
+            "version": 20,
+            "action": "source.add"
+          }
+        ]
+      }
+    }
+  ],
+  "software_query_cases": [
+    {
+      "id": "repository_map_v4_indexes_all_authorized_topic_dimensions",
+      "repository": "repository_map_graph_fixture",
+      "kind": "topics",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 80,
+      "max_rank": 40,
+      "expected": [
+        {
+          "software_slice": "topic",
+          "name": "architecture",
+          "topic_kind": "knowledge_map_topic"
+        }
+      ],
+      "expected_all": [
+        {"software_slice": "topic", "name": "architecture", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "business-knowledge", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "build", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "deployment", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "operations", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "runtime", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "security", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "topic", "name": "software-model", "topic_kind": "knowledge_map_topic"}
+      ],
+      "forbidden": [
+        {"software_slice": "topic", "name": "orphan-shadow-route", "topic_kind": "knowledge_map_topic"}
+      ],
+      "case_group": "repository_map_graph_projection"
+    },
+    {
+      "id": "repository_map_v4_projects_root_authorized_documents_edges_only",
+      "repository": "repository_map_graph_fixture",
+      "kind": "relationships",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 120,
+      "max_rank": 80,
+      "expected": [
+        {
+          "software_slice": "relationship",
+          "relationship_kind": "documents",
+          "target_kind": "topic",
+          "target_hint": "architecture"
+        }
+      ],
+      "expected_all": [
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "architecture"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "business-knowledge"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "build"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "deployment"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "operations"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "runtime"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "security"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "software-model"}
+      ],
+      "forbidden": [
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "orphan-shadow-route"}
+      ],
+      "case_group": "repository_map_graph_projection"
+    },
+    {
+      "id": "repository_map_v4_all_projection_keeps_map_and_software_dimensions_joined",
+      "repository": "repository_map_graph_fixture",
+      "kind": "all",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 200,
+      "max_rank": 100,
+      "expected": [
+        {"software_slice": "file", "path": "knowledge/knowledge-map.yaml", "file_role": "knowledge_map_manifest"}
+      ],
+      "expected_all": [
+        {"software_slice": "component", "ecosystem": "cargo", "name": "serde"},
+        {"software_slice": "file", "file_role": "knowledge_map_topic_shard"},
+        {"software_slice": "topic", "name": "architecture", "topic_kind": "knowledge_map_topic"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "target_hint": "architecture"},
+        {"software_slice": "build_target", "ecosystem": "rust", "kind": "package", "name": "repository-map-graph-fixture"},
+        {"software_slice": "iac_resource", "provider": "kubernetes", "resource_kind": "Deployment", "name": "repository-map-graph"},
+        {"software_slice": "design_element", "element_kind": "architecture", "name": "Architecture graph"}
+      ],
+      "forbidden": [
+        {"software_slice": "topic", "name": "orphan-shadow-route", "topic_kind": "knowledge_map_topic"}
+      ],
+      "case_group": "repository_map_graph_projection"
+    },
+    {
+      "id": "repository_map_v4_keeps_typed_cross_dimension_provenance",
+      "repository": "repository_map_graph_fixture",
+      "kind": "statements",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 500,
+      "max_rank": 500,
+      "status_projection_schema_version": 8,
+      "status_ontology_version": "1.0.0",
+      "status_completeness_basis_points_min": 10000,
+      "expected": [
+        {
+          "software_slice": "statement",
+          "predicate": "documents",
+          "source_kind": "documentation",
+          "fact_state": "active"
+        }
+      ],
+      "expected_all": [
+        {
+          "software_slice": "statement",
+          "predicate": "derived_from",
+          "source_kind": "documentation",
+          "fact_state": "active"
+        },
+        {
+          "software_slice": "statement",
+          "predicate": "depends_on",
+          "source_kind": "manifest",
+          "fact_state": "active"
+        },
+        {
+          "software_slice": "statement",
+          "predicate": "deploys",
+          "source_kind": "iac",
+          "fact_state": "active"
+        },
+        {
+          "software_slice": "statement",
+          "predicate": "runs_as",
+          "source_kind": "service_definition",
+          "fact_state": "active"
+        }
+      ],
+      "case_group": "repository_map_graph_projection"
+    }
+  ]
+}

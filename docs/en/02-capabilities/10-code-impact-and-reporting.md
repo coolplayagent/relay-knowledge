@@ -26,7 +26,7 @@ Compared with ordinary diff tools, impact analysis combines the code graph and r
 
 relay-teams E2E validated definition, reference, import, caller, and hybrid queries over a Python production source scope. Results carried resolved commit, tree hash, path, line range, retrieval layer, index version, freshness, score, and excerpt metadata.
 
-Detailed records stay in [relay-teams E2E Verification](../06-verification/04-relay-teams-e2e-2026-05-14.md) and the Chinese [relay-teams Code Graph Retrieval Accuracy](../../zh/06-verification/05-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md) record.
+Detailed records stay in [relay-teams E2E Verification](../06-verification/01-relay-teams-e2e-2026-05-14.md) and the Chinese [relay-teams Code Graph Retrieval Accuracy](../../zh/06-verification/03-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md) record.
 
 ## Degradation and Diagnostics
 

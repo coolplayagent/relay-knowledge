@@ -5,10 +5,12 @@ use crate::storage::sqlite::schema::marker::{
     REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION, SEARCH_ORPHAN_GC_PHASE_MIGRATION,
 };
 
-use super::migrations::{code_schema_migration_applied, mark_code_schema_migration};
+use super::{
+    migrations::{code_schema_migration_applied, mark_code_schema_migration},
+    retention_activity_trigger_schema,
+};
 
-#[path = "retention_activity_trigger_schema.rs"]
-mod retention_activity_trigger_schema;
+const SOFTWARE_ONTOLOGY_GC_PHASE_MIGRATION: &str = "scope-gc-software-ontology-phase-v1";
 
 pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(), StorageError> {
     super::super::super::schema::columns::ensure_column(
@@ -247,6 +249,7 @@ pub(super) fn initialize_retention_schema(connection: &Connection) -> Result<(),
     )?;
     rewind_legacy_jobs_for_search_orphan_gc_once(connection)?;
     rewind_legacy_jobs_for_reference_search_group_gc_once(connection)?;
+    rewind_legacy_jobs_for_software_ontology_gc_once(connection)?;
     Ok(())
 }
 
@@ -301,6 +304,27 @@ fn rewind_legacy_jobs_for_reference_search_group_gc_once(
         [],
     )?;
     mark_code_schema_migration(&transaction, REFERENCE_SEARCH_GROUP_GC_PHASE_MIGRATION)?;
+    transaction.commit().map_err(StorageError::from)
+}
+
+fn rewind_legacy_jobs_for_software_ontology_gc_once(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, SOFTWARE_ONTOLOGY_GC_PHASE_MIGRATION)? {
+        return Ok(());
+    }
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute(
+        "UPDATE code_repository_scope_gc_jobs
+         SET phase = 'software_entities', search_rowid_cursor = NULL
+         WHERE phase IN (
+             'business_mappings', 'business_term_aliases', 'business_terms',
+             'business_domains', 'business_knowledge_status', 'commit_scopes',
+             'index_batch_staging', 'index_task_history', 'checkpoint', 'scope_metadata'
+         )",
+        [],
+    )?;
+    mark_code_schema_migration(&transaction, SOFTWARE_ONTOLOGY_GC_PHASE_MIGRATION)?;
     transaction.commit().map_err(StorageError::from)
 }
 

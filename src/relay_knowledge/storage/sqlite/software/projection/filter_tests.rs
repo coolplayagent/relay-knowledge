@@ -80,6 +80,50 @@ fn projection_filters_rows_when_serving_broader_scope() {
 }
 
 #[test]
+fn projection_all_kind_does_not_widen_path_filtered_component_targets() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_imports (
+                repository_id, source_scope, file_id, path, module, target_hint,
+                resolution_state, confidence_basis_points, line_start, line_end
+            ) VALUES (
+                'repo', 'scope-1', 'file-1', 'src/main.cc',
+                'use serde::Serialize;', 'serde', 'external', 9000, 12, 12
+            )",
+            [],
+        )
+        .expect("filtered import should insert");
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new(
+            "repo",
+            "commit-1",
+            vec!["src".to_owned()],
+            Vec::new(),
+        )
+        .expect("selector"),
+        SoftwareGlobalKind::All,
+        crate::domain::FreshnessPolicy::AllowStale,
+        20,
+    )
+    .expect("request should validate");
+    let projection = projection(&mut connection, request).expect("projection should load");
+
+    assert!(
+        projection
+            .components
+            .iter()
+            .all(|component| component.evidence_path.starts_with("src/"))
+    );
+    assert!(projection.dependency_usages.is_empty());
+}
+
+#[test]
 fn projection_links_declared_dependencies_to_import_usage() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);
@@ -134,12 +178,21 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
     initialize_schema(&connection).expect("software schema should initialize");
     seed_scope(&connection);
     seed_lifecycle_chunks(&connection);
+    seed_ontology_symbols(&connection);
     let refreshed =
         refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
 
     assert!(refreshed.status.build_target_count >= 3);
     assert!(refreshed.status.iac_resource_count >= 3);
     assert!(refreshed.status.design_element_count >= 2);
+    assert_eq!(
+        refreshed.status.ontology_version,
+        crate::domain::SOFTWARE_ONTOLOGY_VERSION
+    );
+    assert_eq!(refreshed.status.completeness_basis_points, 10_000);
+    assert!(refreshed.status.entity_count > 0);
+    assert!(refreshed.status.statement_count > 0);
+    assert_eq!(refreshed.status.diagnostic_count, 0);
 
     let build_request = SoftwareGlobalRequest::new(
         crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
@@ -159,6 +212,11 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
                 && target.kind == "script"
                 && target.name == "build")
     );
+    assert!(build_projection.build_targets.iter().any(|target| {
+        target.ecosystem == "container"
+            && target.kind == "definition"
+            && target.evidence_path == "Dockerfile"
+    }));
     assert!(
         build_projection
             .build_targets
@@ -199,6 +257,12 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
                 && resource.resource_kind == "resource"
                 && resource.name == "app")
     );
+    assert!(iac_projection.iac_resources.iter().all(|resource| {
+        !matches!(
+            resource.provider.as_str(),
+            "github-actions" | "gitlab-ci" | "container"
+        )
+    }));
     assert!(
         iac_projection
             .iac_resources
@@ -228,6 +292,141 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
             .iter()
             .any(|element| element.element_kind == "module" && element.name == "relay-core")
     );
+    assert!(!design_projection.design_elements.iter().any(|element| {
+        element.element_kind == "software_system"
+            && matches!(element.name.as_str(), "Getting Started" | "Chapter Index")
+    }));
+    assert!(design_projection.design_elements.iter().any(|element| {
+        element.element_kind == "software_system"
+            && element.name == "relay-platform"
+            && element.source_kind == "markdown-metadata"
+    }));
+
+    for (kind, expected_entity_kind) in [
+        (SoftwareGlobalKind::Systems, "software_system"),
+        (SoftwareGlobalKind::Apis, "api"),
+        (SoftwareGlobalKind::Resources, "resource"),
+        (SoftwareGlobalKind::Tests, "test_case"),
+        (SoftwareGlobalKind::Deployments, "deployment_unit"),
+        (SoftwareGlobalKind::Releases, "release_artifact"),
+    ] {
+        let request = SoftwareGlobalRequest::new(
+            crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+                .expect("selector"),
+            kind,
+            crate::domain::FreshnessPolicy::AllowStale,
+            200,
+        )
+        .expect("ontology request should validate");
+        let projection = projection(&mut connection, request).expect("ontology slice should load");
+        assert!(
+            projection
+                .entities
+                .iter()
+                .any(|entity| entity.entity_kind.as_str() == expected_entity_kind),
+            "kind={} should expose entity_kind={expected_entity_kind}",
+            kind.as_str()
+        );
+    }
+
+    let statement_request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Statements,
+        crate::domain::FreshnessPolicy::AllowStale,
+        200,
+    )
+    .expect("statement request should validate");
+    let statement_projection =
+        projection(&mut connection, statement_request).expect("statement slice should load");
+    assert!(!statement_projection.entities.is_empty());
+    assert!(!statement_projection.statements.is_empty());
+    assert!(statement_projection.statements.iter().all(|statement| {
+        !statement.source_scope.is_empty()
+            && !statement.evidence_refs.is_empty()
+            && !statement.extractor_version.is_empty()
+    }));
+    let first_contains = statement_projection
+        .statements
+        .iter()
+        .position(|statement| statement.predicate.as_str() == "contains")
+        .expect("contains statement should exist");
+    let ci_contains = statement_projection
+        .statements
+        .iter()
+        .position(|statement| {
+            statement.predicate.as_str() == "contains"
+                && statement.source_kind == crate::domain::SoftwareSourceKind::Ci
+        })
+        .expect("CI containment statement should exist");
+    assert_eq!(
+        ci_contains, first_contains,
+        "evidence-path ordering should keep the CI statement rank snapshot-independent"
+    );
+}
+
+#[test]
+fn projection_all_kind_fairly_budgets_dense_cross_dimension_results() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    seed_dense_dependencies(&connection, 120);
+    seed_lifecycle_chunks(&connection);
+    seed_ontology_symbols(&connection);
+    seed_documentation_topic(&connection);
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    let request = || {
+        SoftwareGlobalRequest::new(
+            crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+                .expect("selector"),
+            SoftwareGlobalKind::All,
+            crate::domain::FreshnessPolicy::AllowStale,
+            100,
+        )
+        .expect("request should validate")
+    };
+    let first = projection(&mut connection, request()).expect("first projection should load");
+    let second = projection(&mut connection, request()).expect("second projection should load");
+    let returned_rows = first.components.len()
+        + first.dependency_usages.len()
+        + first.sdk_usages.len()
+        + first.files.len()
+        + first.topics.len()
+        + first.relationships.len()
+        + first.build_targets.len()
+        + first.iac_resources.len()
+        + first.design_elements.len()
+        + first.entities.len()
+        + first.statements.len()
+        + first.diagnostics.len();
+
+    assert_eq!(returned_rows, 100);
+    assert!(first.components.len() < 100);
+    assert!(!first.dependency_usages.is_empty());
+    assert!(!first.sdk_usages.is_empty());
+    assert!(!first.files.is_empty());
+    assert!(!first.topics.is_empty());
+    assert!(!first.relationships.is_empty());
+    assert!(!first.build_targets.is_empty());
+    assert!(!first.iac_resources.is_empty());
+    assert!(!first.design_elements.is_empty());
+    assert!(!first.entities.is_empty());
+    assert!(!first.statements.is_empty());
+    let returned_entity_keys = first
+        .entities
+        .iter()
+        .map(|entity| entity.entity_key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert!(first.statements.iter().all(|statement| {
+        returned_entity_keys.contains(statement.subject_id.as_str())
+            && statement
+                .object_id
+                .as_deref()
+                .is_none_or(|object_id| returned_entity_keys.contains(object_id))
+    }));
+    assert_eq!(first, second);
 }
 
 #[test]
@@ -495,6 +694,51 @@ fn seed_scope(connection: &Connection) {
             .expect("javascript import should insert");
 }
 
+fn seed_dense_dependencies(connection: &Connection, count: usize) {
+    let mut insert = connection
+        .prepare(
+            "INSERT INTO code_repository_dependencies (
+                repository_id, source_scope, ecosystem, package_name, requirement,
+                resolved_version, dependency_group, source_kind, is_lockfile, language_id,
+                path, line_start, line_end, excerpt
+            ) VALUES (
+                'repo', 'scope-1', 'cargo', ?1, '1', NULL, 'normal', 'manifest', 0,
+                'rust', ?2, 1, 1, ?3
+            )",
+        )
+        .expect("dense dependency insert should prepare");
+    for index in 0..count {
+        let name = format!("dense-package-{index:03}");
+        insert
+            .execute(params![
+                name,
+                format!("crates/dense-{index:03}/Cargo.toml"),
+                format!("dense-package-{index:03} = \"1\"")
+            ])
+            .expect("dense dependency should insert");
+    }
+}
+
+fn seed_documentation_topic(connection: &Connection) {
+    connection
+        .execute_batch(
+            "INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, parse_status
+            ) VALUES (
+                'repo', 'scope-1', 'file-software-guide', 'docs/software-guide.md',
+                'markdown', 'parsed'
+            );
+            INSERT INTO code_repository_symbols (
+                repository_id, source_scope, symbol_snapshot_id, path, language_id,
+                name, kind, line_start, line_end
+            ) VALUES (
+                'repo', 'scope-1', 'heading-software-guide', 'docs/software-guide.md',
+                'markdown', 'Software Guide', 'heading', 1, 1
+            );",
+        )
+        .expect("documentation topic should insert");
+}
+
 fn insert_existing_maven_build_target(connection: &Connection) {
     connection
         .execute(
@@ -525,11 +769,35 @@ fn seed_lifecycle_chunks(connection: &Connection) {
     );
     insert_chunk(
         connection,
+        "chunk-dockerfile",
+        "Dockerfile",
+        "dockerfile",
+        1,
+        "FROM rust:1.89\nRUN cargo build --release\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-workflow",
+        ".github/workflows/ci.yml",
+        "yaml",
+        1,
+        "name: CI\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: cargo test\n",
+    );
+    insert_chunk(
+        connection,
         "chunk-package",
         "package.json",
         "json",
         1,
         "{\n  \"name\": \"relay-web\",\n  \"scripts\": {\n    \"build\": \"vite build\",\n    \"test\": \"vitest\"\n  }\n}\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-systemd",
+        "deploy/relay.service",
+        "ini",
+        1,
+        "[Service]\nExecStart=/usr/bin/relay-knowledge serve\n",
     );
     insert_chunk(
         connection,
@@ -590,6 +858,38 @@ fn seed_lifecycle_chunks(connection: &Connection) {
         1,
         "# Architecture\nRelay core separates indexing from query serving.\n\n## Module relay-core\nOwns software projection refresh.\n",
     );
+    insert_chunk(
+        connection,
+        "chunk-readme",
+        "README.md",
+        "markdown",
+        1,
+        "# Getting Started\n\n## Chapter Index\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-catalog",
+        "docs/catalog.md",
+        "markdown",
+        1,
+        "---\nsoftware-system: relay-platform\napi: Catalog API\n---\n# Guide\n",
+    );
+}
+
+fn seed_ontology_symbols(connection: &Connection) {
+    connection
+        .execute(
+            "INSERT INTO code_repository_symbols (
+                repository_id, source_scope, symbol_snapshot_id, path, language_id,
+                name, kind, line_start, line_end
+            ) VALUES
+                ('repo', 'scope-1', 'symbol-api', 'src/api.rs', 'rust',
+                 'GraphApi', 'trait', 4, 20),
+                ('repo', 'scope-1', 'symbol-test', 'tests/lifecycle.rs', 'rust',
+                 'lifecycle_smoke_test', 'function', 8, 16)",
+            [],
+        )
+        .expect("ontology symbols should insert");
 }
 
 fn insert_chunk(
@@ -604,15 +904,16 @@ fn insert_chunk(
         .execute(
             "INSERT INTO code_repository_chunks (
                 repository_id, source_scope, chunk_id, file_id, path, language_id,
-                content, line_start
-            ) VALUES ('repo', 'scope-1', ?1, ?2, ?3, ?4, ?5, ?6)",
+                content, line_start, byte_end
+            ) VALUES ('repo', 'scope-1', ?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 chunk_id,
                 format!("file-{chunk_id}"),
                 path,
                 language_id,
                 content,
-                line_start
+                line_start,
+                content.len()
             ],
         )
         .expect("chunk should insert");

@@ -5,7 +5,7 @@ use crate::{
     },
     storage::{
         CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore,
+        CodeIndexTaskSeed, RepositoryCatalogStore as _, SqliteGraphStore,
     },
 };
 

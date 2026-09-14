@@ -4,7 +4,9 @@ use crate::{
         CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
         RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeSymbolRecord,
     },
-    storage::CodeRepositoryStore,
+    storage::CodeIndexPublicationStore as _,
+    storage::CodeQueryReadStore as _,
+    storage::RepositoryCatalogStore as _,
     storage::SqliteGraphStore,
 };
 
@@ -131,6 +133,8 @@ fn snapshot_with_generated_ambiguous_callee_noise() -> CodeIndexSnapshot {
         calls: vec![ambiguous_call],
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),

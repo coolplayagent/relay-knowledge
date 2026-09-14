@@ -1,11 +1,10 @@
 //! Repository-set overlay refresh, edge resolution, and status projection.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params};
 use serde_json::json;
 
 use crate::{
+    clock::system_now_millis as shared_system_now_millis,
     domain::{
         CodeRepositoryCrossEdge, CodeRepositorySetMember, CodeRepositorySetMemberStatus,
         CodeRepositorySetOverlayStatus, CodeRepositorySetRefreshSummary, CodeRepositorySetStatus,
@@ -507,11 +506,8 @@ fn validate_refresh_publication(
 }
 
 fn system_now_millis() -> Result<u64, StorageError> {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| StorageError::InvalidInput(format!("system clock is invalid: {error}")))?
-        .as_millis();
-    Ok(u64::try_from(millis).unwrap_or(u64::MAX))
+    shared_system_now_millis()
+        .map_err(|error| StorageError::InvalidInput(format!("system clock is invalid: {error}")))
 }
 
 pub(in super::super) fn cross_edges_for_set(

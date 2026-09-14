@@ -4,11 +4,24 @@
 from __future__ import annotations
 
 import argparse
+import copy
 from dataclasses import dataclass
+import json
 import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Callable
+
+from skill_schema_contracts import (
+    check_business_glossary_schema,
+    load_schema,
+    require_schema_value,
+    schema_object_nodes,
+    schema_property,
+    self_test_business_glossary_schema,
+    validate_schema_instance,
+)
 
 
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
@@ -31,7 +44,40 @@ REQUIRED_SHELL_POLICY_PHRASES = (
     "cmd.exe",
 )
 KNOWLEDGE_WORKFLOW_REFERENCE = Path("references/knowledge-map-workflows.md")
+KNOWLEDGE_MAP_SCHEMA = Path("references/knowledge-map.schema.json")
+CODESPEC_MAP_SCHEMA = Path("references/codespec-map.schema.json")
+BUSINESS_GLOSSARY_SCHEMA = Path("references/business-glossary.schema.json")
 OPENAI_AGENT_CONFIG = Path("agents/openai.yaml")
+KNOWLEDGE_MAP_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
+KNOWLEDGE_MAP_ARTIFACT_DEFS = (
+    "rootManifest",
+    "topicShard",
+    "redirect",
+)
+KNOWLEDGE_MAP_REQUIRED_DEFS = (
+    "digest",
+    "topicArtifactRef",
+    "topic",
+    "source",
+    "route",
+    "historyEntry",
+    "topicRef",
+    "historyManifest",
+    "directoryRelation",
+    "directory",
+    *KNOWLEDGE_MAP_ARTIFACT_DEFS,
+)
+KNOWLEDGE_MAP_SOURCE_KINDS = (
+    "repo",
+    "file",
+    "doc",
+    "config",
+    "db",
+    "ci",
+    "runtime",
+    "wiki",
+    "monitoring",
+)
 SKILL_KNOWLEDGE_LOOP_ORDER = (
     "### Repository Knowledge Bootstrap",
     "relay-knowledge map validate --format json",
@@ -77,6 +123,11 @@ REFERENCE_KNOWLEDGE_LOOP_PHRASES = (
     "Do not overwrite it",
     "Do not materialize `repo software` or `repo view` responses into the YAML",
     "Wait for the exact target and completed checkpoint",
+    "knowledge-map.schema.json",
+    "business-glossary.schema.json",
+    "map validate` remains authoritative",
+    "does not authorize direct edits",
+    "intentionally authored",
 )
 OPENAI_KNOWLEDGE_LOOP_ORDER = (
     "knowledge map and code map together",
@@ -433,6 +484,204 @@ def check_knowledge_loop_contract(path: Path) -> None:
     )
 
 
+def check_knowledge_map_schema_contract(path: Path, schema: dict[str, object]) -> None:
+    require_schema_value(path, schema.get("$schema"), KNOWLEDGE_MAP_SCHEMA_DRAFT, "draft")
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        raise ValueError(f"{path} is missing Knowledge Map schema $defs")
+    for name in KNOWLEDGE_MAP_REQUIRED_DEFS:
+        if name not in definitions:
+            raise ValueError(f"{path} is missing Knowledge Map schema $defs/{name}")
+
+    artifact_refs = [
+        {"$ref": f"#/$defs/{name}"} for name in KNOWLEDGE_MAP_ARTIFACT_DEFS
+    ]
+    require_schema_value(path, schema.get("oneOf"), artifact_refs, "artifact branches")
+    if any(node.get("additionalProperties") is not True for node in schema_object_nodes(schema)):
+        raise ValueError(f"{path} must allow unknown fields on every object schema")
+
+    source_kind = schema_property(definitions["source"], "kind")
+    require_schema_value(
+        path,
+        source_kind.get("enum"),
+        list(KNOWLEDGE_MAP_SOURCE_KINDS),
+        "source kind enum",
+    )
+    digest = definitions.get("digest")
+    digest_pattern = digest.get("pattern") if isinstance(digest, dict) else None
+    require_schema_value(path, digest_pattern, "^[0-9a-f]{64}$", "digest pattern")
+
+    history = schema_property(definitions["rootManifest"], "history")
+    require_schema_value(
+        path, history.get("$ref"), "#/$defs/historyManifest", "root history ref"
+    )
+    history_manifest = definitions.get("historyManifest")
+    recent = schema_property(history_manifest, "recent")
+    require_schema_value(path, recent.get("minItems"), 1, "recent minimum")
+    require_schema_value(path, recent.get("maxItems"), 16, "recent maximum")
+    forbidden_history_names = (
+        history_manifest.get("propertyNames", {}).get("not", {}).get("enum")
+        if isinstance(history_manifest, dict)
+        else None
+    )
+    require_schema_value(
+        path,
+        forbidden_history_names,
+        ["archived_through", "archive", "index"],
+        "legacy history property prohibition",
+    )
+
+    description = schema.get("description")
+    if not isinstance(description, str):
+        raise ValueError(f"{path} is missing Knowledge Map schema boundary description")
+    require_phrases(
+        path,
+        description,
+        (
+            "allow unknown fields",
+            "relay-knowledge map validate is authoritative",
+            "CLI-managed assets",
+        ),
+    )
+
+
+def knowledge_map_schema_examples() -> list[dict[str, object]]:
+    digest = "a" * 64
+    history_entry = {"version": 1, "action": "init", "actor": "cli", "summary": "Created map."}
+    manifest = {
+        "schema_version": 4,
+        "artifact_kind": "map",
+        "map_type": "knowledge",
+        "map_version": 1,
+        "updated_at": "unix:1",
+        "directories": [{
+            "directory": name,
+            "purpose": f"Govern {name} knowledge.",
+            "content_scope": [f"knowledge/{name}/**"],
+            "key_files": [f"knowledge/{name}/README.md"],
+            "load_hint": "on_demand",
+            "relations": [],
+            "update_rule": "reviewed",
+        } for name in ("domain", "guides", "ops", "glossary", "best-practices")],
+        "topics": [{
+            "id": "cli", "title": "CLI", "description": "CLI docs", "source_ids": ["cli-doc"],
+            "ref": f"topics/topic-{'b' * 16}-{digest}.yaml", "digest": digest,
+        }],
+        "history": {"omitted_through": 0, "recent": [history_entry]},
+    }
+    source = {
+        "id": "cli-doc", "topic": "cli", "kind": "doc", "uri": "docs/cli.md",
+        "source_scope": None, "read_policy": "direct", "write_policy": "manual-review",
+        "status": "active", "version": 1, "description": None,
+    }
+    shard = {
+        "schema_version": 4,
+        "topic": {"id": "cli", "title": "CLI", "description": "CLI docs"},
+        "sources": [source],
+        "route": {"topic": "cli", "source_order": ["cli-doc"], "fallback": None},
+    }
+    redirect = {
+        "schema_version": 4,
+        "artifact_kind": "redirect",
+        "map_type": "knowledge",
+        "target": "knowledge/knowledge-map.yaml",
+    }
+    return [manifest, shard, redirect]
+
+
+def check_knowledge_map_schema_examples(schema: dict[str, object]) -> None:
+    examples = knowledge_map_schema_examples()
+    for example in examples:
+        validate_schema_instance(schema, example)
+    extended = copy.deepcopy(examples[0])
+    extended["future_extension"] = {"enabled": True}
+    extended["topics"][0]["future_topic_field"] = "accepted"
+    validate_schema_instance(schema, extended)
+
+    invalid_examples = []
+    for mutation in (
+        lambda value: value.update(schema_version=1),
+        lambda value: value["topics"][0].update(digest="A" * 64),
+        lambda value: value["topics"][0].update(ref="topics/not-content-addressed.yaml"),
+        lambda value: value["history"].update(
+            recent=[
+                {"version": version, "action": "update", "actor": "cli", "summary": f"Change {version}."}
+                for version in range(1, 18)
+            ]
+        ),
+    ):
+        invalid = copy.deepcopy(examples[0])
+        mutation(invalid)
+        invalid_examples.append(invalid)
+    for legacy_field in ("archived_through", "archive", "index"):
+        invalid = copy.deepcopy(examples[0])
+        invalid["history"][legacy_field] = None
+        invalid_examples.append(invalid)
+    for invalid in invalid_examples:
+        expect_value_error(lambda value=invalid: validate_schema_instance(schema, value), "oneOf")
+
+
+def check_knowledge_map_schema(path: Path) -> None:
+    schema = load_schema(path)
+    check_knowledge_map_schema_contract(path, schema)
+    check_knowledge_map_schema_examples(schema)
+
+
+def check_codespec_map_schema(path: Path) -> None:
+    schema = load_schema(path)
+    require_schema_value(path, schema.get("$schema"), KNOWLEDGE_MAP_SCHEMA_DRAFT, "draft")
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        raise ValueError(f"{path} is missing CodeSpec Map schema $defs")
+    for name in ("directory", "directoryRelation", "historyEntry", "historyManifest"):
+        if name not in definitions:
+            raise ValueError(f"{path} is missing CodeSpec Map schema $defs/{name}")
+    if any(node.get("additionalProperties") is not True for node in schema_object_nodes(schema)):
+        raise ValueError(f"{path} must allow unknown fields on every object schema")
+    history_manifest = definitions.get("historyManifest")
+    forbidden_history_names = (
+        history_manifest.get("propertyNames", {}).get("not", {}).get("enum")
+        if isinstance(history_manifest, dict)
+        else None
+    )
+    require_schema_value(
+        path,
+        forbidden_history_names,
+        ["archived_through", "archive", "index"],
+        "legacy history property prohibition",
+    )
+    example = {
+        "schema_version": 4,
+        "artifact_kind": "map",
+        "map_type": "codespec",
+        "map_version": 1,
+        "updated_at": "unix:1",
+        "directories": [{
+            "directory": name,
+            "purpose": f"Govern {name} specifications.",
+            "content_scope": [f"codespec/{name}/**"],
+            "key_files": [f"codespec/{name}/README.md"],
+            "load_hint": "on_demand",
+            "relations": [],
+            "update_rule": "reviewed",
+        } for name in ("requirements", "design", "api", "test", "decisions")],
+        "topics": [],
+        "history": {
+            "omitted_through": 0,
+            "recent": [{"version": 1, "action": "init", "actor": "cli", "summary": "Created map."}],
+        },
+        "future_extension": True,
+    }
+    validate_schema_instance(schema, example)
+    invalid = copy.deepcopy(example)
+    invalid["map_type"] = "knowledge"
+    expect_value_error(lambda: validate_schema_instance(schema, invalid), "const")
+    for legacy_field in ("archived_through", "archive", "index"):
+        invalid = copy.deepcopy(example)
+        invalid["history"][legacy_field] = None
+        expect_value_error(lambda value=invalid: validate_schema_instance(schema, value), "not")
+
+
 def metadata_version_index(lines: list[str], metadata_index: int, end_index: int) -> int | None:
     for index in range(metadata_index + 1, end_index):
         line = lines[index]
@@ -488,6 +737,9 @@ def check_skill_metadata(path: Path, expected: str) -> None:
     check_frontmatter_description(path)
     check_skill_shell_policy(path)
     check_knowledge_loop_contract(path)
+    check_knowledge_map_schema(path.parent / KNOWLEDGE_MAP_SCHEMA)
+    check_codespec_map_schema(path.parent / CODESPEC_MAP_SCHEMA)
+    check_business_glossary_schema(path.parent / BUSINESS_GLOSSARY_SCHEMA)
 
 
 def expect_value_error(action: Callable[[], object], expected: str) -> None:
@@ -600,6 +852,52 @@ def run_self_test() -> None:
             valid_openai_config,
         ),
         "repo status",
+    )
+
+    schema_path = (
+        Path(__file__).resolve().parents[2]
+        / "skills/relay-knowledge-cli"
+        / KNOWLEDGE_MAP_SCHEMA
+    )
+    schema = load_schema(schema_path)
+    check_knowledge_map_schema_contract(schema_path, schema)
+    check_knowledge_map_schema_examples(schema)
+    with tempfile.TemporaryDirectory(prefix="relay-knowledge-schema-") as directory:
+        temporary = Path(directory)
+        expect_value_error(
+            lambda: check_knowledge_map_schema(temporary / "missing.json"),
+            "is missing",
+        )
+        corrupted = temporary / "corrupted.json"
+        corrupted.write_text("{not-json", encoding="utf-8")
+        expect_value_error(
+            lambda: check_knowledge_map_schema(corrupted),
+            "is not valid JSON",
+        )
+        drifted = copy.deepcopy(schema)
+        del drifted["$defs"]["source"]
+        drifted_path = temporary / "drifted.json"
+        drifted_path.write_text(json.dumps(drifted), encoding="utf-8")
+        expect_value_error(
+            lambda: check_knowledge_map_schema(drifted_path),
+            "$defs/source",
+        )
+    codespec_schema_path = (
+        Path(__file__).resolve().parents[2]
+        / "skills/relay-knowledge-cli"
+        / CODESPEC_MAP_SCHEMA
+    )
+    check_codespec_map_schema(codespec_schema_path)
+    with tempfile.TemporaryDirectory(prefix="relay-codespec-schema-") as directory:
+        missing = Path(directory) / "missing.json"
+        expect_value_error(lambda: check_codespec_map_schema(missing), "is missing")
+        corrupted = Path(directory) / "corrupted.json"
+        corrupted.write_text("{not-json", encoding="utf-8")
+        expect_value_error(lambda: check_codespec_map_schema(corrupted), "is not valid JSON")
+    self_test_business_glossary_schema(
+        Path(__file__).resolve().parents[2]
+        / "skills/relay-knowledge-cli"
+        / BUSINESS_GLOSSARY_SCHEMA
     )
 
     print("self-test OK")

@@ -3,9 +3,10 @@
 use std::{collections::BTreeMap, path::Path};
 
 use crate::domain::{
-    CodeCallRecord, CodeIndexSnapshot, CodeMonorepoWorkspace, CodePathTombstone,
-    CodeRepositoryRegistration, CodeRepositorySelector, CodeRouteRecord,
-    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord, code_snapshot_scope_id,
+    CodeCallRecord, CodeFrameworkEdgeRecord, CodeFrameworkNodeRecord, CodeIndexSnapshot,
+    CodeMonorepoWorkspace, CodePathTombstone, CodeRepositoryRegistration, CodeRepositorySelector,
+    CodeRouteRecord, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+    code_snapshot_scope_id,
 };
 
 use super::{identity, ids::stable_id};
@@ -160,7 +161,14 @@ fn workspace_manifest_read_allowed(relative_path: &str, path_filters: &[String])
 fn is_workspace_manifest_path(relative_path: &str) -> bool {
     matches!(
         relative_path.rsplit('/').next(),
-        Some("pnpm-workspace.yaml" | "go.work" | "package.json" | "Cargo.toml" | "go.mod")
+        Some(
+            "pnpm-workspace.yaml"
+                | "go.work"
+                | "package.json"
+                | "Cargo.toml"
+                | "go.mod"
+                | "pom.xml"
+        )
     )
 }
 
@@ -202,6 +210,8 @@ pub(in crate::code) struct SnapshotBuild {
     calls: Vec<CodeCallRecord>,
     pub(in crate::code) dependencies: Vec<crate::domain::CodeDependencyRecord>,
     pub(in crate::code) feature_flags: Vec<crate::domain::CodeFeatureFlagRecord>,
+    pub(in crate::code) framework_nodes: Vec<CodeFrameworkNodeRecord>,
+    pub(in crate::code) framework_edges: Vec<CodeFrameworkEdgeRecord>,
     pub(in crate::code) chunks: Vec<crate::domain::RepositoryCodeChunkRecord>,
     pub(in crate::code) routes: Vec<CodeRouteRecord>,
     pub(in crate::code) diagnostics: Vec<crate::domain::CodeFileDiagnostic>,
@@ -324,6 +334,8 @@ impl SnapshotBuild {
             calls: Vec::new(),
             dependencies: Vec::new(),
             feature_flags: Vec::new(),
+            framework_nodes: Vec::new(),
+            framework_edges: Vec::new(),
             routes: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
@@ -413,6 +425,8 @@ impl SnapshotBuild {
             calls: self.calls,
             dependencies: self.dependencies,
             feature_flags: self.feature_flags,
+            framework_nodes: self.framework_nodes,
+            framework_edges: self.framework_edges,
             routes: self.routes,
             chunks: self.chunks,
             workspaces: self.workspaces,
@@ -430,6 +444,8 @@ impl SnapshotBuild {
         self.calls.append(&mut other.calls);
         self.dependencies.append(&mut other.dependencies);
         self.feature_flags.append(&mut other.feature_flags);
+        self.framework_nodes.append(&mut other.framework_nodes);
+        self.framework_edges.append(&mut other.framework_edges);
         self.routes.append(&mut other.routes);
         self.chunks.append(&mut other.chunks);
         self.diagnostics.append(&mut other.diagnostics);

@@ -25,6 +25,10 @@ use serde::Serialize;
 
 pub struct Config;
 
+pub trait GraphApi {
+    fn graph_version(&self) -> u64;
+}
+
 impl Config {
     pub fn get_bool(&self, key: &str) -> bool {
         key == "payments.enabled"
@@ -146,9 +150,27 @@ Owns software projection refresh and lifecycle extraction.
 Provides dependency, SDK, build, IaC, and design context for generation.
 "#;
 
+pub(super) const SOFTWARE_GLOBAL_README_MD: &str = r#"
+# Getting Started
+
+## Chapter Index
+This heading is documentation and must not become a software system.
+"#;
+
+pub(super) const SOFTWARE_GLOBAL_CATALOG_MD: &str = r#"
+
+---
+software-system: relay-platform
+api: Catalog API
+---
+# Catalog Guide
+Explicit catalog metadata may promote controlled software entities.
+"#;
+
 pub(super) const SOFTWARE_GLOBAL_KNOWLEDGE_MAP: &str = r#"
 schema_version: 1
 map_version: 1
+updated_at: unix:0
 topics:
 - id: global-runtime
   title: Global runtime knowledge
@@ -168,6 +190,11 @@ routes:
   source_order:
   - global-runtime-doc
   fallback: bounded-search
+history:
+- version: 1
+  action: init
+  actor: fixture
+  summary: Created software projection knowledge route.
 "#;
 
 pub(super) const SOFTWARE_GLOBAL_FLAGS_YAML: &str = r#"
@@ -187,4 +214,12 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: relay-global-template
+"#;
+
+pub(super) const SOFTWARE_GLOBAL_OPENAPI: &str = r#"
+openapi: 3.1.0
+info:
+  title: Relay Global API
+  version: 1.0.0
+paths: {}
 "#;

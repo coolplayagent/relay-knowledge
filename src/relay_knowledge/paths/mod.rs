@@ -13,6 +13,7 @@ use std::{
 
 use crate::{
     env::{PathEnvOverrides, PlatformEnvironment, PlatformKind},
+    identity::stable_hash64,
     project::{
         DATABASE_FILE_NAME, MODEL_CATALOG_CACHE_FILE_NAME, MODEL_FALLBACK_FILE_NAME,
         MODEL_PROFILES_FILE_NAME, REPOSITORY_SHARD_DATABASE_FILE_NAME, REPOSITORY_SHARDS_DIR_NAME,
@@ -541,19 +542,6 @@ fn repository_shard_dir_name(repository_id: &str) -> String {
         "{sanitized}-{:016x}",
         stable_hash64(repository_id.as_bytes())
     )
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }
 
 #[cfg(test)]

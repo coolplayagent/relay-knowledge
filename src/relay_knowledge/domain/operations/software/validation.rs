@@ -1,4 +1,5 @@
 use super::super::{DomainError, error::required_text};
+use crate::identity::StableHasher64;
 
 pub(super) fn normalize_optional(
     field: &'static str,
@@ -22,17 +23,13 @@ pub(super) fn stable_software_id<'a>(
     prefix: &str,
     parts: impl IntoIterator<Item = &'a str>,
 ) -> String {
-    let mut hash = 0xcbf29ce484222325u64;
+    let mut hasher = StableHasher64::new();
     for part in parts {
-        for byte in part.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(0x100000001b3);
+        hasher.update(part.as_bytes());
+        hasher.update(&[0xff]);
     }
 
-    format!("{prefix}:{hash:016x}")
+    format!("{prefix}:{:016x}", hasher.finish())
 }
 
 #[cfg(test)]

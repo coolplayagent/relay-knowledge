@@ -1,9 +1,97 @@
 //! Business projection participation in the fenced publication barrier.
 
 use super::*;
+use crate::storage::sqlite::{code::lifecycle, software};
 
 #[tokio::test]
-async fn fenced_full_checkpoint_waits_for_software_projection_before_becoming_fresh() {
+async fn software_relationship_storage_rejects_invalid_public_flags_before_fenced_publish() {
+    let store = registered_store().await;
+    let (session, fence) = begin_fenced_session(
+        &store,
+        SOURCE_SCOPE,
+        "invalid-relationship-fact",
+        LEASE_OWNER,
+        Default::default(),
+    )
+    .await;
+    store
+        .begin_code_index_session_with_fence(session.clone(), fence.clone())
+        .await
+        .unwrap();
+    let mut facts = batch(SOURCE_SCOPE, 1);
+    facts.files = vec![file(
+        SOURCE_SCOPE,
+        "file-1",
+        "src/lib.rs",
+        "rust",
+        CodeParseStatus::Parsed,
+    )];
+    facts.feature_flags = vec![crate::domain::CodeFeatureFlagRecord {
+        metadata: Default::default(),
+        repository_id: "repo".into(),
+        source_scope: SOURCE_SCOPE.into(),
+        feature_flag_id: "flag".into(),
+        usage_id: "usage".into(),
+        file_id: "file-1".into(),
+        path: "src/lib.rs".into(),
+        language_id: "rust".into(),
+        name: "FEATURE".into(),
+        source_kind: "environment".into(),
+        source_key: "FEATURE".into(),
+        edge_kind: "reads_config".into(),
+        confidence_basis_points: 10001,
+        confidence_tier: "inferred".into(),
+        byte_range: crate::domain::RepositoryCodeRange { start: 0, end: 1 },
+        line_range: crate::domain::RepositoryCodeRange { start: 1, end: 1 },
+        excerpt: "FEATURE".into(),
+    }];
+    store
+        .apply_code_index_batch_with_fence(facts, fence.clone())
+        .await
+        .expect("public code facts stage before relationship validation");
+    store
+        .finalize_code_index_session_with_fence(session, fence.clone())
+        .await
+        .unwrap();
+    crate::storage::stage_empty_business_projection_with_fence_for_test(
+        &store,
+        "repo",
+        SOURCE_SCOPE,
+        "commit",
+        fence.clone(),
+    )
+    .await
+    .unwrap();
+    let error = store
+        .refresh_software_global_projection_with_fence(SOURCE_SCOPE.into(), fence)
+        .await
+        .expect_err("invalid relationship facts must prevent fresh publication");
+    assert!(matches!(
+        error,
+        crate::storage::StorageError::InvalidInput(_)
+    ));
+    let checkpoint = store
+        .code_index_checkpoint(SOURCE_SCOPE.into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        checkpoint.state,
+        "finalizing:software_projection:v3:relationships"
+    );
+    let status = store
+        .code_repository_status("fixture".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status.stale);
+    assert_eq!(status.last_indexed_scope_id, None);
+}
+
+#[tokio::test]
+async fn code_index_persistence_performance_suite_fenced_projection_resumes_between_writer_quanta()
+{
+    const PROJECTED_FILE_COUNT: usize = 12_000;
     let store = registered_store().await;
     let now_ms = now_millis();
     let queued = store
@@ -51,6 +139,58 @@ async fn fenced_full_checkpoint_waits_for_software_projection_before_becoming_fr
         .finalize_code_index_session_with_fence(session, fence.clone())
         .await
         .expect("fenced code facts should stage");
+    store
+        .run(|connection| {
+            connection.execute(
+                "
+                WITH digits(value) AS (
+                    VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)
+                ), generated(value) AS (
+                    SELECT a.value + 10 * b.value + 100 * c.value +
+                           1000 * d.value + 10000 * e.value
+                    FROM digits a, digits b, digits c, digits d, digits e
+                )
+                INSERT INTO code_repository_files (
+                    repository_id, source_scope, file_id, path, language_id,
+                    blob_hash, byte_len, line_count, parse_status, is_generated
+                )
+                SELECT 'repo', ?1, printf('large-file-%05d', value),
+                       printf('src/generated/file_%05d.rs', value), 'rust',
+                       printf('blob-%05d', value), 32, 1, 'parsed', 0
+                FROM generated
+                WHERE value < ?2
+                ",
+                rusqlite::params![SOURCE_SCOPE, PROJECTED_FILE_COUNT],
+            )?;
+            connection.execute(
+                "
+                WITH digits(value) AS (
+                    VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)
+                ), generated(value) AS (
+                    SELECT a.value + 10 * b.value + 100 * c.value +
+                           1000 * d.value + 10000 * e.value
+                    FROM digits a, digits b, digits c, digits d, digits e
+                )
+                INSERT INTO code_repository_imports (
+                    repository_id, source_scope, import_id, file_id, path, module,
+                    target_hint, resolution_state, confidence_basis_points,
+                    confidence_tier, line_start, line_end
+                )
+                SELECT 'repo', ?1, printf('large-import-%05d', value),
+                       printf('large-file-%05d', value),
+                       printf('src/generated/file_%05d.rs', value),
+                       printf('external_sdk_%05d', value),
+                       printf('external_sdk_%05d', value), 'external', 7000,
+                       'inferred', 1, 1
+                FROM generated
+                WHERE value < ?2
+                ",
+                rusqlite::params![SOURCE_SCOPE, PROJECTED_FILE_COUNT],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("large staged file surface should seed");
     let staged_checkpoint = store
         .code_index_checkpoint(SOURCE_SCOPE.to_owned())
         .await
@@ -73,11 +213,66 @@ async fn fenced_full_checkpoint_waits_for_software_projection_before_becoming_fr
     )
     .await
     .expect("business facts should stage before fenced publication");
+    let reset_fence = fence.clone();
+    let reset = store
+        .run(move |connection| {
+            let guard = lifecycle::publication_fence::prepare_guard(connection, reset_fence, None)?;
+            software::advance_fenced_projection(connection, SOURCE_SCOPE, &guard)
+        })
+        .await
+        .expect("reset should commit as one durable writer phase");
+    assert!(matches!(
+        reset,
+        software::FencedProjectionAdvance::Pending { checkpoint_state }
+            if checkpoint_state == "finalizing:software_projection:v3:dependencies"
+    ));
+    let dependency_fence = fence.clone();
+    let dependencies = store
+        .run(move |connection| {
+            let guard =
+                lifecycle::publication_fence::prepare_guard(connection, dependency_fence, None)?;
+            software::advance_fenced_projection(connection, SOURCE_SCOPE, &guard)
+        })
+        .await
+        .expect("dependencies should commit as a second durable writer phase");
+    assert!(matches!(
+        dependencies,
+        software::FencedProjectionAdvance::Pending { checkpoint_state }
+            if checkpoint_state == "finalizing:software_projection:v3:sdk_usages"
+    ));
+    let resumed_checkpoint = store
+        .code_index_checkpoint(SOURCE_SCOPE.to_owned())
+        .await
+        .expect("resumable projection checkpoint should load")
+        .expect("resumable projection checkpoint should exist");
+    assert_eq!(
+        resumed_checkpoint.state,
+        "finalizing:software_projection:v3:sdk_usages"
+    );
     let projection = store
         .refresh_software_global_projection_with_fence(SOURCE_SCOPE.to_owned(), fence)
         .await
         .expect("software facts should complete fenced publication");
     assert!(!projection.status.stale);
+    assert_eq!(projection.status.file_count, PROJECTED_FILE_COUNT);
+    assert_eq!(projection.status.sdk_usage_count, PROJECTED_FILE_COUNT);
+    assert_eq!(projection.status.relationship_count, PROJECTED_FILE_COUNT);
+    let stored_edges = store
+        .run(|connection| {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM software_relationships WHERE source_scope = ?1",
+                    rusqlite::params![SOURCE_SCOPE],
+                    |row| row.get::<_, usize>(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("legacy relationship storage should remain readable after phase resume");
+    assert_eq!(
+        stored_edges, 0,
+        "resuming fenced publication must not recreate redundant relationship rows"
+    );
     let completed_checkpoint = store
         .code_index_checkpoint(SOURCE_SCOPE.to_owned())
         .await
@@ -101,4 +296,96 @@ async fn fenced_full_checkpoint_waits_for_software_projection_before_becoming_fr
         .expect("active task should load")
         .expect("worker completes the task after the publication response");
     assert_eq!(active.state, CodeIndexTaskState::Running);
+}
+
+#[tokio::test]
+async fn maven_legacy_projection_phases_replay_reactor_before_fenced_publication() {
+    for phase in ["files", "topics", "relationships", "ontology", "publish"] {
+        let store = registered_store().await;
+        let (session, fence) = begin_fenced_session(
+            &store,
+            SOURCE_SCOPE,
+            "legacy-reactor",
+            LEASE_OWNER,
+            Default::default(),
+        )
+        .await;
+        store
+            .begin_code_index_session_with_fence(session.clone(), fence.clone())
+            .await
+            .unwrap();
+        let content = "<project><groupId>x</groupId><artifactId>root</artifactId><version>1</version></project>";
+        let mut facts = batch(SOURCE_SCOPE, 1);
+        let mut pom = file(
+            SOURCE_SCOPE,
+            "pom",
+            "pom.xml",
+            "xml",
+            CodeParseStatus::Parsed,
+        );
+        pom.byte_len = content.len();
+        facts.files.push(pom);
+        facts.chunks.push(crate::domain::RepositoryCodeChunkRecord {
+            repository_id: "repo".into(),
+            source_scope: SOURCE_SCOPE.into(),
+            chunk_id: "pom-chunk".into(),
+            file_id: "pom".into(),
+            path: "pom.xml".into(),
+            language_id: "xml".into(),
+            content: content.into(),
+            byte_range: crate::domain::RepositoryCodeRange {
+                start: 0,
+                end: content.len() as u32,
+            },
+            line_range: crate::domain::RepositoryCodeRange { start: 1, end: 1 },
+            symbol_snapshot_id: None,
+        });
+        store
+            .apply_code_index_batch_with_fence(facts, fence.clone())
+            .await
+            .unwrap();
+        store
+            .finalize_code_index_session_with_fence(session, fence.clone())
+            .await
+            .unwrap();
+        crate::storage::stage_empty_business_projection_with_fence_for_test(
+            &store,
+            "repo",
+            SOURCE_SCOPE,
+            "commit",
+            fence.clone(),
+        )
+        .await
+        .unwrap();
+        let reset_fence = fence.clone();
+        store.run(move |connection| {
+            let guard = lifecycle::publication_fence::prepare_guard(connection, reset_fence, None)?;
+            software::advance_fenced_projection(connection, SOURCE_SCOPE, &guard)?;
+            connection.execute("UPDATE software_global_status SET projection_schema_version = 8 WHERE source_scope = ?1", [SOURCE_SCOPE])?;
+            connection.execute("UPDATE code_repository_index_checkpoints SET state = ?1 WHERE source_scope = ?2", rusqlite::params![format!("finalizing:software_projection:v2:{phase}"), SOURCE_SCOPE])?;
+            Ok(())
+        }).await.unwrap();
+        let projection = store
+            .refresh_software_global_projection_with_fence(SOURCE_SCOPE.into(), fence)
+            .await
+            .unwrap();
+        assert!(!projection.status.stale);
+        let count = store
+            .run(|connection| {
+                crate::storage::sqlite::maven::reactor::require_complete(connection, SOURCE_SCOPE)?;
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM maven_reactor_modules WHERE source_scope = ?1",
+                        [SOURCE_SCOPE],
+                        |row| row.get::<_, usize>(0),
+                    )
+                    .map_err(crate::storage::StorageError::from)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "legacy phase {phase} must not skip reactor refresh"
+        );
+    }
 }

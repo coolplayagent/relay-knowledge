@@ -5,7 +5,9 @@ use crate::{
         FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
         RepositoryCodeSymbolRecord,
     },
-    storage::CodeRepositoryStore,
+    storage::CodeIndexPublicationStore as _,
+    storage::CodeQueryReadStore as _,
+    storage::RepositoryCatalogStore as _,
     storage::SqliteGraphStore,
 };
 
@@ -39,6 +41,8 @@ async fn pure_hybrid_symbol_identity_uses_symbol_only_plan() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![chunk(
             "connector-chunk",
@@ -91,6 +95,8 @@ async fn hybrid_symbol_plan_keeps_multi_term_flow_retrieval() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![chunk(
             "connector-chunk",
@@ -151,6 +157,8 @@ async fn dense_hybrid_chunk_plan_answers_before_symbol_noise() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -391,6 +399,8 @@ async fn rust_workflow_identifier_chunk_plan_answers_before_symbol_noise() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk_with_language(
@@ -468,6 +478,8 @@ async fn language_scoped_workflow_chunk_plan_answers_before_symbol_noise() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -558,6 +570,8 @@ async fn query_language_scope_filters_chunk_candidates_before_fts_limit() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks,
         workspaces: Vec::new(),
@@ -621,6 +635,8 @@ async fn dense_structured_hybrid_chunk_plan_answers_before_symbol_noise() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -704,6 +720,8 @@ async fn multi_api_symbol_query_keeps_direct_identity_facets() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
@@ -774,6 +792,8 @@ async fn covered_multi_api_symbol_query_elides_fts_noise() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
@@ -808,33 +828,6 @@ async fn covered_multi_api_symbol_query_elides_fts_noise() {
     );
 }
 
-#[test]
-fn hybrid_symbol_plan_requires_unambiguous_symbol_window() {
-    let read_request = request("read", CodeQueryKind::Hybrid, 2);
-    let hits = vec![
-        symbol_hit("one", "repo://repo/src::one::read", "fn read()"),
-        symbol_hit("two", "repo://repo/src::two::read", "fn read()"),
-        symbol_hit("three", "repo://repo/src::three::read", "fn read()"),
-    ];
-
-    assert!(!hybrid_symbol_query_can_answer_without_non_symbol_layers(
-        &read_request,
-        &hits
-    ));
-    assert!(!hybrid_symbol_query_can_answer_without_non_symbol_layers(
-        &request("read flow", CodeQueryKind::Hybrid, 10),
-        &hits[..1],
-    ));
-    assert!(hybrid_symbol_query_can_answer_without_non_symbol_layers(
-        &request("DBImpl::Get", CodeQueryKind::Hybrid, 10),
-        &[symbol_hit(
-            "get",
-            "repo://repo/db::DBImpl.Get",
-            "Status DBImpl::Get(const ReadOptions& options)",
-        )],
-    ));
-}
-
 fn request(query: &str, kind: CodeQueryKind, limit: usize) -> CodeRetrievalRequest {
     request_with_language_filters(query, kind, limit, Vec::new())
 }
@@ -850,34 +843,6 @@ fn request_with_language_filters(
 
     CodeRetrievalRequest::new(query, selector, kind, limit, FreshnessPolicy::AllowStale)
         .expect("request should be valid")
-}
-
-fn symbol_hit(id: &str, canonical_symbol_id: &str, excerpt: &str) -> CodeRetrievalHit {
-    CodeRetrievalHit {
-        repository_id: "repo".to_owned(),
-        scope_id: TEST_SOURCE_SCOPE.to_owned(),
-        resolved_commit_sha: "commit".to_owned(),
-        tree_hash: "tree".to_owned(),
-        path: format!("src/{id}.rs"),
-        language_id: "rust".to_owned(),
-        byte_range: range(1, 1),
-        line_range: range(1, 1),
-        symbol_snapshot_id: Some(format!("{id}-symbol")),
-        canonical_symbol_id: Some(canonical_symbol_id.to_owned()),
-        file_id: Some(format!("{id}-file")),
-        retrieval_layers: vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition],
-        index_versions: Vec::new(),
-        stale: false,
-        staleness_hint: None,
-        degraded_reason: None,
-        edge_kind: None,
-        edge_resolution_state: None,
-        edge_target_hint: None,
-        edge_confidence_basis_points: None,
-        edge_confidence_tier: None,
-        score: 8.0,
-        excerpt: excerpt.to_owned(),
-    }
 }
 
 fn file(file_id: &str, path: &str) -> RepositoryCodeFileRecord {

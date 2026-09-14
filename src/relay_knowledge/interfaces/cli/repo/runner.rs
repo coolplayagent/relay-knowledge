@@ -3,8 +3,9 @@ use crate::{
     application::RelayKnowledgeService,
     domain::{
         BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeGraphContextRequest,
-        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy,
-        RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
+        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRetrievalRequest,
+        FrameworkGraphRequest, FreshnessPolicy, RepositoryGraphNeighborhoodRequest,
+        SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::{mode_for_index_ref, selector_for_index_request},
 };
@@ -14,7 +15,7 @@ use super::{
     index::{CodeIndexWorkerRunResponse, finish_started_index_task, render_index_worker_response},
     render_response,
     report::render_report_response,
-    selector,
+    selector, serialize_line,
 };
 
 pub async fn run_repo(
@@ -323,6 +324,7 @@ pub async fn run_repo(
             )
         }
         RepoCommand::FeatureFlags {
+            filters,
             alias,
             query,
             limit,
@@ -337,6 +339,7 @@ pub async fn run_repo(
                 limit,
                 freshness,
             )
+            .and_then(|request| request.with_filters(filters))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .query_code_repository_feature_flags(request, context)
@@ -345,6 +348,37 @@ pub async fn run_repo(
 
             render_response(
                 "code.repo.feature_flags",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
+        RepoCommand::FrameworkGraph {
+            alias,
+            query,
+            frameworks,
+            kinds,
+            limit,
+            ref_selector,
+            path_filters,
+            freshness,
+        } => {
+            let request = FrameworkGraphRequest::new(
+                query,
+                selector(alias, ref_selector, path_filters, Vec::new(), format)?,
+                frameworks,
+                kinds,
+                limit,
+                freshness,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = service
+                .query_code_repository_framework_graph(request, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+
+            render_response(
+                "code.repo.framework_graph",
                 response.metadata.clone(),
                 &response,
                 format,
@@ -402,6 +436,8 @@ pub async fn run_repo(
             render_report_response(&response, format)
         }
         RepoCommand::Software {
+            cursor,
+            path_filters,
             alias,
             ref_selector,
             kind,
@@ -409,11 +445,12 @@ pub async fn run_repo(
             limit,
         } => {
             let request = SoftwareGlobalRequest::new(
-                selector(alias, ref_selector, Vec::new(), Vec::new(), format)?,
+                selector(alias, ref_selector, path_filters, Vec::new(), format)?,
                 kind,
                 freshness,
                 limit,
             )
+            .and_then(|request| request.with_cursor(cursor))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .software_global_projection(request, context)
@@ -426,6 +463,26 @@ pub async fn run_repo(
                 &response,
                 format,
             )
+        }
+        RepoCommand::SoftwareExport {
+            alias,
+            ref_selector,
+            profile,
+            freshness,
+            limit,
+        } => {
+            let request = SoftwareGlobalRequest::new(
+                selector(alias, ref_selector, Vec::new(), Vec::new(), format)?,
+                crate::domain::SoftwareGlobalKind::All,
+                freshness,
+                limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = service
+                .software_global_export(request, profile, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+            serialize_line(&response.document)
         }
         RepoCommand::Business {
             alias,

@@ -6,7 +6,9 @@ use crate::{
         RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
         RepositoryCodeSymbolRecord,
     },
-    storage::CodeRepositoryStore,
+    storage::CodeIndexPublicationStore as _,
+    storage::CodeQueryReadStore as _,
+    storage::RepositoryCatalogStore as _,
     storage::SqliteGraphStore,
 };
 
@@ -755,6 +757,8 @@ fn code_query_snapshot(
         calls,
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),

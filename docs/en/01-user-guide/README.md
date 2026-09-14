@@ -7,7 +7,7 @@
 > Scope: Executable user guidance for local development, CLI operations, knowledge graph retrieval, code repository graphs, the Web workspace, MCP/ACP access, resident service operation, background workers, observability, troubleshooting, and advanced configuration.
 
 The version above identifies this English edition. The Chinese edition also
-contains Chapters 15–17 as explicit deployment, SRE, and security deep dives;
+contains Chapters 14–16 as explicit deployment, SRE, and security deep dives;
 their absence here is an indexed edition difference, not an implied translation.
 
 This book only covers paths that users can run, verify, and troubleshoot directly. Architecture constraints, interface boundaries, and forward-looking requirements remain in `docs/en/03-architecture-specs/`; this book turns implemented capabilities into commands, configuration, runtime state, and diagnostic steps.
@@ -43,9 +43,9 @@ This book only covers paths that users can run, verify, and troubleshoot directl
 - [Chapter 13: Operations and Troubleshooting](13-operations-and-troubleshooting.md): health checks, index freshness, common errors, isolated reproduction, and PR verification.
 
 The Chinese edition also provides three deeper operational addenda:
-[Chapter 15: Full Service Deployment](../../zh/01-user-guide/15-service-deployment-full-guide.md),
-[Chapter 16: SRE Operations Runbook](../../zh/01-user-guide/16-sre-operations-runbook.md),
-and [Chapter 17: Security Configuration](../../zh/01-user-guide/17-security-configuration.md).
+[Chapter 14: Service Deployment Guide](../../zh/01-user-guide/14-service-deployment-guide.md),
+[Chapter 15: SRE Operations Runbook](../../zh/01-user-guide/15-sre-operations-runbook.md),
+and [Chapter 16: Security Configuration Guide](../../zh/01-user-guide/16-security-configuration-guide.md).
 The executable English service lifecycle is consolidated in
 [Chapter 9](09-resident-service.md), with general diagnostics in Chapter 13 and
 configuration/security boundaries in Chapter 12. These addenda are not

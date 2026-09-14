@@ -1,5 +1,9 @@
 mod ambiguous_callees;
 pub(super) mod caller_context_scoring;
+mod class_members;
+mod class_rows;
+#[cfg(test)]
+mod class_test_support;
 mod counts;
 mod direction;
 mod display;

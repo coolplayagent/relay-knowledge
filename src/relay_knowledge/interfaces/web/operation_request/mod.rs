@@ -1,3 +1,4 @@
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::{
@@ -11,8 +12,8 @@ use crate::{
         CodeGraphContextRequest, CodeImpactRequest, CodeQueryKind, CodeRepositorySelector,
         CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
         CodeRepositorySetQueryRequest, CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest,
-        FreshnessPolicy, IndexKind, ProposalState, SoftwareGlobalKind, SoftwareGlobalRequest,
-        WorkerKind,
+        FrameworkGraphRequest, FrameworkKind, FrameworkNodeKind, FreshnessPolicy, IndexKind,
+        ProposalState, RepositoryMapType, SoftwareGlobalKind, SoftwareGlobalRequest, WorkerKind,
     },
 };
 
@@ -67,20 +68,20 @@ pub(super) fn index_request(payload: &Value) -> Result<IndexRefreshRequest, WebE
 #[derive(Debug)]
 pub(super) struct KnowledgeMapHistoryPage {
     pub(super) repository: String,
-    pub(super) from_version: u64,
+    pub(super) map_type: RepositoryMapType,
+    pub(super) from_version: Option<u64>,
     pub(super) limit: usize,
 }
 
 pub(super) fn knowledge_map_history_page(
     payload: &Value,
 ) -> Result<KnowledgeMapHistoryPage, WebError> {
-    let from_version = payload
-        .get("from_version")
-        .and_then(Value::as_u64)
-        .filter(|value| *value > 0)
-        .ok_or_else(|| {
+    let from_version = match payload.get("from_version") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(value.as_u64().filter(|value| *value > 0).ok_or_else(|| {
             WebError::bad_request("from_version must be a positive integer".to_owned())
-        })?;
+        })?),
+    };
     let limit = usize_field(payload, "limit")?;
     if limit > MAX_HISTORY_PAGE_SIZE {
         return Err(WebError::bad_request(format!(
@@ -88,8 +89,18 @@ pub(super) fn knowledge_map_history_page(
         )));
     }
     let repository = string_field(payload, "repository")?.trim().to_owned();
+    let map_type = match optional_string_field(payload, "map_type").as_deref() {
+        None | Some("knowledge") => RepositoryMapType::Knowledge,
+        Some("codespec") => RepositoryMapType::Codespec,
+        Some(_) => {
+            return Err(WebError::bad_request(
+                "map_type must be 'knowledge' or 'codespec'".to_owned(),
+            ));
+        }
+    };
     Ok(KnowledgeMapHistoryPage {
         repository,
+        map_type,
         from_version,
         limit,
     })
@@ -143,9 +154,30 @@ pub(super) fn code_context_request(payload: &Value) -> Result<CodeGraphContextRe
 pub(super) fn code_feature_flag_request(
     payload: &Value,
 ) -> Result<CodeFeatureFlagRequest, WebError> {
+    let filters = crate::domain::CodeConfigFilter {
+        domain: optional_filter_string(payload, "domain")?,
+        source: optional_filter_string(payload, "source")?,
+        hot_reload: optional_bool_field(payload, "hot_reload")?,
+        consistency: optional_bool_field(payload, "consistency")?.unwrap_or(false),
+    };
     CodeFeatureFlagRequest::new(
         optional_string_field(payload, "query"),
         code_selector(payload)?,
+        usize_field(payload, "limit")?,
+        parse_freshness(string_field(payload, "freshness")?)?,
+    )
+    .and_then(|request| request.with_filters(filters))
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
+pub(super) fn code_framework_graph_request(
+    payload: &Value,
+) -> Result<FrameworkGraphRequest, WebError> {
+    FrameworkGraphRequest::new(
+        optional_string_field(payload, "query"),
+        code_selector(payload)?,
+        optional_enum_array_field::<FrameworkKind>(payload, "frameworks")?,
+        optional_enum_array_field::<FrameworkNodeKind>(payload, "kinds")?,
         usize_field(payload, "limit")?,
         parse_freshness(string_field(payload, "freshness")?)?,
     )
@@ -163,9 +195,27 @@ pub(super) fn code_impact_request(payload: &Value) -> Result<CodeImpactRequest, 
 }
 
 pub(super) fn code_software_request(payload: &Value) -> Result<SoftwareGlobalRequest, WebError> {
+    let cursor = match payload.get("cursor") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(cursor)) => Some(cursor.clone()),
+        _ => return Err(WebError::bad_request("cursor must be a string".into())),
+    };
     SoftwareGlobalRequest::new(
         code_selector(payload)?,
         parse_software_kind(string_field(payload, "kind")?)?,
+        parse_freshness(string_field(payload, "freshness")?)?,
+        usize_field(payload, "limit")?,
+    )
+    .and_then(|request| request.with_cursor(cursor))
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
+pub(super) fn code_software_export_request(
+    payload: &Value,
+) -> Result<SoftwareGlobalRequest, WebError> {
+    SoftwareGlobalRequest::new(
+        code_selector(payload)?,
+        SoftwareGlobalKind::All,
         parse_freshness(string_field(payload, "freshness")?)?,
         usize_field(payload, "limit")?,
     )
@@ -259,6 +309,17 @@ pub(super) fn string_field<'a>(
         .ok_or_else(|| WebError::bad_request(format!("{field} is required")))
 }
 
+fn optional_filter_string(
+    payload: &Value,
+    field: &'static str,
+) -> Result<Option<String>, WebError> {
+    match payload.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(_) => Err(WebError::bad_request(format!("{field} must be a string"))),
+    }
+}
+
 pub(super) fn optional_string_field(payload: &Value, field: &'static str) -> Option<String> {
     payload
         .get(field)
@@ -295,6 +356,21 @@ pub(super) fn optional_string_array_field(
     }
 
     string_array_field(payload, field)
+}
+
+fn optional_enum_array_field<T>(payload: &Value, field: &'static str) -> Result<Vec<T>, WebError>
+where
+    T: DeserializeOwned,
+{
+    let Some(value) = payload.get(field) else {
+        return Ok(Vec::new());
+    };
+    if !value.is_array() {
+        return Err(WebError::bad_request(format!("{field} must be an array")));
+    }
+
+    serde_json::from_value(value.clone())
+        .map_err(|_| WebError::bad_request(format!("{field} contains an unsupported value")))
 }
 
 pub(super) fn usize_field(payload: &Value, field: &'static str) -> Result<usize, WebError> {
@@ -383,8 +459,17 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, WebError> {
         "topics" => Ok(SoftwareGlobalKind::Topics),
         "relationships" => Ok(SoftwareGlobalKind::Relationships),
         "build" => Ok(SoftwareGlobalKind::Build),
+        "modules" => Ok(SoftwareGlobalKind::Modules),
         "iac" => Ok(SoftwareGlobalKind::Iac),
         "design" => Ok(SoftwareGlobalKind::Design),
+        "systems" => Ok(SoftwareGlobalKind::Systems),
+        "apis" => Ok(SoftwareGlobalKind::Apis),
+        "resources" => Ok(SoftwareGlobalKind::Resources),
+        "tests" => Ok(SoftwareGlobalKind::Tests),
+        "deployments" => Ok(SoftwareGlobalKind::Deployments),
+        "releases" => Ok(SoftwareGlobalKind::Releases),
+        "statements" => Ok(SoftwareGlobalKind::Statements),
+        "conflicts" => Ok(SoftwareGlobalKind::Conflicts),
         "all" => Ok(SoftwareGlobalKind::All),
         other => Err(WebError::bad_request(format!(
             "unsupported software kind '{other}'"

@@ -1,6 +1,6 @@
 use crate::domain::{
-    BusinessKnowledgeQueryKind, CodeQueryKind, CodeRepositorySelector, FreshnessPolicy,
-    SoftwareGlobalKind,
+    BusinessKnowledgeQueryKind, CodeQueryKind, CodeRepositorySelector, FrameworkKind,
+    FrameworkNodeKind, FreshnessPolicy, SoftwareExportProfile, SoftwareGlobalKind,
 };
 
 use super::{
@@ -87,12 +87,23 @@ pub enum RepoCommand {
         exclude_generated: bool,
     },
     FeatureFlags {
+        filters: crate::domain::CodeConfigFilter,
         alias: String,
         query: Option<String>,
         limit: usize,
         ref_selector: String,
         path_filters: Vec<String>,
         language_filters: Vec<String>,
+        freshness: FreshnessPolicy,
+    },
+    FrameworkGraph {
+        alias: String,
+        query: Option<String>,
+        frameworks: Vec<FrameworkKind>,
+        kinds: Vec<FrameworkNodeKind>,
+        limit: usize,
+        ref_selector: String,
+        path_filters: Vec<String>,
         freshness: FreshnessPolicy,
     },
     Impact {
@@ -108,9 +119,18 @@ pub enum RepoCommand {
         alias: String,
     },
     Software {
+        cursor: Option<String>,
+        path_filters: Vec<String>,
         alias: String,
         ref_selector: String,
         kind: SoftwareGlobalKind,
+        freshness: FreshnessPolicy,
+        limit: usize,
+    },
+    SoftwareExport {
+        alias: String,
+        ref_selector: String,
+        profile: SoftwareExportProfile,
         freshness: FreshnessPolicy,
         limit: usize,
     },

@@ -17,6 +17,7 @@ use crate::code::{
 
 mod contracts;
 mod feature_flag_projection;
+mod framework_projection;
 mod parse_status;
 mod route_projection;
 mod text_only;
@@ -167,7 +168,20 @@ pub(in crate::code::parser) fn parse_syntax_file(
         &config_references,
         &mut output,
     )?;
-    let imports = collect_imports(
+    let mut embedded_imports = if input.language.id == "vue" {
+        collect_vue_script_facts(build, &input, &mut output)?
+    } else {
+        Vec::new()
+    };
+    framework_projection::record_framework_graph(
+        build,
+        input.path,
+        input.file_id,
+        input.language.id,
+        input.content,
+        &output.symbols,
+    )?;
+    let mut imports = collect_imports(
         build,
         input.path,
         input.file_id,
@@ -175,6 +189,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
         input.content,
         root,
     )?;
+    imports.append(&mut embedded_imports);
     let chunks = chunks_for_symbols(
         build,
         input.path,
@@ -227,6 +242,49 @@ pub(in crate::code::parser) fn parse_syntax_file(
     );
 
     Ok(())
+}
+
+fn collect_vue_script_facts(
+    build: &SnapshotBuild,
+    input: &SyntaxFileInput<'_>,
+    output: &mut FileParseOutput,
+) -> Result<Vec<crate::domain::CodeImportRecord>, CodeIndexError> {
+    let Some((masked_content, typescript)) = super::frameworks::vue_script_mask(input.content)
+    else {
+        return Ok(Vec::new());
+    };
+    let embedded_language = crate::code::languages::detect_language(if typescript {
+        "embedded.ts"
+    } else {
+        "embedded.js"
+    })
+    .ok_or_else(|| {
+        CodeIndexError::InvalidInput("Vue embedded language is unavailable".to_owned())
+    })?;
+    let parsed = parse_tree_safely(embedded_language, &masked_content)?;
+    let root = parsed.root_node();
+    let captures = extract_tag_captures_safely(embedded_language, root, input.content)?;
+    let context = FileParseContext {
+        build,
+        path: input.path,
+        file_id: input.file_id,
+        language_id: embedded_language.id,
+        content: input.content,
+    };
+    let symbol_start = output.symbols.len();
+    records_from_captures(&context, captures, output)?;
+    collect_manual_nodes(&context, root, &[], &[], output)?;
+    for symbol in &mut output.symbols[symbol_start..] {
+        symbol.language_id = "vue".to_owned();
+    }
+    collect_imports(
+        build,
+        input.path,
+        input.file_id,
+        embedded_language.id,
+        input.content,
+        root,
+    )
 }
 
 fn record_syntax_failure_fallback(

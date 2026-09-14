@@ -26,7 +26,7 @@ Impact 输出包含变更路径、受影响符号、引用/调用/导入信号�
 
 relay-teams E2E 已验证 Python 生产源码范围内的 definition、reference、import、caller 和 hybrid 查询，结果携带 resolved commit、tree hash、path、line range、retrieval layer、index version、freshness、score 和 excerpt metadata。
 
-详细记录保留在 [relay-teams E2E 验证](../06-verification/04-relay-teams-e2e-2026-05-14.md) 和 [relay-teams 代码图检索准确性测试](../06-verification/05-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md)。
+详细记录保留在 [relay-teams E2E 验证](../06-verification/01-relay-teams-e2e-2026-05-14.md) 和 [relay-teams 代码图检索准确性测试](../06-verification/03-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md)。
 
 ## 降级与诊断
 

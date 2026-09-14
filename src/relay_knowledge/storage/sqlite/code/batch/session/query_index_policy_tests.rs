@@ -2,7 +2,7 @@
 
 use crate::{
     domain::{CodeIndexBatch, CodeParseStatus},
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeIndexPublicationStore as _, SqliteGraphStore},
 };
 
 use super::tests::{batch, file, registered_store, session_for_scope};

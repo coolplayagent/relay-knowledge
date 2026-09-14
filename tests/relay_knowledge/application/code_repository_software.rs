@@ -540,7 +540,17 @@ async fn software_projection_links_document_topics_config_and_code_files() {
         )
         .await
         .expect("doc/config scope should index");
-    let projection = software_projection(&service, "HEAD", FreshnessPolicy::WaitUntilFresh)
+    let projection = service
+        .software_global_projection(
+            SoftwareGlobalRequest::new(
+                selector("fixture", "HEAD"),
+                SoftwareGlobalKind::All,
+                FreshnessPolicy::WaitUntilFresh,
+                20,
+            )
+            .expect("software request should validate"),
+            context("software-doc-config"),
+        )
         .await
         .expect("software projection should load");
 
@@ -653,6 +663,9 @@ async fn moved_branch_requires_new_scope_and_queries_rebased_head() {
     );
 }
 
+// Exercise the stable 1.x service signature directly; boxing its public `ApiError` here would
+// make this integration helper diverge from the production contract it is intended to cover.
+#[allow(clippy::result_large_err)]
 async fn software_projection(
     service: &RelayKnowledgeService,
     ref_selector: &str,
@@ -841,3 +854,6 @@ fn git_command<const N: usize>(path: &Path, args: [&str; N]) -> Command {
     command.current_dir(path).args(args);
     command
 }
+
+#[path = "code_repository_maven.rs"]
+mod maven;

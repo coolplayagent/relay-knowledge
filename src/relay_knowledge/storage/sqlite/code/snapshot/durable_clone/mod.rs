@@ -1,16 +1,13 @@
 //! Copies a large incremental base into an unpublished target in fenced pages.
 
-use std::{
-    collections::BTreeSet,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::BTreeSet;
 
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
 
 use crate::{
+    clock::system_now_millis,
     domain::{
         CodeIncrementalClonePhase, CodeIndexResourceBudget, CodeIndexSnapshot,
-        code_incremental_clone, code_incremental_clone_state,
         code_snapshot_scope_is_fact_versioned, code_snapshot_scope_matches_identity,
     },
     storage::StorageError,
@@ -22,11 +19,20 @@ use super::{
 };
 use crate::storage::sqlite::code::lifecycle::publication_fence::PublicationFenceGuard;
 
+mod affected_paths;
 mod base;
+mod delta;
+mod initialization;
 mod progress;
 mod search_bulk;
 mod search_page;
 mod table_page;
+mod validation;
+
+use initialization::initialize_progress;
+use validation::validate_progress;
+
+pub(super) use delta::{batched_delta_completion, finish_batched_delta, start_batched_delta};
 
 const MAX_SOURCE_ROWS_PER_PAGE: usize = 32_768;
 const MAX_PAGE_BYTES: usize = CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH;
@@ -39,6 +45,10 @@ mod tests;
 #[cfg(test)]
 #[path = "e2e_tests.rs"]
 mod e2e_tests;
+
+#[cfg(test)]
+#[path = "affected_paths_e2e_tests.rs"]
+mod affected_paths_e2e_tests;
 
 #[derive(Clone, Debug)]
 pub(super) struct CloneIdentity {
@@ -60,22 +70,19 @@ pub(super) struct CloneIdentity {
 pub(super) struct CloneSession {
     pub(super) identity: CloneIdentity,
     pub(super) max_steps: usize,
-    pub(super) initialized: bool,
+    pub(super) pending_owner_step: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct CloneCompletion {
     pub(super) task_id: String,
-    pub(super) base_scope: String,
     pub(super) checkpoint_state: String,
     pub(super) cloned_file_count: usize,
     pub(super) cloned_symbol_count: usize,
     pub(super) cloned_reference_count: usize,
     pub(super) cloned_chunk_count: usize,
-    pub(super) cloned_diagnostic_count: usize,
-    pub(super) cloned_reference_group_count: usize,
-    pub(super) cloned_search_document_count: usize,
     pub(super) base_source_fact_row_upper_bound: usize,
+    pub(super) completed_page_ordinal: usize,
     pub(super) terminal_cleanup_rows: usize,
     pub(super) terminal_cleanup_bytes: usize,
 }
@@ -145,12 +152,12 @@ pub(super) fn begin_or_resume(
     }
     guard.validate_repository(&snapshot.repository_id)?;
     let budget = guard.resource_budget(connection)?;
-    require_delta_path_budget(snapshot, budget)?;
-    let measure = admission::measure_snapshot_insert_surface(snapshot, budget)?;
-    let identity =
-        CloneIdentity::from_snapshot(snapshot, measure.delta_digest().to_owned(), budget)?;
+    let identity = CloneIdentity::from_snapshot(
+        snapshot,
+        admission::snapshot_delta_digest(snapshot)?,
+        budget,
+    )?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    guard.validate_target_scope(&transaction, &snapshot.source_scope)?;
     guard.validate(&transaction)?;
     validate_partitioned_target(&transaction, guard, &identity)?;
     if guard.resource_budget(&transaction)? != budget {
@@ -180,7 +187,7 @@ pub(super) fn begin_or_resume(
     }
     let persisted = progress::load(&transaction, &snapshot.source_scope)?;
     let initialized = persisted.is_none();
-    match persisted {
+    let current = match persisted {
         Some(progress) => {
             validate_progress(
                 &transaction,
@@ -192,20 +199,35 @@ pub(super) fn begin_or_resume(
             )?;
             progress
         }
-        None => {
-            require_init_budget(&identity, &base_scope, guard.task_id(), budget)?;
-            initialize_progress(
-                &transaction,
-                snapshot,
-                &identity,
-                &base_header,
-                guard,
-                budget,
-            )?
-        }
+        None => initialize_progress(
+            &transaction,
+            snapshot,
+            &identity,
+            &base_header,
+            guard,
+            budget,
+        )?,
     };
-    validate_affected_paths(&transaction, &identity, budget)?;
-    let max_steps = base_step_proof.max_steps;
+    let owner_advance = if initialized {
+        affected_paths::validate_owner(&transaction, &current, &identity)?;
+        None
+    } else if affected_paths::is_staging(&current) {
+        Some(affected_paths::advance(
+            &transaction,
+            &current,
+            &identity,
+            now_millis()?,
+        )?)
+    } else {
+        affected_paths::validate_owner(&transaction, &current, &identity)?;
+        None
+    };
+    let max_steps = base_step_proof
+        .max_steps
+        .checked_add(identity.affected_paths.len())
+        .ok_or_else(|| clone_capacity_error(&identity.source_scope))?;
+    // A new worktree target exists only after initialization stages its empty scope. Rebinding in
+    // this transaction prevents both an unowned staged target and a rebound task without progress.
     guard.validate_target_scope(&transaction, &identity.source_scope)?;
     guard.validate(&transaction)?;
     validate_partitioned_target(&transaction, guard, &identity)?;
@@ -214,7 +236,9 @@ pub(super) fn begin_or_resume(
     Ok(CloneSession {
         identity,
         max_steps,
-        initialized,
+        pending_owner_step: initialized
+            .then_some(0)
+            .or_else(|| owner_advance.map(|advance| advance.completed_steps)),
     })
 }
 
@@ -243,6 +267,12 @@ pub(super) fn advance(
         guard,
         budget,
     )?;
+    if affected_paths::is_staging(&current) {
+        return Err(StorageError::Invariant(format!(
+            "incremental clone affected paths for scope '{}' are not fully staged",
+            identity.source_scope
+        )));
+    }
     if current.completed_page_ordinal > max_steps
         || (current.phase != progress::PHASE_CLONE_COMPLETE
             && current.completed_page_ordinal == max_steps)
@@ -252,26 +282,20 @@ pub(super) fn advance(
             identity.source_scope
         )));
     }
-    let outcome = match current.phase.as_str() {
-        progress::PHASE_TABLES => {
+    let outcome = match current.typed_phase()? {
+        CodeIncrementalClonePhase::Tables => {
             table_page::advance(&transaction, &current, identity, now_millis()?)?;
             CloneAdvance::Pending {
                 completed_steps: current.completed_page_ordinal.saturating_add(1),
             }
         }
-        progress::PHASE_SEARCH => {
+        CodeIncrementalClonePhase::Search => {
             search_page::advance(&transaction, &current, identity, now_millis()?)?;
             CloneAdvance::Pending {
                 completed_steps: current.completed_page_ordinal.saturating_add(1),
             }
         }
-        progress::PHASE_CLONE_COMPLETE => CloneAdvance::CloneComplete,
-        phase => {
-            return Err(StorageError::Invariant(format!(
-                "incremental clone scope '{}' has unknown phase '{phase}'",
-                identity.source_scope
-            )));
-        }
+        CodeIncrementalClonePhase::CloneComplete => CloneAdvance::CloneComplete,
     };
     guard.validate_target_scope(&transaction, &identity.source_scope)?;
     guard.validate(&transaction)?;
@@ -308,23 +332,7 @@ pub(super) fn validate_clone_complete(
         )));
     }
     let checkpoint_state = progress::checkpoint_state(&progress)?;
-    let (terminal_cleanup_rows, terminal_cleanup_bytes) =
-        progress::cleanup_surface(&progress, &identity.affected_paths)?;
-    Ok(CloneCompletion {
-        task_id: progress.task_id,
-        base_scope: progress.base_scope,
-        checkpoint_state,
-        cloned_file_count: progress.cloned_file_count,
-        cloned_symbol_count: progress.cloned_symbol_count,
-        cloned_reference_count: progress.cloned_reference_count,
-        cloned_chunk_count: progress.cloned_chunk_count,
-        cloned_diagnostic_count: progress.cloned_diagnostic_count,
-        cloned_reference_group_count: progress.cloned_reference_group_count,
-        cloned_search_document_count: progress.cloned_search_document_count,
-        base_source_fact_row_upper_bound: progress.base_source_fact_row_upper_bound,
-        terminal_cleanup_rows,
-        terminal_cleanup_bytes,
-    })
+    delta::clone_completion(progress, checkpoint_state, &identity.affected_paths)
 }
 
 pub(super) fn remove_after_delta(
@@ -366,352 +374,17 @@ pub(super) fn remove_after_delta(
     )))
 }
 
-fn require_delta_path_budget(
-    snapshot: &CodeIndexSnapshot,
-    budget: CodeIndexResourceBudget,
-) -> Result<(), StorageError> {
-    let affected = snapshot
-        .files
-        .iter()
-        .map(|file| file.path.as_str())
-        .chain(snapshot.deleted_paths.iter().map(String::as_str))
-        .collect::<BTreeSet<_>>();
-    if affected.len() > budget.max_files_per_batch {
-        return Err(clone_capacity_error(&snapshot.source_scope));
-    }
-    Ok(())
-}
-
-fn require_init_budget(
-    identity: &CloneIdentity,
-    base_scope: &str,
-    task_id: &str,
-    budget: CodeIndexResourceBudget,
-) -> Result<(), StorageError> {
-    let rows = identity
-        .affected_paths
-        .len()
-        .checked_add(3)
-        .ok_or_else(|| clone_capacity_error(&identity.source_scope))?;
-    let checkpoint_state =
-        code_incremental_clone_state(CodeIncrementalClonePhase::Tables, 0, 0, 0, "none")
-            .ok_or_else(|| clone_capacity_error(&identity.source_scope))?;
-    let resource_budget_json = serde_json::to_string(&budget)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let scope_bytes = [
-        identity.source_scope.as_str(),
-        identity.repository_id.as_str(),
-        identity.resolved_commit_sha.as_str(),
-        identity.tree_hash.as_str(),
-        identity.path_filters_json.as_str(),
-        identity.language_filters_json.as_str(),
-    ]
-    .iter()
-    .try_fold(admission::ROW_STORAGE_OVERHEAD_BYTES, |total, value| {
-        total
-            .checked_add(value.len())
-            .ok_or_else(|| clone_capacity_error(&identity.source_scope))
-    })?;
-    let checkpoint_bytes = [
-        identity.source_scope.as_str(),
-        identity.repository_id.as_str(),
-        checkpoint_state.as_str(),
-        identity.resolved_commit_sha.as_str(),
-        identity.tree_hash.as_str(),
-        identity.path_filters_json.as_str(),
-        identity.language_filters_json.as_str(),
-        resource_budget_json.as_str(),
-    ]
-    .iter()
-    .try_fold(
-        admission::ROW_STORAGE_OVERHEAD_BYTES + 10 * 8,
-        |total, value| {
-            total
-                .checked_add(value.len())
-                .ok_or_else(|| clone_capacity_error(&identity.source_scope))
-        },
-    )?;
-    let progress_bytes = [
-        identity.source_scope.as_str(),
-        identity.repository_id.as_str(),
-        base_scope,
-        task_id,
-        identity.delta_digest.as_str(),
-        progress::PHASE_TABLES,
-    ]
-    .iter()
-    .try_fold(
-        admission::ROW_STORAGE_OVERHEAD_BYTES + 27 * 8 + 9,
-        |total, value| {
-            total
-                .checked_add(value.len())
-                .ok_or_else(|| clone_capacity_error(&identity.source_scope))
-        },
-    )?;
-    let mut bytes = scope_bytes
-        .checked_add(checkpoint_bytes)
-        .and_then(|value| value.checked_add(progress_bytes))
-        .ok_or_else(|| clone_capacity_error(&identity.source_scope))?;
-    for path in &identity.affected_paths {
-        bytes = bytes
-            .checked_add(identity.source_scope.len())
-            .and_then(|value| value.checked_add(path.len()))
-            .and_then(|value| value.checked_add(admission::ROW_STORAGE_OVERHEAD_BYTES))
-            .ok_or_else(|| clone_capacity_error(&identity.source_scope))?;
-    }
-    if rows > budget.max_rows_per_batch || bytes > budget.max_bytes_per_batch {
-        return Err(clone_capacity_error(&identity.source_scope));
-    }
-    Ok(())
-}
-
 fn validate_affected_paths(
     transaction: &Transaction<'_>,
     identity: &CloneIdentity,
-    budget: CodeIndexResourceBudget,
 ) -> Result<(), StorageError> {
-    let limit = i64::try_from(budget.max_files_per_batch.saturating_add(1))
-        .map_err(|_| clone_capacity_error(&identity.source_scope))?;
-    let mut statement = transaction.prepare(
-        "SELECT path
-         FROM code_repository_incremental_clone_affected_paths
-         WHERE source_scope = ?1
-         ORDER BY path
-         LIMIT ?2",
-    )?;
-    let persisted = statement
-        .query_map(params![identity.source_scope, limit], |row| {
-            row.get::<_, String>(0)
-        })?
-        .collect::<Result<BTreeSet<_>, _>>()?;
-    if persisted == identity.affected_paths {
-        return Ok(());
-    }
-    Err(StorageError::Invariant(format!(
-        "incremental clone affected-path owner for scope '{}' changed",
-        identity.source_scope
-    )))
-}
-
-fn initialize_progress(
-    transaction: &Transaction<'_>,
-    snapshot: &CodeIndexSnapshot,
-    identity: &CloneIdentity,
-    base: &CloneBaseHeader<'_>,
-    guard: &PublicationFenceGuard,
-    budget: CodeIndexResourceBudget,
-) -> Result<progress::CloneProgress, StorageError> {
-    admission::require_unused_target(transaction, &identity.source_scope)?;
-    stage_empty_target(transaction, identity)?;
-    let progress = progress::CloneProgress {
-        source_scope: identity.source_scope.clone(),
-        repository_id: identity.repository_id.clone(),
-        base_scope: base.source_scope.to_owned(),
-        task_id: guard.task_id().to_owned(),
-        delta_digest: identity.delta_digest.clone(),
-        phase: progress::PHASE_TABLES.to_owned(),
-        table_ordinal: 0,
-        completed_page_ordinal: 0,
-        cursor_key: None,
-        cursor_tiebreaker: None,
-        completed_table_ordinal: None,
-        expected_table_rows: None,
-        scanned_table_rows: 0,
-        copied_table_rows: 0,
-        scanned_total_rows: 0,
-        copied_total_rows: 0,
-        copied_total_bytes: 0,
-        cloned_file_count: 0,
-        cloned_symbol_count: 0,
-        cloned_reference_count: 0,
-        cloned_chunk_count: 0,
-        cloned_diagnostic_count: 0,
-        cloned_reference_group_count: 0,
-        cloned_search_document_count: 0,
-        base_manifest_reference_count: base.manifest_reference_count,
-        base_manifest_group_count: base.manifest_group_count,
-        scanned_reference_occurrence_count: 0,
-        scanned_reference_row_count: 0,
-        scanned_reference_group_count: 0,
-        scanned_reference_search_owner_count: 0,
-        base_source_fact_row_upper_bound: base.source_fact_row_upper_bound,
-        page_row_limit: budget.max_rows_per_batch,
-        page_byte_limit: durable_page_byte_limit(budget),
-    };
-    let now_ms = now_millis()?;
-    let checkpoint_state = progress::checkpoint_state(&progress)?;
-    transaction.execute(
-        "INSERT INTO code_repository_index_checkpoints (
-             source_scope, repository_id, state, resolved_commit_sha, tree_hash,
-             path_filters_json, language_filters_json, total_path_count,
-             parsed_file_count, committed_file_count, committed_symbol_count,
-             committed_reference_count, committed_chunk_count, batch_count, last_path,
-             resource_budget_json, updated_at_ms, error_message
-         ) VALUES (
-             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-             ?8, 0, 0, 0, 0, 0, NULL, ?9, ?10, NULL
-         )",
-        params![
-            identity.source_scope,
-            identity.repository_id,
-            checkpoint_state,
-            identity.resolved_commit_sha,
-            identity.tree_hash,
-            identity.path_filters_json,
-            identity.language_filters_json,
-            snapshot.files.len(),
-            serde_json::to_string(&budget)
-                .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
-            now_ms,
-        ],
-    )?;
-    progress::insert(transaction, &progress, now_ms)?;
-    let mut insert_path = transaction.prepare_cached(
-        "INSERT INTO code_repository_incremental_clone_affected_paths (source_scope, path)
-         VALUES (?1, ?2)",
-    )?;
-    for path in &identity.affected_paths {
-        insert_path.execute(params![identity.source_scope, path])?;
-    }
-    Ok(progress)
-}
-
-fn stage_empty_target(
-    transaction: &Transaction<'_>,
-    identity: &CloneIdentity,
-) -> Result<(), StorageError> {
-    transaction.execute(
-        "INSERT INTO code_repository_scopes (
-             source_scope, repository_id, resolved_commit_sha, tree_hash,
-             path_filters_json, language_filters_json, indexed_file_count,
-             symbol_count, reference_count, chunk_count, stale, degraded_reason
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, 0, 0, 1, NULL)",
-        params![
-            identity.source_scope,
-            identity.repository_id,
-            identity.resolved_commit_sha,
-            identity.tree_hash,
-            identity.path_filters_json,
-            identity.language_filters_json,
-        ],
-    )?;
-    Ok(())
-}
-
-fn validate_progress(
-    transaction: &Transaction<'_>,
-    current: &progress::CloneProgress,
-    identity: &CloneIdentity,
-    base_scope: &str,
-    guard: &PublicationFenceGuard,
-    budget: CodeIndexResourceBudget,
-) -> Result<(), StorageError> {
-    let identity_matches = current.source_scope == identity.source_scope
-        && current.repository_id == identity.repository_id
-        && current.base_scope == base_scope
-        && current.task_id == guard.task_id()
-        && current.delta_digest == identity.delta_digest
-        && current.page_row_limit == budget.max_rows_per_batch
-        && current.page_byte_limit == durable_page_byte_limit(budget);
-    if !identity_matches {
-        return Err(StorageError::Invariant(format!(
-            "incremental clone progress identity for scope '{}' does not match the live task",
+    let progress = progress::load(transaction, &identity.source_scope)?.ok_or_else(|| {
+        StorageError::Invariant(format!(
+            "incremental clone progress for scope '{}' disappeared",
             identity.source_scope
-        )));
-    }
-    let phase_position_is_valid = match current.phase.as_str() {
-        progress::PHASE_TABLES => current.table_ordinal < table_count(),
-        progress::PHASE_SEARCH | progress::PHASE_CLONE_COMPLETE => {
-            current.table_ordinal == table_count()
-        }
-        _ => false,
-    };
-    let completed_table_proof_is_valid = match (
-        current.phase.as_str(),
-        current.completed_table_ordinal,
-        current.expected_table_rows,
-    ) {
-        (progress::PHASE_TABLES, None, None) => current.table_ordinal == 0,
-        (progress::PHASE_TABLES, Some(completed), Some(expected)) => {
-            completed.checked_add(1) == Some(current.table_ordinal)
-                && expected <= current.scanned_total_rows
-        }
-        (progress::PHASE_SEARCH, Some(completed), Some(expected)) => {
-            completed.checked_add(1) == Some(table_count())
-                && expected <= current.scanned_total_rows
-        }
-        (progress::PHASE_CLONE_COMPLETE, Some(completed), Some(expected)) => {
-            completed == table_count() && expected <= current.scanned_total_rows
-        }
-        _ => false,
-    };
-    let cloned_counter_total = current
-        .cloned_file_count
-        .saturating_add(current.cloned_symbol_count)
-        .saturating_add(current.cloned_reference_count)
-        .saturating_add(current.cloned_chunk_count)
-        .saturating_add(current.cloned_diagnostic_count)
-        .saturating_add(current.cloned_reference_group_count)
-        .saturating_add(current.cloned_search_document_count.saturating_mul(2));
-    let base_manifest = base::manifest_header(transaction, base_scope)?;
-    let base_step_proof = base::step_proof(transaction, base_scope)?;
-    if current.copied_table_rows > current.scanned_table_rows
-        || current.copied_total_rows > current.scanned_total_rows.saturating_mul(2)
-        || cloned_counter_total > current.copied_total_rows
-        || current.base_manifest_reference_count != base_manifest.0
-        || current.base_manifest_group_count != base_manifest.1
-        || current.base_source_fact_row_upper_bound != base_step_proof.source_fact_row_upper_bound
-        || current.scanned_reference_occurrence_count > current.base_manifest_reference_count
-        || current.scanned_reference_row_count > current.base_manifest_reference_count
-        || current.scanned_reference_group_count > current.base_manifest_group_count
-        || current.scanned_reference_search_owner_count > current.base_manifest_group_count
-        || !phase_position_is_valid
-        || !completed_table_proof_is_valid
-    {
-        return Err(StorageError::Invariant(format!(
-            "incremental clone progress counters for scope '{}' are invalid",
-            identity.source_scope
-        )));
-    }
-    if current.phase == progress::PHASE_CLONE_COMPLETE
-        && (current.scanned_reference_occurrence_count != current.base_manifest_reference_count
-            || current.scanned_reference_row_count != current.base_manifest_reference_count
-            || current.scanned_reference_group_count != current.base_manifest_group_count
-            || current.scanned_reference_search_owner_count != current.base_manifest_group_count)
-    {
-        return Err(StorageError::Invariant(format!(
-            "incremental clone projection proof for scope '{}' is incomplete",
-            identity.source_scope
-        )));
-    }
-    {
-        let expected_checkpoint = progress::checkpoint_state(current)?;
-        let checkpoint = transaction
-            .query_row(
-                "SELECT state FROM code_repository_index_checkpoints WHERE source_scope = ?1",
-                [&identity.source_scope],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        let parsed_checkpoint = checkpoint
-            .as_deref()
-            .and_then(code_incremental_clone)
-            .filter(|parsed| {
-                parsed.table_ordinal == current.table_ordinal
-                    && parsed.completed_page_ordinal == current.completed_page_ordinal
-                    && parsed.scanned_total_rows == current.scanned_total_rows
-            });
-        if checkpoint.as_deref() != Some(expected_checkpoint.as_str())
-            || parsed_checkpoint.is_none()
-        {
-            return Err(StorageError::Invariant(format!(
-                "incremental clone progress and checkpoint for scope '{}' diverged",
-                identity.source_scope
-            )));
-        }
-    }
-    validate_base_scope(transaction, identity, base_scope)?;
-    validate_staged_target(transaction, identity)
+        ))
+    })?;
+    affected_paths::validate_owner(transaction, &progress, identity)
 }
 
 fn validate_base_scope(
@@ -969,11 +642,5 @@ pub(super) fn clone_capacity_error(source_scope: &str) -> StorageError {
 }
 
 fn now_millis() -> Result<u64, StorageError> {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| StorageError::Invariant(error.to_string()))?
-        .as_millis();
-    u64::try_from(millis).map_err(|_| {
-        StorageError::Invariant("system time does not fit u64 milliseconds".to_owned())
-    })
+    system_now_millis().map_err(|error| StorageError::Invariant(error.to_string()))
 }

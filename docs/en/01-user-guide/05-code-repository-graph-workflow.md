@@ -72,7 +72,7 @@ When the requested full scope is not already fresh, `repo index` queues a durabl
 
 The CLI-shaped Web index request accepts the optional boolean `reuse_historical`; omission and `null` keep the default full-index behavior. The 100-path reuse budget counts both the old and new path of each rename or copy, and a historical base retired before task admission safely falls back to a full task.
 
-In remote service mode, register the repository on the service host, start `service run --web`, and point the local CLI at the resident HTTP API with `--remote http://host:8791` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote `repo index` and `repo update` only submit durable tasks and return task/status/checkpoint data; they do not run `repo index-worker` in the local CLI process. The remote resident master drains the task through its code-index worker pool. Remote mode supports `repo list`, `repo index`, `repo update`, `repo scope preview`, `repo status`, `repo query`, `repo context`, `repo feature-flags`, `repo impact`, `repo report`, `repo software`, and `repo view`; it does not register local paths into a remote service. Run `repo index --reset` and `repo index-worker` on the service host because remote-selected CLIs reject those maintenance commands instead of falling back to local state.
+In remote service mode, register the repository on the service host, start `service run --web`, and point the local CLI at the resident HTTP API with `--remote http://host:8791` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote `repo index` and `repo update` only submit durable tasks and return task/status/checkpoint data; they do not run `repo index-worker` in the local CLI process. The remote resident master drains the task through its code-index worker pool. Remote mode supports `repo list`, `repo index`, `repo update`, `repo scope preview`, `repo status`, `repo query`, `repo context`, `repo framework`, `repo feature-flags`, `repo impact`, `repo report`, `repo software` including standard exports, and `repo view`; it does not register local paths into a remote service. Run `repo index --reset` and `repo index-worker` on the service host because remote-selected CLIs reject those maintenance commands instead of falling back to local state.
 
 ```bash
 RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://127.0.0.1:8791 \
@@ -99,6 +99,12 @@ If an old service process died while holding a task lease and the task remains s
 Fresh full indexes still return a completed `summary` immediately. Freshness checks compare the code-fact version embedded in the `scope_id`, so extraction-surface changes such as SBOM dependency facts or web route facts require a rebuild even when the Git tree hash is unchanged. For Git scopes with submodules, the freshness key also records whether scoped gitlinks expanded from available submodule objects or were skipped as unavailable, so initializing a submodule after an earlier skipped index invalidates the old scope. Scoped Git freshness probes inspect only gitlinks that overlap the requested path filters before falling back to whole-tree submodule state for unscoped scopes. Incremental `repo update` now enters the same durable task, lease, retry, and publication path as a full index; only full rebuilds expose batch checkpoints, while the bounded incremental snapshot publishes atomically. The local CLI performs a bounded drain attempt, while remote or watcher-triggered calls may remain queued for resident workers. New files under non-`src` roots such as `external_deps/` or `modules/` use the same source-layout policy.
 
 ## 5.4 Query Symbols and Relationships
+
+Java class-name call queries use indexed class and direct-member ownership. `--query B --kind callers` aggregates incoming edges to B, its constructors and direct methods; `--kind callees` aggregates their outgoing edges. Results retain the actual caller/callee methods and call sites. For `A.main` calling `B.process()`, B callers returns `main calls process`; A callers does not incorrectly return that outgoing edge merely because its text mentions A. A matched class with no edges in the requested direction returns empty without full-text broadening.
+
+This aggregation applies only to short Java class names with `callers` or `callees`; names match case-sensitively and same-named classes are aggregated. Hybrid and qualified-name queries keep their existing search behavior. Package-qualified class aggregation is not supported: existing Java qualified-name facts encode source paths, not package declarations. Same-file source ranges and direct qualified names exclude nested-type methods, sibling methods, fields and unresolved incoming edges supported only by name text. Inherited members and dynamic dispatch are not guessed. Unresolved outgoing edges retain their status. `--query B.process` continues to query a specific method. Path, language, generated-file and inline filters apply before call-candidate limits; paths constrain call sites, so callers may be outside the selected class file.
+
+Selection admits at most 64 candidate classes and 1,024 class/member records, retaining the existing maximum of 200 call candidates and the requested result limit. Class resolution and call reads share approximately 4.1 million SQLite instructions. Exhausting identity or execution budgets explicitly returns a `class call query incomplete` capacity error instead of silently truncating identities. Query a member method to reduce expansion. This read-only change reuses existing facts, with no schema, fact-version or installation configuration change; completed older indexes can be queried directly.
 
 Hybrid query:
 
@@ -150,6 +156,17 @@ Symbol hits also include `canonical_symbol_id` for expressing logical symbol ide
 
 If candidate-path lookup is unavailable, or if candidate-file, materialized-byte, or line-length budgets are exhausted, the query still returns existing code graph results and reports the source fallback diagnostic through `degraded_reason`. Narrowing `--path` or `--language`, and confirming that the target ref is fresh, is usually more useful than raising `--limit`.
 
+### Angular and Vue Framework Graph Queries
+
+`repo framework` exposes component/template semantics as an independent graph instead of mixing framework facts into ordinary symbol hits:
+
+```bash
+relay-knowledge repo framework repo --framework angular --kind component --path src/app --format json
+relay-knowledge repo framework repo --framework vue --kind prop --query modelValue --limit 20 --format json
+```
+
+Angular indexing reads decorators plus inline or external HTML templates. Vue SFC indexing records props, emits, models, slots, template variables, and control flow while still sending embedded script content through ordinary TypeScript/JavaScript extraction. The response separates typed `nodes` and `edges`, carries resolution state and target hints, and marks result truncation explicitly. Queries use only committed, bounded framework tables; they do not parse templates or read the worktree on demand.
+
 ### Feature-Flag Graph Queries
 
 Existing repositories often spread feature flags across environment variables, config keys, settings objects, SDK clients, and guarded branches. `repo feature-flags` lists configuration-driven flags and their code relationships from facts extracted during indexing:
@@ -161,17 +178,21 @@ relay-knowledge repo feature-flags repo --query checkout --path src --limit 20 -
 
 Responses are grouped by feature flag and include configuration source, `defines_config`, `reads_config`, or `guards_code` relationships, source ranges, confidence, related symbols, and excerpts. The indexer recognizes static code/config evidence from environment access, config/settings reads, boolean config facts from supported configuration formats, and common OpenFeature, LaunchDarkly, and Unleash evaluation calls. Provider control-plane state such as rollout strategies, segments, and variants is not synchronized in this path. The query reads only the feature-flag table and FTS documents for the selected indexed scope; it does not recursively grep the repository at query time. Re-run `repo index` or `repo update` after adding flags or changing extraction rules.
 
-### Software Global Projection
+### Software Global Ontology and Compatibility Projections
 
-`repo software` exposes repository-scoped software graph projections for dependencies, unresolved SDK/API usage, whole-file nodes, documentation topics, and cross-domain relationships:
+`repo software` exposes compatibility projections, typed ontology entities, provenance statements, and conflict diagnostics for one repository scope:
 
 ```bash
 relay-knowledge repo software repo --kind files --ref HEAD --format json
 relay-knowledge repo software repo --kind topics --ref HEAD --format json
 relay-knowledge repo software repo --kind relationships --ref HEAD --format json
+relay-knowledge repo software repo --kind systems --ref HEAD --format json
+relay-knowledge repo software repo --kind statements --ref HEAD --format json
+relay-knowledge repo software repo --kind conflicts --ref HEAD --format json
+relay-knowledge repo software export repo --profile cyclonedx-1.7 --ref HEAD --format json
 ```
 
-The projection connects Markdown/spec headings and `.knowledge/knowledge-map.yaml` topics with documentation files, dependency manifests with package components, unresolved imports with SDK/API usage candidates, and config/feature-flag facts with code or config files. It reads committed projection tables for the selected indexed scope and does not scan package caches, SDK directories, unindexed external source, or whole-repository docs at query time.
+An `entity_key` remains stable across commits while `occurrence_id` binds a snapshot and evidence. Ordinary Markdown/spec headings become only documentation units or topics. Explicit frontmatter, API traits or schemas, test symbols, Dockerfiles and build files, Compose/Kubernetes/Terraform, and service definitions project into their corresponding controlled kinds. Dockerfiles and CI jobs no longer become IaC resources. Statements retain source kind, evidence, extractor version, assertion/resolution/fact state, time, and confidence. A statement without evidence or violating a shape returns a `rejected` diagnostic and does not become an accepted fact. Every slice and SPDX 3.0.1, CycloneDX 1.7, or PROV-O export reads committed tables for the selected indexed scope and does not scan package caches, SDK directories, unindexed external source, or whole-repository docs at query time.
 
 ### Multi-Repository Repository Set Queries
 
@@ -244,6 +265,10 @@ relay-knowledge repo query repo --query retry_policy --ref worktree --format jso
 
 The overlay is bound to the current checked-out `HEAD`, uses a synthetic snapshot identifier, and includes modified files, untracked files, staged submodule gitlink updates, and unstaged submodule worktree commits when the submodule `HEAD` differs from the parent gitlink. If a submodule has both a staged gitlink and a different checked-out submodule `HEAD`, the overlay indexes the checked-out worktree commit. Staged submodule commits remain readable from cached gitdirs after deinit. Staged submodule additions, removals, renames, and file/submodule replacements clean up the old indexed paths by expanded child path rather than by the gitlink path alone. While an overlay is active, clean commit ref queries are rejected so uncommitted content is not mislabeled as a clean Git snapshot.
 
+At query admission, the user-facing `worktree` selector is pinned to the active immutable `worktree:<base>:<overlay-hash>` identity. Multi-step operations such as `repo context` reuse that resolved identity for every internal graph query; they do not pass the synthetic identity back to Git as though it were a branch or commit. Editing the live worktree after publication therefore does not silently change an in-flight context pack; run `repo index ... --ref worktree` again to publish a new overlay.
+
+For the CLI's default workspace-detection-disabled path, indexing first uses the direct overlay transaction only when its complete clone/delete/insert surface fits the task's frozen writer budget. If it does not fit, the same durable task stages the overlay bytes, clones the immutable clean base in bounded pages, and applies dirty files in deterministic bounded batches. A worker commits no more than one dirty batch per step, so an expired lease can be reclaimed without replaying committed batches. The final handoff also budgets owner cleanup, tombstones, checkpoint control rows, and the multi-batch receipt together. The operation retains its worktree identity and scope throughout; it is not reported as a clean full index and cannot return success before finalization and publication complete. API/Web worktree requests with auto-workspace detection currently fail closed when durable staging is required; they do not drop workspace metadata or convert the overlay to a clean snapshot.
+
 ## 5.7 Impact Analysis
 
 Analyze diff impact:
@@ -294,3 +319,56 @@ When `repo query` returns no results, check in order:
 6. Whether files were diagnosed as unsupported, binary, oversized, invalid UTF-8, or parser failed.
 
 `repo impact` requires an indexed snapshot for `--head`. Run `repo index repo --ref <head>` or `repo update repo --base <base> --head <head>` before impact analysis.
+
+### Configuration keys, reads and guarded code
+
+`repo feature-flags` combines Java system-property and environment reads, constant keys and zero-argument configuration getters with properties, INI, Consul-template (`.ctmpl`) and exported shell variables. Configuration symbols are resolved inside the served repository snapshot. This capability is independent of canonical callers/callees queries and does not alter Python or C++ parsing. Runtime production switch values are outside this static registry.
+
+A `defines_config` usage supplies a file definition. `declares_config_key` identifies a Java constant or a template output key. `reads_config` identifies a concrete read. A `guards_code` usage contains `metadata.read_usage_id`, linking its condition to the read that supplied it. Java local bindings stop propagating after a write; deferred class/method/lambda bodies do not overwrite the enclosing binding. Field, parameter and local getter receivers use lexical type evidence. Anonymous receivers and unknown dynamic values are not assumed to use a default implementation. Conflicting configuration-symbol targets remain unresolved.
+
+Each usage carries source format and optional default value, value type, owning domain and hot-reload support. Unknown values stay absent. An adjacent comment such as `# @config domain=business hot-reload=true` supplies explicit ownership metadata. Properties continuation/Unicode escapes and INI sections preserve their key/value identity; section keys use `section.key`. Environment variables use a separate namespace from system properties.
+
+```powershell
+relay-knowledge repo feature-flags demo --query feature_x --domain business --source properties --hot-reload true --format json
+relay-knowledge repo feature-flags demo --query feature_y --consistency --format json
+```
+
+Source filtering selects matching groups and retains their linked Java usages. Consistency compares observed formats in the served snapshot within the registered authorized scope and reports `read_without_definition`, `missing_from_format` and `conflicting_defaults`. A missing key is a diagnostic, not an assertion about production configuration. Stale or unresolved analysis cannot prove absence. Query limits apply to returned groups; completeness budgets remain separate. Registering with `--path src` is only a scope example, not a required repository layout.
+
+Remote CLI and the Web repository endpoint accept the same domain request, with a `filters` object containing `domain`, `source`, `hot_reload` and `consistency`. MCP exposes those four fields directly in `relay_code_feature_flags` arguments.
+
+Java getter flow follows proven java.lang Boolean/Integer/Long/Double parsing and boxing conversions. Unsupported getter result flow sets `metadata.flow_incomplete` and prevents complete consistency claims. String constants become public configuration declarations only when a visible configuration read references them, they have explicit `@config domain=...` / `hot-reload=...` metadata, or follow the declaration convention of a containing type ending in `Keys` or a field ending in `_KEY`. Other strings remain internal symbol candidates, excluded from registry results and general configuration views.
+
+Consistency format coverage comes from the scoped indexed file inventory, including empty/comment-only templates, and respects registration path/language restrictions. Query-time path/language filters project returned `usages`; connected binding and consistency evidence remain within the registered authorized snapshot. Thus `conflicting_default_sources` can identify an authorized definition outside the displayed query path. `conflicting_default_sources` contains the usage records for conflicting defaults: `metadata.default_value`, `path`, `line_range`, `excerpt`, and `usage_id` directly identify each source. The compact `conflicting_defaults` diagnostic remains available.
+
+Java SDK feature flags continue through the existing SDK extractor alongside configuration reads. Static platform imports ignore unrelated sibling/nested classes and inapplicable method overloads. Shell assignments exported by a later unconditional command retain their source defaults; properties escape decoding does not alter INI/template backslashes. Expanded and consistency usages retain containing-symbol evidence. The result limit applies after symbolic keys are resolved and ranked: candidates are bounded by the 10,000-usage budget, with an explicit incomplete-analysis error on overflow or SQLite time/step interruption. A served stale snapshot cannot emit definitive consistency diagnostics, even when its stored status originally recorded a completed fresh index.
+
+Consistency queries apply query terms before the fact budget and expand only connected bindings; the file-format inventory remains bounded by the registered scope independently of query projection. Referenced constant bindings are collected once instead of rescanning all records per declaration. Java receiver names erase generic arguments, simple assignments to existing local variables propagate to subsequent conditions until reassignment, and explicit static imports take precedence over wildcard imports. Shell `set -a` / `set -o allexport` applies to subsequent assignments; disabling allexport does not remove an existing variable's export attribute. General codebase and software views exclude raw symbolic getter rows; resolved configuration usage remains available through `feature-flags`.
+
+### Configuration registry acceptance matrix
+
+| Contract | Required result | Verification |
+| --- | --- | --- |
+| Java reads, constants and getters (#389/#394) | Real key, located read, linked guard; respect imports, overloads, visibility and nonvirtual dispatch | Java receiver matrix and snapshot binding regressions |
+| Properties, INI, ctmpl, Shell and dotenv (#394) | Format-correct definitions, defaults and locations; preserve quoted text and continuations | Format and execution matrices |
+| Metadata and filters (#394) | Default/type/domain/source/hot-reload; CLI, Web and MCP use the same request | Domain, interface and real index-service acceptance tests |
+| Consistency (#394) | Located conflicting defaults and missing-format/read diagnostics from authorized evidence | Scoped, stale, ambiguous and incremental snapshot tests |
+| Unknown or conditional behavior | Retain evidence and uncertainty; never infer runtime state or definite absence from incomplete analysis | Conditional export/template and unresolved-binding regressions |
+| Resource bounds | Explicit errors before exceeding file facts, metadata, expansion or query budgets | Boundary and overflow tests |
+
+This is bounded static analysis, not execution of arbitrary Java, Shell or templates. The expected behaviors above must not be removed merely to obtain a clean review. Findings are assessed against this contract and reproducible behavior; an inaccurate premise does not by itself invalidate a demonstrated bug.
+
+The Java platform-reader inventory for this change is System.getProperty/getenv, direct System.getenv().get/getOrDefault and System.getProperties().getProperty, Boolean.getBoolean, Integer.getInteger and Long.getLong, with supported literal/constant keys and proven getter forwarding/conversions. Equivalent qualified/static-import forms share the same rules. Additional arbitrary APIs are not implicitly promised by the registry label; demonstrated misbinding, lost evidence or wrong defaults within this inventory remain defects.
+
+
+Enclosing getter fallback requires indexed inheritance evidence; deferred template definitions do not publish root defaults. Quoted Shell options obey quote removal, and static interface methods are not inherited. Hexadecimal Double fallback strings remain explicitly unsupported: raw evidence is retained, the default is unknown and consistency is incomplete; this change does not evaluate arbitrary Java numeric syntax. Fact version: `config-registry-v49`.
+
+Software ontology configuration projection excludes internal constants, type/getter markers and unresolved symbolic rows while retaining their indexed evidence. Shell set options use the same static quote removal as export options, including enable/disable and the option terminator. Fact version: `config-registry-v50`.
+
+Explicit unevaluated Java fallbacks make consistency incomplete; known String constant expressions participate in overload applicability. Inline non-output template control actions preserve static/conditional text. Edge-kind query terms remain searchable after grouping. Metadata-only queries without path/language projections seed matching groups before bounded symbol expansion. Collection containsKey presence APIs and executing named template bodies are outside the finite extraction inventory; missing-definition diagnostics describe observed static evidence, not runtime rendering or values. Fact version: `config-registry-v51`.
+
+Statically decoded Shell builtin names use the same export classification for quoted, concatenated and escaped forms; generic assignment operands retain defaults. A for/select loop variable shadows inherited environment values in its body, while loop input expansions remain reads and possible later overrides remain uncertain. Java Boolean conversion of an explicit null property fallback yields false; other unevaluated fallbacks remain incomplete. Catch parameters bind receivers within their body and shadow outer fields; multi-catch receivers remain unresolved when no unique static type is proven. Fact version: `config-registry-v52`.
+
+Free-text configuration queries match persisted metadata as well as keys and located usages; final group matching and row scoring preserve the SQL metadata search contract. An explicitly supplied query containing no alphanumeric character or underscore is rejected before loading rows; omit the query for an unfiltered registry. Java try-with-resources declarations bind receivers in the try body and later resource initializers, not catch/finally blocks. Shell assignments preceding a recognized export builtin define configuration when that builtin exports the same variable; unrelated ordinary-command prefixes do not define the parent environment. Fact version: `config-registry-v53`.
+
+Proven getter conversions canonicalize explicit environment fallbacks as well as property fallbacks; property-specific nullable handling remains separate. Known platform wildcard imports contribute only supported members they actually expose, and final var keys require a proven String initializer. Named local Java types have lexical identities so unrelated methods or blocks cannot share getter providers. Asynchronous Shell commands cannot define or mutate the parent configuration/export state. Nameref alias tracking and command/builtin dispatch wrappers are outside the finite Shell extraction inventory; recognizing direct builtin names and quoted equivalents does not execute wrappers or indirect variable writes. Absence diagnostics describe observed static evidence within this inventory. Fact version: `config-registry-v54`.

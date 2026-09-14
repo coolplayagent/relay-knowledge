@@ -5,7 +5,10 @@ use crate::{
         FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
         RepositoryCodeSymbolRecord,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 const TEST_SOURCE_SCOPE: &str = "code:test:bounded-chunk-recall:commit:tree";
@@ -57,6 +60,8 @@ async fn broad_hybrid_fallback_recalls_beyond_strict_probe_cap() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks,
         workspaces: Vec::new(),
@@ -108,6 +113,8 @@ async fn exact_path_contextual_hybrid_query_keeps_chunk_body_evidence() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![chunk(
             "policy-body",
@@ -181,6 +188,8 @@ async fn compile_time_interface_assertions_outrank_partial_type_context() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks,
         workspaces: Vec::new(),

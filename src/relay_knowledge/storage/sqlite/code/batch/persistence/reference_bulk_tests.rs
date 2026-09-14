@@ -7,8 +7,8 @@ use crate::{
         RepositoryCodeRange, RepositoryCodeReferenceRecord,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore,
-        StorageError,
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskSeed,
+        CodeIndexTaskStore as _, RepositoryCatalogStore as _, SqliteGraphStore, StorageError,
     },
 };
 use rusqlite::{limits::Limit, params};
@@ -430,6 +430,8 @@ fn batch(source_scope: &str, references: Vec<RepositoryCodeReferenceRecord>) -> 
         imports: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),

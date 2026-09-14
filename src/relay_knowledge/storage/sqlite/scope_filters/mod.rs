@@ -1,3 +1,5 @@
+mod sql;
+pub(super) use sql::{path_filter_sql_for_column, push_path_filter_values};
 pub(super) fn selector_filters_fit_indexed_scope(
     indexed_path_filters: &[String],
     indexed_language_filters: &[String],

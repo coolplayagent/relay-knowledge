@@ -1,7 +1,4 @@
-use std::{
-    path::PathBuf,
-    time::{Instant, SystemTime, UNIX_EPOCH},
-};
+use std::{path::PathBuf, time::Instant};
 
 use crate::{
     api::{
@@ -9,6 +6,7 @@ use crate::{
         FileIndexFreshnessState, FileIndexRequest, FileIndexResponse, FileQueryRequest,
         FileQueryResponse, RequestContext,
     },
+    clock::system_now_millis_or_zero as current_time_millis,
     domain::{FreshnessPolicy, GraphVersion},
     storage::{FileContentSearchRequest, FileIndexScanSummary, FileSearchRequest, StorageError},
 };
@@ -512,14 +510,6 @@ fn normalize_optional_text(value: Option<String>) -> Result<Option<String>, Stri
             }
         })
         .transpose()
-}
-
-fn current_time_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        })
 }
 
 fn elapsed_ms(started: Instant) -> u64 {

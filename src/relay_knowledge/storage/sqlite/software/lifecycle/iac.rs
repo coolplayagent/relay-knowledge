@@ -237,17 +237,8 @@ pub(super) fn collect(
     graph_version: GraphVersion,
     resources: &mut IacResources,
 ) -> Result<(), StorageError> {
-    let file_name = file_name(&document.path);
     let lower_path = document.path.to_ascii_lowercase();
-    if file_name
-        .as_deref()
-        .is_some_and(|name| name == "Dockerfile" || name == "Containerfile")
-        || file_name.as_deref().is_some_and(|name| {
-            name.starts_with("Dockerfile.") || name.starts_with("Containerfile.")
-        })
-    {
-        collect_dockerfile(document, graph_version, resources)?;
-    } else if lower_path.ends_with(".tf") {
+    if lower_path.ends_with(".tf") {
         collect_terraform(document, graph_version, resources)?;
     } else if lower_path.ends_with(".service") {
         collect_systemd(document, graph_version, resources)?;
@@ -258,44 +249,6 @@ pub(super) fn collect(
         collect_yaml(document, graph_version, resources)?;
     } else if lower_path.ends_with(".plist") {
         collect_launchd(document, graph_version, resources)?;
-    }
-    Ok(())
-}
-
-fn collect_dockerfile(
-    document: &IndexedDocument,
-    graph_version: GraphVersion,
-    resources: &mut IacResources,
-) -> Result<(), StorageError> {
-    for line in &document.lines {
-        let trimmed = strip_comment(&line.text, '#').trim();
-        if let Some(image) = trimmed.strip_prefix("FROM ").map(str::trim) {
-            let image = image.split_whitespace().next().unwrap_or(image);
-            let mut input = iac_input(
-                document,
-                graph_version,
-                "container",
-                "base_image",
-                image,
-                "Dockerfile",
-                line,
-            );
-            input.target_hint = Some(image.to_owned());
-            push_iac_resource(resources, input)?;
-        } else if let Some(port) = trimmed.strip_prefix("EXPOSE ").map(str::trim) {
-            push_iac_resource(
-                resources,
-                iac_input(
-                    document,
-                    graph_version,
-                    "container",
-                    "port",
-                    port,
-                    "Dockerfile",
-                    line,
-                ),
-            )?;
-        }
     }
     Ok(())
 }
@@ -396,12 +349,6 @@ fn collect_yaml(
     collect_kubernetes(document, graph_version, resources)?;
     if file_name == "Chart.yaml" {
         collect_helm(document, graph_version, resources)?;
-    }
-    if document.path.starts_with(".github/workflows/") {
-        collect_workflow(document, graph_version, "github-actions", resources)?;
-    }
-    if matches!(file_name.as_str(), ".gitlab-ci.yml" | ".gitlab-ci.yaml") {
-        collect_workflow(document, graph_version, "gitlab-ci", resources)?;
     }
     Ok(())
 }
@@ -514,40 +461,6 @@ fn collect_helm(
                 ),
             )?;
             break;
-        }
-    }
-    Ok(())
-}
-
-fn collect_workflow(
-    document: &IndexedDocument,
-    graph_version: GraphVersion,
-    provider: &str,
-    resources: &mut IacResources,
-) -> Result<(), StorageError> {
-    let mut in_jobs = false;
-    for line in &document.lines {
-        let trimmed = strip_comment(&line.text, '#').trim();
-        if trimmed == "jobs:" {
-            in_jobs = true;
-            continue;
-        }
-        if in_jobs
-            && indentation(&line.text) == 2
-            && let Some(name) = trimmed.strip_suffix(':')
-        {
-            push_iac_resource(
-                resources,
-                iac_input(
-                    document,
-                    graph_version,
-                    provider,
-                    "job",
-                    name,
-                    provider,
-                    line,
-                ),
-            )?;
         }
     }
     Ok(())

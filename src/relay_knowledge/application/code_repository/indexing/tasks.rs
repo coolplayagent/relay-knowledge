@@ -100,7 +100,7 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<CodeRepositoryIndexResetResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, &repository).await?;
+        let status = required_code_repository(store.as_ref(), &repository).await?;
         // Reclaim leases whose owner process has exited before applying the
         // operator reset. This keeps reset idempotent while preserving the
         // single-writer invariant for genuinely live workers.
@@ -118,7 +118,8 @@ impl RelayKnowledgeService {
             .active_code_index_task(status.repository_id.clone())
             .await
             .map_err(storage_api_error)?;
-        let checkpoint = code_status_checkpoint(&store, &status, active_task.as_ref()).await?;
+        let checkpoint =
+            code_status_checkpoint(store.as_ref(), &status, active_task.as_ref()).await?;
         let retention = store
             .code_scope_retention(status.repository_id.clone())
             .await

@@ -10,7 +10,9 @@ use crate::{
         CodeRepositoryRegistration, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
         RepositoryCodeRange,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{
+        CodeIndexPublicationStore as _, RepositoryCatalogStore as _, SqliteGraphStore, StorageError,
+    },
 };
 
 use super::{
@@ -233,6 +235,8 @@ fn chunk_batch(source_scope: &str, chunks: Vec<RepositoryCodeChunkRecord>) -> Co
         imports: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks,
         diagnostics: Vec::new(),

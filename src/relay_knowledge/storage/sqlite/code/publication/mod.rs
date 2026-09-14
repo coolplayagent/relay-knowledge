@@ -3,11 +3,12 @@
 //! This code-owned boundary is called by software projection in the existing
 //! software-to-code dependency direction.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::storage::{CodeIndexPublicationTarget, StorageError};
+use crate::{
+    clock::system_now_millis_or_zero as now_millis,
+    storage::{CodeIndexPublicationTarget, StorageError},
+};
 
 use super::lifecycle::commit_scope;
 
@@ -88,6 +89,45 @@ pub(in crate::storage::sqlite) fn stage(
     publish_staged_scope(connection, publication.source_scope)
 }
 
+/// Reads the exact durable software-projection resume token.
+pub(in crate::storage::sqlite) fn software_projection_checkpoint_state(
+    connection: &Connection,
+    source_scope: &str,
+) -> Result<Option<String>, StorageError> {
+    Ok(connection
+        .query_row(
+            "SELECT state FROM code_repository_index_checkpoints WHERE source_scope = ?1",
+            params![source_scope],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
+/// Atomically moves one software projection phase after its materialized rows commit.
+pub(in crate::storage::sqlite) fn advance_software_projection_checkpoint(
+    connection: &Connection,
+    source_scope: &str,
+    expected_state: &str,
+    next_state: &str,
+) -> Result<(), StorageError> {
+    let updated_at_ms = crate::clock::system_now_millis()
+        .map_err(|error| StorageError::Invariant(error.to_string()))?;
+    let changed = connection.execute(
+        "
+        UPDATE code_repository_index_checkpoints
+        SET state = ?3, updated_at_ms = ?4, error_message = NULL
+        WHERE source_scope = ?1 AND state = ?2
+        ",
+        params![source_scope, expected_state, next_state, updated_at_ms],
+    )?;
+    if changed == 1 {
+        return Ok(());
+    }
+    Err(StorageError::Invariant(format!(
+        "software projection checkpoint for scope '{source_scope}' changed while advancing from '{expected_state}' to '{next_state}'"
+    )))
+}
+
 /// Makes a staged scope, its software projection, and its checkpoint visible
 /// as one publication decision. The caller revalidates the task fence in the
 /// same transaction before commit.
@@ -104,10 +144,7 @@ pub(in crate::storage::sqlite) fn complete_after_software_projection(
         )
         .optional()?;
     if checkpoint_state.as_deref().is_some_and(|state| {
-        !matches!(
-            state,
-            super::batch::finalize::phases::SOFTWARE_PROJECTION | "completed"
-        )
+        state != "completed" && crate::domain::code_software_projection_phase(state).is_none()
     }) {
         return Err(StorageError::InvalidInput(format!(
             "code scope '{source_scope}' cannot publish from checkpoint state '{}'",
@@ -659,13 +696,6 @@ struct PersistedScope {
     reference_count: usize,
     chunk_count: usize,
     degraded_reason: Option<String>,
-}
-
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

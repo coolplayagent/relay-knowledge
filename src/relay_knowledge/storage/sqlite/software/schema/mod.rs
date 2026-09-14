@@ -3,9 +3,10 @@ use rusqlite::{Connection, params};
 use crate::storage::StorageError;
 
 use super::super::schema::columns;
-use super::{dependency_usage, lifecycle};
+use super::{dependency_usage, lifecycle, ontology};
 
-pub(super) const SOFTWARE_PROJECTION_SCHEMA_VERSION: i64 = 5;
+pub(super) const SOFTWARE_PROJECTION_SCHEMA_VERSION: i64 =
+    crate::domain::SOFTWARE_PROJECTION_SCHEMA_VERSION as i64;
 
 pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
@@ -31,6 +32,8 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
 
         CREATE INDEX IF NOT EXISTS software_components_scope
             ON software_components(source_scope, language_id, ecosystem, name);
+        CREATE INDEX IF NOT EXISTS software_components_page
+            ON software_components(source_scope, component_id);
 
         CREATE TABLE IF NOT EXISTS software_sdk_usages (
             usage_id TEXT PRIMARY KEY,
@@ -82,6 +85,9 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
         CREATE INDEX IF NOT EXISTS software_topics_scope
             ON software_topics(source_scope, topic_kind, source_path);
 
+        -- Legacy payload only: new projections derive these edges from their facts.
+        -- Retained for resumable old retention/import cursors. Scope refresh and
+        -- existing bounded retention reclaim old rows; never bulk-delete on open.
         CREATE TABLE IF NOT EXISTS software_relationships (
             relationship_id TEXT PRIMARY KEY,
             repository_id TEXT NOT NULL,
@@ -117,7 +123,15 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
             build_target_count INTEGER NOT NULL DEFAULT 0,
             iac_resource_count INTEGER NOT NULL DEFAULT 0,
             design_element_count INTEGER NOT NULL DEFAULT 0,
-            projection_schema_version INTEGER NOT NULL DEFAULT 5,
+            projection_schema_version INTEGER NOT NULL DEFAULT 9,
+            ontology_version TEXT NOT NULL DEFAULT '0',
+            source_coverage_json TEXT NOT NULL DEFAULT '{\"source_kinds\":[],\"source_path_count\":0,\"evidence_ref_count\":0}',
+            completeness_basis_points INTEGER NOT NULL DEFAULT 0,
+            freshness TEXT NOT NULL DEFAULT 'stale',
+            conflict_count INTEGER NOT NULL DEFAULT 0,
+            entity_count INTEGER NOT NULL DEFAULT 0,
+            statement_count INTEGER NOT NULL DEFAULT 0,
+            diagnostic_count INTEGER NOT NULL DEFAULT 0,
             last_error TEXT
         );
         ",
@@ -146,8 +160,6 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
         "projection_schema_version",
         "INTEGER NOT NULL DEFAULT 1",
     )?;
-    mark_legacy_projection_schema_stale(connection)?;
-
     columns::ensure_column(
         connection,
         "software_global_status",
@@ -166,8 +178,48 @@ pub(in super::super) fn initialize_schema(connection: &Connection) -> Result<(),
         "design_element_count",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    columns::ensure_column(
+        connection,
+        "software_global_status",
+        "ontology_version",
+        "TEXT NOT NULL DEFAULT '0'",
+    )?;
+    columns::ensure_column(
+        connection,
+        "software_global_status",
+        "source_coverage_json",
+        "TEXT NOT NULL DEFAULT '{\"source_kinds\":[],\"source_path_count\":0,\"evidence_ref_count\":0}'",
+    )?;
+    columns::ensure_column(
+        connection,
+        "software_global_status",
+        "completeness_basis_points",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    columns::ensure_column(
+        connection,
+        "software_global_status",
+        "freshness",
+        "TEXT NOT NULL DEFAULT 'stale'",
+    )?;
+    for column in [
+        "conflict_count",
+        "entity_count",
+        "statement_count",
+        "diagnostic_count",
+    ] {
+        columns::ensure_column(
+            connection,
+            "software_global_status",
+            column,
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+    }
+    mark_legacy_projection_schema_stale(connection)?;
     dependency_usage::initialize_schema(connection)?;
-    lifecycle::initialize_schema(connection)
+    lifecycle::initialize_schema(connection)?;
+    crate::storage::sqlite::maven::reactor::initialize_schema(connection)?;
+    ontology::initialize_schema(connection)
 }
 
 fn mark_legacy_projection_schema_stale(connection: &Connection) -> Result<(), StorageError> {
@@ -175,6 +227,7 @@ fn mark_legacy_projection_schema_stale(connection: &Connection) -> Result<(), St
         "
         UPDATE software_global_status
         SET stale = 1,
+            freshness = 'stale',
             projection_schema_version = ?1,
             last_error = COALESCE(
                 last_error,

@@ -23,6 +23,7 @@ const styles = [
   readFileSync(new URL("../src/runtime.css", import.meta.url), "utf8"),
   readFileSync(new URL("../src/settings.css", import.meta.url), "utf8"),
   readFileSync(new URL("../src/graph_canvas.css", import.meta.url), "utf8"),
+  readFileSync(new URL("../src/software_graph.css", import.meta.url), "utf8"),
 ].join("\n");
 writeFileSync(new URL("styles.css", assetsUrl), styles);
 

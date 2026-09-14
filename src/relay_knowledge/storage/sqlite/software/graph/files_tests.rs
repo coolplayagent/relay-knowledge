@@ -59,6 +59,78 @@ fn file_page_assigns_owned_roles_before_domain_validation() {
 }
 
 #[test]
+fn file_page_authorizes_current_and_legacy_map_topic_shards() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE code_repository_files (
+                repository_id TEXT NOT NULL,
+                source_scope TEXT NOT NULL,
+                path TEXT NOT NULL,
+                language_id TEXT NOT NULL,
+                parse_status TEXT NOT NULL
+            );
+            CREATE TABLE code_repository_symbols (
+                repository_id TEXT NOT NULL,
+                source_scope TEXT NOT NULL,
+                path TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                line_start INTEGER NOT NULL
+            );
+            ",
+        )
+        .expect("software source schema should initialize");
+
+    for (line, root, shard, topic, identity) in [
+        (
+            5,
+            KNOWLEDGE_MAP_RELATIVE_PATH,
+            "knowledge/topics/current.yaml",
+            "Current",
+            "current-identity",
+        ),
+        (
+            6,
+            LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH,
+            ".knowledge/topics/legacy.yaml",
+            "Legacy",
+            "legacy-identity",
+        ),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO code_repository_files VALUES ('repository', 'scope', ?1, 'yaml', 'parsed')",
+                params![shard],
+            )
+            .expect("topic shard file should seed");
+        connection
+            .execute_batch(&format!(
+                "
+                INSERT INTO code_repository_symbols VALUES
+                    ('repository', 'scope', '{root}', '{shard}', 'knowledge_map_topic_shard_ref', {line}),
+                    ('repository', 'scope', '{root}', '{topic}', 'knowledge_map_topic_shard_topic', {line}),
+                    ('repository', 'scope', '{root}', '{identity}', 'knowledge_map_topic_shard_identity', {line}),
+                    ('repository', 'scope', '{shard}', '{topic}', 'knowledge_map_topic_shard', 3),
+                    ('repository', 'scope', '{shard}', '{identity}', 'knowledge_map_topic_shard_identity', 3);
+                "
+            ))
+            .expect("topic shard symbols should seed");
+    }
+
+    let files = software_file_page(&connection, "scope", GraphVersion::new(1), 10, None)
+        .expect("software files should load");
+
+    assert_eq!(files.len(), 2);
+    assert!(
+        files
+            .iter()
+            .all(|file| file.file_role == "knowledge_map_topic_shard")
+    );
+}
+
+#[test]
 fn file_projection_reuses_one_insert_prepare_across_keyset_pages() {
     use std::sync::{
         Arc,

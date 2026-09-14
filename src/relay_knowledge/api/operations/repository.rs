@@ -3,16 +3,17 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::{ApiMetadata, CodeRepositoryFreshnessDiagnostics, CodeRepositoryScopeMetadata},
     domain::{
-        BusinessDomain, BusinessKnowledgeQueryRequest, BusinessKnowledgeResolution,
-        BusinessKnowledgeStatus, BusinessTerm, CodeFeatureFlagGraph, CodeFeatureFlagRequest,
+        BusinessDomain, BusinessKnowledgeQueryRequest, BusinessKnowledgeResult,
+        BusinessKnowledgeSummary, BusinessTerm, CodeFeatureFlagGraph, CodeFeatureFlagRequest,
         CodeImpactPathGroups, CodeImpactRequest, CodeIndexCheckpoint, CodeIndexSummary,
         CodeIndexTaskRecord, CodeRepositoryRegistration, CodeRepositoryRemovalSummary,
         CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositoryStatus, CodeRetrievalHit,
-        CodeRetrievalRequest, CodeScopeRetentionSummary, RepositoryGraphEdge,
-        RepositoryGraphNeighborhoodRequest, RepositoryGraphNode, SoftwareBuildTarget,
-        SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement, SoftwareFile,
-        SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource, SoftwareRelationship,
-        SoftwareSdkUsage, SoftwareTopic,
+        CodeRetrievalRequest, CodeScopeRetentionSummary, FrameworkGraph, FrameworkGraphRequest,
+        RepositoryGraphEdge, RepositoryGraphNeighborhoodRequest, RepositoryGraphNode,
+        SoftwareBuildTarget, SoftwareComponent, SoftwareDependencyUsage, SoftwareDesignElement,
+        SoftwareEntity, SoftwareExportProfile, SoftwareFile, SoftwareGlobalRequest,
+        SoftwareGlobalStatus, SoftwareIacResource, SoftwareRelationship, SoftwareSdkUsage,
+        SoftwareShapeDiagnostic, SoftwareStatement, SoftwareTopic,
     },
 };
 
@@ -149,6 +150,19 @@ pub struct CodeRepositoryFeatureFlagsResponse {
     pub degraded_reason: Option<String>,
 }
 
+/// Framework-aware component and template graph response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryFrameworkGraphResponse {
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    #[serde(default = "CodeRepositoryFreshnessDiagnostics::legacy_unknown")]
+    pub freshness: CodeRepositoryFreshnessDiagnostics,
+    pub request: FrameworkGraphRequest,
+    pub graph: FrameworkGraph,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+}
+
 /// Code repository impact response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeRepositoryImpactResponse {
@@ -182,6 +196,9 @@ pub struct CodeRepositoryReportResponse {
 /// Repository-scoped software global model projection response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SoftwareGlobalResponse {
+    /// Pass back as cursor with the same ref, kind and filters to continue this page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
     pub metadata: ApiMetadata,
     pub scope: CodeRepositoryScopeMetadata,
     pub request: SoftwareGlobalRequest,
@@ -195,16 +212,35 @@ pub struct SoftwareGlobalResponse {
     pub build_targets: Vec<SoftwareBuildTarget>,
     pub iac_resources: Vec<SoftwareIacResource>,
     pub design_elements: Vec<SoftwareDesignElement>,
+    #[serde(default)]
+    pub entities: Vec<SoftwareEntity>,
+    #[serde(default)]
+    pub statements: Vec<SoftwareStatement>,
+    #[serde(default)]
+    pub diagnostics: Vec<SoftwareShapeDiagnostic>,
+}
+
+/// A standard-profile export produced from the same snapshot-bound software read model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SoftwareGlobalExportResponse {
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    pub status: SoftwareGlobalStatus,
+    pub profile: SoftwareExportProfile,
+    pub media_type: String,
+    pub document: serde_json::Value,
 }
 
 /// Repository-scoped authored business knowledge projection response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BusinessKnowledgeQueryResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<crate::api::BusinessKnowledgeDiagnostics>,
     pub metadata: ApiMetadata,
     pub scope: CodeRepositoryScopeMetadata,
     pub request: BusinessKnowledgeQueryRequest,
-    pub status: BusinessKnowledgeStatus,
-    pub resolution: BusinessKnowledgeResolution,
+    pub knowledge: BusinessKnowledgeSummary,
+    pub result: BusinessKnowledgeResult,
     pub domains: Vec<BusinessDomain>,
     pub terms: Vec<BusinessTerm>,
 }

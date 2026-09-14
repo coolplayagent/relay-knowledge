@@ -9,7 +9,10 @@ use crate::{
         CodeIndexMode, CodeIndexRequest, CodeMonorepoWorkspaceFormat, CodeWorkspaceDetectionConfig,
         FreshnessPolicy, code_snapshot_scope_id_with_workspace_detection,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexTaskStore as _, CodeQueryReadStore as _,
+        CodeRepositorySetStore as _, SqliteGraphStore,
+    },
 };
 
 use super::test_support::*;
@@ -78,6 +81,7 @@ async fn equivalent_enabled_workspace_config_reuses_the_exact_published_scope() 
                 CodeMonorepoWorkspaceFormat::CargoWorkspace,
                 CodeMonorepoWorkspaceFormat::Pnpm,
                 CodeMonorepoWorkspaceFormat::GoModules,
+                CodeMonorepoWorkspaceFormat::Maven,
                 CodeMonorepoWorkspaceFormat::CargoWorkspace,
             ],
         },

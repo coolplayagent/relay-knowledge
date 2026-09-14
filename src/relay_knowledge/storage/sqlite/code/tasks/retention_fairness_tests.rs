@@ -1,6 +1,9 @@
 use crate::{
     domain::CodeRepositoryRegistration,
-    storage::{CodeRepositoryStore, CodeScopeRetentionRequest, SqliteGraphStore, StorageError},
+    storage::{
+        CodeScopeRetentionRequest, CodeScopeRetentionStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore, StorageError,
+    },
 };
 
 #[tokio::test]

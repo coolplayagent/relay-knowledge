@@ -352,6 +352,40 @@ pub(super) fn query_command(
     command
 }
 
+pub(super) fn framework_query_command(
+    binary: &Path,
+    alias: &str,
+    ref_selector: &str,
+    case: &Value,
+) -> Vec<String> {
+    let mut command = vec![
+        binary.display().to_string(),
+        "repo".to_owned(),
+        "framework".to_owned(),
+        alias.to_owned(),
+        "--ref".to_owned(),
+        string_or(case, "ref", ref_selector).to_owned(),
+        "--freshness".to_owned(),
+        "wait-until-fresh".to_owned(),
+        "--limit".to_owned(),
+        number_or(case, "limit", 50).to_string(),
+    ];
+    if let Some(query) = string_field(case, "query").filter(|query| !query.is_empty()) {
+        command.extend(["--query".to_owned(), query.to_owned()]);
+    }
+    for framework in string_vec(case, "frameworks") {
+        command.extend(["--framework".to_owned(), framework]);
+    }
+    for kind in string_vec(case, "kinds") {
+        command.extend(["--kind".to_owned(), kind]);
+    }
+    for path in string_vec(case, "path_filters") {
+        command.extend(["--path".to_owned(), path]);
+    }
+    command.extend(["--format".to_owned(), "json".to_owned()]);
+    command
+}
+
 pub(super) fn incremental_update_command(
     binary: &Path,
     alias: &str,

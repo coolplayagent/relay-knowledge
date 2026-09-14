@@ -6,7 +6,9 @@ mod languages;
 mod model;
 mod source;
 
-pub(super) use detection::{detect, manual_parse_status, recoverable_parse_error};
+pub(super) use detection::{
+    detect, manual_parse_status, recoverable_parse_error, template_action_end,
+};
 pub(super) use model::{ConfigFact, ConfigImport, ConfigRange, ConfigReference, ConfigValueKind};
 
 pub(super) fn doc_comment_text<'a>(trimmed: &'a str, language_id: &str) -> Option<&'a str> {

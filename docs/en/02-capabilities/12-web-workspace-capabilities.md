@@ -2,8 +2,8 @@
 
 [English](./12-web-workspace-capabilities.md) | [中文](../../zh/02-capabilities/12-web-workspace-capabilities.md)
 
-> Document version: 2.0
-> Date: 2026-05-17
+> Document version: 2.1
+> Date: 2026-08-30
 > Scope: Book 2 capability guide
 
 ## Capability Positioning
@@ -12,11 +12,11 @@ The Web workspace organizes local capability into a visual operations surface. I
 
 ## User-visible Behavior
 
-The Web workspace reads `/api/project/status`, `/api/health`, and `/api/web/operations/execute` from the same origin. It shows graph version, health, index lag, GraphRAG readiness, runtime budgets, refresh recovery, stale reasons, the operation composer, and execution results.
+The Web workspace reads `/api/project/status`, `/api/health`, `/api/v1/code/repositories`, snapshot-bound software projections, and `/api/web/operations/execute` from the same origin. It shows graph version, health, index lag, GraphRAG readiness, the software ontology graph, provenance completeness, conflicts and shape diagnostics, runtime budgets, refresh recovery, stale reasons, the operation composer, and execution results.
 
 ## Competitive Features
 
-The Web operation composer generates typed command/request previews so users see payload and command semantics before execution. The Rust Web adapter reuses application services instead of duplicating CLI logic.
+The Web operation composer generates typed command/request previews so users see payload and command semantics before execution. The Software page shares the same application service and ontology status as CLI and MCP instead of creating a frontend fact model. The Rust Web adapter likewise reuses application services instead of duplicating CLI logic.
 
 ## Command/API Entry Points
 

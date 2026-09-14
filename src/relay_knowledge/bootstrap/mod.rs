@@ -9,3 +9,6 @@
 //! entry points move to the outer layer.
 
 pub mod cli;
+mod service;
+
+pub(crate) use service::runtime_configuration_from_process_environment;

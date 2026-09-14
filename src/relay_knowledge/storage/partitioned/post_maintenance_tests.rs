@@ -8,7 +8,9 @@ use crate::{
     },
     env::{EnvironmentConfig, PlatformKind},
     paths::RuntimePaths,
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{
+        CodeIndexTaskStore as _, RepositoryCatalogStore as _, SqliteGraphStore, StorageError,
+    },
 };
 
 use super::PartitionedSqliteKnowledgeStore;
@@ -180,6 +182,8 @@ fn snapshot(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),

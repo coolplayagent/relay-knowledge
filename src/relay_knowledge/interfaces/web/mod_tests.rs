@@ -10,7 +10,7 @@ use tower::ServiceExt;
 use crate::{
     api::{CodeRepositoryRegisterRequest, IngestEvidence, IngestEvidenceExtraction, IngestRequest},
     application::{KnowledgeMapService, KnowledgeMapSourceAddRequest, RelayKnowledgeService},
-    domain::{EvidenceModality, KnowledgeMapSourceKind},
+    domain::{EvidenceModality, KnowledgeMapSourceKind, RepositoryMapType},
     env::{EnvironmentConfig, PlatformKind},
 };
 
@@ -47,7 +47,7 @@ async fn api_error_response_maps_stable_status_codes() {
 #[test]
 fn knowledge_map_errors_preserve_contract_and_storage_statuses() {
     let invalid = knowledge_map_web_error(KnowledgeMapServiceError::InvalidRequest(
-        "limit must be within 1..=256".to_owned(),
+        "limit must be within 1..=16".to_owned(),
     ));
     let denied = knowledge_map_web_error(KnowledgeMapServiceError::Io(std::io::Error::new(
         std::io::ErrorKind::PermissionDenied,
@@ -56,7 +56,7 @@ fn knowledge_map_errors_preserve_contract_and_storage_statuses() {
 
     assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
     assert_eq!(denied.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert!(invalid.message.contains("limit must be within 1..=256"));
+    assert!(invalid.message.contains("limit must be within 1..=16"));
     assert!(denied.message.contains("permission denied"));
 }
 
@@ -235,6 +235,10 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
     let map = KnowledgeMapService::new(root.clone());
     let context = RequestContext::for_interface(InterfaceKind::Web);
     map.init(&context).await.expect("map should initialize");
+    map.for_type(RepositoryMapType::Codespec)
+        .init(&context)
+        .await
+        .expect("codespec map should initialize");
     map.add_source(
         &context,
         KnowledgeMapSourceAddRequest {
@@ -285,6 +289,26 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
     .await;
     assert_eq!(payload["result"]["from_version"], 1);
     assert_eq!(payload["result"]["entries"].as_array().unwrap().len(), 1);
+    let codespec = execute_json_with_router(
+        router.clone(),
+        json!({
+            "snapshot": {
+                "name": "CodeSpec map history",
+                "command": "relay-knowledge map history --type codespec --from 1 --limit 1",
+                "payload": {
+                    "operation": "repository.map.history",
+                    "repository": "map-history",
+                    "map_type": "codespec",
+                    "from_version": 1,
+                    "limit": 1
+                }
+            }
+        }),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(codespec["result"]["map_type"], "codespec");
+    assert_eq!(codespec["result"]["entries"].as_array().unwrap().len(), 1);
     let unregistered = execute_json_with_router(
         router.clone(),
         json!({
@@ -329,19 +353,19 @@ async fn pages_knowledge_map_history_through_the_web_operation_endpoint() {
         json!({
             "snapshot": {
                 "name": "Oversized map history",
-                "command": "relay-knowledge map history --from 1 --limit 257",
+                    "command": "relay-knowledge map history --from 1 --limit 17",
                 "payload": {
                     "operation": "knowledge.map.history",
                     "repository": "missing",
                     "from_version": 1,
-                    "limit": 257
+                    "limit": 17
                 }
             }
         }),
         StatusCode::BAD_REQUEST,
     )
     .await;
-    assert_eq!(oversized["error"], "limit must be within 1..=256");
+    assert_eq!(oversized["error"], "limit must be within 1..=16");
     let map_path = root.join(crate::project::KNOWLEDGE_MAP_RELATIVE_PATH);
     std::fs::rename(&map_path, root.join("map-history-test-backup.yaml"))
         .expect("map root should move for I/O failure fixture");
@@ -818,35 +842,8 @@ async fn web_operation_endpoint_maps_bad_payloads_to_http_errors() {
     assert_eq!(bad_worker["error"], "unsupported worker kind 'unknown'");
 }
 
-#[tokio::test]
-async fn web_operation_endpoint_enforces_configured_body_limit() {
-    let service = test_service("body-limit").await;
-    let router = router(service, 64);
-    let request = Request::builder()
-        .method("POST")
-        .uri("/api/web/operations/execute")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            json!({
-                "snapshot": {
-                    "name": "Oversized",
-                    "command": "relay-knowledge ingest",
-                    "payload": {
-                        "operation": "graph.ingest",
-                        "source_scope": "docs",
-                        "content": "this body is intentionally larger than the configured limit",
-                        "entity_labels": ["Web"]
-                    }
-                }
-            })
-            .to_string(),
-        ))
-        .expect("request should build");
-
-    let response = router.oneshot(request).await.expect("request should route");
-
-    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-}
+#[path = "mod_tests/body_limit_tests.rs"]
+mod body_limit_tests;
 
 async fn test_router(label: &str) -> Router {
     let root = unique_temp_dir(label).join("web");

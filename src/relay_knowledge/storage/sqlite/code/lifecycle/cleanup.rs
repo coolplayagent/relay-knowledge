@@ -17,6 +17,8 @@ pub(in crate::storage::sqlite::code) fn delete_scope_index(
         "code_repository_calls",
         "code_repository_routes",
         "code_repository_feature_flags",
+        "code_repository_framework_edges",
+        "code_repository_framework_nodes",
         "code_repository_dependencies",
         "code_repository_imports",
         "code_repository_reference_search_groups",
@@ -32,6 +34,9 @@ pub(in crate::storage::sqlite::code) fn delete_scope_index(
         "software_relationships",
         "software_global_status",
         "software_build_targets",
+        "maven_reactor_modules",
+        "maven_reactor_edges",
+        "maven_reactor_status",
         "software_iac_resources",
         "software_design_elements",
         "business_mappings",
@@ -45,8 +50,37 @@ pub(in crate::storage::sqlite::code) fn delete_scope_index(
             params![source_scope],
         )?;
     }
+    for table in [
+        "software_entities",
+        "software_statements",
+        "software_ontology_diagnostics",
+    ] {
+        delete_optional_projection_rows(transaction, table, source_scope)?;
+    }
     delete_search_documents_for_scope(transaction, source_scope)?;
 
+    Ok(())
+}
+
+/// Deletes a parallel-release projection when an older database has not created it yet.
+fn delete_optional_projection_rows(
+    transaction: &rusqlite::Transaction<'_>,
+    table: &'static str,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    let exists = transaction.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1
+         )",
+        params![table],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if exists {
+        transaction.execute(
+            &format!("DELETE FROM {table} WHERE source_scope = ?1"),
+            params![source_scope],
+        )?;
+    }
     Ok(())
 }
 
@@ -112,6 +146,8 @@ pub(in crate::storage::sqlite::code) fn delete_path_indexes<'path>(
         "code_repository_calls",
         "code_repository_routes",
         "code_repository_feature_flags",
+        "code_repository_framework_edges",
+        "code_repository_framework_nodes",
         "code_repository_dependencies",
         "code_repository_imports",
         "code_repository_reference_search_groups",

@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Relay CodeSpec Map v4 root",
+  "description": "Structural schema for codespec/codespec-map.yaml. Unknown fields remain allowed for Serde forward compatibility, except that v4 history explicitly rejects known legacy archive keys. Directory existence, key-file confinement, cross-map targets, dependency cycles, and recent-history continuity are validated by relay-knowledge map validate.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "map_type",
+    "map_version",
+    "updated_at",
+    "directories",
+    "topics",
+    "history"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 4 },
+    "artifact_kind": { "const": "map" },
+    "map_type": { "const": "codespec" },
+    "map_version": { "type": "integer", "minimum": 1 },
+    "updated_at": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "directories": {
+      "type": "array",
+      "minItems": 5,
+      "items": { "$ref": "#/$defs/directory" },
+      "uniqueItems": true
+    },
+    "topics": { "type": "array", "maxItems": 0 },
+    "history": { "$ref": "#/$defs/historyManifest" }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "positiveInteger": { "type": "integer", "minimum": 1 },
+    "directoryRelation": {
+      "type": "object",
+      "required": ["kind", "target"],
+      "properties": {
+        "kind": {
+          "enum": ["depends_on", "implements", "documents", "tests", "operates", "related_to"]
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^(knowledge|codespec):[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+        }
+      },
+      "additionalProperties": true
+    },
+    "directory": {
+      "type": "object",
+      "required": [
+        "directory",
+        "purpose",
+        "content_scope",
+        "key_files",
+        "load_hint",
+        "relations",
+        "update_rule"
+      ],
+      "properties": {
+        "directory": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+        },
+        "purpose": { "$ref": "#/$defs/nonEmptyString" },
+        "content_scope": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "uniqueItems": true
+        },
+        "key_files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "uniqueItems": true
+        },
+        "load_hint": { "enum": ["always", "task_match", "on_demand"] },
+        "relations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/directoryRelation" },
+          "uniqueItems": true
+        },
+        "update_rule": { "enum": ["reviewed", "generated", "external_sync"] }
+      },
+      "additionalProperties": true
+    },
+    "historyEntry": {
+      "type": "object",
+      "required": ["version", "action", "actor", "summary"],
+      "properties": {
+        "version": { "$ref": "#/$defs/positiveInteger" },
+        "action": { "$ref": "#/$defs/nonEmptyString" },
+        "actor": { "$ref": "#/$defs/nonEmptyString" },
+        "summary": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": true
+    },
+    "historyManifest": {
+      "type": "object",
+      "required": ["omitted_through", "recent"],
+      "propertyNames": {
+        "not": { "enum": ["archived_through", "archive", "index"] }
+      },
+      "properties": {
+        "omitted_through": { "type": "integer", "minimum": 0 },
+        "recent": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/historyEntry" },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

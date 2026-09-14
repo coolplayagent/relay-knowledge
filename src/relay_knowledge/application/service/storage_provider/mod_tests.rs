@@ -1,76 +1,31 @@
-use std::{
-    fs,
-    path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
-};
-
-use crate::{
-    domain::CodeRepositoryRegistration,
-    env::{EnvironmentConfig, PlatformKind},
-    paths::RuntimePaths,
-    storage::{CodeRepositoryStore, StorageTopology},
-};
-
-// Direct tests for lazy storage-provider initialization.
+use crate::storage::{KnowledgeStoreFactoryFuture, StorageTopologySnapshot};
 
 use super::*;
 
-#[tokio::test]
-async fn single_sqlite_rejects_active_partitioned_catalog() {
-    let paths = runtime_paths();
-    let database_path = paths.database_file();
-    let partitioned =
-        PartitionedSqliteKnowledgeStore::open(&database_path, paths.clone()).expect("open");
-    partitioned
-        .upsert_code_repository(
-            CodeRepositoryRegistration::new(
-                "repo-alpha",
-                "alpha",
-                "/tmp/alpha",
-                Vec::new(),
-                Vec::new(),
-            )
-            .expect("registration"),
-        )
-        .await
-        .expect("partitioned registration activates catalog");
+struct FailingFactory;
 
-    let error = match open_store(StorageProviderConfig {
-        database_path,
-        paths,
-        topology: StorageTopology::SingleSqlite,
-    }) {
-        Ok(_) => panic!("single topology should reject active shard catalog"),
+impl KnowledgeStoreFactory for FailingFactory {
+    fn open(&self) -> KnowledgeStoreFactoryFuture<'_, Arc<dyn KnowledgeStore>> {
+        Box::pin(async { Err(StorageError::InvalidInput("factory-open-failed".to_owned())) })
+    }
+
+    fn topology_snapshot(&self) -> KnowledgeStoreFactoryFuture<'_, StorageTopologySnapshot> {
+        Box::pin(async { Ok(StorageTopologySnapshot::default()) })
+    }
+}
+
+#[tokio::test]
+async fn lazy_provider_preserves_factory_errors_without_partial_initialization() {
+    let provider = StorageProvider::configured(Arc::new(FailingFactory));
+
+    let error = match provider.get().await {
+        Ok(_) => panic!("factory should fail"),
         Err(error) => error,
     };
 
-    assert!(error.to_string().contains("partitioned_sqlite"));
-    assert!(error.to_string().contains("single_sqlite"));
-}
-
-fn runtime_paths() -> RuntimePaths {
-    let root = unique_temp_dir("storage-provider");
-    let environment = EnvironmentConfig::from_pairs(
-        PlatformKind::current(),
-        [(
-            "RELAY_KNOWLEDGE_HOME",
-            root.to_str().expect("temp path should be UTF-8"),
-        )],
-    )
-    .expect("environment should parse");
-
-    RuntimePaths::resolve(&environment.platform, &environment.paths).expect("paths resolve")
-}
-
-fn unique_temp_dir(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock should be after epoch")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!(
-        "relay-knowledge-{name}-{}-{nanos}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&path);
-    path
+    assert_eq!(
+        error.to_string(),
+        "invalid storage input: factory-open-failed"
+    );
+    assert!(provider.ready_store().is_none());
 }

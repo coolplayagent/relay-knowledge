@@ -2,7 +2,7 @@
 
 use crate::{
     domain::CodeIndexCheckpoint,
-    storage::{CodeRepositoryStore, StorageFuture},
+    storage::{CodeIndexPublicationStore, StorageFuture},
 };
 
 use super::super::PartitionedSqliteKnowledgeStore;

@@ -15,6 +15,7 @@ mod mod_tests;
 mod model;
 mod pom_path;
 mod property_interpolation;
+pub(in crate::storage::sqlite) mod reactor;
 #[cfg(test)]
 mod tests;
 mod xml;
@@ -22,7 +23,6 @@ mod xml;
 use model::{EffectivePom, JVM_LANGUAGES, PomDocument, resolve_effective_model_load};
 
 const MAVEN_SOURCE_KIND: &str = "pom.xml";
-const FILE_CHUNK_CONTENT_BUDGET_BYTES: u64 = 8_000;
 const MAX_POM_DOCUMENTS_PER_SCOPE: usize = 8_192;
 const MAX_POM_CHUNKS_PER_SCOPE: usize = 16_384;
 const MAX_POM_BYTES_PER_SCOPE: usize = 64 * 1024 * 1024;
@@ -49,7 +49,7 @@ struct PomLoad {
 }
 
 #[derive(Debug)]
-struct MavenModels {
+pub(super) struct MavenModels {
     models: Vec<EffectivePom>,
     preserve_existing_facts: bool,
 }
@@ -73,17 +73,15 @@ pub(super) struct MavenBuildFact {
 }
 
 pub(super) fn visit_build_target_inputs(
-    connection: &Connection,
-    source_scope: &str,
+    loaded: &MavenModels,
     graph_version: GraphVersion,
     mut visit: impl FnMut(SoftwareBuildTargetInput) -> Result<(), StorageError>,
 ) -> Result<(), StorageError> {
-    let loaded = effective_models(connection, source_scope)?;
     if loaded.preserve_existing_facts {
         return Ok(());
     }
-    for model in loaded.models {
-        visit_build_facts(&model, |fact| visit(build_input(fact, graph_version)))?;
+    for model in &loaded.models {
+        visit_build_facts(model, |fact| visit(build_input(fact, graph_version)))?;
     }
     Ok(())
 }
@@ -95,18 +93,15 @@ fn build_target_inputs(
     graph_version: GraphVersion,
 ) -> Result<Vec<SoftwareBuildTargetInput>, StorageError> {
     let mut inputs = Vec::new();
-    visit_build_target_inputs(connection, source_scope, graph_version, |input| {
-        inputs.push(input);
-        Ok(())
-    })?;
+    visit_build_target_inputs(
+        &effective_models(connection, source_scope)?,
+        graph_version,
+        |input| {
+            inputs.push(input);
+            Ok(())
+        },
+    )?;
     Ok(inputs)
-}
-
-pub(super) fn preserves_existing_facts(
-    connection: &Connection,
-    source_scope: &str,
-) -> Result<bool, StorageError> {
-    Ok(effective_models(connection, source_scope)?.preserve_existing_facts)
 }
 
 #[cfg(test)]
@@ -255,7 +250,7 @@ fn refresh_effective_dependency_records(
     })
 }
 
-fn effective_models(
+pub(super) fn effective_models(
     connection: &Connection,
     source_scope: &str,
 ) -> Result<MavenModels, StorageError> {
@@ -319,7 +314,7 @@ fn pom_documents_with_limits(
     let byte_end_expression = if chunk_schema.has_byte_end {
         "byte_end"
     } else {
-        "LENGTH(content)"
+        "LENGTH(CAST(content AS BLOB))"
     };
     let symbol_filter = if chunk_schema.has_symbol_snapshot_id {
         "AND symbol_snapshot_id IS NULL"
@@ -334,7 +329,7 @@ fn pom_documents_with_limits(
         WHERE source_scope = ?1
           AND (path = 'pom.xml' OR path LIKE '%/pom.xml')
           {symbol_filter}
-        ORDER BY path ASC, line_start ASC, chunk_id ASC
+        ORDER BY path ASC, 6 ASC, chunk_id ASC
         LIMIT ?2
         ",
     );
@@ -362,15 +357,27 @@ fn pom_documents_with_limits(
         },
     )?;
 
-    let mut documents = Vec::new();
+    let mut documents: Vec<PomDocument> = Vec::new();
     let mut has_truncated_documents = false;
     for row in rows {
         let document = row?;
-        if document_is_truncated(&document) {
+        if document.byte_end.checked_sub(document.byte_start) != Some(document.content.len() as u64)
+        {
             has_truncated_documents = true;
-            continue;
         }
-        documents.push(document);
+        if let Some(previous) = documents
+            .last_mut()
+            .filter(|item| item.path == document.path)
+        {
+            if previous.byte_end != document.byte_start || previous.file_id != document.file_id {
+                has_truncated_documents = true;
+            }
+            previous.content.push_str(&document.content);
+            previous.byte_end = document.byte_end;
+        } else {
+            has_truncated_documents |= document.byte_start != 0;
+            documents.push(document);
+        }
     }
     Ok(PomLoad {
         documents,
@@ -387,7 +394,7 @@ fn preflight_pom_budget(
     byte_limit: usize,
 ) -> Result<(), StorageError> {
     let query = format!(
-        "SELECT path, LENGTH(content)
+        "SELECT path, LENGTH(CAST(content AS BLOB))
          FROM code_repository_chunks
          WHERE source_scope = ?1
            AND (path = 'pom.xml' OR path LIKE '%/pom.xml')
@@ -436,11 +443,6 @@ fn read_chunk_schema(connection: &Connection) -> Result<ChunkSchema, StorageErro
         has_byte_start: column_names.contains("byte_start"),
         has_byte_end: column_names.contains("byte_end"),
     })
-}
-
-fn document_is_truncated(document: &PomDocument) -> bool {
-    let source_span = document.byte_end.saturating_sub(document.byte_start);
-    source_span > FILE_CHUNK_CONTENT_BUDGET_BYTES && (document.content.len() as u64) < source_span
 }
 
 fn scope_jvm_languages(

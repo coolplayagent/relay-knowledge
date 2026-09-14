@@ -56,17 +56,11 @@ pub(super) fn delete_scope(
     connection: &Connection,
     source_scope: &str,
 ) -> Result<(), StorageError> {
-    if maven::preserves_existing_facts(connection, source_scope)? {
-        connection.execute(
-            "DELETE FROM software_build_targets WHERE source_scope = ?1 AND ecosystem != 'maven'",
-            params![source_scope],
-        )?;
-    } else {
-        connection.execute(
-            "DELETE FROM software_build_targets WHERE source_scope = ?1",
-            params![source_scope],
-        )?;
-    }
+    // Keep previous Maven facts until the lifecycle phase can validate its one shared POM load.
+    connection.execute(
+        "DELETE FROM software_build_targets WHERE source_scope = ?1 AND ecosystem != 'maven'",
+        params![source_scope],
+    )?;
 
     Ok(())
 }
@@ -176,13 +170,15 @@ pub(in super::super) fn build_targets_for_scope(
 
 pub(super) fn persist(
     connection: &Connection,
-    source_scope: &str,
     graph_version: GraphVersion,
     targets: &mut BuildTargets,
+    models: Option<&maven::MavenModels>,
 ) -> Result<(), StorageError> {
-    maven::visit_build_target_inputs(connection, source_scope, graph_version, |input| {
-        push_build_target(targets, input)
-    })?;
+    if let Some(models) = models {
+        maven::visit_build_target_inputs(models, graph_version, |input| {
+            push_build_target(targets, input)
+        })?;
+    }
     let mut statement = connection.prepare(
         "
         INSERT OR REPLACE INTO software_build_targets (
@@ -301,6 +297,14 @@ pub(super) fn collect(
         Some("build.gradle") | Some("build.gradle.kts") => {
             collect_gradle(document, graph_version, targets)
         }
+        Some(name)
+            if name == "Dockerfile"
+                || name == "Containerfile"
+                || name.starts_with("Dockerfile.")
+                || name.starts_with("Containerfile.") =>
+        {
+            collect_dockerfile(document, graph_version, targets)
+        }
         Some(".gitlab-ci.yml") | Some(".gitlab-ci.yaml") => {
             collect_ci_jobs(document, graph_version, "gitlab-ci", targets)
         }
@@ -309,6 +313,35 @@ pub(super) fn collect(
         }
         _ => Ok(()),
     }
+}
+
+fn collect_dockerfile(
+    document: &IndexedDocument,
+    graph_version: GraphVersion,
+    targets: &mut BuildTargets,
+) -> Result<(), StorageError> {
+    let Some(evidence_line) = document
+        .lines
+        .iter()
+        .find(|line| !line.text.trim().is_empty())
+    else {
+        return Ok(());
+    };
+    let mut input = build_input(
+        document,
+        graph_version,
+        "container",
+        "definition",
+        &document.path,
+        "Dockerfile",
+        evidence_line,
+    );
+    input.command = document
+        .lines
+        .iter()
+        .find_map(|line| line.text.trim().strip_prefix("FROM ").map(str::trim))
+        .map(|image| format!("FROM {image}"));
+    push_build_target(targets, input)
 }
 
 fn collect_cargo(

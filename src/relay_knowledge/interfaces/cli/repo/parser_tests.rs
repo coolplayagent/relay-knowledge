@@ -1,4 +1,48 @@
 use super::*;
+#[test]
+fn feature_flags_rejects_missing_filter_values_before_following_options() {
+    for option in ["--domain", "--source"] {
+        let tokens = ["feature-flags", "repo", option, "--consistency"].map(str::to_owned);
+        assert!(
+            matches!(parse_repo(&tokens), Err(CliError::MissingValue(value)) if value == option)
+        );
+    }
+}
+
+#[test]
+fn parses_software_export_profile_and_bounded_scope() {
+    assert_eq!(
+        parse_repo(&[
+            "software".to_owned(),
+            "export".to_owned(),
+            "repo".to_owned(),
+            "--profile".to_owned(),
+            "cyclonedx-1.7".to_owned(),
+            "--ref".to_owned(),
+            "abc123".to_owned(),
+            "--freshness".to_owned(),
+            "wait-until-fresh".to_owned(),
+            "--limit".to_owned(),
+            "250".to_owned(),
+        ])
+        .expect("software export command should parse"),
+        RepoCommand::SoftwareExport {
+            alias: "repo".to_owned(),
+            ref_selector: "abc123".to_owned(),
+            profile: SoftwareExportProfile::Cyclonedx17,
+            freshness: FreshnessPolicy::WaitUntilFresh,
+            limit: 250,
+        }
+    );
+    assert!(matches!(
+        parse_repo(&[
+            "software".to_owned(),
+            "export".to_owned(),
+            "repo".to_owned(),
+        ]),
+        Err(CliError::MissingValue("--profile"))
+    ));
+}
 
 #[test]
 fn parses_business_query_with_domain_and_fixed_ref() {
@@ -217,12 +261,53 @@ fn parses_repo_feature_flags_with_optional_filter_and_scope() {
     assert_eq!(
         command,
         RepoCommand::FeatureFlags {
+            filters: Default::default(),
             alias: "core".to_owned(),
             query: Some("checkout".to_owned()),
             limit: 20,
             ref_selector: "HEAD".to_owned(),
             path_filters: vec!["src".to_owned()],
             language_filters: vec!["rust".to_owned()],
+            freshness: FreshnessPolicy::WaitUntilFresh,
+        }
+    );
+}
+
+#[test]
+fn parses_repo_framework_graph_filters() {
+    let command = parse_repo(&[
+        "framework".to_owned(),
+        "frontend".to_owned(),
+        "--query".to_owned(),
+        "version select".to_owned(),
+        "--framework".to_owned(),
+        "vue".to_owned(),
+        "--kind".to_owned(),
+        "component".to_owned(),
+        "--kind".to_owned(),
+        "template-variable".to_owned(),
+        "--path".to_owned(),
+        "src".to_owned(),
+        "--freshness".to_owned(),
+        "wait-until-fresh".to_owned(),
+        "--limit".to_owned(),
+        "25".to_owned(),
+    ])
+    .expect("framework graph command should parse");
+
+    assert_eq!(
+        command,
+        RepoCommand::FrameworkGraph {
+            alias: "frontend".to_owned(),
+            query: Some("version select".to_owned()),
+            frameworks: vec![crate::domain::FrameworkKind::Vue],
+            kinds: vec![
+                crate::domain::FrameworkNodeKind::Component,
+                crate::domain::FrameworkNodeKind::TemplateVariable,
+            ],
+            limit: 25,
+            ref_selector: "HEAD".to_owned(),
+            path_filters: vec!["src".to_owned()],
             freshness: FreshnessPolicy::WaitUntilFresh,
         }
     );
@@ -561,4 +646,35 @@ fn update_parser_rejects_impact_only_and_duplicate_flags() {
     ])
     .expect_err("duplicate refs should fail closed");
     assert_eq!(duplicate, CliError::UnexpectedArgument("--head".to_owned()));
+}
+
+#[test]
+fn parses_software_page_cursor_and_path() {
+    let args = [
+        "software",
+        "demo",
+        "--kind",
+        "dependencies",
+        "--limit",
+        "2",
+        "--cursor",
+        "sw1:abcd",
+        "--path",
+        "module-a",
+    ]
+    .map(str::to_owned);
+    let RepoCommand::Software {
+        cursor,
+        path_filters,
+        kind,
+        limit,
+        ..
+    } = parse_repo(&args).unwrap()
+    else {
+        panic!("software command expected")
+    };
+    assert_eq!(cursor.as_deref(), Some("sw1:abcd"));
+    assert_eq!(path_filters, vec!["module-a"]);
+    assert_eq!(kind, SoftwareGlobalKind::Dependencies);
+    assert_eq!(limit, 2);
 }

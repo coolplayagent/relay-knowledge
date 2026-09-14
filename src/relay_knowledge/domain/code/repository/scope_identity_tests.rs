@@ -92,7 +92,7 @@ fn fact_versioned_snapshot_scope_requires_generated_hash_shape() {
     assert!(code_snapshot_scope_is_fact_versioned(&format!(
         "{base}:workspace-v1:7"
     )));
-    for malformed in ["00", "01", "8", "-1", "+1", "1x", "1:extra"] {
+    for malformed in ["00", "01", "16", "-1", "+1", "1x", "1:extra"] {
         assert!(!code_snapshot_scope_is_fact_versioned(&format!(
             "{base}:workspace-v1:{malformed}"
         )));
@@ -155,4 +155,29 @@ fn workspace_scope_semantics_are_canonical_and_backward_compatible() {
         code_snapshot_scope_workspace_semantic("repo", "tree", &[], &[], &empty_scope),
         Some(Some(0))
     );
+}
+
+#[test]
+fn configuration_registry_version_invalidates_previous_completed_scope() {
+    let previous =
+        CODE_SNAPSHOT_FACT_VERSION.replace("-config-registry-v54", "-config-registry-v53");
+    assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
+    let mut input = Vec::new();
+    for value in ["git_snapshot", "repo", "tree"] {
+        super::append_hash_part(&mut input, value);
+    }
+    super::append_hash_list(&mut input, &[]);
+    super::append_hash_list(&mut input, &[]);
+    super::append_hash_part(&mut input, &previous);
+    let scope = format!(
+        "git_snapshot:{:016x}",
+        crate::identity::stable_hash64(&input)
+    );
+    assert!(!code_snapshot_scope_matches_identity(
+        "repo",
+        "tree",
+        &[],
+        &[],
+        &scope
+    ));
 }

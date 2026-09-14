@@ -23,6 +23,8 @@ The current Web client reads and executes through same-origin service endpoints:
 /api/health
 /api/service/status
 /api/web/graph/canvas
+/api/v1/code/repositories
+/api/v1/code/repositories/{alias}/software
 /api/web/operations/execute
 /api/configs/model/profiles
 /api/configs/model-fallback
@@ -31,13 +33,13 @@ The current Web client reads and executes through same-origin service endpoints:
 /api/configs/model:discover
 ```
 
-The UI shows project health, GraphRAG readiness, provider backend diagnostics, graph counts, Status graph overview, Graph canvas, scoped index freshness, refresh queue diagnostics, stale reasons, runtime budgets, agent/model settings, and the operation composer. Complete diagnostics still live in `/api/health`, `/api/service/status`, and operation result JSON.
+The UI shows project health, GraphRAG readiness, provider backend diagnostics, graph counts, Status graph overview, Graph canvas, the software ontology graph, conflicts and shape diagnostics, scoped index freshness, refresh queue diagnostics, stale reasons, runtime budgets, agent/model settings, and the operation composer. Complete diagnostics still live in `/api/health`, `/api/service/status`, and operation result JSON.
 
 The Providers panel shows only redacted semantic/vector backend mode, model, dimension, endpoint host, key configured state, and cursor metadata. The Web UI does not store or echo raw provider API keys.
 
 ## 6.3 Page Structure
 
-The Web workspace uses left navigation and a right detail area. On desktop, the navigation stays fixed and the detail area scrolls independently; on narrow screens, navigation becomes a fixed top menu. Selecting Status, Readiness, Graph, Providers, Operations, Indexes, Runtime, or Settings shows only that page instead of stacking all panels in one long page.
+The Web workspace uses left navigation and a right detail area. On desktop, the navigation stays fixed and the detail area scrolls independently; on narrow screens, navigation becomes a fixed top menu. Selecting Status, Readiness, Graph, Software, Providers, Operations, Indexes, Runtime, or Settings shows only that page instead of stacking all panels in one long page.
 
 The toolbar provides light/dark theme switching. The first load follows the browser system theme; user choice is stored in browser local storage.
 
@@ -48,6 +50,8 @@ The Graph page provides three read-only canvases:
 - Mixed: knowledge and code graphs combined, including source-scope or source-path links that can be inferred across graphs.
 
 Canvas requests use `/api/web/graph/canvas?kind=knowledge|code|mixed&scope=<scope>&query=<text>&limit=<n>`. The default limit is 250 and the maximum is 1000. The backend always returns a bounded snapshot at the current graph version and marks truncation in `summary.truncated`.
+
+The Software page first reads the bounded indexed-repository list, then requests `statements` and `conflicts` in parallel for the selected repository at its pinned commit. The relationship canvas merges occurrences by stable `entity_key`; selecting a node or statement exposes occurrence, source scope, evidence, assertion, resolution, confidence, and extractor details. Tables retain conflicting, superseded, rejected, unresolved, ambiguous, and external statements plus shape diagnostics. The page also exposes ontology and projection-schema versions, freshness, provenance completeness, source coverage, and conflict count. It never scans source or invents missing facts in the browser. Each slice uses a limit from 1 through 500.
 
 ## 6.4 Operation Execution
 
@@ -65,7 +69,7 @@ The Web Operations panel covers typed command/request preview and same-origin ex
 
 `Run` sends the current snapshot and shows pending, success, or error state. Execution requests do not use the 10-second diagnostic client timeout, so long indexing or maintenance operations are not aborted by the frontend.
 
-The displayed command is a CLI-equivalent preview, not a simulated frontend result. The real result comes from the unified API response returned by `/api/web/operations/execute`. The `knowledge.map.history` operation requires a managed repository alias plus the same positive `from_version` and bounded `limit` (1-256) as CLI `map history`. The service resolves the alias through persisted repository registration state, so installed Web services never infer a repository from their process working directory. Register the repository first, then reproduce a Web result by running the displayed CLI command from that repository root. On error, copy operation, repository alias, command, error kind, and metadata from result JSON.
+The displayed command is a CLI-equivalent preview, not a simulated frontend result. The real result comes from the unified API response returned by `/api/web/operations/execute`. The `knowledge.map.history` compatibility operation and the typed `repository.map.history` operation require a managed repository alias plus `map_type` (`knowledge` or `codespec`), an optional positive `from_version`, and a `limit` from 1 through 16, matching CLI `map history`. Omitting `from_version` starts at the earliest retained recent entry. The service resolves the alias through persisted repository registration state, so installed Web services never infer a repository from their process working directory. Register the repository first, then reproduce a Web result by running the displayed CLI command from that repository root. On error, copy operation, repository alias, command, error kind, and metadata from result JSON.
 
 Malformed Knowledge Map request parameters and invalid repository contracts return HTTP 400. Repository filesystem or storage failures remain service failures and return HTTP 503 rather than being reported as bad user input.
 
@@ -99,7 +103,7 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-The tests cover diagnostics, the Status page query entry point, Status graph overview, single-detail navigation, theme switching, GraphRAG readiness, graph canvas controls, operation composer, index table, runtime panel, Settings-generated configuration, model provider profiles, provider probe/discovery, and mobile layout.
+The tests cover diagnostics, the Status page query entry point, Status graph overview, single-detail navigation, theme switching, GraphRAG readiness, graph canvas controls, the software ontology graph and conflict/shape views, operation composer, index table, runtime panel, Settings-generated configuration, model provider profiles, provider probe/discovery, and mobile layout.
 
 ## 6.7 Safety Boundary
 

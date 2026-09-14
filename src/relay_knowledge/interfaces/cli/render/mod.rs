@@ -120,6 +120,21 @@ where
             value["diagnostics"].as_array().map_or(0, Vec::len)
         ),
         "knowledge.map.agent_snippet" => value["snippet"].as_str().unwrap_or("").to_owned(),
+        "repository.map.init"
+        | "repository.map.show"
+        | "repository.map.history"
+        | "repository.map.validate" => format!(
+            "repository_maps={}",
+            value["results"].as_array().map_or(0, Vec::len)
+        ),
+        "repository.map.directory.add"
+        | "repository.map.directory.update"
+        | "repository.map.directory.remove"
+        | "repository.map.migrate" => format!(
+            "repository_map={} version={}",
+            value["path"].as_str().unwrap_or("unknown"),
+            value["map_version"].as_u64().unwrap_or(0)
+        ),
         "worker.status" => format!(
             "workers={}",
             value["workers"].as_array().map_or(0, Vec::len)
@@ -235,6 +250,13 @@ where
             value["flags"].as_array().map_or(0, Vec::len),
             value["degraded_reason"].as_str().unwrap_or("none")
         ),
+        "code.repo.framework_graph" => format!(
+            "framework_nodes={} framework_edges={} truncated={} degraded={}",
+            value["graph"]["nodes"].as_array().map_or(0, Vec::len),
+            value["graph"]["edges"].as_array().map_or(0, Vec::len),
+            value["graph"]["truncated"].as_bool().unwrap_or(false),
+            value["degraded_reason"].as_str().unwrap_or("none")
+        ),
         "code.repo.impact" => format!(
             "changed_in_scope={} results={}",
             value["path_groups"]["in_scope_changed_paths"]
@@ -256,15 +278,7 @@ where
             value["degraded_reason"].as_str().unwrap_or("none")
         ),
         "code.repo.list" => render_code_repository_list(&value),
-        "code.repo.status" => format!(
-            "repo={} files={} symbols={} stale={} task={} checkpoint={}",
-            value["status"]["alias"].as_str().unwrap_or(""),
-            value["status"]["indexed_file_count"].as_u64().unwrap_or(0),
-            value["status"]["symbol_count"].as_u64().unwrap_or(0),
-            value["status"]["stale"].as_bool().unwrap_or(true),
-            value["active_task"]["state"].as_str().unwrap_or("none"),
-            value["checkpoint"]["state"].as_str().unwrap_or("none")
-        ),
+        "code.repo.status" => render_code_repository_status(&value),
         "code.repo.report" => format!(
             "repo={} files={} freshness={}",
             value["report"]["alias"].as_str().unwrap_or(""),
@@ -272,6 +286,12 @@ where
             value["report"]["freshness_state"]
                 .as_str()
                 .unwrap_or("unknown")
+        ),
+        "code.repo.software" if value["request"]["kind"] == "modules" => format!(
+            "maven modules={} relationships={} stale={}",
+            value["build_targets"].as_array().map_or(0, Vec::len),
+            value["relationships"].as_array().map_or(0, Vec::len),
+            value["status"]["stale"].as_bool().unwrap_or(true)
         ),
         "code.repo.software" => format!(
             "software scope={} components={} dependency_usages={} sdk_usages={} files={} topics={} relationships={} build_targets={} iac_resources={} design_elements={} stale={}",
@@ -328,16 +348,44 @@ where
         _ => operation.to_owned(),
     };
 
+    if operation == "code.repo.software" {
+        if let Some(cursor) = value["next_cursor"].as_str() {
+            return Ok(format!("{line} next_cursor={}\n", single_line(cursor)));
+        }
+    }
     Ok(format!("{line}\n"))
+}
+
+fn render_code_repository_status(value: &serde_json::Value) -> String {
+    let mut rendered = format!(
+        "repo={} files={} symbols={} stale={} task={} checkpoint={}",
+        value["status"]["alias"].as_str().unwrap_or(""),
+        value["status"]["indexed_file_count"].as_u64().unwrap_or(0),
+        value["status"]["symbol_count"].as_u64().unwrap_or(0),
+        value["status"]["stale"].as_bool().unwrap_or(true),
+        value["active_task"]["state"].as_str().unwrap_or("none"),
+        value["checkpoint"]["state"].as_str().unwrap_or("none")
+    );
+    if let Some(error_kind) = value["active_task"]["last_error_kind"].as_str() {
+        rendered.push_str(" error_kind=");
+        rendered.push_str(error_kind);
+    }
+    if let Some(error_message) = value["active_task"]["last_error_message"].as_str() {
+        rendered.push_str(" error=");
+        rendered.push_str(&serde_json::Value::String(error_message.to_owned()).to_string());
+    }
+    rendered
 }
 
 fn render_knowledge_map_history(value: &serde_json::Value) -> String {
     let mut lines = vec![format!(
-        "knowledge_map={} map_version={} from={} through={} next={}",
+        "knowledge_map={} map_version={} earliest={} omitted_through={} from={} through={} next={}",
         value["path"]
             .as_str()
             .unwrap_or(KNOWLEDGE_MAP_RELATIVE_PATH),
         value["map_version"].as_u64().unwrap_or(0),
+        value["earliest_available_version"].as_u64().unwrap_or(1),
+        value["omitted_through"].as_u64().unwrap_or(0),
         value["from_version"].as_u64().unwrap_or(0),
         value["through_version"].as_u64().unwrap_or(0),
         value["next_from_version"]
@@ -361,9 +409,9 @@ fn render_knowledge_map_history(value: &serde_json::Value) -> String {
 fn render_knowledge_map_show(value: &serde_json::Value) -> String {
     let history = &value["map"]["history"];
     let complete = history["complete"].as_bool().unwrap_or(true);
-    let archived_through = history["archived_through"].as_u64().unwrap_or(0);
+    let omitted_through = history["omitted_through"].as_u64().unwrap_or(0);
     let mut output = format!(
-        "knowledge_map={} topics={} sources={} routes={} history_complete={} history_archived_through={} history_recent={}",
+        "knowledge_map={} topics={} sources={} routes={} history_complete={} history_omitted_through={} history_recent={}",
         value["path"]
             .as_str()
             .unwrap_or(KNOWLEDGE_MAP_RELATIVE_PATH),
@@ -371,12 +419,12 @@ fn render_knowledge_map_show(value: &serde_json::Value) -> String {
         value["map"]["sources"].as_array().map_or(0, Vec::len),
         value["map"]["routes"].as_array().map_or(0, Vec::len),
         complete,
-        archived_through,
+        omitted_through,
         history["recent"].as_array().map_or(0, Vec::len)
     );
     if !complete {
         output.push_str(&format!(
-            "\nhistory_notice=entries through version {archived_through} are archived; use relay-knowledge map history --from 1 --limit 256 to start paging archived history"
+            "\nhistory_notice=entries through version {omitted_through} are outside this view; run relay-knowledge map history without --from to read the earliest available page"
         ));
     }
 

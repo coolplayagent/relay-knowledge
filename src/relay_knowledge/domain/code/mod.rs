@@ -1,6 +1,7 @@
 pub(crate) mod call_targets;
 mod context;
 mod dependencies;
+mod framework;
 mod graph_records;
 mod repository;
 mod repository_graph;
@@ -20,6 +21,10 @@ pub use context::{
     CodeGraphContextRequest, CodeGraphImpactHint,
 };
 pub use dependencies::CodeDependencyRecord;
+pub use framework::{
+    CodeFrameworkEdgeRecord, CodeFrameworkNodeRecord, FrameworkEdgeKind, FrameworkGraph,
+    FrameworkGraphRequest, FrameworkKind, FrameworkNodeKind,
+};
 pub use graph_records::{
     CodeChunkRecord, CodeExtractionMetadata, CodeFileFields, CodeFileRecord, CodeGraphBatch,
     CodeGraphCommitReceipt, CodeParseStatus, CodeParseStatusCounts, CodeRange, CodeReferenceFields,
@@ -27,16 +32,16 @@ pub use graph_records::{
     RouteHandlerRole, SymbolRole,
 };
 pub use repository::{
-    CodeCallRecord, CodeFeatureFlagGraph, CodeFeatureFlagRecord, CodeFeatureFlagRequest,
-    CodeFeatureFlagUsage, CodeFileDiagnostic, CodeFileFingerprint, CodeImpactPathGroups,
-    CodeImpactRequest, CodeImportRecord, CodeIndexMode, CodeIndexRequest, CodePathTombstone,
-    CodeQueryKind, CodeRepositoryExcludedPath, CodeRepositoryLanguagePreview,
-    CodeRepositoryLargestFile, CodeRepositoryLatencySample, CodeRepositoryRegistration,
-    CodeRepositoryRemovalSummary, CodeRepositoryReport, CodeRepositoryScopePreview,
-    CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
-    CodeRetrievalLayer, CodeRetrievalRequest, CodeRouteRecord, CodeSymbolGenerationCounts,
-    RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
-    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+    CodeCallRecord, CodeConfigFilter, CodeConfigMetadata, CodeFeatureFlagGraph,
+    CodeFeatureFlagRecord, CodeFeatureFlagRequest, CodeFeatureFlagUsage, CodeFileDiagnostic,
+    CodeFileFingerprint, CodeImpactPathGroups, CodeImpactRequest, CodeImportRecord, CodeIndexMode,
+    CodeIndexRequest, CodePathTombstone, CodeQueryKind, CodeRepositoryExcludedPath,
+    CodeRepositoryLanguagePreview, CodeRepositoryLargestFile, CodeRepositoryLatencySample,
+    CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
+    CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals,
+    CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, CodeRouteRecord,
+    CodeSymbolGenerationCounts, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
+    RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
     code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,
     code_snapshot_scope_matches_identity, code_snapshot_scope_workspace_semantic,
@@ -53,13 +58,15 @@ pub(crate) use repository_index::{
     CodeQueryIndexRepairResumePhase, CodeReferenceResolution,
     CodeReferenceResolutionQueryIndexRepair, CodeReferenceResolutionStage,
     CodeReferenceSearchQueryIndexRepair, CodeReferenceSearchRebuild,
-    CodeReferenceSearchRebuildStage, code_incremental_clone, code_incremental_clone_state,
-    code_query_index_repair, code_query_index_repair_state, code_query_index_subphase,
-    code_query_index_subphase_state, code_reference_resolution,
-    code_reference_resolution_cursor_digest, code_reference_resolution_query_index_repair,
+    CodeReferenceSearchRebuildStage, CodeSoftwareProjectionPhase, SOFTWARE_PROJECTION_CHECKPOINT,
+    code_incremental_clone, code_incremental_clone_state, code_query_index_repair,
+    code_query_index_repair_state, code_query_index_subphase, code_query_index_subphase_state,
+    code_reference_resolution, code_reference_resolution_cursor_digest,
+    code_reference_resolution_query_index_repair,
     code_reference_resolution_query_index_repair_state, code_reference_resolution_state,
     code_reference_search_query_index_repair, code_reference_search_query_index_repair_state,
     code_reference_search_rebuild, code_reference_search_rebuild_state,
+    code_software_projection_phase,
 };
 pub use repository_index::{
     CodeIncrementalSummaryReceipt, CodeIndexBatch, CodeIndexCheckpoint, CodeIndexProgressSummary,

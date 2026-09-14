@@ -5,7 +5,10 @@ use crate::{
     domain::{
         CodeIndexMode, CodeIndexResourceBudget, CodeRepositoryRegistration, code_snapshot_scope_id,
     },
-    storage::{CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexTaskSeed, CodeIndexTaskStore as _,
+        RepositoryCatalogStore as _, SqliteGraphStore,
+    },
 };
 
 #[tokio::test]

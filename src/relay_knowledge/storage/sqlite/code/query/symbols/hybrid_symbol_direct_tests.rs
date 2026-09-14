@@ -4,7 +4,7 @@ use crate::{
         CodeIndexSnapshot, CodeParseStatus, CodeRepositoryRegistration, CodeRepositorySelector,
         FreshnessPolicy, RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeSymbolRecord,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{CodeIndexPublicationStore as _, RepositoryCatalogStore as _, SqliteGraphStore},
 };
 
 const HYBRID_DIRECT_TEST_SOURCE_SCOPE: &str = "code:test:hybrid-direct-generated:commit:tree";
@@ -81,6 +81,8 @@ fn snapshot_with_generated_symbol_noise() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),

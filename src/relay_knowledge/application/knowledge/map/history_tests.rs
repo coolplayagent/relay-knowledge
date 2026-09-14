@@ -1,4 +1,6 @@
+use super::super::migration::rewrite_contract_schema_for_test as rewrite_schema;
 use super::*;
+use crate::application::knowledge::map::history::MISSING_HISTORY_INDEX_MESSAGE;
 
 #[tokio::test]
 async fn oldest_history_lookup_has_a_constant_read_bound_and_crosses_leaves() {
@@ -14,7 +16,7 @@ async fn oldest_history_lookup_has_a_constant_read_bound_and_crosses_leaves() {
     let mut index = None;
     for version in 1..=70 {
         let archive = KnowledgeMapHistoryArchive {
-            schema_version: ARTIFACT_SCHEMA_VERSION,
+            schema_version: DIRECTORY_ARTIFACT_SCHEMA_VERSION,
             from_version: version,
             through_version: version,
             previous: previous.clone(),
@@ -50,12 +52,18 @@ async fn oldest_history_lookup_has_a_constant_read_bound_and_crosses_leaves() {
         "70 archives should require two index levels"
     );
     let manifest = KnowledgeMapManifest {
-        schema_version: ARTIFACT_SCHEMA_VERSION,
+        schema_version: DIRECTORY_ARTIFACT_SCHEMA_VERSION,
+        artifact_kind: Some("map".to_owned()),
+        map_type: Some(crate::domain::RepositoryMapType::Knowledge),
         map_version: 71,
         updated_at: "fixture".to_owned(),
+        directories: super::contracts::baseline_directories(
+            crate::domain::RepositoryMapType::Knowledge,
+        ),
         topics: Vec::new(),
         history: KnowledgeMapHistoryManifest {
             archived_through: 70,
+            omitted_through: 0,
             archive: previous,
             index: Some(index.clone()),
             recent: vec![crate::domain::KnowledgeMapHistoryEntry {
@@ -82,7 +90,7 @@ async fn oldest_history_lookup_has_a_constant_read_bound_and_crosses_leaves() {
     let page = service
         .history(
             &RequestContext::for_interface(crate::api::InterfaceKind::Cli),
-            32,
+            Some(32),
             3,
         )
         .await
@@ -140,7 +148,7 @@ fn balanced_prepend_shape_stays_logarithmic_past_two_full_levels() {
 }
 
 #[tokio::test]
-async fn map_init_migrates_a_legacy_v2_archive_chain_before_history_paging() {
+async fn map_validate_is_read_only_before_init_migrates_and_defers_legacy_history_cleanup() {
     let root = temp_root("legacy-v2-index-migration");
     fs::create_dir_all(&root).await.expect("root should create");
     fs::write(
@@ -168,49 +176,187 @@ async fn map_init_migrates_a_legacy_v2_archive_chain_before_history_paging() {
             .await
             .expect("source should add");
     }
-    let mut manifest = parse_manifest(
+    let manifest = parse_manifest(
         &fs::read_to_string(service.map_path())
             .await
             .expect("manifest should read"),
     )
     .expect("manifest should parse");
-    assert!(manifest.history.archive.is_some());
-    manifest.history.index = None;
+    assert_eq!(manifest.history.omitted_through, 1);
+    let archive = KnowledgeMapHistoryArchive {
+        schema_version: DIRECTORY_ARTIFACT_SCHEMA_VERSION,
+        from_version: 1,
+        through_version: 1,
+        previous: None,
+        entries: vec![crate::domain::KnowledgeMapHistoryEntry {
+            version: 1,
+            action: "init".to_owned(),
+            actor: "cli".to_owned(),
+            summary: "Legacy history fixture".to_owned(),
+        }],
+    };
+    let archive_yaml = serialize_yaml(&archive).expect("legacy archive should serialize");
+    let archive_digest = content_digest(archive_yaml.as_bytes());
+    let archive_ref = KnowledgeMapArchiveRef {
+        r#ref: format!(
+            "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{archive_digest}.yaml",
+            archive.from_version, archive.through_version
+        ),
+        digest: archive_digest,
+    };
+    let history_directory = root
+        .join(AGENT_CONTRACT_DIR_NAME)
+        .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME);
+    fs::create_dir_all(&history_directory)
+        .await
+        .expect("legacy history directory should create");
     fs::write(
-        service.map_path(),
-        serialize_yaml(&manifest).expect("legacy v2 manifest should serialize"),
+        root.join(AGENT_CONTRACT_DIR_NAME).join(&archive_ref.r#ref),
+        archive_yaml,
     )
     .await
-    .expect("legacy v2 manifest should write");
+    .expect("legacy archive should write");
+    rewrite_schema(
+        &root,
+        AGENT_CONTRACT_DIR_NAME,
+        &service.map_path(),
+        DIRECTORY_ARTIFACT_SCHEMA_VERSION,
+        Some(archive_ref.clone()),
+    )
+    .await
+    .expect("legacy root and shards should downgrade together");
+    let manifest = parse_manifest(
+        &fs::read_to_string(service.map_path())
+            .await
+            .expect("legacy manifest should read"),
+    )
+    .expect("legacy manifest should parse");
+    assert_eq!(manifest.history.archived_through, 1);
+    assert_eq!(manifest.history.archive, Some(archive_ref.clone()));
+
+    let mut history_files = fs::read_dir(&history_directory)
+        .await
+        .expect("history directory should read");
+    while let Some(entry) = history_files
+        .next_entry()
+        .await
+        .expect("history entry should read")
+    {
+        if entry.file_name().to_string_lossy().starts_with("index-") {
+            fs::remove_file(entry.path())
+                .await
+                .expect("legacy fixture index should remove");
+        }
+    }
+    let root_before_validation = fs::read(service.map_path())
+        .await
+        .expect("legacy v2 root should read");
+    let history_before_validation =
+        super::history_cleanup_tests::history_file_contents(&history_directory).await;
+
+    let validation = service
+        .validate(&context)
+        .await
+        .expect("read-only validation should return diagnostics");
+    assert!(!validation.valid);
+    assert!(
+        validation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains(MISSING_HISTORY_INDEX_MESSAGE))
+    );
+    assert_eq!(
+        fs::read(service.map_path())
+            .await
+            .expect("validated root should read"),
+        root_before_validation,
+        "map validate must not publish a migrated root"
+    );
+    assert_eq!(
+        super::history_cleanup_tests::history_file_contents(&history_directory).await,
+        history_before_validation,
+        "map validate must not create or rewrite history artifacts"
+    );
+
+    let archive_path = root.join(AGENT_CONTRACT_DIR_NAME).join(&archive_ref.r#ref);
+    let archive_content = fs::read(&archive_path)
+        .await
+        .expect("archive should read before corruption");
+    fs::write(&archive_path, "corrupt archive").await.unwrap();
+    let corrupted = service
+        .validate(&context)
+        .await
+        .expect("validation should surface the blocking archive corruption");
+    assert!(
+        corrupted
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("digest mismatch")),
+        "archive integrity must be checked before reporting a missing index"
+    );
+    assert!(
+        !corrupted
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains(MISSING_HISTORY_INDEX_MESSAGE))
+    );
+    let migration_error = service
+        .init(&context)
+        .await
+        .expect_err("migration must fail before deleting a corrupt archive");
+    assert!(migration_error.to_string().contains("digest mismatch"));
+    assert_eq!(
+        fs::read(service.map_path())
+            .await
+            .expect("legacy root should remain readable"),
+        root_before_validation
+    );
+    assert!(fs::try_exists(&archive_path).await.unwrap());
+    fs::write(&archive_path, archive_content)
+        .await
+        .expect("archive should restore");
 
     let error = service
-        .history(&context, 1, 1)
+        .history(&context, Some(1), 1)
         .await
         .expect_err("history must not fall back to a reverse-chain scan");
     assert!(error.to_string().contains("relay-knowledge map init"));
     let migration = service.init(&context).await.expect("migration should work");
-    assert!(migration.summary.contains("history archive index"));
+    assert!(migration.summary.contains("schema v4 recent-only history"));
     let migrated = parse_manifest(
         &fs::read_to_string(service.map_path())
             .await
             .expect("migrated manifest should read"),
     )
     .expect("migrated manifest should parse");
-    assert!(migrated.history.index.is_some());
+    assert_eq!(migrated.schema_version, ARTIFACT_SCHEMA_VERSION);
+    assert_eq!(migrated.history.omitted_through, 2);
+    assert!(migrated.history.index.is_none());
+    assert!(migrated.history.archive.is_none());
+    let fallback = parse_manifest(
+        &fs::read_to_string(service.backup_path())
+            .await
+            .expect("reader fallback should remain available"),
+    )
+    .expect("reader fallback should parse");
+    assert_eq!(fallback.schema_version, ARTIFACT_SCHEMA_VERSION);
+    assert!(fallback.history.archive.is_none());
+    assert!(fs::try_exists(&history_directory).await.unwrap());
     assert_eq!(
         service
-            .history(&context, 1, 1)
+            .history(&context, None, 1)
             .await
-            .expect("indexed history should work")
+            .expect("retained history should work")
             .entries[0]
             .version,
-        1
+        3
     );
+    assert!(service.history(&context, Some(1), 1).await.is_err());
     let _ = fs::remove_dir_all(root).await;
 }
 
 #[tokio::test]
-async fn bounds_recent_history_and_detects_archive_tampering() {
+async fn bounds_recent_history_without_creating_archive_artifacts() {
     let root = temp_root("history");
     fs::create_dir_all(&root).await.expect("root should create");
     fs::write(
@@ -242,98 +388,73 @@ async fn bounds_recent_history_and_detects_archive_tampering() {
         .await
         .expect("manifest should read");
     let manifest = parse_manifest(&manifest_text).expect("manifest should parse");
-    assert_eq!(manifest.history.recent.len(), 3);
+    assert_eq!(manifest.history.recent.len(), RECENT_HISTORY_LIMIT);
     assert_eq!(
-        manifest.history.archived_through,
-        (RECENT_HISTORY_LIMIT * 2) as u64
+        manifest.history.omitted_through,
+        (RECENT_HISTORY_LIMIT + 3) as u64
     );
-    let archive_ref = manifest.history.archive.expect("archive should exist");
-    let mut archive_entries = fs::read_dir(
-        root.join(AGENT_CONTRACT_DIR_NAME)
-            .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME),
-    )
-    .await
-    .expect("history directory should read");
-    let mut archive_count = 0;
-    while let Some(entry) = archive_entries
-        .next_entry()
-        .await
-        .expect("archive entry should read")
-    {
-        if !entry.file_name().to_string_lossy().starts_with("index-") {
-            archive_count += 1;
-        }
-    }
-    assert_eq!(archive_count, 2);
-    let first_page = service
-        .history(&context, 1, RECENT_HISTORY_LIMIT)
-        .await
-        .expect("first history page should load");
-    let second_page = service
-        .history(
-            &context,
-            first_page.next_from_version.expect("next page"),
-            RECENT_HISTORY_LIMIT,
+    assert_eq!(manifest.history.archived_through, 0);
+    assert!(manifest.history.archive.is_none());
+    assert!(manifest.history.index.is_none());
+    assert!(
+        !fs::try_exists(
+            root.join(AGENT_CONTRACT_DIR_NAME)
+                .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME)
         )
         .await
-        .expect("second history page should load");
-    assert_eq!(first_page.entries.len(), RECENT_HISTORY_LIMIT);
-    assert_eq!(first_page.through_version + 1, second_page.from_version);
+        .expect("history path should be inspectable")
+    );
+    let retained = service
+        .history(&context, None, RECENT_HISTORY_LIMIT)
+        .await
+        .expect("default history page should start at the retained boundary");
+    assert_eq!(retained.entries.len(), RECENT_HISTORY_LIMIT);
+    assert_eq!(retained.omitted_through, (RECENT_HISTORY_LIMIT + 3) as u64);
+    assert_eq!(
+        retained.earliest_available_version,
+        retained.omitted_through + 1
+    );
+    let error = service
+        .history(&context, Some(1), 1)
+        .await
+        .expect_err("omitted history must not be synthesized");
+    assert!(error.to_string().contains("no longer retained"));
     assert!(
         service
-            .history(&context, 1, MAX_HISTORY_PAGE_SIZE + 1)
+            .history(&context, Some(1), MAX_HISTORY_PAGE_SIZE + 1)
             .await
             .is_err()
     );
 
-    let head_archive_text =
-        fs::read_to_string(root.join(AGENT_CONTRACT_DIR_NAME).join(&archive_ref.r#ref))
-            .await
-            .expect("head archive should read");
-    let head_archive = serde_norway::from_str::<KnowledgeMapHistoryArchive>(&head_archive_text)
-        .expect("head archive should parse");
-    let older_ref = head_archive.previous.expect("older archive should exist");
-    let archive_path = root.join(AGENT_CONTRACT_DIR_NAME).join(&older_ref.r#ref);
-    fs::remove_file(&archive_path)
-        .await
-        .expect("archive should be removed");
     let shown = service
         .show(&context, None)
         .await
-        .expect("default show must not load old archives");
+        .expect("default show should expose only retained history");
     assert!(!shown.map.history.complete);
     assert_eq!(
-        shown.map.history.archived_through,
-        (RECENT_HISTORY_LIMIT * 2) as u64
+        shown.map.history.omitted_through,
+        (RECENT_HISTORY_LIMIT + 3) as u64
     );
     service
         .route(&context, "build".to_owned())
         .await
-        .expect("route must not load old archives");
-    let head_page = service
-        .history(&context, head_archive.from_version, RECENT_HISTORY_LIMIT)
-        .await
-        .expect("a page in the head archive must not load older chunks");
-    assert_eq!(head_page.entries[0].version, head_archive.from_version);
-    assert!(service.history(&context, 1, 1).await.is_err());
+        .expect("route should not depend on omitted history");
     let validation = service.validate(&context).await.expect("validate");
-    assert!(!validation.valid);
-    assert!(validation.diagnostics[0].contains(&older_ref.r#ref));
-    assert!(validation.diagnostics[0].contains(&older_ref.digest));
-    let mutation = service
+    assert!(validation.valid, "{:?}", validation.diagnostics);
+    service
         .add_source(
             &context,
             KnowledgeMapSourceAddRequest {
-                id: "after-tamper".to_owned(),
+                id: "after-compaction".to_owned(),
                 topic: "build".to_owned(),
                 kind: KnowledgeMapSourceKind::Doc,
-                uri: "docs/tamper.md".to_owned(),
+                uri: "docs/history.md".to_owned(),
                 source_scope: Some("repo".to_owned()),
                 description: None,
             },
         )
-        .await;
-    assert!(mutation.is_err(), "mutation must verify archived history");
+        .await
+        .expect("mutation should advance the bounded window");
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -366,10 +487,10 @@ async fn legacy_show_returns_only_the_recent_history_window() {
         .expect("show should work");
 
     assert_eq!(shown.map.history.recent.len(), RECENT_HISTORY_LIMIT);
-    assert_eq!(shown.map.history.archived_through, 5);
+    assert_eq!(shown.map.history.omitted_through, 5);
     assert!(!shown.map.history.complete);
     let first_page = service
-        .history(&context, 1, 3)
+        .history(&context, Some(1), 3)
         .await
         .expect("legacy history should remain pageable");
     assert_eq!(
@@ -380,80 +501,6 @@ async fn legacy_show_returns_only_the_recent_history_window() {
             .collect::<Vec<_>>(),
         [1, 2, 3]
     );
-    let _ = fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
-async fn history_pages_reject_digest_valid_noncontiguous_archive_entries() {
-    let root = temp_root("invalid-history-page");
-    fs::create_dir_all(&root).await.expect("root should create");
-    let service = KnowledgeMapService::new(root.clone());
-    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
-    service.init(&context).await.expect("init should work");
-    let manifest_text = fs::read_to_string(service.map_path())
-        .await
-        .expect("manifest should read");
-    let mut manifest = parse_manifest(&manifest_text).expect("manifest should parse");
-    let mut entries = (1..=RECENT_HISTORY_LIMIT as u64)
-        .map(|version| crate::domain::KnowledgeMapHistoryEntry {
-            version,
-            action: "fixture".to_owned(),
-            actor: "test".to_owned(),
-            summary: format!("History entry {version}"),
-        })
-        .collect::<Vec<_>>();
-    entries[5].version = 5;
-    let archive = KnowledgeMapHistoryArchive {
-        schema_version: ARTIFACT_SCHEMA_VERSION,
-        from_version: 1,
-        through_version: RECENT_HISTORY_LIMIT as u64,
-        previous: None,
-        entries,
-    };
-    let archive_yaml = serialize_yaml(&archive).expect("archive should serialize");
-    let digest = content_digest(archive_yaml.as_bytes());
-    let relative = format!(
-        "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{digest}.yaml",
-        archive.from_version, archive.through_version
-    );
-    fs::create_dir_all(
-        root.join(AGENT_CONTRACT_DIR_NAME)
-            .join(KNOWLEDGE_MAP_HISTORY_DIR_NAME),
-    )
-    .await
-    .expect("history directory should create");
-    fs::write(
-        root.join(AGENT_CONTRACT_DIR_NAME).join(&relative),
-        archive_yaml,
-    )
-    .await
-    .expect("archive should write");
-    manifest.map_version = RECENT_HISTORY_LIMIT as u64 + 1;
-    manifest.history.archived_through = RECENT_HISTORY_LIMIT as u64;
-    let archive_ref = KnowledgeMapArchiveRef {
-        r#ref: relative,
-        digest,
-    };
-    manifest.history.index = Some(
-        service
-            .append_history_index(None, archive_ref.clone(), &archive)
-            .await
-            .expect("index should publish"),
-    );
-    manifest.history.archive = Some(archive_ref);
-    manifest.history.recent[0].version = manifest.map_version;
-    fs::write(
-        service.map_path(),
-        serialize_yaml(&manifest).expect("manifest should serialize"),
-    )
-    .await
-    .expect("manifest should write");
-
-    let error = service
-        .history(&context, 1, RECENT_HISTORY_LIMIT)
-        .await
-        .expect_err("noncontiguous archive entries must fail");
-    assert!(error.to_string().contains("not contiguous"));
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -573,6 +620,7 @@ async fn writer_lock_ignore_contract_is_target_local_preserved_and_idempotent() 
             .count(),
         1
     );
+    assert_eq!(content.matches("/topics/*.retired\n").count(), 1);
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -696,6 +744,9 @@ async fn cleanup_preserves_an_old_staging_inode_while_its_initializer_is_active(
             .await
             .expect("active staging path check")
     );
+    // Match the production guard's explicit unlock: concurrently spawned children
+    // can briefly inherit this descriptor and extend a drop-only lock lifetime.
+    fs2::FileExt::unlock(&prepared).expect("initializer should release its staging lock");
     drop(prepared);
     cleanup_transition_locks(&lock_path, Duration::ZERO);
     assert!(

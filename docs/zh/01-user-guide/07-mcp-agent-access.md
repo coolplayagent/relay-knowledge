@@ -81,7 +81,7 @@ MCP tool surface 当前包括:
 - 已授权代码库理解视图。
 - 已授权代码影响分析。
 
-Agent kind 选择复用现有产品 kind，而不是新增一套 MCP taxonomy。`relay_code_query` 接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 和 `sbom`。`relay_software_query` 接受 `dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design` 和 `all`。`relay_codebase_view` 接受 `architecture_layers`、`business_domains`、`dependency_tour`、`process_flow` 和 `affected_scope`，并接受与 CLI 一致的短横线别名。为方便 agent 调用，singular alias 会被接受；`configuration` 映射到软件 `relationships`，`model` 或 `models` 映射到软件 `design`；配置驱动 feature flag 仍通过 `relay_code_feature_flags` 查询。
+Agent kind 选择复用现有产品 kind，而不是新增一套 MCP taxonomy。`relay_code_query` 接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 和 `sbom`。`relay_software_query` 接受 `dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design`、`systems`、`apis`、`resources`、`tests`、`deployments`、`releases`、`statements`、`conflicts` 和 `all`；可选 `export_profile` 为 `spdx-3`、`cyclonedx-1.7` 或 `prov-o`，设置后返回标准导出 envelope 并忽略 kind。`relay_codebase_view` 接受 `architecture_layers`、`business_domains`、`dependency_tour`、`process_flow` 和 `affected_scope`，并接受与 CLI 一致的短横线别名。为方便 agent 调用，singular alias 会被接受；`configuration` 映射到软件 `relationships`，`model` 或 `models` 映射到软件 `design`；配置驱动 feature flag 仍通过 `relay_code_feature_flags` 查询。
 
 `relay_retrieve_context` 返回带 `indexes`、`index_cursors`、`index_refresh` 和 `context_pack.provenance_trace` 诊断的 GraphRAG context，便于 agent 在信任派生 context 前检查 BM25、semantic、vector、scoped cursor lag、cited evidence、visited-but-uncited context、ranking contributions、stale/degraded 状态和授权裁剪。
 

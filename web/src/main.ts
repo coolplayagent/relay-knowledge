@@ -10,6 +10,7 @@ import { operationsSection } from "./operations_panel.js";
 import { providersSection } from "./providers.js";
 import { homeQueryEntry, type HomeQueryCallbacks } from "./home_query.js";
 import { settingsSection } from "./settings.js";
+import { softwareGraphSection } from "./software_graph.js";
 import { maxIndexLag } from "./operations.js";
 import { currentTheme, initializeTheme, toggleTheme } from "./theme.js";
 import { element, icon, sectionShell, statusPill, textElement, type Tone } from "./ui.js";
@@ -24,6 +25,7 @@ type PageId =
   | "status"
   | "readiness"
   | "graph"
+  | "software"
   | "providers"
   | "operations"
   | "indexes"
@@ -58,6 +60,7 @@ const PAGES: PageLink[] = [
   { id: "status", label: "Status" },
   { id: "readiness", label: "Readiness" },
   { id: "graph", label: "Graph" },
+  { id: "software", label: "Software" },
   { id: "providers", label: "Providers" },
   { id: "operations", label: "Operations" },
   { id: "indexes", label: "Indexes" },
@@ -185,6 +188,8 @@ function pageContent(
       return readinessSection(status, health, service);
     case "graph":
       return graphCanvasSection();
+    case "software":
+      return softwareGraphSection();
     case "providers":
       return providersSection(status, health);
     case "operations":

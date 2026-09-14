@@ -115,3 +115,59 @@ fn knowledge_map_topic_page_uses_only_root_authorized_v2_shards() {
     assert_eq!(topics[0].name, "Build");
     assert_eq!(topics[0].source_path, ".knowledge/topics/current.yaml");
 }
+
+#[test]
+fn topic_queries_prioritize_specific_documents_before_root_overviews() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE software_topics (
+                topic_id TEXT PRIMARY KEY,
+                repository_id TEXT NOT NULL,
+                source_scope TEXT NOT NULL,
+                name TEXT NOT NULL,
+                topic_kind TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                line_start INTEGER NOT NULL,
+                line_end INTEGER NOT NULL,
+                created_graph_version INTEGER NOT NULL
+            );
+            CREATE TABLE software_files (
+                source_scope TEXT NOT NULL,
+                path TEXT NOT NULL,
+                language_id TEXT NOT NULL
+            );
+            INSERT INTO software_files VALUES
+                ('scope', 'README.md', 'markdown'),
+                ('scope', 'docs/architecture.md', 'markdown'),
+                ('scope', '.knowledge/knowledge-map.yaml', 'yaml');
+            INSERT INTO software_topics VALUES
+                ('root', 'repo', 'scope', 'Getting Started', 'document_heading',
+                 'README.md', 1, 2, 1),
+                ('architecture', 'repo', 'scope', 'Runtime Architecture', 'document_heading',
+                 'docs/architecture.md', 1, 2, 1),
+                ('knowledge', 'repo', 'scope', 'runtime', 'knowledge_map_topic',
+                 '.knowledge/knowledge-map.yaml', 3, 3, 1);
+            ",
+        )
+        .expect("topic rows should seed");
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+            .expect("selector should validate"),
+        crate::domain::SoftwareGlobalKind::Topics,
+        crate::domain::FreshnessPolicy::AllowStale,
+        10,
+    )
+    .expect("request should validate");
+
+    let topics = topics_for_scope(&connection, "scope", &request, 10).expect("topics should load");
+
+    assert_eq!(
+        topics
+            .iter()
+            .map(|topic| topic.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Runtime Architecture", "runtime", "Getting Started"]
+    );
+}

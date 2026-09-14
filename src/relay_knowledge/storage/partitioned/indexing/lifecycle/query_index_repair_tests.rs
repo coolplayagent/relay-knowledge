@@ -3,8 +3,9 @@
 use crate::{
     domain::code_query_index_repair,
     storage::{
-        CodeIndexFinalizationStep, CodeIndexPublicationTarget, CodeIndexTaskClaimRequest,
-        CodeRepositoryStore, PartitionedSqliteKnowledgeStore,
+        CodeIndexFinalizationStep, CodeIndexPublicationStore as _, CodeIndexPublicationTarget,
+        CodeIndexTaskClaimRequest, CodeIndexTaskStore as _, PartitionedSqliteKnowledgeStore,
+        RepositoryCatalogStore as _, SoftwareProjectionStore as _,
     },
 };
 use rusqlite::{Connection, params};

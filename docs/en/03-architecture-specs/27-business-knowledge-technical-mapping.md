@@ -6,7 +6,7 @@ This chapter defines how repository-authored business knowledge enters the versi
 
 ## 1. Authority and Data Flow
 
-`.knowledge/knowledge-map.yaml` stores only the `business-knowledge` topic, the `repository-business-glossary` file source, and route order. Business definitions live in version-controlled `.knowledge/business-glossary.yaml`:
+`knowledge/knowledge-map.yaml` stores only the `business-knowledge` topic, the `repository-business-glossary` file source, and route order. Business definitions live in version-controlled `knowledge/glossary/business-glossary.yaml`, governed by the Knowledge Map `glossary` directory entry:
 
 ```yaml
 schema_version: 1
@@ -44,7 +44,7 @@ Hard limits are 4 MiB per file, 256 domains, 10,000 terms, 32 aliases and 64 map
 
 ## 3. Projection, Resolution, and Publication Fence
 
-The repository indexer reads only active repository-scoped files authorized by the current route at the same immutable Git commit. A v2 topic shard must pass manifest digest, identity, and source-order validation. Absolute paths, parent traversal, backslashes, missing blobs, oversized content, and invalid schema fail the durable attempt. A live non-Git filesystem glossary is not represented as a committed business fact.
+The repository indexer reads only active repository-scoped files authorized by the current route at the same immutable Git commit. A v4 topic shard must pass manifest digest, identity, and source-order validation. Absolute paths, parent traversal, backslashes, missing blobs, oversized content, and invalid schema fail the durable attempt. A live non-Git filesystem glossary is not represented as a committed business fact.
 
 Business, code, and software projections share one durable task, lease, attempt, and publication fence. The storage boundary owns business reads and writes through a dedicated `BusinessKnowledgeStore` contract instead of enlarging the code-store contract. Code facts are staged first, followed by the business projection and software projection; one transaction then publishes business/software status and the code scope as fresh. An old lease or mismatched target cannot perform the replacement, and receipts or fast paths cannot report freshness without a matching fresh business status.
 
@@ -73,6 +73,16 @@ relay-knowledge repo business <alias> --kind all --query MRR --domain revenue --
 Opening an older runtime database adds typed entity-identity columns and business projection tables. Existing code/software facts and label-only entities are not rewritten. An old scope without a fresh business status cannot use the full-index fast path and must rebuild from Git authority through normal `repo index` or `repo update`. Binary-only rollback may ignore the new tables but cannot serve the new projection; exact rollback requires a transaction-consistent pre-upgrade backup of the control database and every shard.
 
 Acceptance covers map initialization and upgrade, path/digest/schema bounds, homonyms, acronyms, competing definitions, fenced publication and replay, stale repair, resolved and unresolved mappings, canonical exact retrieval, business-to-code context, declared-domain views, and a fixed-commit end-to-end loop. Formula execution, OWL/RDF inference, external Wiki/database ingestion, and Web glossary editing are outside v1.
+
+Issue #391
+
+The response removes the mixed `resolution` and top-level business `status`. `request.mode` is derived from `query` as `list` or `search`; inbound mode values are ignored. `result.status` is `matched`, `no_match`, `ambiguous` or `unavailable`. `result.match_type` is `exact` or `partial` only for matching searches. Returned term/mapping counts describe the output slice; `truncated` reports pagination. Kind eligibility and domain/text matching precede classification and limit, so unmapped terms do not consume mapping-query slots and cross-domain exact ambiguity survives truncation. A domain name shared by multiple domain IDs does not disambiguate; use a unique ID.
+
+`knowledge.state` uses scope-wide persisted counts: `no_sources`, `empty_glossary`, `terms_only` or `mapped`. The same object retains counts, repository/commit/scope identity, graph version and `stale`. `mapped` means at least one declared mapping, not complete coverage or resolved targets; per-mapping `resolution_state` is unchanged. `graph-only` yields `unknown` knowledge and `unavailable` results; zero placeholder counts do not prove an empty glossary. No sources yields `unavailable`; an indexed empty glossary yields `no_match`. With `allow-stale`, a result may be `matched` and `knowledge.stale=true`. Storage failures still return errors.
+
+Diagnostics provide reason-specific `next_steps`: inspect routes and committed files for no sources, author/commit/re-index for empty glossaries or missing mappings, adjust filters for no match, specify a domain for ambiguity, and re-index/change freshness for stale or unread projections. Authoring reasons include a `bootstrap` schema resource. Default paths do not prove which legacy/additional sources were indexed. Queries never scan workspace YAML. CLI, HTTP and MCP share this contract; context still consumes the same commit-bound terms and mappings. This response contract change needs no database migration.
+
+Domain `business::result` owns readiness contracts. SQLite `business::selection` owns eligibility, matching and pre-pagination classification with adjacent tests. API `operations::business_guidance` explains outcomes; `application::knowledge::map::business_bootstrap` owns safe authoring initialization.
 
 ---
 

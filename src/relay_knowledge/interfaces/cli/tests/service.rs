@@ -9,8 +9,9 @@ use crate::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositorySetMemberSeed,
-        CodeRepositorySetSeed, CodeRepositoryStore, SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskSeed,
+        CodeIndexTaskStore as _, CodeRepositorySetMemberSeed, CodeRepositorySetSeed,
+        CodeRepositorySetStore as _, RepositoryCatalogStore as _, SqliteGraphStore,
     },
 };
 
@@ -304,6 +305,8 @@ fn snapshot(repository_id: &str, source_scope: &str) -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),

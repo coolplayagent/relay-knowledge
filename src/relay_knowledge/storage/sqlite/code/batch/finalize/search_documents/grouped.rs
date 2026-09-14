@@ -12,9 +12,7 @@ use crate::{
 
 use super::super::super::super::search::require_consecutive_search_rowids;
 use super::super::pages::{checkpoint_row_bytes, require_quantum_bytes};
-
-#[path = "grouped_sql.rs"]
-mod sql;
+use super::grouped_sql as sql;
 
 #[cfg(test)]
 #[path = "grouped_plan_tests.rs"]

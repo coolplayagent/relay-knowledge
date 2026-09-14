@@ -132,7 +132,7 @@ pub struct BusinessKnowledgeStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BusinessKnowledgeProjection {
     pub status: BusinessKnowledgeStatus,
-    pub resolution: super::BusinessKnowledgeResolution,
+    pub result: super::BusinessKnowledgeResult,
     pub domains: Vec<BusinessDomain>,
     pub terms: Vec<BusinessTerm>,
 }

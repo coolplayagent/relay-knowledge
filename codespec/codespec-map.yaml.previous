@@ -1,0 +1,84 @@
+schema_version: 4
+artifact_kind: map
+map_type: codespec
+map_version: 6
+updated_at: unix:1788492340
+directories:
+- directory: requirements
+  purpose: Product requirements and acceptance criteria.
+  content_scope:
+  - codespec/requirements/**
+  key_files:
+  - codespec/requirements/README.md
+  load_hint: on_demand
+  relations:
+  - kind: depends_on
+    target: knowledge:domain
+  update_rule: reviewed
+- directory: design
+  purpose: Architecture and implementation design records.
+  content_scope:
+  - codespec/design/**
+  key_files:
+  - codespec/design/README.md
+  - codespec/design/partitioned-sqlite-catalog-read-fast-path.md
+  - codespec/design/durable-worktree-delta-batching.md
+  - codespec/design/software-global-evidence-priority.md
+  load_hint: task_match
+  relations: []
+  update_rule: reviewed
+- directory: api
+  purpose: Public interface and schema contracts.
+  content_scope:
+  - codespec/api/**
+  key_files:
+  - codespec/api/README.md
+  load_hint: on_demand
+  relations: []
+  update_rule: reviewed
+- directory: test
+  purpose: Verification strategy, fixtures, and evidence.
+  content_scope:
+  - codespec/test/**
+  key_files:
+  - codespec/test/README.md
+  load_hint: on_demand
+  relations: []
+  update_rule: reviewed
+- directory: decisions
+  purpose: Durable architecture and product decisions.
+  content_scope:
+  - codespec/decisions/**
+  key_files:
+  - codespec/decisions/README.md
+  load_hint: on_demand
+  relations: []
+  update_rule: reviewed
+topics: []
+history:
+  omitted_through: 0
+  recent:
+  - version: 1
+    action: init
+    actor: cli
+    summary: Created CodeSpec repository map contract.
+  - version: 2
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'requirements'.
+  - version: 3
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'design'.
+  - version: 4
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'test'.
+  - version: 5
+    action: directory.update
+    actor: cli
+    summary: Updated governed directory 'design'.
+  - version: 6
+    action: history.compact
+    actor: cli
+    summary: Migrated repository map to bounded recent-only history storage.

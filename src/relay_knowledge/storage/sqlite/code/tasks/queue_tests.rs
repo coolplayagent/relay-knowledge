@@ -10,8 +10,9 @@ use crate::{
         CodeIndexMode, CodeIndexResourceBudget, CodeIndexTaskState, CodeRepositoryRegistration,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositoryStore,
-        CodeScopeRetentionRequest, SqliteGraphStore, StorageError,
+        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeIndexTaskStore as _,
+        CodeScopeRetentionRequest, CodeScopeRetentionStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore, StorageError,
     },
 };
 use tokio::sync::Barrier;

@@ -8,7 +8,7 @@ use crate::{
         CodeIndexCheckpoint, CodeIndexMode, CodeIndexSession, CodeIndexSummary,
         code_incremental_clone, code_query_index_repair, code_reference_resolution,
         code_reference_resolution_query_index_repair, code_reference_search_query_index_repair,
-        code_reference_search_rebuild,
+        code_reference_search_rebuild, code_software_projection_phase,
     },
     storage::KnowledgeStore,
 };
@@ -28,10 +28,9 @@ pub(super) enum IncrementalSnapshotApply {
 }
 
 pub(super) fn checkpoint_skips_parser(state: &str) -> bool {
-    matches!(
-        state,
-        "finalizing:software_projection" | "finalizing:partitioned_publish" | "completed"
-    ) || code_query_index_repair(state).is_some()
+    matches!(state, "finalizing:partitioned_publish" | "completed")
+        || code_software_projection_phase(state).is_some()
+        || code_query_index_repair(state).is_some()
         || code_reference_resolution(state).is_some()
         || code_reference_resolution_query_index_repair(state).is_some()
         || code_reference_search_query_index_repair(state).is_some()

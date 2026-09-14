@@ -131,6 +131,8 @@ fn snapshot() -> CodeIndexSnapshot {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         workspaces: Vec::new(),
@@ -149,6 +151,9 @@ fn durable_query_index_repairs_skip_parser_restart_for_every_resume_phase() {
     assert!(!checkpoint_skips_parser("indexing"));
     assert!(!checkpoint_skips_parser("finalizing:resolve_imports"));
     assert!(checkpoint_skips_parser("finalizing:software_projection"));
+    assert!(checkpoint_skips_parser(
+        "finalizing:software_projection:v1:relationships"
+    ));
     assert!(checkpoint_skips_parser("finalizing:partitioned_publish"));
     assert!(checkpoint_skips_parser("completed"));
     for stage in [

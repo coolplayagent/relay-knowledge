@@ -19,6 +19,11 @@ impl QosHttpClientError {
     pub fn is_timeout(&self) -> bool {
         matches!(self, Self::Transport(error) if error.is_timeout())
     }
+
+    /// Returns whether outbound admission rejected the request before I/O.
+    pub fn is_qos_rejected(&self) -> bool {
+        matches!(self, Self::QosRejected(_))
+    }
 }
 
 impl fmt::Display for QosHttpClientError {
@@ -36,73 +41,126 @@ impl Error for QosHttpClientError {}
 
 /// Reqwest response that keeps the QoS request permit until the body is consumed.
 pub struct QosHttpResponse {
-    inner: reqwest::Response,
-    qos: Option<QosRuntime>,
+    inner: Option<reqwest::Response>,
+    qos: QosRuntime,
     _permit: Option<QosPermit>,
+    cancellation: CancellationGuard,
 }
 
 impl QosHttpResponse {
-    fn with_permit(inner: reqwest::Response, qos: QosRuntime, permit: QosPermit) -> Self {
+    fn with_permit(
+        inner: reqwest::Response,
+        qos: QosRuntime,
+        permit: QosPermit,
+        cancellation: CancellationGuard,
+    ) -> Self {
         Self {
-            inner,
-            qos: Some(qos),
+            inner: Some(inner),
+            qos,
             _permit: Some(permit),
+            cancellation,
         }
     }
 
-    fn without_permit(inner: reqwest::Response, qos: QosRuntime) -> Self {
+    fn without_permit(
+        inner: reqwest::Response,
+        qos: QosRuntime,
+        cancellation: CancellationGuard,
+    ) -> Self {
         Self {
-            inner,
-            qos: Some(qos),
+            inner: Some(inner),
+            qos,
             _permit: None,
-        }
-    }
-
-    pub fn unmetered(inner: reqwest::Response) -> Self {
-        Self {
-            inner,
-            qos: None,
-            _permit: None,
+            cancellation,
         }
     }
 
     pub fn status(&self) -> reqwest::StatusCode {
-        self.inner.status()
+        self.inner.as_ref().expect("response is available").status()
     }
 
     pub fn content_length(&self) -> Option<u64> {
-        self.inner.content_length()
+        self.inner
+            .as_ref()
+            .expect("response is available")
+            .content_length()
     }
 
-    pub async fn json<T>(self) -> Result<T, reqwest::Error>
+    pub async fn json<T>(mut self) -> Result<T, reqwest::Error>
     where
         T: DeserializeOwned,
     {
-        let qos = self.qos.clone();
-        record_body_timeout(qos.as_ref(), self.inner.json::<T>().await)
+        let result = self
+            .inner
+            .take()
+            .expect("response is available")
+            .json::<T>()
+            .await;
+        self.cancellation.complete();
+        record_body_timeout(&self.qos, result)
     }
 
-    pub async fn text(self) -> Result<String, reqwest::Error> {
-        let qos = self.qos.clone();
-        record_body_timeout(qos.as_ref(), self.inner.text().await)
+    pub async fn text(mut self) -> Result<String, reqwest::Error> {
+        let result = self
+            .inner
+            .take()
+            .expect("response is available")
+            .text()
+            .await;
+        self.cancellation.complete();
+        record_body_timeout(&self.qos, result)
     }
 
-    pub async fn bytes(self) -> Result<Vec<u8>, reqwest::Error> {
-        let qos = self.qos.clone();
-        record_body_timeout(
-            qos.as_ref(),
-            self.inner.bytes().await.map(|bytes| bytes.to_vec()),
-        )
+    pub async fn bytes(mut self) -> Result<Vec<u8>, reqwest::Error> {
+        let result = self
+            .inner
+            .take()
+            .expect("response is available")
+            .bytes()
+            .await
+            .map(|bytes| bytes.to_vec());
+        self.cancellation.complete();
+        record_body_timeout(&self.qos, result)
     }
 
     pub async fn chunk(&mut self) -> Result<Option<Vec<u8>>, reqwest::Error> {
-        record_body_timeout(
-            self.qos.as_ref(),
-            self.inner
-                .chunk()
-                .await
-                .map(|chunk| chunk.map(|bytes| bytes.to_vec())),
-        )
+        let result = self
+            .inner
+            .as_mut()
+            .expect("response is available")
+            .chunk()
+            .await
+            .map(|chunk| chunk.map(|bytes| bytes.to_vec()));
+        if !matches!(&result, Ok(Some(_))) {
+            self.cancellation.complete();
+        }
+        record_body_timeout(&self.qos, result)
+    }
+}
+
+struct CancellationGuard {
+    qos: QosRuntime,
+    completed: bool,
+}
+
+impl CancellationGuard {
+    fn new(qos: QosRuntime) -> Self {
+        Self {
+            qos,
+            completed: false,
+        }
+    }
+
+    fn complete(&mut self) {
+        self.completed = true;
+    }
+}
+
+impl Drop for CancellationGuard {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.qos.record_cancelled();
+        }
     }
 }
 
@@ -119,9 +177,16 @@ pub async fn send_request_with_qos(
     let permit = qos
         .admit_request(policy)
         .map_err(QosHttpClientError::QosRejected)?;
+    let mut cancellation = CancellationGuard::new(qos.clone());
     match request.send().await {
-        Ok(response) => Ok(QosHttpResponse::with_permit(response, qos.clone(), permit)),
+        Ok(response) => Ok(QosHttpResponse::with_permit(
+            response,
+            qos.clone(),
+            permit,
+            cancellation,
+        )),
         Err(error) => {
+            cancellation.complete();
             if error.is_timeout() {
                 qos.record_timed_out();
             }
@@ -134,9 +199,15 @@ async fn send_request_without_new_permit(
     qos: &QosRuntime,
     request: reqwest::RequestBuilder,
 ) -> Result<QosHttpResponse, QosHttpClientError> {
+    let mut cancellation = CancellationGuard::new(qos.clone());
     match request.send().await {
-        Ok(response) => Ok(QosHttpResponse::without_permit(response, qos.clone())),
+        Ok(response) => Ok(QosHttpResponse::without_permit(
+            response,
+            qos.clone(),
+            cancellation,
+        )),
         Err(error) => {
+            cancellation.complete();
             if error.is_timeout() {
                 qos.record_timed_out();
             }
@@ -146,13 +217,11 @@ async fn send_request_without_new_permit(
 }
 
 fn record_body_timeout<T>(
-    qos: Option<&QosRuntime>,
+    qos: &QosRuntime,
     result: Result<T, reqwest::Error>,
 ) -> Result<T, reqwest::Error> {
     if matches!(&result, Err(error) if error.is_timeout()) {
-        if let Some(qos) = qos {
-            qos.record_timed_out();
-        }
+        qos.record_timed_out();
     }
     result
 }

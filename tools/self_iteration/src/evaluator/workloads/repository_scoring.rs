@@ -83,6 +83,51 @@ pub(super) fn score_query_case(
     }
 }
 
+pub(super) fn score_framework_case(
+    repo_name: &str,
+    case: &Value,
+    result: &CommandResult,
+) -> CaseObservation {
+    let objective = repository_case_objective(case);
+    if !result.passed() {
+        return failed_case(case, repo_name, &objective, result);
+    }
+    let payload = match parse_json_case_output(case, repo_name, &objective, result) {
+        Ok(payload) => payload,
+        Err(observation) => return *observation,
+    };
+    let mut hits = score_array_field(&payload["graph"], "nodes").to_vec();
+    hits.extend(
+        score_array_field(&payload["graph"], "edges")
+            .iter()
+            .cloned(),
+    );
+    let expected = score_array_field(case, "expected");
+    let forbidden = score_array_field(case, "forbidden");
+    let payload_failures = payload_constraint_failures(case, &payload, hits.len());
+    let mut assessment = assess_ranked_hits(case, &hits, expected, forbidden);
+    assessment.failures.extend(payload_failures.clone());
+    if !payload_failures.is_empty() {
+        assessment.details = format!(
+            "{} payload_failures={}",
+            assessment.details,
+            payload_failures.join("; ")
+        );
+    }
+    CaseObservation {
+        case_id: string_or(case, "id", "framework_case").to_owned(),
+        repository: repo_name.to_owned(),
+        passed: assessment.failures.is_empty(),
+        guardrail: is_guardrail_case(case),
+        rank: assessment.rank,
+        max_rank: number_or(case, "max_rank", 1) as usize,
+        false_positive_count: assessment.false_positive_count,
+        message: format!("framework_results={} {}", hits.len(), assessment.details),
+        objective,
+        score_override: Some(assessment.score),
+    }
+}
+
 pub(super) fn score_software_case(
     repo_name: &str,
     case: &Value,
@@ -171,6 +216,16 @@ fn software_hits_for_kind(payload: &Value, kind: &str) -> Vec<Value> {
         "build" => append_software_hits(payload, "build_targets", "build_target", &mut hits),
         "iac" => append_software_hits(payload, "iac_resources", "iac_resource", &mut hits),
         "design" => append_software_hits(payload, "design_elements", "design_element", &mut hits),
+        "systems" | "apis" | "resources" | "tests" | "deployments" | "releases" => {
+            append_software_hits(payload, "entities", "entity", &mut hits);
+        }
+        "statements" => {
+            append_software_hits(payload, "statements", "statement", &mut hits);
+        }
+        "conflicts" => {
+            append_software_hits(payload, "statements", "statement", &mut hits);
+            append_software_hits(payload, "diagnostics", "diagnostic", &mut hits);
+        }
         _ => {
             append_software_hits(payload, "components", "component", &mut hits);
             append_software_hits(payload, "dependency_usages", "dependency_usage", &mut hits);
@@ -181,6 +236,9 @@ fn software_hits_for_kind(payload: &Value, kind: &str) -> Vec<Value> {
             append_software_hits(payload, "build_targets", "build_target", &mut hits);
             append_software_hits(payload, "iac_resources", "iac_resource", &mut hits);
             append_software_hits(payload, "design_elements", "design_element", &mut hits);
+            append_software_hits(payload, "entities", "entity", &mut hits);
+            append_software_hits(payload, "statements", "statement", &mut hits);
+            append_software_hits(payload, "diagnostics", "diagnostic", &mut hits);
         }
     }
     hits

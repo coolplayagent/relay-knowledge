@@ -20,9 +20,10 @@ use relay_knowledge::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeRepositorySetMemberSeed, CodeRepositorySetRefreshPublication,
-        CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,
-        CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositoryStore,
+        CodeIndexPublicationStore as _, CodeRepositorySetMemberSeed,
+        CodeRepositorySetRefreshPublication, CodeRepositorySetRefreshTaskClaimRequest,
+        CodeRepositorySetRefreshTaskCompletion, CodeRepositorySetRefreshTaskSeed,
+        CodeRepositorySetSeed, CodeRepositorySetStore as _, RepositoryCatalogStore as _,
         SqliteGraphStore,
     },
 };
@@ -223,6 +224,8 @@ fn snapshot_fixture(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![RepositoryCodeChunkRecord {
             repository_id: repository_id.to_owned(),

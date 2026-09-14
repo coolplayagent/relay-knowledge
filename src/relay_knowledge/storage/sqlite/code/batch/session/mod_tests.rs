@@ -9,7 +9,10 @@ use crate::{
         CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
         RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore, StorageError,
+    },
 };
 
 #[tokio::test]
@@ -732,6 +735,8 @@ pub(super) fn batch(source_scope: &str, batch_index: usize) -> CodeIndexBatch {
         imports: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),

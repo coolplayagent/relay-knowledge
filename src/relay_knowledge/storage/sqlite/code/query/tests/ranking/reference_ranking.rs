@@ -5,7 +5,9 @@ use crate::{
         RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
         RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
-    storage::CodeRepositoryStore,
+    storage::CodeIndexPublicationStore as _,
+    storage::CodeQueryReadStore as _,
+    storage::RepositoryCatalogStore as _,
     storage::SqliteGraphStore,
 };
 
@@ -50,6 +52,8 @@ async fn scoped_reference_queries_use_resolved_symbol_identity() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![chunk(
             "caller-chunk",
@@ -97,6 +101,8 @@ async fn exact_reference_queries_fall_back_to_chunks_when_reference_facts_are_mi
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![chunk(
             "pipeline-chunk",
@@ -154,6 +160,8 @@ async fn reference_excerpts_prefer_the_reference_line_inside_large_chunks() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![chunk(
             "cache-class-chunk",
@@ -210,6 +218,8 @@ async fn exact_reference_fallback_chunks_rank_usage_context_before_declarations(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -300,6 +310,8 @@ async fn exact_reference_queries_rank_initializer_usage_before_declarations() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -386,6 +398,8 @@ async fn exact_reference_queries_rank_indirect_array_calls_before_array_declarat
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -456,6 +470,8 @@ async fn exact_reference_queries_rank_return_calls_before_assignment_calls() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -530,6 +546,8 @@ async fn exact_reference_queries_rank_type_annotations_before_test_constructors(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -606,6 +624,8 @@ async fn exact_reference_queries_do_not_treat_object_literal_values_as_type_anno
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -704,6 +724,8 @@ async fn exact_reference_queries_rank_exported_parameter_types_before_passive_fi
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![
             chunk(
@@ -751,81 +773,8 @@ async fn exact_reference_queries_rank_exported_parameter_types_before_passive_fi
     assert!(score_for_path(&hits, session_path) > score_for_path(&hits, test_path));
 }
 
-#[tokio::test]
-async fn exact_reference_queries_rank_constructor_calls_before_passive_values() {
-    let registry_path = "src/connector/registry.ts";
-    let runtime_path = "src/connector/runtime.ts";
-    let store = store_with_snapshot(CodeIndexSnapshot {
-        repository_id: "repo".to_owned(),
-        source_scope: TEST_SOURCE_SCOPE.to_owned(),
-        base_resolved_commit_sha: None,
-        resolved_commit_sha: "commit".to_owned(),
-        tree_hash: "tree".to_owned(),
-        path_filters: Vec::new(),
-        language_filters: Vec::new(),
-        full_replace: true,
-        changed_path_count: 2,
-        skipped_unchanged_count: 0,
-        deleted_paths: Vec::new(),
-        tombstones: Vec::new(),
-        files: vec![
-            file("registry-file", registry_path, "typescript"),
-            file("runtime-file", runtime_path, "typescript"),
-        ],
-        symbols: Vec::new(),
-        references: vec![
-            reference_on_line(
-                "registry-value-reference",
-                "registry-file",
-                registry_path,
-                "SaveRequest",
-                None,
-                8,
-            ),
-            reference_on_line(
-                "runtime-constructor-reference",
-                "runtime-file",
-                runtime_path,
-                "SaveRequest",
-                None,
-                20,
-            ),
-        ],
-        imports: Vec::new(),
-        calls: Vec::new(),
-        dependencies: Vec::new(),
-        feature_flags: Vec::new(),
-        routes: Vec::new(),
-        chunks: vec![
-            chunk(
-                "registry-chunk",
-                "registry-file",
-                registry_path,
-                "export const handlers = {\n  save: SaveRequest,\n};",
-                range(7, 9),
-            ),
-            chunk(
-                "runtime-chunk",
-                "runtime-file",
-                runtime_path,
-                "export function run(input: unknown) {\n  return new SaveRequest(input);\n}",
-                range(19, 21),
-            ),
-        ],
-        workspaces: Vec::new(),
-        diagnostics: Vec::new(),
-    })
-    .await;
-
-    let hits = store
-        .search_code(request("SaveRequest", CodeQueryKind::References))
-        .await
-        .expect("reference query should succeed");
-
-    assert_eq!(hits[0].path, runtime_path);
-    assert!(hits[0].excerpt.contains("new SaveRequest"));
-    assert!(score_for_path(&hits, runtime_path) > score_for_path(&hits, registry_path));
-}
+#[path = "reference_ranking/constructor_tests.rs"]
+mod constructor_tests;
 
 fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequest {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())

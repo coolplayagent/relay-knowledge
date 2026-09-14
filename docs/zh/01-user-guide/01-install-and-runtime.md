@@ -18,7 +18,7 @@
 
 > ⚠️ **开发环境限定**：`run.sh` 和 `run.sh --daemon` 仅用于开发环境验证，不可用于生产部署。
 > 长期后台运行必须由 systemd（Linux）、launchd（macOS）或 Windows Service 托管。
-> 生产部署请参阅第 15 章「服务化部署用户指南」。
+> 生产部署请参阅第 14 章「服务化部署指南」。
 
 ```bash
 ./build.sh
@@ -26,9 +26,17 @@
 ./run.sh status
 ./run.sh stop --force
 ./check.sh
+./check.sh --deep
 ```
 
-`build.sh` 构建 `target/release/relay-knowledge` 和 `web/dist`。`run.sh` 只管理本地服务进程，发现缺少产物会提示先运行 `./build.sh`。`check.sh` 执行 fmt、clippy、测试、覆盖率、Web build 和可用时的浏览器集成门。
+`build.sh` 构建 `target/release/relay-knowledge` 和 `web/dist`。`run.sh` 只管理本地服务进程，发现缺少产物会提示先运行 `./build.sh`。`check.sh` 执行文档、fmt、`cargo check`、Clippy、测试、覆盖率、Web build 和可用时的浏览器集成门。`check.sh --deep` 还会执行确定性 benchmark、无 FFI 的 Miri 子集和 AddressSanitizer。deep profile 要求 nightly 组件；缺失时会给出安装命令并失败，不会静默跳过：
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+AddressSanitizer 只支持脚本显式选择的 Linux 与 macOS target；Linux x86_64 CI 是跨开发环境的权威 sanitizer 门禁。
 
 ## 1.2 本地运行
 

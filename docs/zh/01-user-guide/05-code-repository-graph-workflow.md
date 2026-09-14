@@ -72,7 +72,7 @@ relay-knowledge repo index repo --ref <commit-sha> --format json
 
 CLI-shaped Web 索引请求接受可选布尔字段 `reuse_historical`；省略或传 `null` 时保持默认 full-index 行为。100-path 复用预算会分别统计 rename/copy 的 old/new path；历史基线若在 task admission 前被 retention 标为 retiring，则安全回退 full task。
 
-远端服务模式下，先在服务端机器注册仓库并启动 `service run --web`，本地 CLI 再用 `--remote http://host:8791` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问远端索引和查询 API。远端 `repo index` 和 `repo update` 只提交 durable task 并返回 task/status/checkpoint，不在本地 CLI 进程执行 `repo index-worker`；任务由远端 resident master 的 code-index worker pool 消费。远端模式支持 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo context`、`repo feature-flags`、`repo impact`、`repo report`、`repo software` 和 `repo view`，不支持把本机路径注册到远端服务。`repo index --reset` 和 `repo index-worker` 必须在服务端机器执行；远端选中的 CLI 会拒绝这些维护命令，而不是回落到本机状态。
+远端服务模式下，先在服务端机器注册仓库并启动 `service run --web`，本地 CLI 再用 `--remote http://host:8791` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL` 访问远端索引和查询 API。远端 `repo index` 和 `repo update` 只提交 durable task 并返回 task/status/checkpoint，不在本地 CLI 进程执行 `repo index-worker`；任务由远端 resident master 的 code-index worker pool 消费。远端模式支持 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo context`、`repo framework`、`repo feature-flags`、`repo impact`、`repo report`、`repo software`（包括标准导出）和 `repo view`，不支持把本机路径注册到远端服务。`repo index --reset` 和 `repo index-worker` 必须在服务端机器执行；远端选中的 CLI 会拒绝这些维护命令，而不是回落到本机状态。
 
 ```bash
 RELAY_KNOWLEDGE_REMOTE_BASE_URL=http://127.0.0.1:8791 \
@@ -99,6 +99,12 @@ relay-knowledge repo status repo --format json
 已经 fresh 的 full index 仍会立即返回完成态 `summary`。freshness 检查会比较嵌入 `scope_id` 的代码事实版本，因此 SBOM 依赖事实或 Web 路由事实这类抽取面变化即使 Git tree hash 不变，也会要求重建。对于包含 submodule 的 Git scope，freshness key 还会记录 scope 内 gitlink 是从可用 submodule 对象展开，还是因不可用而跳过；因此先前被跳过的 submodule 在后续初始化后会让旧 scope 失效。带 path filter 的 Git freshness probe 只检查与请求 scope 相交的 gitlink；无 scope 时才回退到 whole-tree submodule 状态。增量 `repo update` 现在与 full index 共用 durable task、lease、retry 和 publication 路径；只有 full rebuild 暴露 batch checkpoint，受界 incremental snapshot 则原子发布。本地 CLI 执行一次有界 drain，远端或 watcher 触发的调用则可能留在队列中由常驻 worker 消费；新增文件落在 `external_deps/`、`modules/` 等非 `src/` source root 时会沿用同一 source-layout 策略进入增量索引。
 
 ## 5.4 符号与关系查询
+
+Java 类名调用查询使用已索引的结构化类和直接成员归属：`--query B --kind callers` 汇总指向 B 自身、构造函数和直接成员方法的调用边，`--kind callees` 汇总这些成员发出的调用边。结果保留具体调用方/被调用方法及调用位置。例如 `A.main` 调用 `B.process()` 后，查 B 的 callers 返回 `main calls process`；查 A 的 callers 不会因为 A 出现在调用文本中而误返回这条出边。已匹配的类没有对应方向的边时返回空，不通过全文搜索扩大结果。
+
+此聚合仅适用于短 Java 类名的 `callers` / `callees` 查询，类名按大小写匹配，同名类共同参与汇总。Hybrid 和限定名称查询保持原有搜索行为。不支持按包名限定类进行聚合：现有 Java 限定名事实编码的是源码路径，而非 package 声明。成员归属基于同文件源码范围和直接限定名，嵌套类型的方法、其他类的同名方法、字段及只有名称文本的 unresolved 入边不会混入；不猜测继承成员或动态分派。已记录的 unresolved 出边仍保留其状态。`--query B.process` 继续查询具体方法。路径、语言、生成文件及内联过滤在调用候选上限前生效；路径约束调用发生的位置，callers 的调用方可以位于被查类文件之外。
+
+类查询最多准入 64 个候选类、1,024 条类/成员记录，沿用最多 200 条调用候选和请求结果上限；类解析及调用读取共享约 410 万条 SQLite 指令预算。类/成员或执行预算耗尽明确报告 `class call query incomplete` 容量错误，不静默截断身份集合；可改用成员方法名缩小展开范围。本次读取行为复用现有索引事实，无 schema、事实版本或安装配置变更，已完成的旧索引可直接查询。
 
 混合查询:
 
@@ -148,6 +154,17 @@ Workspace import resolution 是显式启用的索引期能力。API 调用方可
 
 如果候选路径查询不可用、候选文件数、物化字节或单行长度预算耗尽，查询仍返回已有代码图结果，并在 `degraded_reason` 中说明 source fallback 预算或候选路径原因。缩小 `--path`、`--language` 或先确认目标 ref 已 fresh，通常比扩大 `--limit` 更有效。
 
+### Angular/Vue Framework Graph 查询
+
+`repo framework` 把 component/template 语义作为独立 graph 暴露，而不是混入普通 symbol 命中：
+
+```bash
+relay-knowledge repo framework repo --framework angular --kind component --path src/app --format json
+relay-knowledge repo framework repo --framework vue --kind prop --query modelValue --limit 20 --format json
+```
+
+Angular 索引会读取 decorator 以及 inline/external HTML template。Vue SFC 索引会记录 prop、emit、model、slot、template variable 和 control flow，同时仍把 embedded script 交给普通 TypeScript/JavaScript 抽取。响应分开返回类型化 `nodes`/`edges`，携带 resolution state 与 target hint，并显式标记结果截断。查询只读取已提交的受界 framework table，不会即时解析 template 或读取 worktree。
+
 ### 特性开关图查询
 
 存量仓库经常把特性开关分散在环境变量、配置 key、设置对象、SDK client 和条件分支里。`repo feature-flags` 使用索引阶段抽取出的结构化事实列出配置驱动开关及其代码关系:
@@ -159,17 +176,21 @@ relay-knowledge repo feature-flags repo --query checkout --path src --limit 20 -
 
 响应按 feature flag 分组，包含配置来源、`defines_config`、`reads_config` 或 `guards_code` 关系、source range、置信度、相关符号和 excerpt。索引器识别环境访问、config/settings 读取、支持配置格式里的布尔 config fact，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用中的静态代码/配置证据；provider 控制面的 rollout strategy、segment 和 variant 不在该路径同步。该查询只读取当前 indexed scope 下的 feature-flag 表和 FTS 文档，不在查询时递归 grep 全仓库；新增开关或抽取规则变化后需要重新 `repo index` 或 `repo update`。
 
-### 软件全域投影
+### 软件全域本体与兼容投影
 
-`repo software` 暴露 repository scope 内的软件图投影，包括依赖、未解析 SDK/API 使用、文件整体节点、文档主题和跨域关系：
+`repo software` 暴露同一 repository scope 内的兼容投影、类型化 ontology entity、provenance statement 和冲突诊断：
 
 ```bash
 relay-knowledge repo software repo --kind files --ref HEAD --format json
 relay-knowledge repo software repo --kind topics --ref HEAD --format json
 relay-knowledge repo software repo --kind relationships --ref HEAD --format json
+relay-knowledge repo software repo --kind systems --ref HEAD --format json
+relay-knowledge repo software repo --kind statements --ref HEAD --format json
+relay-knowledge repo software repo --kind conflicts --ref HEAD --format json
+relay-knowledge repo software export repo --profile cyclonedx-1.7 --ref HEAD --format json
 ```
 
-该投影会把 Markdown/spec heading 和 `.knowledge/knowledge-map.yaml` topic 与文档文件连接，把依赖 manifest 与 package component 连接，把 unresolved import 与 SDK/API usage 候选连接，并把配置/feature-flag facts 与代码或配置文件连接。它只读取所选 indexed scope 的已提交 projection 表，不在查询时扫描包缓存、SDK 目录、未索引外部源码或全仓文档。
+`entity_key` 跨 commit 稳定，`occurrence_id` 绑定 snapshot 和 evidence。普通 Markdown/spec heading 只成为 documentation unit/topic；显式 frontmatter、API trait/schema、test symbol、Dockerfile/build file、Compose/Kubernetes/Terraform 或 service definition 才投影到相应受控类型。Dockerfile 和 CI job 不再成为 IaC resource。Statement 保留 source kind、evidence、extractor version、assertion/resolution/fact state、时间和 confidence；无证据或违反 shape 的 statement 返回 `rejected` diagnostic，不会成为 accepted fact。所有切片和 SPDX 3.0.1、CycloneDX 1.7、PROV-O 导出只读取所选 indexed scope 的已提交表，不在查询时扫描包缓存、SDK 目录、未索引外部源码或全仓文档。
 
 ### 多仓库 Repository Set 查询
 
@@ -242,6 +263,10 @@ relay-knowledge repo query repo --query retry_policy --ref worktree --format jso
 
 overlay 绑定当前 checked-out `HEAD`，使用合成 snapshot 标识，包含已修改文件、未跟踪文件、staged submodule gitlink 更新，以及 submodule `HEAD` 不同于父仓 gitlink 时的 unstaged submodule worktree commit。如果 submodule 同时有 staged gitlink 和另一个已检出的 submodule `HEAD`，overlay 会索引已检出的 worktree commit。deinit 后只能从缓存 gitdir 读取的 staged submodule commit 也会纳入 overlay。staged submodule 的新增、删除、重命名以及 file/submodule 互换会按展开后的 child path 清理旧索引，而不是只处理 gitlink path。overlay 活跃时，clean commit ref 查询会被拒绝，避免把未提交内容误标成 clean Git snapshot。
 
+Query admission 会把用户输入的 `worktree` selector 固定为当前 active、不可变的 `worktree:<base>:<overlay-hash>` identity。`repo context` 等多步操作的每个内部 graph query 都复用这个已解析 identity，不会再把 synthetic identity 当作 branch 或 commit 送回 Git。发布后再修改 live worktree 不会悄悄改变正在生成的 context pack；需要重新执行 `repo index ... --ref worktree` 发布新 overlay。
+
+对于 CLI 默认关闭 workspace detection 的路径，索引只有在完整 clone/delete/insert surface 装得进 task 冻结的 writer budget 时才使用 direct overlay transaction。若超预算，同一个 durable task 会 staging overlay bytes、按受界 page clone immutable clean base，再把 dirty file 划分为确定性的受界 batch。每个 worker step 最多提交一个 dirty batch，因此过期 lease 可被重新 claim，且不会重放已提交 batch。最终 handoff 还会把 owner cleanup、tombstone、checkpoint control row 与多批 receipt 一并纳入预算。整个操作始终保留 worktree identity 与 scope；不得把它报告成 clean full index，也不得在 finalization 与 publication 完成前返回成功。API/Web 启用 auto-workspace detection 的 worktree request 在需要 durable staging 时目前会 fail closed；系统不会丢弃 workspace metadata，也不会把 overlay 转成 clean snapshot。
+
 ## 5.7 影响分析
 
 分析 diff 影响:
@@ -292,3 +317,58 @@ relay-knowledge repo status repo --format json
 6. 文件是否被诊断为 unsupported、binary、oversized、invalid UTF-8 或 parser failed。
 
 `repo impact` 需要 `--head` 对应已索引 snapshot。先运行 `repo index repo --ref <head>` 或 `repo update repo --base <base> --head <head>`，再运行 impact。
+
+### 配置键、读取位置与受控代码
+
+`repo feature-flags` 将 Java 系统属性、环境变量读取、常量键及零参数配置 getter，与 properties、INI、Consul-template（`.ctmpl`）和 Shell 导出的环境变量连接起来。配置符号只在当前返回的仓库快照中解析，不依赖 canonical callers/callees 查询，也不修改 Python/C++ 解析。生产环境开关实时值不在静态注册表范围内。
+
+`defines_config` 表示文件定义，`declares_config_key` 表示 Java 常量键或模板输出键，`reads_config` 表示读取位置。`guards_code` 的 `metadata.read_usage_id` 将条件位置连接到提供值的读取位置。Java 局部绑定在重新赋值后停止传播；延迟执行的类、方法与 lambda 函数体不会覆盖外层绑定。字段、参数及局部 getter 接收者使用词法类型证据。匿名接收者与未知动态值不会被猜测为默认实现；指向不同配置键的符号关系保留未解析状态。
+
+每条使用关系包含来源格式以及可选的默认值、值类型、所属领域、热加载能力，未知值保持缺省。相邻注释如 `# @config domain=business hot-reload=true` 提供显式领域信息。properties 续行及 Unicode 转义保持键值身份；INI 节内键使用 `section.key`。环境变量与系统属性属于不同命名空间。
+
+```powershell
+relay-knowledge repo feature-flags demo --query feature_x --domain business --source properties --hot-reload true --format json
+relay-knowledge repo feature-flags demo --query feature_y --consistency --format json
+```
+
+来源筛选选择符合条件的配置组，并保留其关联 Java 使用关系。一致性分析比较已授权注册范围内、当前返回快照中已观察到的格式，报告 `read_without_definition`、`missing_from_format` 和 `conflicting_defaults`；它不判断生产配置。陈旧或未解析的分析不能证明某键不存在。返回数量限制与完整性分析预算分开处理。注册命令中的 `--path src` 只是范围示例，不要求仓库采用固定目录布局。
+
+远程 CLI 与 Web 仓库端点使用相同的领域请求，其中 `filters` 对象包含 `domain`、`source`、`hot_reload`、`consistency`。MCP 在 `relay_code_feature_flags` 参数中直接暴露这四个字段。
+
+Java getter 值流还支持已确认属于 java.lang 的 Boolean/Integer/Long/Double 解析及装箱转换。无法解析的 getter 返回值流通过 `metadata.flow_incomplete` 标记，不能宣称一致性分析完整。字符串常量只有被范围内的配置读取引用、带显式 `@config domain=...` / `hot-reload=...` 元数据，或遵循声明约定（所属类型名以 `Keys` 结尾、字段名以 `_KEY` 结尾）时才公开为配置声明。其余字符串仅作为内部符号候选，不进入配置查询及通用配置视图。
+
+一致性检查从限定范围的已索引文件清单获取格式覆盖，包含空模板和只有注释的模板，并遵守注册时的仓库路径、语言限制。`conflicting_default_sources` 返回冲突默认值对应的使用记录，可直接通过 `metadata.default_value`、`path`、`line_range`、`excerpt`、`usage_id` 定位每个来源；原有简短 `conflicting_defaults` 诊断继续保留。
+
+Java SDK 开关继续使用现有 SDK 提取器，与配置读取同时提取。静态平台导入不会被无关兄弟类、嵌套类或不适用的重载方法遮蔽。Shell 先赋值后明确导出的变量保留定义与默认值；properties 转义解码不再改变 INI/模板的反斜杠。扩展查询和一致性查询保留所在符号的信息。结果数量限制在符号键解析、分组和排序后应用：候选仍受 10,000 条使用记录预算约束，超出预算或 SQLite 时间/步骤预算时返回明确的分析不完整错误。返回陈旧快照时，即使其持久化状态曾为已完成且新鲜，也不能给出确定性的一致性结论。
+
+一致性查询先应用查询词，再对关联的配置事实执行预算和符号展开；文件格式清单独立遵守注册时的路径及语言范围，不随查询展示筛选收窄。常量引用集合只收集一次，避免每个声明重复扫描全部记录。Java 接收者类型会擦除泛型参数；对已有局部变量的简单赋值可关联后续条件，重新赋值后停止传播；显式静态导入优先于通配符导入。Shell `set -a` / `set -o allexport` 作用于后续赋值，关闭该选项不会撤销已导出变量的属性。通用代码及软件视图不展示原始符号 getter 记录；解析后的配置使用关系仍通过 `feature-flags` 查询。
+
+配置一致性范围说明：注册时的路径和语言限制是证据的授权边界。查询时的路径和语言筛选只投影返回的 `usages`，跨文件绑定及一致性仍使用该已授权快照中的关联证据和格式清单；因此 `conflicting_default_sources` 可以指出显示路径之外、但注册范围之内的定义。仅查看 Java 使用位置不会把已注册的 properties 定义误报为缺失。
+
+### 配置注册表验收矩阵
+
+| 契约 | 必须满足的结果 | 验证 |
+| --- | --- | --- |
+| Java 读取、常量和 getter（#389/#394） | 真实键、可定位的读取与关联守卫；遵守导入、重载、可见性和非虚分派 | Java 接收者矩阵及快照绑定回归 |
+| Properties、INI、ctmpl、Shell、dotenv（#394） | 符合格式的定义、默认值及位置；保留引号内容和续行 | 格式及执行范围矩阵 |
+| 元数据及筛选（#394） | 默认值/类型/领域/格式/热加载；CLI、Web、MCP 使用同一请求契约 | 领域、接口和真实索引服务验收 |
+| 一致性（#394） | 从授权证据生成可定位的默认值冲突、格式缺失及读取缺失诊断 | 范围、陈旧、歧义和增量快照测试 |
+| 未知或条件行为 | 保留证据及不确定性，不从不完整分析推断运行值或确定缺失 | 条件导出/模板和未解析绑定回归 |
+| 资源上限 | 文件事实、元数据、扩展及查询超限前返回明确错误 | 边界和超限测试 |
+
+这是有界静态分析，不执行任意 Java、Shell 或模板程序。不能仅为获得无意见审查而删除上述预期行为。检视意见依据该契约及可复现行为判断；描述中的前提不准确，不代表已证实的问题不成立。
+
+本次 Java 平台读取规则清单为 System.getProperty/getenv、直接 System.getenv().get/getOrDefault 和 System.getProperties().getProperty、Boolean.getBoolean、Integer.getInteger、Long.getLong，支持已列明的字面量/常量键及可证明的 getter 转发/转换。等价的全限定名和静态导入形式使用同一规则。“注册表”不隐含承诺识别任意新增 API；但清单内的错误绑定、证据丢失和错误默认值仍属于必须修复的缺陷。
+
+
+外部类 getter 回退需要已索引继承证据；延迟模板定义不发布根模板默认值。Shell 引号选项遵循引号移除规则，接口静态方法不参与继承。十六进制 Double 默认字符串仍明确不支持：保留原始证据，默认值未知，一致性不完整；本次不扩展为任意 Java 数值语法求值。 Fact version: `config-registry-v49`.
+
+软件本体配置投影排除内部常量、类型/getter 标记及未解析符号行，同时保留其索引证据。Shell set 选项与 export 选项采用相同的静态引号移除规则，覆盖启用、禁用及选项终止符。 Fact version: `config-registry-v50`.
+
+显式但无法求值的 Java 默认值使一致性不完整；已知 String 常量表达式参与重载适用性判断。模板行内不输出值的控制动作保留静态/条件文本。聚合后仍支持边类型查询。无路径/语言投影的纯元数据查询先筛选匹配组，再执行有界符号扩展。集合 containsKey 存在性 API 和命名模板体执行不在限定抽取清单中；缺少定义诊断描述已观察的静态证据，不表示运行时渲染或取值。 Fact version: `config-registry-v51`.
+
+Shell 内置命令名先静态解码，引号、拼接和转义形式使用相同导出分类，普通命令的赋值操作数保留默认值。for/select 循环变量在循环体中遮蔽继承环境值，循环输入展开仍保留读取证据，循环后的可能覆盖保持不确定。Java 属性读取显式 null 默认值经布尔转换得到 false；其他无法求值的默认值仍标记不完整。catch 参数在其语句体内绑定接收者并遮蔽外层字段；无法证明唯一静态类型的 multi-catch 接收者保持未解析。 Fact version: `config-registry-v52`.
+
+配置自由文本查询同时匹配持久化元数据、配置键和使用位置，最终分组匹配与行评分遵守 SQL 元数据搜索契约。显式查询不含任何字母、数字或下划线时，在加载数据前报错；省略查询参数才表示不筛选注册表。Java try-with-resources 声明在 try 体和后续资源初始化中绑定接收者，不在 catch/finally 中生效。Shell 已识别导出内置命令前的赋值，仅在该命令导出同名变量时形成配置定义；普通命令的临时环境赋值不定义父环境配置。 Fact version: `config-registry-v53`.
+
+已证明的 getter 转换同时规范化显式环境回退值与属性回退值，属性特有的可空默认处理保持独立。已知平台通配静态导入只贡献实际提供的受支持成员，final var 配置键须有已证明的 String 初始化值。具名 Java 局部类型使用词法身份，互不相关的方法或代码块不会共享 getter 提供者。异步 Shell 命令不能定义或修改父环境配置及导出状态。nameref 别名跟踪和 command/builtin 分派包装器不在有限 Shell 抽取清单内；直接内置命令名及引号等价形式的识别不执行包装器或间接变量写入。缺少定义诊断描述该清单内已观察的静态证据。 Fact version: `config-registry-v54`.

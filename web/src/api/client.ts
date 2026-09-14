@@ -1,4 +1,5 @@
 import type {
+  CodeRepositoryListResponse,
   GraphCanvasKind,
   GraphCanvasResponse,
   HealthResponse,
@@ -10,6 +11,7 @@ import type {
   ModelProfilesResponse,
   ProjectStatusResponse,
   ServiceStatusResponse,
+  SoftwareGlobalResponse,
   WebOperationExecuteResponse,
   WebOperationSnapshot
 } from "./contracts";
@@ -18,6 +20,7 @@ const PROJECT_STATUS_PATH = "/api/project/status";
 const HEALTH_PATH = "/api/health";
 const SERVICE_STATUS_PATH = "/api/service/status";
 const GRAPH_CANVAS_PATH = "/api/web/graph/canvas";
+const CODE_REPOSITORIES_PATH = "/api/v1/code/repositories";
 const OPERATION_EXECUTE_PATH = "/api/web/operations/execute";
 const MODEL_PROFILES_PATH = "/api/configs/model/profiles";
 const MODEL_FALLBACK_PATH = "/api/configs/model-fallback";
@@ -56,6 +59,36 @@ export async function loadGraphCanvas(params: {
   }
 
   return fetchJson<GraphCanvasResponse>(`${GRAPH_CANVAS_PATH}?${query.toString()}`);
+}
+
+export async function loadCodeRepositories(): Promise<CodeRepositoryListResponse> {
+  return fetchJson<CodeRepositoryListResponse>(CODE_REPOSITORIES_PATH);
+}
+
+export async function loadSoftwareProjection(params: {
+  alias: string;
+  refSelector: string;
+  kind: "statements" | "conflicts";
+  limit: number;
+}): Promise<SoftwareGlobalResponse> {
+  const alias = encodeURIComponent(params.alias);
+  return fetchJson<SoftwareGlobalResponse>(`${CODE_REPOSITORIES_PATH}/${alias}/software`, {
+    method: "POST",
+    body: JSON.stringify({
+      repository: {
+        repository: params.alias,
+        ref_selector: params.refSelector,
+        path_filters: [],
+        language_filters: []
+      },
+      kind: params.kind,
+      freshness_policy: "allow_stale",
+      limit: params.limit
+    }),
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
 }
 
 export async function executeWebOperation(

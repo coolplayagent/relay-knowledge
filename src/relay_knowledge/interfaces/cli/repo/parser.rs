@@ -1,4 +1,7 @@
-use crate::domain::{BusinessKnowledgeQueryKind, FreshnessPolicy, SoftwareGlobalKind};
+use crate::domain::{
+    BusinessKnowledgeQueryKind, FrameworkKind, FrameworkNodeKind, FreshnessPolicy,
+    SoftwareExportProfile, SoftwareGlobalKind,
+};
 
 #[cfg(test)]
 use super::query::parse_query_kind;
@@ -22,6 +25,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some("graph") => parse_graph(&tokens[1..]),
         Some("context") => parse_context(&tokens[1..]),
         Some("feature-flags") => parse_feature_flags(&tokens[1..]),
+        Some("framework") => parse_framework_graph(&tokens[1..]),
         Some("impact") => parse_impact(&tokens[1..]),
         Some("status") => parse_status(&tokens[1..]),
         Some("report") => parse_report(&tokens[1..]),
@@ -280,6 +284,7 @@ fn parse_update(tokens: &[String]) -> Result<RepoCommand, CliError> {
 
 fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let alias = positional_alias(tokens)?;
+    let mut filters = crate::domain::CodeConfigFilter::default();
     let mut query = None;
     let mut limit = 50;
     let mut ref_selector = "HEAD".to_owned();
@@ -289,6 +294,35 @@ fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
+            "--domain" | "--source" => {
+                let option = if tokens[index] == "--domain" {
+                    "--domain"
+                } else {
+                    "--source"
+                };
+                let value = value_after(tokens, index, option)?;
+                if value.starts_with('-') {
+                    return Err(CliError::MissingValue(option));
+                }
+                if option == "--domain" {
+                    filters.domain = Some(value);
+                } else {
+                    filters.source = Some(value);
+                }
+                index += 2;
+            }
+            "--hot-reload" => {
+                let value = value_after(tokens, index, "--hot-reload")?;
+                filters.hot_reload = Some(value.parse::<bool>().map_err(|_| {
+                    CliError::UnexpectedArgument("--hot-reload requires true or false".into())
+                })?);
+                index += 2;
+            }
+            "--consistency" => {
+                filters.consistency = true;
+                index += 1;
+            }
+
             "--query" => {
                 let (value, next_index) = collect_query_value(tokens, index, "--query")?;
                 query = Some(value);
@@ -326,7 +360,11 @@ fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
         }
     }
 
+    let filters = filters
+        .validate()
+        .map_err(|e| CliError::UnexpectedArgument(e.to_string()))?;
     Ok(RepoCommand::FeatureFlags {
+        filters,
         alias,
         query,
         limit,
@@ -335,6 +373,99 @@ fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
         language_filters,
         freshness,
     })
+}
+
+fn parse_framework_graph(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let alias = positional_alias(tokens)?;
+    let mut query = None;
+    let mut frameworks = Vec::new();
+    let mut kinds = Vec::new();
+    let mut limit = 50;
+    let mut ref_selector = "HEAD".to_owned();
+    let mut path_filters = Vec::new();
+    let mut freshness = FreshnessPolicy::AllowStale;
+    let mut index = 1;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--query" => {
+                let (value, next_index) = collect_query_value(tokens, index, "--query")?;
+                query = Some(value);
+                index = next_index;
+            }
+            "--framework" => {
+                let value = value_after(tokens, index, "--framework")?;
+                frameworks.push(parse_framework_kind(&value)?);
+                index += 2;
+            }
+            "--kind" => {
+                let value = value_after(tokens, index, "--kind")?;
+                kinds.push(parse_framework_node_kind(&value)?);
+                index += 2;
+            }
+            "--limit" => {
+                let value = value_after(tokens, index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
+                index += 2;
+            }
+            "--ref" => {
+                ref_selector = value_after(tokens, index, "--ref")?;
+                index += 2;
+            }
+            "--path" => {
+                path_filters.push(value_after(tokens, index, "--path")?);
+                index += 2;
+            }
+            "--freshness" => {
+                freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
+                index += 2;
+            }
+            other if !other.starts_with('-') && query.is_none() => {
+                let (value, next_index) = collect_positional_query(tokens, index);
+                query = Some(value);
+                index = next_index;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(RepoCommand::FrameworkGraph {
+        alias,
+        query,
+        frameworks,
+        kinds,
+        limit,
+        ref_selector,
+        path_filters,
+        freshness,
+    })
+}
+
+fn parse_framework_kind(value: &str) -> Result<FrameworkKind, CliError> {
+    match value {
+        "angular" => Ok(FrameworkKind::Angular),
+        "vue" => Ok(FrameworkKind::Vue),
+        other => Err(CliError::UnexpectedArgument(other.to_owned())),
+    }
+}
+
+fn parse_framework_node_kind(value: &str) -> Result<FrameworkNodeKind, CliError> {
+    match value {
+        "component" => Ok(FrameworkNodeKind::Component),
+        "directive" => Ok(FrameworkNodeKind::Directive),
+        "pipe" => Ok(FrameworkNodeKind::Pipe),
+        "template" => Ok(FrameworkNodeKind::Template),
+        "input" => Ok(FrameworkNodeKind::Input),
+        "output" => Ok(FrameworkNodeKind::Output),
+        "prop" => Ok(FrameworkNodeKind::Prop),
+        "emit" => Ok(FrameworkNodeKind::Emit),
+        "model" => Ok(FrameworkNodeKind::Model),
+        "slot" => Ok(FrameworkNodeKind::Slot),
+        "template-variable" => Ok(FrameworkNodeKind::TemplateVariable),
+        "control-flow" => Ok(FrameworkNodeKind::ControlFlow),
+        other => Err(CliError::UnexpectedArgument(other.to_owned())),
+    }
 }
 
 fn parse_impact(tokens: &[String]) -> Result<RepoCommand, CliError> {
@@ -362,14 +493,27 @@ fn parse_report(tokens: &[String]) -> Result<RepoCommand, CliError> {
 }
 
 fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    if tokens.first().map(String::as_str) == Some("export") {
+        return parse_software_export(&tokens[1..]);
+    }
     let alias = positional_alias(tokens)?;
     let mut ref_selector = "HEAD".to_owned();
     let mut kind = SoftwareGlobalKind::All;
     let mut freshness = FreshnessPolicy::AllowStale;
     let mut limit = 100;
+    let mut path_filters = Vec::new();
+    let mut cursor = None;
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
+            "--cursor" => {
+                cursor = Some(value_after(tokens, index, "--cursor")?);
+                index += 2;
+            }
+            "--path" => {
+                path_filters.push(value_after(tokens, index, "--path")?);
+                index += 2;
+            }
             "--ref" => {
                 ref_selector = value_after(tokens, index, "--ref")?;
                 index += 2;
@@ -394,9 +538,56 @@ fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
     }
 
     Ok(RepoCommand::Software {
+        cursor,
+        path_filters,
         alias,
         ref_selector,
         kind,
+        freshness,
+        limit,
+    })
+}
+
+fn parse_software_export(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let alias = positional_alias(tokens)?;
+    let mut ref_selector = "HEAD".to_owned();
+    let mut profile = None;
+    let mut freshness = FreshnessPolicy::AllowStale;
+    let mut limit = 500;
+    let mut index = 1;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--ref" => {
+                ref_selector = value_after(tokens, index, "--ref")?;
+                index += 2;
+            }
+            "--profile" => {
+                let value = value_after(tokens, index, "--profile")?;
+                profile = SoftwareExportProfile::parse(&value);
+                if profile.is_none() {
+                    return Err(CliError::UnexpectedArgument(value));
+                }
+                index += 2;
+            }
+            "--freshness" => {
+                freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
+                index += 2;
+            }
+            "--limit" => {
+                let value = value_after(tokens, index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(RepoCommand::SoftwareExport {
+        alias,
+        ref_selector,
+        profile: profile.ok_or(CliError::MissingValue("--profile"))?,
         freshness,
         limit,
     })
@@ -536,8 +727,17 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, CliError> {
         "topics" => Ok(SoftwareGlobalKind::Topics),
         "relationships" => Ok(SoftwareGlobalKind::Relationships),
         "build" => Ok(SoftwareGlobalKind::Build),
+        "modules" => Ok(SoftwareGlobalKind::Modules),
         "iac" => Ok(SoftwareGlobalKind::Iac),
         "design" => Ok(SoftwareGlobalKind::Design),
+        "systems" => Ok(SoftwareGlobalKind::Systems),
+        "apis" => Ok(SoftwareGlobalKind::Apis),
+        "resources" => Ok(SoftwareGlobalKind::Resources),
+        "tests" => Ok(SoftwareGlobalKind::Tests),
+        "deployments" => Ok(SoftwareGlobalKind::Deployments),
+        "releases" => Ok(SoftwareGlobalKind::Releases),
+        "statements" => Ok(SoftwareGlobalKind::Statements),
+        "conflicts" => Ok(SoftwareGlobalKind::Conflicts),
         "all" => Ok(SoftwareGlobalKind::All),
         other => Err(CliError::InvalidSoftwareKind(other.to_owned())),
     }

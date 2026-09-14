@@ -1,9 +1,3 @@
-//! Provides the bounded wall-clock representation persisted by code-index task records.
+//! Code-repository wall-clock boundary backed by the shared system clock.
 
-pub(super) fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        })
-}
+pub(super) use crate::clock::system_now_millis_or_zero as now_millis;

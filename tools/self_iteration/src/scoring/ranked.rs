@@ -109,6 +109,18 @@ fn hit_matches(hit: &Value, pattern: &Value) -> bool {
         "edge_resolution_state",
         "repository_alias",
         "source_scope",
+        "entity_key",
+        "occurrence_id",
+        "entity_kind",
+        "predicate",
+        "assertion_mode",
+        "fact_state",
+        "extractor_id",
+        "extractor_version",
+        "shape_id",
+        "code",
+        "severity",
+        "field",
     ] {
         if let Some(expected) = pattern.get(key).and_then(Value::as_str) {
             if hit.get(key).and_then(Value::as_str) != Some(expected) {

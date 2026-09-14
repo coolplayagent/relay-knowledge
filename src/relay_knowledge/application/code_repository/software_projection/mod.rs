@@ -1,13 +1,17 @@
 //! Coordinates repository software-projection reads and scope validation.
 
 use crate::{
-    api::{ApiError, ApiMetadata, RequestContext, SoftwareGlobalResponse},
+    api::{
+        ApiError, ApiMetadata, RequestContext, SoftwareGlobalExportResponse, SoftwareGlobalResponse,
+    },
     application::service::RelayKnowledgeService,
     domain::{
-        CodeRepositoryStatus, FreshnessPolicy, GraphVersion, SoftwareGlobalRequest,
-        SoftwareGlobalStatus,
+        CodeRepositoryStatus, FreshnessPolicy, GraphVersion, SoftwareExportProfile,
+        SoftwareGlobalRequest, SoftwareGlobalStatus,
     },
 };
+
+mod export;
 
 use super::{
     errors::storage_api_error,
@@ -19,20 +23,45 @@ use super::{
 };
 
 impl RelayKnowledgeService {
+    /// Exports the snapshot-bound ontology through a versioned interoperability profile.
+    pub async fn software_global_export(
+        &self,
+        mut request: SoftwareGlobalRequest,
+        profile: SoftwareExportProfile,
+        context: RequestContext,
+    ) -> Result<SoftwareGlobalExportResponse, ApiError> {
+        request.kind = crate::domain::SoftwareGlobalKind::Statements;
+        let response = self.software_global_projection(request, context).await?;
+        let document = export::export_document(&response, profile);
+        Ok(SoftwareGlobalExportResponse {
+            metadata: response.metadata,
+            scope: response.scope,
+            status: response.status,
+            profile,
+            media_type: profile.media_type().to_owned(),
+            document,
+        })
+    }
+
     /// Reads the repository-scoped software global dependency and SDK projection.
     pub async fn software_global_projection(
         &self,
         request: SoftwareGlobalRequest,
         context: RequestContext,
     ) -> Result<SoftwareGlobalResponse, ApiError> {
+        request
+            .validate()
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         let store = self.store().await.map_err(storage_api_error)?;
-        let status = required_code_repository(&store, &request.repository.repository).await?;
+        let status =
+            required_code_repository(store.as_ref(), &request.repository.repository).await?;
         if request.freshness_policy == FreshnessPolicy::GraphOnly {
             let graph_version = store
                 .current_graph_version()
                 .await
                 .map_err(storage_api_error)?;
             return Ok(SoftwareGlobalResponse {
+                next_cursor: None,
                 metadata: ApiMetadata::graph_only(&context, graph_version),
                 scope: crate::api::CodeRepositoryScopeMetadata::from_status(
                     &status,
@@ -48,6 +77,15 @@ impl RelayKnowledgeService {
                         .unwrap_or_else(|| "unscoped".to_owned()),
                     projected_graph_version: GraphVersion::ZERO,
                     stale: true,
+                    ontology_version: crate::domain::SOFTWARE_ONTOLOGY_VERSION.to_owned(),
+                    projection_schema_version: crate::domain::SOFTWARE_PROJECTION_SCHEMA_VERSION,
+                    source_coverage: crate::domain::SoftwareSourceCoverage::default(),
+                    completeness_basis_points: 0,
+                    freshness: crate::domain::SoftwareProjectionFreshness::Stale,
+                    conflict_count: 0,
+                    entity_count: 0,
+                    statement_count: 0,
+                    diagnostic_count: 0,
                     component_count: 0,
                     sdk_usage_count: 0,
                     file_count: 0,
@@ -67,6 +105,9 @@ impl RelayKnowledgeService {
                 build_targets: Vec::new(),
                 iac_resources: Vec::new(),
                 design_elements: Vec::new(),
+                entities: Vec::new(),
+                statements: Vec::new(),
+                diagnostics: Vec::new(),
             });
         }
 
@@ -145,9 +186,13 @@ impl RelayKnowledgeService {
         let mut status = projection.status;
         if scoped_status.stale || served_stale_scope {
             status.stale = true;
+            status.freshness = crate::domain::SoftwareProjectionFreshness::Stale;
+        } else if scoped_status.degraded_reason.is_some() {
+            status.freshness = crate::domain::SoftwareProjectionFreshness::Degraded;
         }
 
         Ok(SoftwareGlobalResponse {
+            next_cursor: projection.next_cursor,
             metadata,
             scope,
             request,
@@ -161,6 +206,9 @@ impl RelayKnowledgeService {
             build_targets: projection.build_targets,
             iac_resources: projection.iac_resources,
             design_elements: projection.design_elements,
+            entities: projection.entities,
+            statements: projection.statements,
+            diagnostics: projection.diagnostics,
         })
     }
 }

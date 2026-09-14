@@ -54,7 +54,7 @@ export type AppState = {
   };
   map: {
     repository: string;
-    fromVersion: number;
+    fromVersion: number | null;
     limit: number;
   };
   code: {
@@ -134,7 +134,7 @@ export const appState: AppState = {
   },
   map: {
     repository: "core",
-    fromVersion: 1,
+    fromVersion: null,
     limit: 16
   },
   code: {
@@ -372,19 +372,14 @@ function graphSnapshot(metadata: Record<string, unknown>) {
 
 function mapHistorySnapshot(metadata: Record<string, unknown>) {
   const state = appState.map;
+  const command = ["relay-knowledge", "map", "history"];
+  if (state.fromVersion !== null) {
+    command.push("--from", String(state.fromVersion));
+  }
+  command.push("--limit", String(state.limit), "--format", "json");
   return {
     name: "Knowledge Map history",
-    command: shellCommand([
-      "relay-knowledge",
-      "map",
-      "history",
-      "--from",
-      String(state.fromVersion),
-      "--limit",
-      String(state.limit),
-      "--format",
-      "json"
-    ]),
+    command: shellCommand(command),
     payload: {
       operation: "knowledge.map.history",
       repository: state.repository,

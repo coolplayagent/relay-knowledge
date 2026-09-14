@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="relay-knowledge 1.1.16 release notes: typed repository maps, framework graph extraction, durable indexing boundaries, and cross-platform packages."
+    />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.16 release notes</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="Page navigation">
+        <a href="../">English documentation</a>
+        <a href="../../zh/releases/1.1.16.html">中文</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.16">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.16 release notes</h1>
+        <p>
+          Version 1.1.16 makes the repository-owned CodeSpec and Knowledge maps a typed,
+          agent-visible contract and strengthens the durable code-index and software-projection
+          lifecycle. It also adds Angular and Vue framework graph extraction and refreshes the
+          cross-platform release baseline.
+        </p>
+        <p>Published August 30, 2026.</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.16">Release downloads</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.16">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.16/checksums.txt">Checksums</a>
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Install and verify</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.16 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json</code></pre>
+        <p class="notice">
+          Upgrade every writer and reader that shares a repository before migrating its visible
+          Repository Map v3 contract. Back up or commit repository-owned map files before a
+          migration, and use the documented service lifecycle dry-run before replacing a resident
+          service binary.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Typed CodeSpec and Knowledge maps</h2>
+        <p>
+          Repository Map v3 uses the visible <code>codespec/</code> and <code>knowledge/</code> roots.
+          The CLI now exposes the two map types through one validation, inspection, routing, and
+          migration surface instead of requiring agents to infer repository structure from files.
+        </p>
+        <ul>
+          <li><code>map validate --type all</code> validates both governed roots and reports diagnostics without rewriting them.</li>
+          <li><code>map show</code> exposes typed directory scope, key files, load policy, update policy, and cross-map relationships.</li>
+          <li><code>map route</code> resolves authored sources such as the repository business glossary.</li>
+          <li>The CLI skill includes Draft 2020-12 schemas for Knowledge Map, CodeSpec Map, and Business Glossary contracts.</li>
+          <li>Foundational self-iteration cases protect help discovery, validation, directory filtering, and business routing.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Framework and software graph coverage</h2>
+        <p>
+          The repository graph now extracts Angular and Vue framework evidence and keeps software
+          projections tied to the same committed source scope as code facts. Missing external
+          packages remain unresolved edge metadata rather than being reported as repository damage.
+        </p>
+        <ul>
+          <li>Framework queries expose components, routes, dependencies, and related graph edges with evidence.</li>
+          <li>Software projections publish through durable, lease-aware work instead of bypassing index ownership.</li>
+          <li>Freshness, active task, checkpoint, and publication state remain observable through repository status.</li>
+        </ul>
+        <pre><code>relay-knowledge repo framework &lt;alias&gt; \
+  --framework angular --kind component \
+  --ref &lt;commit&gt; --freshness wait-until-fresh --format json
+
+relay-knowledge repo software &lt;alias&gt; \
+  --kind relationships --ref &lt;commit&gt; \
+  --freshness wait-until-fresh --format json</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>Durable indexing and architecture boundaries</h2>
+        <ul>
+          <li>Indexing orchestration is split into explicit start, session, worker, recovery, snapshot, projection, and publication responsibilities.</li>
+          <li>Repository work preserves durable task leases, bounded retries, checkpoints, single-writer ownership, and publication fences.</li>
+          <li>Clock, identity, runtime, storage, network, and service lifecycle ownership is enforced by stronger architecture checks.</li>
+          <li>Large software projections use lease-friendly bounded work so maintenance does not block query hot paths.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Release packages</h2>
+        <p>
+          The release contains six platform archives, <code>checksums.txt</code>, artifact
+          attestations, and the versioned CLI skill archive. Linux GNU binaries are built and
+          started on a glibc 2.28 baseline before publication.
+        </p>
+        <ul>
+          <li>Linux x64 and ARM64</li>
+          <li>macOS Intel and Apple Silicon</li>
+          <li>Windows x64 and ARM64</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.16.tar.gz</code> for agent CLI workflows</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>Further reading</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.16/docs/en/03-architecture-specs/19-installation-release-and-upgrade.md">Installation, release, and upgrade</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.16/docs/en/03-architecture-specs/21-software-global-domain-modeling.md">Software-global domain model</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.16/docs/en/03-architecture-specs/24-code-map-backed-knowledge-development-loop.md">Knowledge development loop</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.16/docs/en/03-architecture-specs/26-git-commit-knowledge-development-loop.md">Git commit knowledge loop</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

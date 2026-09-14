@@ -39,10 +39,8 @@ fn markdown_headings_map_only_known_design_concepts() {
         design_heading_kind("Runtime Architecture", "docs/runtime.md"),
         Some("architecture")
     );
-    assert_eq!(
-        design_heading_kind("Getting Started", "README.md"),
-        Some("software_system")
-    );
+    assert_eq!(design_heading_kind("Getting Started", "README.md"), None);
+    assert_eq!(design_heading_kind("Chapter Index", "README.md"), None);
     assert_eq!(
         design_heading_kind("Getting Started", "docs/guide.md"),
         None

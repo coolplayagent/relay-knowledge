@@ -16,7 +16,7 @@ use crate::{
     domain::{CodeRepositoryRegistration, EvidenceRecord, GraphMutationBatch, SourceScope},
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeRepositoryStore, GraphStore, KnowledgeStore, PartitionedSqliteKnowledgeStore,
+        GraphStore, KnowledgeStore, PartitionedSqliteKnowledgeStore, RepositoryCatalogStore as _,
         SqliteGraphStore,
     },
 };

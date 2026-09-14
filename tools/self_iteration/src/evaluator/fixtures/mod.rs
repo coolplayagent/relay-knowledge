@@ -4,8 +4,10 @@ mod c_and_cpp;
 mod common_languages;
 mod cross_language;
 mod incremental;
+mod java_class_calls;
 mod nonstandard_layout;
 mod repository;
+mod repository_maps;
 mod software_global;
 mod writer;
 

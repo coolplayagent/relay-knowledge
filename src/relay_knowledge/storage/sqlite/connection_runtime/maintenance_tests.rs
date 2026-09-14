@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use super::*;
 use crate::{
     domain::{
@@ -5,8 +7,9 @@ use crate::{
         CodeIndexSnapshot, CodeRepositoryRegistration,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskSeed, CodeRepositoryStore,
-        GraphStore, SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
+        CodeIndexTaskSeed, CodeIndexTaskStore as _, GraphStore, RepositoryCatalogStore as _,
+        SoftwareProjectionStore as _, SqliteGraphStore,
     },
 };
 use rusqlite::OpenFlags;
@@ -355,6 +358,8 @@ fn empty_snapshot(source_scope: &str) -> CodeIndexSnapshot {
         files: Vec::new(),
         symbols: Vec::new(),
         references: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),

@@ -1,8 +1,8 @@
 ---
 name: relay-knowledge-cli
-description: "Use relay-knowledge local CLI for repository knowledge bootstrap and GraphRAG: initialize/validate .knowledge/knowledge-map.yaml plus code and authored business maps; read snapshot-bound repo business/software/view/context models for specs and coding; run durable update/status/impact loops after commits. Use for 知识地图初始化, 业务术语与技术映射, git commit知识库增量更新, 用户代码查询kind/查询类型, 图关系, 调用关系, 导入依赖, SDK/API, 代码地图, definitions, references, usage, impact. Recover durable single-writer index tasks through repo status, a managed service, or bounded local index-worker attempts. Pin immutable refs. Prefer graph CLI before grep/rg unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP/ACP setup or protocol access."
+description: "Use relay-knowledge local CLI for repository CodeSpec/Knowledge map governance and GraphRAG: initialize, validate, route, and update codespec/codespec-map.yaml and knowledge/knowledge-map.yaml; read snapshot-bound repo business/software/view/context models for specs and coding; run durable update/status/impact loops after commits. Use for 目录化知识管理, 知识地图初始化, 业务术语与技术映射, git commit知识库增量更新, 用户代码查询kind/查询类型, 图关系, 调用关系, 导入依赖, SDK/API, definitions, references, usage, impact. Prefer graph CLI before grep/rg unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP/ACP setup or protocol access."
 metadata:
-  version: 1.1.13
+  version: 1.1.17
   openclaw:
     skillKey: relay-knowledge-cli
     homepage: https://github.com/coolplayagent/relay-knowledge
@@ -34,14 +34,15 @@ json` attempts before re-checking status. Do not replace leases with loops.
 
 Prefer the bundled `assets` binary for the current operating system, CPU, and
 active command runner whenever it exists and `version --format json` succeeds.
-Released skill packages include Linux x64 and Windows x64 binaries at
+GitHub Release skill archives include Linux x64 and Windows x64 binaries at
 `assets/linux-x86_64/relay-knowledge` and
-`assets/windows-x86_64/relay-knowledge.exe`. Use the published `PATH` install
-only when the bundled asset is missing, not executable, fails its version check,
-has no matching OS or CPU architecture, has no matching shell boundary, the
-Linux host is older than the glibc 2.31 baseline, or the user explicitly asks
-for the system-installed binary. Version comparisons are diagnostic only; do
-not choose a newer `PATH` binary over a working bundled asset by default.
+`assets/windows-x86_64/relay-knowledge.exe`. Registry distributions such as
+ClawHub omit these binaries to satisfy per-file limits. Use the published `PATH`
+install when the bundled asset is missing, not executable, fails its version
+check, has no matching OS or CPU architecture, has no matching shell boundary,
+the Linux host is older than the glibc 2.28 baseline, or the user explicitly
+asks for the system-installed binary. Version comparisons are diagnostic only;
+do not choose a newer `PATH` binary over a working bundled asset by default.
 
 The command examples below use `relay-knowledge` as readable shorthand for the
 resolved executable. When the bundled asset is selected, substitute that asset
@@ -101,10 +102,29 @@ instead.
 For repository knowledge navigation contracts, use
 `references/knowledge-map-workflows.md`. Prefer `relay-knowledge map` commands
 to create, read, update, delete, validate, and route the shared
-`.knowledge/knowledge-map.yaml` contract. Read that reference for repository
+`codespec/codespec-map.yaml` and `knowledge/knowledge-map.yaml` contracts. Read that reference for repository
 bootstrap, spec work, coding work, commit refresh, or source reconciliation.
-Do not hand-edit the YAML unless the CLI is unavailable and the user explicitly
-asks for manual repair.
+When an editor, validator, or agent needs the machine-readable v4 artifact
+shape, load the Draft 2020-12 schemas at
+`references/knowledge-map.schema.json` and
+`references/codespec-map.schema.json`. They cover the typed roots, directory
+governance, topic shards, bounded recent history, and redirect while allowing unknown fields
+for Serde reader compatibility. The schema is structural guidance only:
+`relay-knowledge map validate` remains authoritative for digests, cross-file
+identity, route and recent-history continuity, and reserved
+sources. It does not grant permission to edit generated roots, topic shards,
+or redirects directly. Repository map archives are not retained; use Git
+or repository backups for history older than the latest 16 entries.
+For the intentionally authored `knowledge/glossary/business-glossary.yaml`, load
+`references/business-glossary.schema.json`. This separate Draft 2020-12 schema
+describes glossary schema v1 domains, terms, aliases, semantics, and technical
+mappings while allowing unknown fields for Serde reader compatibility. It is
+structural guidance: `relay-knowledge map validate` remains authoritative for
+the document byte limit, UTF-8 byte-sized fields, identity and domain-reference
+rules, and case-insensitive alias uniqueness. The authored glossary may be
+edited directly with normal source review. Do not hand-edit generated Knowledge
+Map YAML unless the CLI is unavailable and the user explicitly asks for manual
+repair.
 
 When the user asks for a test, smoke check, or reproduction that should not
 touch existing runtime state, set an explicit temporary `RELAY_KNOWLEDGE_HOME`
@@ -274,7 +294,7 @@ with the same-ref architecture view and another map validation:
 ```bash
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
-relay-knowledge map route business-knowledge --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register . --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
@@ -288,7 +308,7 @@ relay-knowledge map validate --format json
 
 `map init` idempotently ensures the `software-model` route and the
 `business-knowledge` route whose repository-scoped source points to
-`.knowledge/business-glossary.yaml`; it creates the minimal valid glossary only
+`knowledge/glossary/business-glossary.yaml`; it creates the minimal valid glossary only
 when that file is absent. Edit the glossary as the version-controlled authored
 business surface, but never copy derived architecture, build, IaC, resolved
 mapping ids, or commit facts into the Knowledge Map. Follow
@@ -387,7 +407,7 @@ to guess. Preserve unresolved `target_hint` metadata and use it as a bounded
 `repo context` or `repo query` seed rather than declaring repository damage.
 
 ```bash
-relay-knowledge map route business-knowledge --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
 relay-knowledge repo business core \
   --kind all \
   --query "conversion rate" \
@@ -421,7 +441,7 @@ expecting new facts in this command.
 
 ### Spec-Grounded Incremental Loop
 
-Before writing a spec, read `map route business-knowledge` and combine relevant
+Before writing a spec, read `map route business-knowledge --type knowledge` and combine relevant
 route results with pinned `repo business --kind all`, `repo software --kind
 all`, both architecture/business-domain views, and requirement-specific code
 context. For a registered Git repository, omit both

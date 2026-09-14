@@ -1,6 +1,6 @@
 //! Owns provider HTTP requests, protocol responses, and connectivity diagnostics.
 
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use super::profile::{StoredModelProfile, redacted_url};
 use super::*;
+pub(super) use crate::clock::system_now_millis_or_zero as now_millis;
 use crate::net::{
     http::{HttpConfig, QosHttpClientError, QosHttpResponse, send_request_with_qos},
     qos::{QosPolicy, QosRuntime},
@@ -651,16 +652,6 @@ pub(super) fn request_timeout_from_ms(timeout_ms: Option<u64>) -> Option<Duratio
 
 pub(super) fn elapsed_millis(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
-}
-
-pub(super) fn now_millis() -> u64 {
-    u64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis(),
-    )
-    .unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ use crate::{
         CodeIndexMode, CodeIndexResourceBudget, CodeIndexTaskState, CodeRepositoryRegistration,
     },
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositoryStore, SqliteGraphStore,
+        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, RepositoryCatalogStore as _, SqliteGraphStore,
     },
 };
 use rusqlite::params;

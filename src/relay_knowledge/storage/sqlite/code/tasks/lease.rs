@@ -1,10 +1,9 @@
 //! Owns durable code-index task lease acquisition, renewal, and recovery.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::{
+    clock::system_now_millis as shared_system_now_millis,
     domain::CodeIndexTaskRecord,
     storage::{
         CodeIndexTaskClaimRequest, CodeIndexTaskLeaseRecord, CodeIndexTaskLeaseRecovery,
@@ -296,14 +295,7 @@ pub(super) fn validate_observed_execution_time(
 }
 
 pub(super) fn system_now_millis() -> Result<u64, StorageError> {
-    let elapsed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| {
-            StorageError::Invariant(format!("system clock is before Unix epoch: {error}"))
-        })?;
-    u64::try_from(elapsed.as_millis()).map_err(|_| {
-        StorageError::Invariant("system clock milliseconds exceed u64 range".to_owned())
-    })
+    shared_system_now_millis().map_err(|error| StorageError::Invariant(error.to_string()))
 }
 
 pub(in crate::storage::sqlite::code) fn recover_expired_task_leases(

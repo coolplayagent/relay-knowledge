@@ -1,0 +1,99 @@
+{
+  "repositories": {
+    "angular_official_framework": {
+      "path": "/opt/workspace/angular",
+      "alias": "angular-framework-self-iteration",
+      "ref": "133cafda42028fbd8efd7840d6ff3fea25223166",
+      "scope": "all",
+      "isolated_index_home": true,
+      "registration_path_filters": ["adev/src/app/core/layout"],
+      "index_budget_ms": 60000,
+      "query_p50_budget_ms": 150,
+      "query_p95_budget_ms": 300
+    },
+    "vue_official_framework": {
+      "path": "/opt/workspace/vue",
+      "alias": "vue-framework-self-iteration",
+      "ref": "d63616ca17de965ed32dcb449a4c5cd9982f15d2",
+      "scope": "all",
+      "isolated_index_home": true,
+      "registration_path_filters": ["packages-private/sfc-playground/src"],
+      "index_budget_ms": 60000,
+      "query_p50_budget_ms": 150,
+      "query_p95_budget_ms": 300
+    }
+  },
+  "query_cases": [
+    {
+      "id": "angular_framework_progress_bar_component",
+      "repository": "angular_official_framework",
+      "surface": "framework",
+      "query": "ProgressBarComponent",
+      "frameworks": ["angular"],
+      "kinds": ["component"],
+      "limit": 20,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "adev/src/app/core/layout/progress-bar/progress-bar.component.ts",
+          "kind": "component",
+          "name": "ProgressBarComponent"
+        }
+      ],
+      "objective": "competitive_capability"
+    },
+    {
+      "id": "angular_framework_inline_template_render_edge",
+      "repository": "angular_official_framework",
+      "surface": "framework",
+      "query": "ng-progress",
+      "frameworks": ["angular"],
+      "limit": 20,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "adev/src/app/core/layout/progress-bar/progress-bar.component.ts",
+          "kind": "renders",
+          "target_hint": "ng-progress"
+        }
+      ],
+      "objective": "competitive_capability"
+    },
+    {
+      "id": "vue_framework_version_select_props",
+      "repository": "vue_official_framework",
+      "surface": "framework",
+      "query": "pkg",
+      "frameworks": ["vue"],
+      "kinds": ["prop"],
+      "limit": 20,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "packages-private/sfc-playground/src/VersionSelect.vue",
+          "kind": "prop",
+          "name": "pkg"
+        }
+      ],
+      "objective": "competitive_capability"
+    },
+    {
+      "id": "vue_framework_v_for_template_variable",
+      "repository": "vue_official_framework",
+      "surface": "framework",
+      "query": "ver",
+      "frameworks": ["vue"],
+      "kinds": ["template-variable"],
+      "limit": 20,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "packages-private/sfc-playground/src/VersionSelect.vue",
+          "kind": "template_variable",
+          "name": "ver"
+        }
+      ],
+      "objective": "competitive_capability"
+    }
+  ]
+}

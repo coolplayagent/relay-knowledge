@@ -52,7 +52,7 @@ relay-knowledge query "topic" --freshness graph-only --format json
 
 `invalid --freshness value`: 只接受 `allow-stale`、`wait-until-fresh` 或 `graph-only`。
 
-`invalid --kind value`: `index refresh` 只接受 `bm25`、`semantic` 或 `vector`；`repo query` 只接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 或 `sbom`；`repo software` 只接受 `dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design` 或 `all`。
+`invalid --kind value`: `index refresh` 只接受 `bm25`、`semantic` 或 `vector`；`repo query` 只接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 或 `sbom`；`repo software` 接受 `dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design`、`systems`、`apis`、`resources`、`tests`、`deployments`、`releases`、`statements`、`conflicts` 或 `all`。`repo software export --profile` 只接受 `spdx-3`、`cyclonedx-1.7` 或 `prov-o`，它不是 `--kind`。
 
 `source_scope is required by the MCP access policy`: MCP graph tool 请求缺少 scope，或者未配置允许 unspecified scope。
 
@@ -71,6 +71,8 @@ MCP 返回 HTTP 404: 常见原因是 session id 未知、过期或被淘汰。�
 `repo impact` 返回 head snapshot 不存在: 先对目标 head 执行 `repo index` 或 `repo update`，再做影响分析。
 
 `repo status` 显示 `active_task.state=running`，但 `checkpoint.parsed_file_count` 一直是 0: 先查看 `repo status --format json` 中的 `active_task.lease_expires_at_ms` 和 `checkpoint.updated_at_ms`。非交互式 agent session 中不要反复启动 `service run`；它是前台常驻进程。`service run` 启动时会恢复 owner 进程已退出的 `code-index-worker-<pid>` lease，并记录 `lease_orphaned`；仍有存活 worker 持有的 lease 会保留。冷启动索引用到的 Git blob 批量读取有明确边界，`git cat-file` 无响应时会报告 Git 命令错误，使任务进入 retry 或 dead-letter，而不是无限持有 lease。如果 `git cat-file --batch` 或 `--batch-check` 返回意外 header，例如本应有 blob size 却返回 missing object 行，索引会退回有界逐路径 Git 读取，而不是让整个 batch 失败。如果任务处于 queued 或 retrying，可执行 `repo index-worker --task-id <active_task.task_id> --format json` 做一次有界 worker attempt。对仍然卡住的未完成任务，执行 `repo index <alias> --reset --format json`，再用 `repo index-worker --task-id <reset_task_id> --format json` 消费重排任务；如果历史任务已经进入 dead-letter，则用 `repo index <alias> --ref <ref>` 有意重新排当前 scope，而不是复活 terminal 历史。不要杀 `relay-knowledge` 进程，也不要绕过任务 lease。
+
+`repo status` 停在 `finalizing:software_projection:v3:*`: 这是可恢复的软件投影阶段，不表示已发布成功。文本格式会在 retrying/failed task 后附带 `error_kind` 和带引号的 `error`；JSON 格式继续提供完整 `active_task.last_error_kind`、`active_task.last_error_message`、lease 和 checkpoint 时间。升级后旧 v1/v2 阶段会安全地从 reset 重放投影派生；正常 worker 会从当前 v3 阶段继续，阶段之间会释放 SQLite writer 供续租；不要直接把 checkpoint 改成 completed。Watcher 的 Git reconciliation warning 现在包含 `operation=resolve_head|observe_worktree|resolve_snapshot`，先按 operation 区分 Git ref、工作树文件 I/O 和 snapshot 解析。工作树中单个暂时不可读的变更路径会进入稳定的 unreadable fingerprint，而不会被误报为 HEAD 解析失败；后续索引仍会按正常 task diagnostic 报告无法读取的权威内容。
 
 SQLite WAL 或 planner 维护异常: 先查看 `health --format json` 或 graph inspection 中的 `graph.sqlite`。`journal_mode` 应为 `wal`，`wal_size_bytes` 表示当前 `-wal` 文件大小，`last_maintenance_at_ms` 表示最近一次批量索引后维护尝试时间，`last_maintenance_error` 非空表示 `PRAGMA optimize` 或 `PRAGMA wal_checkpoint(PASSIVE)` 失败。维护时间和错误会持久化到 SQLite，因此服务重启或一次性 worker 退出后仍应可见。`partitioned_sqlite` 拓扑下这些值会通过只读 shard 诊断聚合 control 数据库和 active repository shard 数据库；任一 active shard 无法检查时，`wal_size_bytes` 为未知，shard 错误保留在 `last_maintenance_error` 中。该错误不会让已经完成的索引结果失效；如果同时出现查询性能回退，运行 `tools/self_iteration --categories performance` 复现大仓性能门，再结合数据库文件所在磁盘空间、权限和只读挂载状态排查。
 
@@ -109,10 +111,24 @@ Rust 质量门禁:
 
 ```bash
 cargo fmt --all -- --check
+cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+cargo test --test benchmarks --all-features -- --nocapture
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
+
+nightly 未定义行为与内存插桩门禁需要先安装 Miri 和 `rust-src`，再运行有界
+deep profile：
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+Miri 门禁有意只执行无 FFI 的 `domain::core::` 单元测试面。SQLite、socket
+和其他外部边界继续由普通测试与 Linux AddressSanitizer job 覆盖，因为 Miri
+不实现这些 host API。
 
 Web 和浏览器集成测试:
 

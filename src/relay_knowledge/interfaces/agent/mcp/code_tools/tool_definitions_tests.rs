@@ -50,4 +50,15 @@ fn software_tool_schema_advertises_agent_aliases() {
             "schema should advertise {alias}"
         );
     }
+    assert!(values.iter().any(|value| value == "statements"));
+    assert_eq!(
+        definition["inputSchema"]["properties"]["export_profile"]["enum"],
+        serde_json::json!(["spdx-3", "cyclonedx-1.7", "prov-o"])
+    );
+    assert!(
+        code_query_tool_definition()["inputSchema"]["properties"]
+            .get("export_profile")
+            .is_none(),
+        "code queries must not advertise software export profiles"
+    );
 }

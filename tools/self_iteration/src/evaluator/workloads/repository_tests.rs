@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use super::{elastic_timeout_seconds, evaluate_repository};
+use super::{elastic_timeout_seconds, evaluate_repository, scoped_register_command};
 use crate::evaluator::runtime::contracts::{EvalRuntime, Limiter};
 
 #[test]
@@ -21,6 +21,36 @@ fn elastic_budget_extends_process_timeout_beyond_global_default() {
     assert_eq!(
         elastic_timeout_seconds(900, &config, "index_budget_ms"),
         1_030
+    );
+}
+
+#[test]
+fn scoped_registration_uses_only_explicit_registration_paths() {
+    let config = serde_json::json!({
+        "registration_path_filters": ["packages/app/src"],
+        "path_filters": ["query/only"],
+        "language_filters": ["vue"]
+    });
+
+    assert_eq!(
+        scoped_register_command(
+            std::path::Path::new("relay-knowledge"),
+            std::path::Path::new("/work/project"),
+            Some("frontend"),
+            &config,
+        ),
+        vec![
+            "relay-knowledge",
+            "repo",
+            "register",
+            "/work/project",
+            "--alias",
+            "frontend",
+            "--path",
+            "packages/app/src",
+            "--format",
+            "json",
+        ]
     );
 }
 

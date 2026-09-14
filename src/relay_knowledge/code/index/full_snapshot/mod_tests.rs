@@ -11,6 +11,60 @@ use crate::domain::CodeMonorepoWorkspaceFormat;
 use super::*;
 
 #[test]
+fn maven_workspace_uses_indexed_poms_and_preserves_scope() {
+    let repo = TestRepo::create("maven-workspace-snapshot");
+    repo.write("pom.xml", "<project><groupId>demo</groupId><artifactId>root</artifactId><modules><module>child</module></modules></project>");
+    repo.write(
+        "child/pom.xml",
+        "<project><parent><groupId>demo</groupId></parent><artifactId>child</artifactId></project>",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "reactor"]);
+    repo.write(
+        "child/pom.xml",
+        "<project><groupId>dirty</groupId><artifactId>unindexed</artifactId></project>",
+    );
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "fixture",
+        repo.path.to_string_lossy(),
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    let selector = CodeRepositorySelector::new("fixture", "HEAD", Vec::new(), Vec::new()).unwrap();
+    let snapshot = build_full_snapshot(
+        &registration,
+        &selector,
+        &repo.path,
+        &CodeWorkspaceDetectionConfig::enabled_all(),
+    )
+    .unwrap();
+    let workspace = snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.format == CodeMonorepoWorkspaceFormat::Maven)
+        .unwrap();
+    assert_eq!(workspace.members.len(), 2);
+    assert!(
+        workspace
+            .members
+            .iter()
+            .any(|member| member.package_name == "demo:child")
+    );
+    let restricted =
+        CodeRepositorySelector::new("fixture", "HEAD", vec!["pom.xml".into()], Vec::new()).unwrap();
+    let snapshot = build_full_snapshot(
+        &registration,
+        &restricted,
+        &repo.path,
+        &CodeWorkspaceDetectionConfig::enabled_all(),
+    )
+    .unwrap();
+    assert!(snapshot.workspaces.is_empty());
+}
+
+#[test]
 fn workspace_detection_reads_manifests_from_indexed_ref() {
     let repo = TestRepo::create("workspace-indexed-ref");
     repo.write("pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n");

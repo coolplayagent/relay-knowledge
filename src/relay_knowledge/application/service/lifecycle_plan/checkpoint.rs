@@ -142,8 +142,10 @@ fn read_checkpoint_from_path(path: &Path) -> Result<LifecycleCheckpoint, String>
         .map_err(|error| format!("parse rollback checkpoint {}: {error}", path.display()))
 }
 
-pub(super) fn copy_current_binary(plan: &ServiceDefinitionPlan) -> Result<(), String> {
-    let source = std::env::current_exe().map_err(|error| error.to_string())?;
+pub(super) fn copy_current_binary(
+    plan: &ServiceDefinitionPlan,
+    source: &Path,
+) -> Result<(), String> {
     let target = Path::new(&plan.binary_path);
     if source == target {
         return Ok(());

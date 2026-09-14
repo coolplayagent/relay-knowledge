@@ -1,0 +1,32 @@
+schema_version: 4
+topic:
+  id: cli
+  title: CLI knowledge
+  description: CLI command reference and agent workflow guidance.
+sources:
+- id: cli-command-reference
+  topic: cli
+  kind: doc
+  uri: docs/zh/01-user-guide/03-cli-command-reference.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: User-facing CLI command reference.
+- id: cli-skill-workflows
+  topic: cli
+  kind: doc
+  uri: skills/relay-knowledge-cli/references/knowledge-map-workflows.md
+  source_scope: skill
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 2
+  description: Agent workflow for joint knowledge-map/code-map bootstrap, source reconciliation, and spec-grounded incremental development.
+route:
+  topic: cli
+  source_order:
+  - cli-command-reference
+  - cli-skill-workflows
+  fallback: bounded-search

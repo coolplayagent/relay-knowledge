@@ -23,6 +23,8 @@ Web 工作区位于 `web/`:
 /api/health
 /api/service/status
 /api/web/graph/canvas
+/api/v1/code/repositories
+/api/v1/code/repositories/{alias}/software
 /api/web/operations/execute
 /api/configs/model/profiles
 /api/configs/model-fallback
@@ -31,13 +33,13 @@ Web 工作区位于 `web/`:
 /api/configs/model:discover
 ```
 
-页面展示 project health、GraphRAG readiness、provider backend diagnostics、graph counts、Status graph overview、Graph canvas、scoped index freshness、refresh queue diagnostics、stale reasons、runtime budgets、agent/model settings 和操作 composer。完整诊断仍以 `/api/health`、`/api/service/status` 和操作返回 JSON 为准。
+页面展示 project health、GraphRAG readiness、provider backend diagnostics、graph counts、Status graph overview、Graph canvas、software ontology graph、冲突与 shape diagnostics、scoped index freshness、refresh queue diagnostics、stale reasons、runtime budgets、agent/model settings 和操作 composer。完整诊断仍以 `/api/health`、`/api/service/status` 和操作返回 JSON 为准。
 
 Providers 面板只展示脱敏后的 semantic/vector backend mode、模型、维度、endpoint host、key configured 状态和 cursor metadata；Web UI 不保存或回显 provider API key 原文。
 
 ## 6.3 页面结构
 
-Web 工作区使用左侧导航和右侧详情区。桌面端左侧导航固定在视口内，右侧详情区独立滚动；窄屏端导航固定为顶部横向菜单。点击 Status、Readiness、Graph、Providers、Operations、Indexes、Runtime 或 Settings 时，详情区只显示对应页面，不把所有面板堆在同一个长页面内。
+Web 工作区使用左侧导航和右侧详情区。桌面端左侧导航固定在视口内，右侧详情区独立滚动；窄屏端导航固定为顶部横向菜单。点击 Status、Readiness、Graph、Software、Providers、Operations、Indexes、Runtime 或 Settings 时，详情区只显示对应页面，不把所有面板堆在同一个长页面内。
 
 工具栏提供白天/夜间主题切换。首次打开时跟随浏览器系统主题；用户切换后，选择会写入浏览器本地存储并在后续刷新中保留。
 
@@ -48,6 +50,8 @@ Graph 页面提供三个只读画布:
 - Mixed: 合并知识图和代码图，并显示 source scope 或 source path 可推导出的跨图关联。
 
 画布请求使用 `/api/web/graph/canvas?kind=knowledge|code|mixed&scope=<scope>&query=<text>&limit=<n>`。默认 limit 是 250，最大 1000；后端始终按当前 graph version 返回 bounded snapshot，超过限制时在 `summary.truncated` 中标记截断。
+
+Software 页面先读取有界的已索引仓库列表，再针对选中仓库和其固定 commit 并行请求 `statements` 与 `conflicts`。关系画布以稳定 `entity_key` 合并同一实体，点击节点或 statement 可查看 occurrence、source scope、evidence、assertion、resolution、confidence 和 extractor；下方表格保留 conflicting、superseded、rejected、unresolved、ambiguous、external statement 与 shape diagnostics。页面同时展示 ontology/projection schema 版本、freshness、provenance completeness、source coverage 和 conflict count，不在浏览器中扫描源码或推断缺失事实。单次每个切片的 limit 为 1-500。
 
 ## 6.4 操作执行
 
@@ -65,7 +69,7 @@ Web Operations 面板覆盖这些 typed command/request preview 和同源执行:
 
 `Run` 会发送当前 snapshot 并在页面内显示 pending、success 或 error 状态。执行请求不使用诊断请求的 10 秒客户端超时，避免长时间索引或维护操作被前端提前 abort。
 
-操作面板展示的 command 是 CLI 等价预览，不是前端模拟结果。真正执行结果来自 `/api/web/operations/execute` 返回的统一 API 响应。`knowledge.map.history` 操作必须提供已托管的仓库别名，并与 CLI `map history` 使用相同的正数 `from_version` 和有界 `limit`（1-256）。服务通过持久化的仓库注册状态解析别名，因此安装后的 Web 服务不会从进程工作目录猜测仓库。请先注册仓库；复现 Web 结果时进入该仓库根目录再运行展示的 CLI 命令。发生错误时，复制 result JSON 中的 operation、仓库别名、command、error kind 和 metadata。
+操作面板展示的 command 是 CLI 等价预览，不是前端模拟结果。真正执行结果来自 `/api/web/operations/execute` 返回的统一 API 响应。`knowledge.map.history` 兼容操作与强类型 `repository.map.history` 操作必须提供已托管的仓库别名和 `map_type`（`knowledge` 或 `codespec`），可选提供正数 `from_version`，`limit` 必须位于 1 到 16，与 CLI `map history` 一致。省略 `from_version` 时从最早保留的近期记录开始。服务通过持久化的仓库注册状态解析别名，因此安装后的 Web 服务不会从进程工作目录猜测仓库。请先注册仓库；复现 Web 结果时进入该仓库根目录再运行展示的 CLI 命令。发生错误时，复制 result JSON 中的 operation、仓库别名、command、error kind 和 metadata。
 
 Knowledge Map 请求参数错误和无效仓库契约返回 HTTP 400；仓库文件系统或存储故障保留为服务端故障并返回 HTTP 503，不会被误报为用户输入错误。
 
@@ -99,7 +103,7 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-测试覆盖 diagnostics、Status 首页查询入口、Status graph overview、单详情页导航、主题切换、GraphRAG readiness、graph canvas controls、operation composer、index table、runtime panel、Settings 配置生成、模型 provider profile、provider probe/discovery，以及移动端布局。
+测试覆盖 diagnostics、Status 首页查询入口、Status graph overview、单详情页导航、主题切换、GraphRAG readiness、graph canvas controls、software ontology graph 与冲突/shape 视图、operation composer、index table、runtime panel、Settings 配置生成、模型 provider profile、provider probe/discovery，以及移动端布局。
 
 ## 6.7 安全边界
 

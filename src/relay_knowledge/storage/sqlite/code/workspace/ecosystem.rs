@@ -9,6 +9,7 @@ pub(super) fn ecosystem_for_format(format: CodeMonorepoWorkspaceFormat) -> &'sta
         CodeMonorepoWorkspaceFormat::Pnpm => "npm",
         CodeMonorepoWorkspaceFormat::GoModules => "go",
         CodeMonorepoWorkspaceFormat::CargoWorkspace => "rust",
+        CodeMonorepoWorkspaceFormat::Maven => "maven",
     }
 }
 
@@ -26,6 +27,7 @@ pub(super) fn workspace_format_key(format: CodeMonorepoWorkspaceFormat) -> &'sta
         CodeMonorepoWorkspaceFormat::Pnpm => "pnpm",
         CodeMonorepoWorkspaceFormat::GoModules => "go_modules",
         CodeMonorepoWorkspaceFormat::CargoWorkspace => "cargo_workspace",
+        CodeMonorepoWorkspaceFormat::Maven => "maven",
     }
 }
 
@@ -34,6 +36,7 @@ pub(super) fn workspace_manifest_file_name(ecosystem: &str) -> Option<&'static s
         "npm" => Some("package.json"),
         "go" => Some("go.mod"),
         "rust" => Some("Cargo.toml"),
+        "maven" => Some("pom.xml"),
         _ => None,
     }
 }

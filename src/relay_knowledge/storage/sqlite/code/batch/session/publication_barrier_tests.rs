@@ -7,7 +7,10 @@ use crate::{
         CodeIncrementalSummaryReceipt, CodeIndexMode, CodeIndexPublicationFence,
         CodeIndexResourceBudget, CodeIndexSnapshot, CodeIndexTaskState, CodeParseStatus,
     },
-    storage::{CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositoryStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest, CodeIndexTaskSeed,
+        CodeIndexTaskStore as _, RepositoryCatalogStore as _, SoftwareProjectionStore as _,
+    },
 };
 
 use super::tests::{batch, file, reference, registered_store, session_for_scope};
@@ -497,6 +500,8 @@ async fn fenced_snapshot_and_session_cannot_rewrite_an_active_scope() {
                 calls: Vec::new(),
                 dependencies: Vec::new(),
                 feature_flags: Vec::new(),
+                framework_nodes: Vec::new(),
+                framework_edges: Vec::new(),
                 routes: Vec::new(),
                 chunks: Vec::new(),
                 workspaces: Vec::new(),

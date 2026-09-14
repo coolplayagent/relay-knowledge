@@ -7,11 +7,11 @@ use crate::{
         CodeIndexBatch, CodeIndexCheckpoint, CodeIndexPublicationFence, CodeIndexSession,
         CodeIndexSnapshot, CodeIndexSummary,
     },
-    storage::{CodeRepositoryStore, StorageError, StorageFuture},
+    storage::{CodeIndexPublicationStore, RepositoryCatalogStore, StorageError, StorageFuture},
 };
 
 #[cfg(test)]
-use crate::storage::BusinessKnowledgeStore;
+use crate::storage::{BusinessKnowledgeStore, SoftwareProjectionStore};
 
 use super::super::{PartitionedSqliteKnowledgeStore, status::mirror_status};
 

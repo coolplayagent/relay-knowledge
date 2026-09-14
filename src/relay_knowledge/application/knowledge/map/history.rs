@@ -1,41 +1,45 @@
-//! Bounded Knowledge Map history paging and archive-chain validation.
+//! Bounded recent-history paging and legacy archive-chain validation.
 
 use crate::{
-    api::RequestContext,
-    domain::{KnowledgeMap, KnowledgeMapHistoryEntry},
-    project::{KNOWLEDGE_MAP_HISTORY_DIR_NAME, KNOWLEDGE_MAP_RELATIVE_PATH},
+    api::RequestContext, domain::KnowledgeMapHistoryEntry, project::KNOWLEDGE_MAP_HISTORY_DIR_NAME,
 };
 
 use super::{
     KnowledgeMapHistoryResponse, KnowledgeMapService, KnowledgeMapServiceError,
     artifact::{
-        ARTIFACT_SCHEMA_VERSION, HISTORY_INDEX_FANOUT, HISTORY_INDEX_MAX_HEIGHT,
-        KnowledgeMapArchiveRef, KnowledgeMapHistoryArchive, KnowledgeMapHistoryIndexEntry,
-        KnowledgeMapHistoryIndexNode, KnowledgeMapHistoryIndexRef, KnowledgeMapHistoryIndexTarget,
-        KnowledgeMapHistoryManifest, KnowledgeMapManifest, KnowledgeMapSchemaProbe,
-        RECENT_HISTORY_LIMIT, content_digest, parse_manifest, read_verified_ref, serialize_yaml,
-        validate_history_index_ref_shape, validate_recent_history,
+        ARTIFACT_SCHEMA_VERSION, DIRECTORY_ARTIFACT_SCHEMA_VERSION, HISTORY_INDEX_FANOUT,
+        HISTORY_INDEX_MAX_HEIGHT, KnowledgeMapArchiveRef, KnowledgeMapHistoryArchive,
+        KnowledgeMapHistoryIndexEntry, KnowledgeMapHistoryIndexNode, KnowledgeMapHistoryIndexRef,
+        KnowledgeMapHistoryIndexTarget, KnowledgeMapHistoryManifest, KnowledgeMapManifest,
+        KnowledgeMapSchemaProbe, LEGACY_ARTIFACT_SCHEMA_VERSION, RECENT_HISTORY_LIMIT,
+        parse_manifest, read_verified_ref_in, validate_history_index_ref_shape,
+        validate_recent_history,
     },
     contracts::metadata,
-    publish_immutable,
 };
 
-pub(crate) const MAX_HISTORY_PAGE_SIZE: usize = 256;
+#[cfg(test)]
+use super::{content_digest, publish_immutable_in, serialize_yaml};
+
+pub(crate) const MAX_HISTORY_PAGE_SIZE: usize = RECENT_HISTORY_LIMIT;
 pub(super) const MAX_HISTORY_LOOKUP_READS: usize = HISTORY_INDEX_MAX_HEIGHT as usize + 2;
+pub(super) const MISSING_HISTORY_INDEX_MESSAGE: &str =
+    "history archive index is missing; run `relay-knowledge map init` to migrate this v2 map";
 
 impl KnowledgeMapService {
     pub async fn history(
         &self,
         context: &RequestContext,
-        from_version: u64,
+        from_version: Option<u64>,
         limit: usize,
     ) -> Result<KnowledgeMapHistoryResponse, KnowledgeMapServiceError> {
-        if from_version == 0 || limit == 0 || limit > MAX_HISTORY_PAGE_SIZE {
+        if from_version == Some(0) || limit == 0 || limit > MAX_HISTORY_PAGE_SIZE {
             return Err(KnowledgeMapServiceError::InvalidRequest(format!(
                 "history from_version must be positive and limit must be within 1..={MAX_HISTORY_PAGE_SIZE}"
             )));
         }
-        let (map_version, entries) = self.load_history_page(from_version, limit).await?;
+        let (map_version, omitted_through, from_version, entries) =
+            self.load_history_page(from_version, limit).await?;
         let through_version = entries
             .last()
             .map_or(from_version.saturating_sub(1), |entry| entry.version);
@@ -44,8 +48,11 @@ impl KnowledgeMapService {
             .flatten();
         Ok(KnowledgeMapHistoryResponse {
             metadata: metadata(context),
-            path: KNOWLEDGE_MAP_RELATIVE_PATH.to_owned(),
+            path: self.relative_path().to_owned(),
+            map_type: self.map_type,
             map_version,
+            omitted_through,
+            earliest_available_version: omitted_through.saturating_add(1),
             from_version,
             through_version,
             next_from_version,
@@ -55,31 +62,59 @@ impl KnowledgeMapService {
 
     async fn load_history_page(
         &self,
-        from_version: u64,
+        from_version: Option<u64>,
         limit: usize,
-    ) -> Result<(u64, Vec<KnowledgeMapHistoryEntry>), KnowledgeMapServiceError> {
-        let content = self.read_root_content().await?;
-        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
+    ) -> Result<(u64, u64, u64, Vec<KnowledgeMapHistoryEntry>), KnowledgeMapServiceError> {
+        let root = self.read_root_snapshot().await?;
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&root.content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         match probe.schema_version {
             1 => {
-                let map = serde_norway::from_str::<KnowledgeMap>(&content)
-                    .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-                map.validate()?;
+                let from_version = from_version.unwrap_or(1);
+                let map = super::parse_v1_map(&root.content)?;
                 let entries = map
                     .history
                     .into_iter()
                     .filter(|entry| entry.version >= from_version)
                     .take(limit)
                     .collect();
-                Ok((map.map_version, entries))
+                Ok((map.map_version, 0, from_version, entries))
+            }
+            LEGACY_ARTIFACT_SCHEMA_VERSION | DIRECTORY_ARTIFACT_SCHEMA_VERSION => {
+                let from_version = from_version.unwrap_or(1);
+                let manifest = parse_manifest(&root.content)?;
+                self.validate_manifest_identity(&manifest)?;
+                let entries = self
+                    .load_v2_history_page(&manifest, root.contract_dir, from_version, limit)
+                    .await?;
+                Ok((manifest.map_version, 0, from_version, entries))
             }
             ARTIFACT_SCHEMA_VERSION => {
-                let manifest = parse_manifest(&content)?;
-                let entries = self
-                    .load_v2_history_page(&manifest, from_version, limit)
-                    .await?;
-                Ok((manifest.map_version, entries))
+                let manifest = parse_manifest(&root.content)?;
+                self.validate_manifest_identity(&manifest)?;
+                let earliest = manifest.history.omitted_through.saturating_add(1);
+                let from_version = from_version.unwrap_or(earliest);
+                if from_version <= manifest.history.omitted_through {
+                    return Err(KnowledgeMapServiceError::InvalidRequest(format!(
+                        "history through version {} is no longer retained; earliest available version is {}",
+                        manifest.history.omitted_through,
+                        manifest.history.omitted_through.saturating_add(1)
+                    )));
+                }
+                let entries = manifest
+                    .history
+                    .recent
+                    .iter()
+                    .filter(|entry| entry.version >= from_version)
+                    .take(limit)
+                    .cloned()
+                    .collect();
+                Ok((
+                    manifest.map_version,
+                    manifest.history.omitted_through,
+                    from_version,
+                    entries,
+                ))
             }
             version => Err(KnowledgeMapServiceError::Yaml(format!(
                 "unsupported schema_version {version}"
@@ -90,6 +125,7 @@ impl KnowledgeMapService {
     async fn load_v2_history_page(
         &self,
         manifest: &KnowledgeMapManifest,
+        contract_dir: &str,
         from_version: u64,
         limit: usize,
     ) -> Result<Vec<KnowledgeMapHistoryEntry>, KnowledgeMapServiceError> {
@@ -114,14 +150,13 @@ impl KnowledgeMapService {
                 )
             })?;
             let index = manifest.history.index.as_ref().ok_or_else(|| {
-                KnowledgeMapServiceError::Integrity(
-                    "history archive index is missing; run `relay-knowledge map init` to migrate this v2 map"
-                        .to_owned(),
-                )
+                KnowledgeMapServiceError::Integrity(MISSING_HISTORY_INDEX_MESSAGE.to_owned())
             })?;
             let mut target = from_version;
             while target <= through_version && target <= manifest.history.archived_through {
-                let (archive, _, reads) = self.load_indexed_history_archive(index, target).await?;
+                let (archive, _, reads) = self
+                    .load_indexed_history_archive_in(contract_dir, index, target)
+                    .await?;
                 if reads > MAX_HISTORY_LOOKUP_READS {
                     return Err(KnowledgeMapServiceError::Integrity(
                         "history archive index exceeded its lookup read budget".to_owned(),
@@ -163,6 +198,16 @@ impl KnowledgeMapService {
         &self,
         history: &KnowledgeMapHistoryManifest,
     ) -> Result<(), KnowledgeMapServiceError> {
+        let contract_dir = self.read_contract_dir_name().await?;
+        self.validate_archived_history_in(contract_dir, history)
+            .await
+    }
+
+    pub(super) async fn validate_archived_history_in(
+        &self,
+        contract_dir: &str,
+        history: &KnowledgeMapHistoryManifest,
+    ) -> Result<(), KnowledgeMapServiceError> {
         let Some(mut archive_ref) = history.archive.clone() else {
             return if history.archived_through == 0 {
                 Ok(())
@@ -175,11 +220,11 @@ impl KnowledgeMapService {
         let mut expected_through = history.archived_through;
         loop {
             let archive = self
-                .load_history_archive(&archive_ref, expected_through)
+                .load_history_archive_in(contract_dir, &archive_ref, expected_through)
                 .await?;
             if let Some(index) = &history.index {
                 let (_, indexed_ref, _) = self
-                    .load_indexed_history_archive(index, archive.from_version)
+                    .load_indexed_history_archive_in(contract_dir, index, archive.from_version)
                     .await?;
                 if indexed_ref != archive_ref {
                     return Err(KnowledgeMapServiceError::Integrity(
@@ -201,81 +246,28 @@ impl KnowledgeMapService {
         }
     }
 
-    pub(super) async fn ensure_history_index(
-        &self,
-        history: &KnowledgeMapHistoryManifest,
-    ) -> Result<Option<KnowledgeMapHistoryIndexRef>, KnowledgeMapServiceError> {
-        if history.archived_through == 0 {
-            return Ok(None);
-        }
-        if let Some(index) = &history.index {
-            return Ok(Some(index.clone()));
-        }
-        let mut archive_ref = history.archive.clone().ok_or_else(|| {
-            KnowledgeMapServiceError::Integrity(
-                "history archive is missing for a non-zero checkpoint".to_owned(),
-            )
-        })?;
-        let mut expected_through = history.archived_through;
-        let mut index = None;
-        loop {
-            let archive = self
-                .load_history_archive(&archive_ref, expected_through)
-                .await?;
-            index = Some(
-                self.prepend_history_index(index, archive_ref.clone(), &archive)
-                    .await?,
-            );
-            expected_through = archive.from_version - 1;
-            match archive.previous {
-                Some(previous) => archive_ref = previous,
-                None if expected_through == 0 => break,
-                None => {
-                    return Err(KnowledgeMapServiceError::Integrity(
-                        "history archive chain ends before version 1".to_owned(),
-                    ));
-                }
-            }
-        }
-        Ok(index)
-    }
-
+    #[cfg(test)]
     pub(super) async fn append_history_index(
         &self,
         index: Option<KnowledgeMapHistoryIndexRef>,
         archive_ref: KnowledgeMapArchiveRef,
         archive: &KnowledgeMapHistoryArchive,
     ) -> Result<KnowledgeMapHistoryIndexRef, KnowledgeMapServiceError> {
-        self.update_history_index(index, archive_ref, archive, false)
-            .await
+        self.update_history_index(index, archive_ref, archive).await
     }
 
-    async fn prepend_history_index(
-        &self,
-        index: Option<KnowledgeMapHistoryIndexRef>,
-        archive_ref: KnowledgeMapArchiveRef,
-        archive: &KnowledgeMapHistoryArchive,
-    ) -> Result<KnowledgeMapHistoryIndexRef, KnowledgeMapServiceError> {
-        self.update_history_index(index, archive_ref, archive, true)
-            .await
-    }
-
+    #[cfg(test)]
     async fn update_history_index(
         &self,
         index: Option<KnowledgeMapHistoryIndexRef>,
         archive_ref: KnowledgeMapArchiveRef,
         archive: &KnowledgeMapHistoryArchive,
-        prepend: bool,
     ) -> Result<KnowledgeMapHistoryIndexRef, KnowledgeMapServiceError> {
         let archive_entry = archive_index_entry(archive_ref, archive);
         let Some(root) = index else {
             return self.publish_index_node(0, vec![archive_entry]).await;
         };
-        if prepend {
-            if archive.through_version.checked_add(1) != Some(root.from_version) {
-                return Err(noncontiguous_index());
-            }
-        } else if root.through_version.checked_add(1) != Some(archive.from_version) {
+        if root.through_version.checked_add(1) != Some(archive.from_version) {
             return Err(noncontiguous_index());
         }
         let mut path = Vec::new();
@@ -286,36 +278,23 @@ impl KnowledgeMapService {
                 path.push(node);
                 break;
             }
-            let child = if prepend {
-                node.entries.first()
-            } else {
-                node.entries.last()
-            }
-            .and_then(index_node_ref)
-            .ok_or_else(invalid_index)?;
+            let child = node
+                .entries
+                .last()
+                .and_then(index_node_ref)
+                .ok_or_else(invalid_index)?;
             path.push(node);
             current = child;
         }
         let mut replacements = {
             let mut leaf = path.pop().expect("index path contains a leaf").entries;
-            if prepend {
-                leaf.insert(0, archive_entry);
-            } else {
-                leaf.push(archive_entry);
-            }
+            leaf.push(archive_entry);
             self.publish_index_level(0, leaf).await?
         };
         while let Some(parent) = path.pop() {
             let mut entries = parent.entries;
-            if prepend {
-                entries.remove(0);
-                for replacement in replacements.into_iter().rev() {
-                    entries.insert(0, node_index_entry(replacement));
-                }
-            } else {
-                entries.pop();
-                entries.extend(replacements.into_iter().map(node_index_entry));
-            }
+            entries.pop();
+            entries.extend(replacements.into_iter().map(node_index_entry));
             replacements = self.publish_index_level(parent.height, entries).await?;
         }
         if replacements.len() == 1 {
@@ -337,6 +316,7 @@ impl KnowledgeMapService {
         .await
     }
 
+    #[cfg(test)]
     async fn publish_index_level(
         &self,
         height: u8,
@@ -354,6 +334,7 @@ impl KnowledgeMapService {
         Ok(refs)
     }
 
+    #[cfg(test)]
     async fn publish_index_node(
         &self,
         height: u8,
@@ -361,7 +342,7 @@ impl KnowledgeMapService {
     ) -> Result<KnowledgeMapHistoryIndexRef, KnowledgeMapServiceError> {
         validate_index_entries(height, &entries)?;
         let node = KnowledgeMapHistoryIndexNode {
-            schema_version: ARTIFACT_SCHEMA_VERSION,
+            schema_version: DIRECTORY_ARTIFACT_SCHEMA_VERSION,
             from_version: entries.first().expect("validated entries").from_version,
             through_version: entries.last().expect("validated entries").through_version,
             height,
@@ -373,7 +354,13 @@ impl KnowledgeMapService {
             "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/index-{height:02}-{:020}-{:020}-{digest}.yaml",
             node.from_version, node.through_version
         );
-        publish_immutable(&self.repository_root, &relative, yaml.as_bytes()).await?;
+        publish_immutable_in(
+            &self.repository_root,
+            self.contract_dir_name(),
+            &relative,
+            yaml.as_bytes(),
+        )
+        .await?;
         Ok(KnowledgeMapHistoryIndexRef {
             from_version: node.from_version,
             through_version: node.through_version,
@@ -383,8 +370,21 @@ impl KnowledgeMapService {
         })
     }
 
+    #[cfg(test)]
     pub(super) async fn load_indexed_history_archive(
         &self,
+        root: &KnowledgeMapHistoryIndexRef,
+        version: u64,
+    ) -> Result<(KnowledgeMapHistoryArchive, KnowledgeMapArchiveRef, usize), KnowledgeMapServiceError>
+    {
+        let contract_dir = self.read_contract_dir_name().await?;
+        self.load_indexed_history_archive_in(contract_dir, root, version)
+            .await
+    }
+
+    async fn load_indexed_history_archive_in(
+        &self,
+        contract_dir: &str,
         root: &KnowledgeMapHistoryIndexRef,
         version: u64,
     ) -> Result<(KnowledgeMapHistoryArchive, KnowledgeMapArchiveRef, usize), KnowledgeMapServiceError>
@@ -398,7 +398,9 @@ impl KnowledgeMapService {
         let mut reads = 0;
         loop {
             reads += 1;
-            let node = self.load_history_index_node(&current).await?;
+            let node = self
+                .load_history_index_node_in(contract_dir, &current)
+                .await?;
             let entry = node
                 .entries
                 .iter()
@@ -425,7 +427,7 @@ impl KnowledgeMapService {
                         digest: digest.clone(),
                     };
                     let archive = self
-                        .load_history_archive(&archive_ref, entry.through_version)
+                        .load_history_archive_in(contract_dir, &archive_ref, entry.through_version)
                         .await?;
                     if archive.from_version != entry.from_version {
                         return Err(invalid_index());
@@ -436,16 +438,34 @@ impl KnowledgeMapService {
         }
     }
 
+    #[cfg(test)]
     async fn load_history_index_node(
         &self,
         index: &KnowledgeMapHistoryIndexRef,
     ) -> Result<KnowledgeMapHistoryIndexNode, KnowledgeMapServiceError> {
+        let contract_dir = self.read_contract_dir_name().await?;
+        self.load_history_index_node_in(contract_dir, index).await
+    }
+
+    async fn load_history_index_node_in(
+        &self,
+        contract_dir: &str,
+        index: &KnowledgeMapHistoryIndexRef,
+    ) -> Result<KnowledgeMapHistoryIndexNode, KnowledgeMapServiceError> {
         validate_history_index_ref_shape(index, index.through_version)?;
-        let content = read_verified_ref(&self.repository_root, &index.r#ref, &index.digest).await?;
+        let content = read_verified_ref_in(
+            &self.repository_root,
+            contract_dir,
+            &index.r#ref,
+            &index.digest,
+        )
+        .await?;
         let node = serde_norway::from_str::<KnowledgeMapHistoryIndexNode>(&content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-        if node.schema_version != ARTIFACT_SCHEMA_VERSION
-            || node.height != index.height
+        if !matches!(
+            node.schema_version,
+            LEGACY_ARTIFACT_SCHEMA_VERSION | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+        ) || node.height != index.height
             || node.from_version != index.from_version
             || node.through_version != index.through_version
             || node.entries.first().map(|entry| entry.from_version) != Some(node.from_version)
@@ -457,8 +477,9 @@ impl KnowledgeMapService {
         Ok(node)
     }
 
-    async fn load_history_archive(
+    async fn load_history_archive_in(
         &self,
+        contract_dir: &str,
         archive_ref: &KnowledgeMapArchiveRef,
         expected_through: u64,
     ) -> Result<KnowledgeMapHistoryArchive, KnowledgeMapServiceError> {
@@ -470,8 +491,9 @@ impl KnowledgeMapService {
                 "history archive chain has an unsafe ref".to_owned(),
             ));
         }
-        let content = read_verified_ref(
+        let content = read_verified_ref_in(
             &self.repository_root,
+            contract_dir,
             &archive_ref.r#ref,
             &archive_ref.digest,
         )
@@ -482,8 +504,10 @@ impl KnowledgeMapService {
             "{KNOWLEDGE_MAP_HISTORY_DIR_NAME}/{:020}-{:020}-{}.yaml",
             archive.from_version, archive.through_version, archive_ref.digest
         );
-        if archive.schema_version != ARTIFACT_SCHEMA_VERSION
-            || archive_ref.r#ref != expected_ref
+        if !matches!(
+            archive.schema_version,
+            LEGACY_ARTIFACT_SCHEMA_VERSION | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+        ) || archive_ref.r#ref != expected_ref
             || archive.through_version != expected_through
             || archive.entries.is_empty()
             || archive.entries.len() > RECENT_HISTORY_LIMIT
@@ -514,6 +538,7 @@ impl KnowledgeMapService {
     }
 }
 
+#[cfg(test)]
 fn archive_index_entry(
     archive_ref: KnowledgeMapArchiveRef,
     archive: &KnowledgeMapHistoryArchive,
@@ -528,6 +553,7 @@ fn archive_index_entry(
     }
 }
 
+#[cfg(test)]
 fn node_index_entry(index: KnowledgeMapHistoryIndexRef) -> KnowledgeMapHistoryIndexEntry {
     KnowledgeMapHistoryIndexEntry {
         from_version: index.from_version,
@@ -540,6 +566,7 @@ fn node_index_entry(index: KnowledgeMapHistoryIndexRef) -> KnowledgeMapHistoryIn
     }
 }
 
+#[cfg(test)]
 fn index_node_ref(entry: &KnowledgeMapHistoryIndexEntry) -> Option<KnowledgeMapHistoryIndexRef> {
     let KnowledgeMapHistoryIndexTarget::Node {
         height,
@@ -615,6 +642,7 @@ fn noncontiguous_index() -> KnowledgeMapServiceError {
     )
 }
 
+#[cfg(test)]
 pub(super) fn balanced_index_split(entry_count: usize) -> Option<usize> {
     (entry_count > HISTORY_INDEX_FANOUT).then_some(entry_count / 2)
 }

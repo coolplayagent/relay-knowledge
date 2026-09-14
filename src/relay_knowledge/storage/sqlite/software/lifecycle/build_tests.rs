@@ -41,6 +41,26 @@ fn package_manifest_collection_keeps_nonempty_scripts() {
 }
 
 #[test]
+fn dockerfile_is_a_build_definition_instead_of_an_iac_resource() {
+    let document = document(
+        "Dockerfile",
+        "dockerfile",
+        &["FROM rust:1.88 AS builder", "RUN cargo build --release"],
+    );
+    let mut targets = BuildTargets::new(MAX_BUILD_TARGETS_PER_SCOPE, "build targets");
+
+    collect(&document, GraphVersion::new(7), &mut targets).expect("target should collect");
+
+    assert_eq!(targets.as_slice().len(), 1);
+    assert_eq!(targets.as_slice()[0].ecosystem, "container");
+    assert_eq!(targets.as_slice()[0].kind, "definition");
+    assert_eq!(
+        targets.as_slice()[0].command.as_deref(),
+        Some("FROM rust:1.88 AS builder")
+    );
+}
+
+#[test]
 fn initialize_schema_creates_build_target_lookup_index() {
     let connection = Connection::open_in_memory().expect("sqlite should open");
 

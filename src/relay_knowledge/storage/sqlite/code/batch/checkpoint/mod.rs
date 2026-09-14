@@ -1,13 +1,13 @@
 //! Persists and decodes checkpoint state for checkpointed code-index batches.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
 use crate::{
     domain::{CodeIndexCheckpoint, CodeIndexSession},
     storage::StorageError,
 };
+
+pub(super) use crate::clock::system_now_millis_or_zero as now_millis;
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
@@ -280,11 +280,4 @@ pub(super) fn count_scope_diagnostics(
 
 pub(super) fn serialize_json<T: serde::Serialize>(value: &T) -> Result<String, StorageError> {
     serde_json::to_string(value).map_err(|error| StorageError::InvalidInput(error.to_string()))
-}
-
-pub(super) fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }

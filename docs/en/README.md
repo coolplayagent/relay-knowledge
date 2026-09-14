@@ -20,6 +20,11 @@ volume covers and count as chapter 0 when they appear in a reading path.
 For release preparation, start with the root README, Chapter 1 installation
 workflow, Chapter 19 installation/release architecture contract, and the latest
 [documentation and self-iteration readiness record](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md).
+The [software-global evidence-priority verification](06-verification/14-software-global-evidence-priority-2026-08-31.md)
+adds current focused performance evidence without superseding overall readiness.
+The [durable worktree delta verification](06-verification/15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
+adds bounded lease-recovery and pinned synthetic-ref evidence under the same
+readiness boundary.
 The [2026-06-05 audit](06-verification/11-documentation-release-readiness-2026-06-05.md)
 remains a historical snapshot rather than evidence for the current worktree.
 The Chinese edition currently includes several benchmark and verification
@@ -87,8 +92,9 @@ records that are intentionally listed below as Chinese-only until translated.
 - [Chapter 21: Software Global Domain Modeling Architecture](03-architecture-specs/21-software-global-domain-modeling.md)
 - [Chapter 22: Service Deployment, Control Plane, and Data Plane](03-architecture-specs/22-service-deployment-control-data-plane.md)
 - [Chapter 24: Code-Map-Backed Knowledge Development Loop](03-architecture-specs/24-code-map-backed-knowledge-development-loop.md)
-- [Chapter 27: Business Knowledge to Technical Graph Mapping](03-architecture-specs/27-business-knowledge-technical-mapping.md)
+- [Chapter 25: Code Index Retention](03-architecture-specs/25-code-index-retention.md)
 - [Chapter 26: Git Commit + Knowledge Development Philosophy and Iteration Loop](03-architecture-specs/26-git-commit-knowledge-development-loop.md)
+- [Chapter 27: Business Knowledge to Technical Graph Mapping](03-architecture-specs/27-business-knowledge-technical-mapping.md)
 
 ## Book 4: Research
 
@@ -127,10 +133,12 @@ their entry point is the [Chinese archive index](../zh/05-benchmarks/archive/REA
 ## Appendix B: Verification
 
 - [Appendix B.0: Verification Records](06-verification/README.md): dated audit index and evidence rules.
-- [Appendix B.1: Documentation Book Refresh Audit 2026-05-17](06-verification/01-documentation-book-refresh-2026-05-17.md): directory responsibilities, closed capability status, and bookshelf index refresh.
-- [Appendix B.2: Documentation Refresh Audit 2026-05-17](06-verification/02-documentation-refresh-audit-2026-05-17.md): documentation sync record for the code retrieval self-iteration commits.
-- [Appendix B.3: Documentation Refresh Audit 2026-05-14](06-verification/03-documentation-refresh-audit-2026-05-14.md): current documentation status, refreshed gaps, and open productization work.
-- [Appendix B.4: relay-teams E2E Verification 2026-05-14](06-verification/04-relay-teams-e2e-2026-05-14.md)
+- [Appendix B.1: relay-teams E2E Verification 2026-05-14](06-verification/01-relay-teams-e2e-2026-05-14.md)
+- [Appendix B.2: Documentation Content Audit 2026-05-14](06-verification/02-documentation-content-audit-2026-05-14.md): current documentation status, refreshed gaps, and open productization work.
+- [Appendix B.3: relay-teams Retrieval Accuracy 2026-05-15](../zh/06-verification/03-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md) (Chinese only)
+- [Appendix B.4: Linux Retrieval Accuracy 2026-05-15](../zh/06-verification/04-code-graph-retrieval-accuracy-linux-2026-05-15.md) (Chinese only)
+- [Appendix B.5: Documentation Book Structure Audit 2026-05-17](06-verification/05-documentation-book-structure-audit-2026-05-17.md): directory responsibilities, closed capability status, and bookshelf index refresh.
+- [Appendix B.6: Documentation Content Refresh Audit 2026-05-17](06-verification/06-documentation-content-refresh-audit-2026-05-17.md): documentation sync record for the code retrieval self-iteration commits.
 - [Appendix B.7: Grep Fallback Documentation Refresh Audit 2026-05-22](06-verification/07-grep-fallback-documentation-refresh-2026-05-22.md): chapter sync record for code retrieval exact-text fallback.
 - [Appendix B.8: Software Global Modeling Documentation Refresh Audit 2026-05-28](06-verification/08-software-global-modeling-documentation-refresh-2026-05-28.md): verification record for the software global modeling research and architecture archive.
 - [Appendix B.9: Software Global, CodeGraph, and Search Everything Research Documentation Refresh Audit 2026-05-31](06-verification/09-software-global-codegraph-search-everything-research-2026-05-31.md): chapter 11 research and bookshelf index sync record.
@@ -138,7 +146,8 @@ their entry point is the [Chinese archive index](../zh/05-benchmarks/archive/REA
 - [Appendix B.11: Documentation Release Readiness Audit 2026-06-05](06-verification/11-documentation-release-readiness-2026-06-05.md): release navigation, file inventory, local link checking, and documentation-only change boundaries.
 - [Appendix B.12: Graph Database, Knowledge Graph, and CodeGraph Deep Research Archive 2026-06-05](06-verification/12-graph-database-codegraph-deep-research-archive-2026-06-05.md): arXiv, X.com, Reddit, and open-source source ledger, research artifacts, competitive feature issues, and validation state archive.
 - [Appendix B.13: Documentation and Self-Iteration Readiness Verification 2026-08-18](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md): current confirmed Rust/package/Web-build/runtime/browser/coverage evidence, an accepted focused-fast performance report, the local `--with-deps` setup limitation, pending exhaustive/Kubernetes accuracy evidence, and the failed Kubernetes 210-second performance rail.
+- [Appendix B.14: Software-Global Evidence Priority Verification 2026-08-31](06-verification/14-software-global-evidence-priority-2026-08-31.md): code-graph analysis, release-binary A/B evidence, budget variance, owner tests, 90.01% coverage, and open boundaries for typed software-global evidence ordering.
+- [Appendix B.15: Durable Worktree Delta and Pinned Query Verification 2026-08-31](06-verification/15-durable-worktree-delta-and-pinned-query-2026-08-31.md): bounded delta batching, lease takeover, release-product self-iteration, full tests and coverage, real repository replay, and the explicit auto-workspace boundary.
 
-Chinese-only verification records pending English translation:
-[Appendix B.5](../zh/06-verification/05-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md) and
-[Appendix B.6](../zh/06-verification/06-code-graph-retrieval-accuracy-linux-2026-05-15.md).
+Appendix B keeps one chronological identity across both editions. Entries B.3
+and B.4 therefore stay in sequence while their English translations are pending.

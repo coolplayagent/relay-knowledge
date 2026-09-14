@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="relay-knowledge 1.1.17 发布说明：Repository Map v4、有界历史、减少存储写入、耐久 worktree 恢复与共享本体 schema。"
+    />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.17 发布说明</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="页面导航">
+        <a href="../">中文文档</a>
+        <a href="../../en/releases/1.1.17.html">English</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.17">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.17 发布说明</h1>
+        <p>
+          1.1.17 引入仅保留最近历史的 Repository Map v4，减少地图存储写入并加强迁移与恢复。
+          本版同时改进耐久 worktree 索引，收敛软件本体的核心 schema。
+        </p>
+        <p>发布日期：2026 年 9 月 7 日。</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.17">发布与下载</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.17">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.17/checksums.txt">Checksums</a>
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>安装与验证</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.17 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json</code></pre>
+        <p class="notice">
+          迁移可见的 Repository Map v4 合同前，应先升级所有共享该仓库的 writer 与 reader。
+          迁移前备份或提交仓库拥有的 map 文件；替换常驻服务二进制前，先运行文档规定的
+          service lifecycle dry-run。1.1.17 是最低 v4 reader 版本。
+          地图不提供数据级 rollback 命令：启动旧二进制前，先从 Git 或备份恢复迁移前的 map snapshot。
+          存储迁移的精确回滚还需要备份 runtime database 和全部 shard。
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Repository Map v4</h2>
+        <p>CodeSpec 与 Knowledge Map 继续使用可见的 <code>codespec/</code> 与
+          <code>knowledge/</code> 根目录。每个根只保留最近 16 条历史，
+          <code>omitted_through</code> 记录被丢弃历史的 checkpoint；请求更早历史会明确失败。
+          长期审计与恢复依赖 Git 或仓库备份。</p>
+        <ul>
+          <li>迁移先校验完整且经过授权的 legacy history chain，再发布 v4 根和 legacy redirect。</li>
+          <li>清理等待 60 秒 reader grace，每轮最多删除 1,024 个已识别文件。</li>
+          <li>符号链接、未知条目、不安全路径或完整性失败会停止清理，不删除未识别数据。</li>
+          <li>再次运行 <code>map init</code> 可续跑待完成清理；<code>map validate</code> 始终只读。</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>减少地图存储写入</h2>
+        <ul>
+          <li>相同内容的 source update 不再消耗 map/source version，也不写入新 topic shard。</li>
+          <li>Topic-shard 清理保留 current 与 fallback reader root，并通过有界、可续跑的维护执行。</li>
+          <li>恢复与迁移在 repository writer lock 内校验 ownership 和 legacy 状态。</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>索引与本体</h2>
+        <ul>
+          <li>耐久 worktree 索引加强恢复与发布校验，继续保留 lease 和 checkpoint。</li>
+          <li>只读 catalog 启动避免获取 catalog writer lock。</li>
+          <li>软件本体投影共享核心 schema，统一词汇、属性和验证规则。</li>
+          <li>分层 commit 质量门禁与高维索引验证加强回归覆盖。</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>发布产物</h2>
+        <p>
+          Release 包含六个平台压缩包、<code>checksums.txt</code>、artifact attestation 和版本化 CLI skill。
+          Linux GNU 二进制在发布前使用 glibc 2.28 基线构建并实际启动验证。
+        </p>
+        <ul>
+          <li>Linux x64 与 ARM64</li>
+          <li>macOS Intel 与 Apple Silicon</li>
+          <li>Windows x64 与 ARM64</li>
+          <li>用于 agent CLI 工作流的 <code>relay-knowledge-cli-skill-v1.1.17.tar.gz</code></li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>进一步阅读</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.17/docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md">安装、发布与升级</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.17/docs/zh/03-architecture-specs/21-software-global-domain-modeling.md">软件全域模型</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.17/docs/zh/03-architecture-specs/24-code-map-backed-knowledge-development-loop.md">Knowledge 开发闭环</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.17/docs/zh/03-architecture-specs/26-git-commit-knowledge-development-loop.md">Git commit 知识闭环</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

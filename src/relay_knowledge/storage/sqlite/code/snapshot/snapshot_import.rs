@@ -8,9 +8,17 @@ use super::scope_tables::CodeScopeTable;
 
 pub(super) const IMPORT_SCHEMA: &str = "relay_import";
 
-const OPTIONAL_LEGACY_IMPORT_TABLES: &[&str] = &["code_repository_routes"];
+const OPTIONAL_LEGACY_IMPORT_TABLES: &[&str] = &[
+    "maven_reactor_status",
+    "maven_reactor_modules",
+    "maven_reactor_edges",
+    "code_repository_routes",
+    "code_repository_framework_nodes",
+    "code_repository_framework_edges",
+];
 const LEGACY_IMPORT_COLUMN_DEFAULTS: &[(&str, &str, &str)] = &[
     ("code_repository_files", "is_generated", "0"),
+    ("code_repository_feature_flags", "metadata_json", "'{}'"),
     ("code_repository_symbols", "symbol_role_json", "NULL"),
     (
         "code_repository_index_checkpoints",

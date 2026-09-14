@@ -32,6 +32,7 @@ pub(super) fn call_rows_to_hits(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
     rows: Vec<CallRow>,
+    minimum_identity_score: f64,
 ) -> Vec<CodeRetrievalHit> {
     let query = request.query.as_str();
     let score_query = ScoreQuery::new(query);
@@ -106,6 +107,9 @@ pub(super) fn call_rows_to_hits(
                     ),
                 ),
             };
+            // A structured class/member match remains evidence even when the
+            // method's name or display signature does not repeat its owner.
+            let base_score = base_score.max(minimum_identity_score);
             let source_path_bonus = call_site_source_path_bonus(
                 base_score,
                 &row.path,

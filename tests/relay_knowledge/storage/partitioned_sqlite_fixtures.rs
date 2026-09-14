@@ -16,8 +16,10 @@ use relay_knowledge::{
     env::{EnvironmentConfig, PlatformKind},
     paths::RuntimePaths,
     storage::{
-        BusinessKnowledgeStore, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
-        CodeIndexTaskSeed, CodeRepositoryStore, PartitionedSqliteKnowledgeStore, StorageError,
+        BusinessKnowledgeStore, CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest,
+        CodeIndexTaskCompletion, CodeIndexTaskSeed, CodeIndexTaskStore as _,
+        PartitionedSqliteKnowledgeStore, RepositoryCatalogStore as _, SoftwareProjectionStore as _,
+        StorageError,
     },
 };
 use rusqlite::Connection;
@@ -117,6 +119,8 @@ pub(super) fn snapshot(
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks: vec![chunk],
         workspaces: Vec::new(),
@@ -183,6 +187,8 @@ pub(super) fn batch_from_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexBatch
         imports: snapshot.imports,
         dependencies: snapshot.dependencies,
         feature_flags: snapshot.feature_flags,
+        framework_nodes: snapshot.framework_nodes,
+        framework_edges: snapshot.framework_edges,
         routes: snapshot.routes,
         chunks: snapshot.chunks,
         diagnostics: snapshot.diagnostics,

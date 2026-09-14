@@ -35,7 +35,7 @@ use crate::{
     storage::{
         CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
         CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed,
-        CodeRepositoryStore, SqliteGraphStore,
+        CodeIndexTaskStore as _, RepositoryCatalogStore as _, SqliteGraphStore,
     },
 };
 

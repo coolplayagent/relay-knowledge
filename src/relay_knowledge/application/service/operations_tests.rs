@@ -20,8 +20,10 @@ use crate::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeIndexTaskClaimRequest, CodeIndexTaskFailure, CodeIndexTaskSeed, CodeRepositoryStore,
-        KnowledgeStore, SqliteGraphStore,
+        CodeIndexPublicationStore as _, CodeIndexSourceStore as _, CodeIndexTaskClaimRequest,
+        CodeIndexTaskFailure, CodeIndexTaskSeed, CodeIndexTaskStore as _,
+        CodeScopeRetentionStore as _, KnowledgeStore, RepositoryCatalogStore as _,
+        SqliteGraphStore,
     },
 };
 
@@ -140,6 +142,8 @@ async fn code_index_task_idle_retention_cleans_failed_partial_scope_without_acti
                 imports: Vec::new(),
                 dependencies: Vec::new(),
                 feature_flags: Vec::new(),
+                framework_nodes: Vec::new(),
+                framework_edges: Vec::new(),
                 routes: Vec::new(),
                 chunks: Vec::new(),
                 diagnostics: Vec::new(),

@@ -32,6 +32,9 @@ impl AcpPromptResult {
     }
 }
 
+// Keep the stable 1.x `ApiError` return type shared with the application boundary. Changing the
+// DTO's public metadata field to a box is reserved for the 2.0 contract cleanup.
+#[allow(clippy::result_large_err)]
 pub(super) async fn run_mapped_prompt(
     service: RelayKnowledgeService,
     mapped: MappedPromptRequest,

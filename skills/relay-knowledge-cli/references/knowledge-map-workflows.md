@@ -4,16 +4,31 @@ Use this reference when an agent initializes repository knowledge, plans a
 specification, starts a coding task, reacts to a Git commit, or changes an
 authoritative document/configuration source.
 
-The shared entry point is `.knowledge/knowledge-map.yaml`. In schema v2 it is a
-small root manifest: topic sources/routes live in content-addressed
-`.knowledge/topics/` shards, and history older than the bounded recent window
-lives in a verified `.knowledge/history/` archive. `map route <topic>` loads one
+The shared entry points are `codespec/codespec-map.yaml` and
+`knowledge/knowledge-map.yaml`. In schema v4 they govern typed repository
+directories; Knowledge Map topic sources/routes live in content-addressed
+`knowledge/topics/` shards. Repository maps retain only their latest 16 history
+entries and do not create a `history/` archive tree. `map route <topic> --type knowledge` loads one
 shard; `map show` loads current shards and returns only the bounded recent-history
-window. Use `map history --from <version> --limit <count>` for explicit pages of
-at most 256 entries. Never edit shard refs or archive files directly. Mutations
-append only newly completed history chunks and
+window. Use `map history [--from <version>] [--limit <count>]` for an explicit
+page of at most 16 retained entries; omitting `--from` starts at the earliest
+retained version. The bundled Draft 2020-12 schema at
+`knowledge-map.schema.json` and `codespec-map.schema.json` describe the roots,
+typed directory entries, topic shard, recent history, and redirect for discovery and
+structural validation. It deliberately accepts unknown fields to remain
+compatible with current Serde readers. It cannot prove that digests match file
+content, source ids are globally unique, routes are complete, history is
+contiguous with its omission checkpoint, or reserved sources remain intact;
+`map validate` remains authoritative for those cross-file and semantic checks.
+The schema does not authorize direct edits to generated roots or topic shards.
+Never edit shard refs directly. Mutations advance the bounded recent window and
 clean superseded topic shards after committing the root while protecting any
-recovery-manifest refs. The code map is the primary source of truth for
+recovery-manifest refs. Equal-field source updates preserve versions, history,
+and artifact bytes unless migration or reserved-route repair requires publication.
+An idempotent `map init` also resumes retired-shard cleanup after the 60-second
+reader grace, processing at most 1,024 unreferenced regular shards per attempt.
+It preserves recovery refs and unknown files and does not create empty CodeSpec
+topic storage. The code map is the primary source of truth for
 repository facts. The map stores stable navigation and repository-model entry
 metadata; it must not copy derived architecture narratives, build targets,
 deployment resources, framework scan results, or resolved commit ids. Read
@@ -34,13 +49,22 @@ It also ensures the authored business entry:
 - topic: `business-knowledge`
 - source: `repository-business-glossary`
 - kind: `file`
-- URI: `.knowledge/business-glossary.yaml`
+- URI: `knowledge/glossary/business-glossary.yaml`
 - scope: `repo`
 
 The Knowledge Map remains routing metadata. The glossary is the intentionally
 authored, version-controlled business surface; edit it directly and review it
 as source code. `map init` creates only a missing minimal valid glossary and
 must never overwrite an existing one.
+
+The bundled Draft 2020-12 schema at `business-glossary.schema.json` describes
+the authored glossary v1 domains, terms, aliases, semantics, and technical
+mappings. It deliberately accepts unknown fields for Serde reader compatibility.
+Its character-count limits are structural approximations of the runtime's UTF-8
+byte limits, and it cannot prove domain/term identity, domain references, or
+case-insensitive alias uniqueness; `map validate` remains authoritative. Unlike
+the generated Knowledge Map roots and shards, this intentionally
+authored glossary may be edited directly with normal source review.
 
 If that reserved source id has incompatible fields, stop and report the
 conflict. Do not overwrite it.
@@ -54,14 +78,22 @@ conflict. Do not overwrite it.
   valid v1 map is migrated and receives the default software-model route.
 - Use `map show` before adding a source. One topic can contain multiple sources,
   each with a distinct stable id.
-- Treat `map show.history.complete=false` as an explicit archive omission, not
-  data loss; use bounded `map history` pages or `map validate` when old history
-  is relevant.
-- Use only `map source add`, `map source update`, or `map source remove` for
+- Treat `map show.history.complete=false` as an explicit retention boundary.
+  Use `map history` without `--from` for the retained window and use Git or a
+  repository backup when older audit history is relevant.
+- Use only `map source add`, `map source update`, or `map source remove` with
+  `--type knowledge` for
   normal mutations, then validate again.
+- Use the bundled map schemas only for v4 structural discovery or tooling;
+  never treat schema acceptance as a replacement for `map validate` or as
+  permission to edit CLI-generated artifacts.
+- Use `business-glossary.schema.json` for authored glossary v1 field discovery
+  and structural checks, edit that source under normal review, and run
+  `map validate` afterward for runtime and semantic validation.
 - Do not copy the YAML into `AGENTS.md`; keep only
-  `Knowledge map: .knowledge/knowledge-map.yaml`.
-- Read `map route business-knowledge --format json` before business/spec/coding
+  `CodeSpec map: codespec/codespec-map.yaml` and
+  `Knowledge map: knowledge/knowledge-map.yaml`.
+- Read `map route business-knowledge --type knowledge --format json` before business/spec/coding
   work and verify the routed glossary is the intended authority.
 - Do not materialize `repo software` or `repo view` responses into the YAML.
   Do not materialize `repo business` responses into the Knowledge Map or
@@ -69,8 +101,49 @@ conflict. Do not overwrite it.
 - If a map mutation must affect the current uncommitted coding decision,
   refresh a `worktree` overlay after a clean `HEAD` base exists. Otherwise
   commit the map with its related sources and publish it in the next update.
-- Edit YAML directly only when the CLI is unavailable and the user explicitly
-  requests manual repair.
+
+## Directory Governance
+
+`map init` without `--type` idempotently initializes both maps. Read-only
+`show`, `history`, and `validate` also default to `all`; every targeted mutation
+must name one concrete map type. The five baseline directories in each map are
+required and cannot be removed, while custom confined directories may be added.
+
+```bash
+relay-knowledge map show --directory design --type codespec --format json
+relay-knowledge map directory add --type knowledge \
+  --directory integrations \
+  --purpose "Reviewed integration knowledge." \
+  --content-scope "knowledge/integrations/**" \
+  --key-file "knowledge/integrations/README.md" \
+  --load-hint on_demand \
+  --relation "documents=codespec:api" \
+  --update-rule reviewed \
+  --format json
+relay-knowledge map directory update --type knowledge \
+  --directory integrations --load-hint task_match --format json
+relay-knowledge map directory remove --type knowledge \
+  --directory integrations --format json
+relay-knowledge map validate --format json
+```
+
+Use `map migrate --type knowledge --to-v4` for an explicit legacy migration.
+The CLI verifies referenced legacy artifacts, publishes both current and reader
+fallback roots in v4, then safely removes recognized history archive files and
+their empty directories. Cleanup is bounded and resumable with `map init`; a
+committed mutation remains successful when another cleanup batch is pending,
+while `map validate` continues to report the obsolete directory until cleanup
+finishes. A cleanup refusal discovered after root publication is logged as
+post-commit maintenance state instead of retroactively failing the mutation.
+Cleanup establishes a 60-second reader grace before archive deletion, and
+legacy history is retained while a live legacy root is not a redirect.
+Unrecognized files, links, or corrupt referenced artifacts fail closed. There
+is no data-level map rollback command; use Git or a repository backup to recover
+older repository-owned map state.
+
+- Edit generated Knowledge Map YAML directly only when the CLI is unavailable
+  and the user explicitly requests manual repair; this restriction does not
+  apply to the intentionally authored business glossary.
 
 ## Repository Knowledge Bootstrap
 
@@ -100,7 +173,7 @@ POSIX bootstrap commands:
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
 relay-knowledge map validate --format json
-relay-knowledge map route business-knowledge --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register . --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
@@ -123,7 +196,7 @@ PowerShell bootstrap commands:
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
 relay-knowledge map validate --format json
-relay-knowledge map route business-knowledge --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register (Get-Location).Path --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
@@ -142,7 +215,7 @@ cmd.exe bootstrap commands:
 relay-knowledge map validate --format json
 relay-knowledge map init --format json
 relay-knowledge map validate --format json
-relay-knowledge map route business-knowledge --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
 relay-knowledge repo list --format json
 relay-knowledge repo register "%CD%" --format json
 relay-knowledge repo index <alias> --ref HEAD --format json
@@ -163,7 +236,7 @@ to obtain a non-null summary. Let the service drain the task or run bounded
 local worker attempts, then require `repo status` to identify the exact head as
 fresh.
 
-Before writing or revising a spec, read `map route business-knowledge` and
+Before writing or revising a spec, read `map route business-knowledge --type knowledge` and
 combine snapshot-bound business terms/mappings, software, architecture and
 business-domain views, and code context. After implementation,
 run impact on the pinned pair and repeat the model/context reads at the pinned
@@ -205,7 +278,7 @@ or move a source only when authoritative evidence confirms the old route is no
 longer valid and the requested task authorizes that mutation.
 
 ```bash
-relay-knowledge map source add \
+relay-knowledge map source add --type knowledge \
   --id cli-reference \
   --topic cli \
   --kind doc \
@@ -213,8 +286,8 @@ relay-knowledge map source add \
   --scope docs \
   --description "CLI command reference" \
   --format json
-relay-knowledge map source update --id cli-reference --description "User-facing CLI command reference" --format json
-relay-knowledge map route cli --format json
+relay-knowledge map source update --type knowledge --id cli-reference --description "User-facing CLI command reference" --format json
+relay-knowledge map route cli --type knowledge --format json
 relay-knowledge map validate --format json
 ```
 

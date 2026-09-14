@@ -14,7 +14,8 @@ use crate::{
     domain::{
         BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeGraphContextRequest,
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRepositorySelector,
-        CodeRetrievalRequest, CodebaseViewRequest, RepositoryGraphNeighborhoodRequest,
+        CodeRetrievalRequest, CodebaseViewRequest, FrameworkGraphRequest,
+        RepositoryGraphNeighborhoodRequest, SoftwareExportProfile, SoftwareGlobalKind,
         SoftwareGlobalRequest,
     },
     interfaces::code_index_mode::normalize_index_request,
@@ -60,6 +61,10 @@ pub(super) fn routes() -> Router<WebState> {
             post(code_repository_feature_flags),
         )
         .route(
+            "/api/v1/code/repositories/{alias}/framework-graph",
+            post(code_repository_framework_graph),
+        )
+        .route(
             "/api/v1/code/repositories/{alias}/impact",
             post(code_repository_impact),
         )
@@ -70,6 +75,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/software",
             post(code_repository_software),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/software/export/{profile}",
+            post(code_repository_software_export),
         )
         .route(
             "/api/v1/code/repositories/{alias}/business",
@@ -261,6 +270,28 @@ async fn code_repository_feature_flags(
     }
 }
 
+async fn code_repository_framework_graph(
+    State(state): State<WebState>,
+    AxumPath(alias): AxumPath<String>,
+    headers: HeaderMap,
+    Json(mut request): Json<FrameworkGraphRequest>,
+) -> Response {
+    if let Some(error) = normalize_framework_graph_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    match state
+        .service
+        .query_code_repository_framework_graph(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
 async fn code_repository_impact(
     State(state): State<WebState>,
     AxumPath(alias): AxumPath<String>,
@@ -317,6 +348,34 @@ async fn code_repository_software(
     match state
         .service
         .software_global_projection(request, api_context(&headers))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn code_repository_software_export(
+    State(state): State<WebState>,
+    AxumPath((alias, profile)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    Json(mut request): Json<SoftwareGlobalRequest>,
+) -> Response {
+    if let Some(error) = normalize_software_request(&mut request) {
+        return api_error_response(error);
+    }
+    if let Some(error) = path_alias_error(&alias, &request.repository) {
+        return api_error_response(error);
+    }
+    let Some(profile) = SoftwareExportProfile::parse(&profile) else {
+        return api_error_response(ApiError::invalid_argument(
+            "software export profile must be spdx-3, cyclonedx-1.7, or prov-o",
+        ));
+    };
+    request.kind = SoftwareGlobalKind::All;
+    match state
+        .service
+        .software_global_export(request, profile, api_context(&headers))
         .await
     {
         Ok(response) => Json(response).into_response(),
@@ -489,6 +548,28 @@ fn normalize_feature_flag_request(request: &mut CodeFeatureFlagRequest) -> Optio
         request.repository.clone(),
         request.limit,
         request.freshness_policy,
+    )
+    .and_then(|validated| validated.with_filters(request.filters.clone()))
+    {
+        Ok(validated) => {
+            *request = validated;
+            None
+        }
+        Err(error) => Some(ApiError::invalid_argument(error.to_string())),
+    }
+}
+
+fn normalize_framework_graph_request(request: &mut FrameworkGraphRequest) -> Option<ApiError> {
+    if let Some(error) = normalize_selector(&mut request.repository) {
+        return Some(error);
+    }
+    match FrameworkGraphRequest::new(
+        request.query.take(),
+        request.repository.clone(),
+        std::mem::take(&mut request.frameworks),
+        std::mem::take(&mut request.kinds),
+        request.limit,
+        request.freshness_policy,
     ) {
         Ok(validated) => {
             *request = validated;
@@ -525,7 +606,9 @@ fn normalize_software_request(request: &mut SoftwareGlobalRequest) -> Option<Api
         request.kind,
         request.freshness_policy,
         request.limit,
-    ) {
+    )
+    .and_then(|validated| validated.with_cursor(request.cursor.clone()))
+    {
         Ok(validated) => {
             *request = validated;
             None

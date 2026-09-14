@@ -52,8 +52,8 @@ acceptance evidence that implementation changes must preserve.
 Chapter 23 currently has a Chinese-only
 [API Reference](../../zh/03-architecture-specs/23-api-reference.md), with
 an [API topic index](../../zh/03-architecture-specs/reference/README.md),
-[API Codebase Views](../../zh/03-architecture-specs/reference/api-codebase-views.md),
-and an [endpoint quick reference](../../zh/03-architecture-specs/reference/api-http-endpoints.md)
+[API Codebase Views](../../zh/03-architecture-specs/reference/04-codebase-view-api.md),
+and an [endpoint quick reference](../../zh/03-architecture-specs/reference/01-http-endpoints.md)
 kept as supporting reference material. The topic index links the split control/Web,
 code-repository, MCP Streamable HTTP, and model-configuration details.
 

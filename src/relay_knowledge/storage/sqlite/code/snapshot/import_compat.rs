@@ -313,3 +313,13 @@ pub(super) fn attached_table_has_column(
 
     Ok(false)
 }
+pub(super) fn attached_framework_graph_is_current(
+    transaction: &Transaction<'_>,
+    migration: &str,
+) -> Result<bool, StorageError> {
+    Ok(
+        attached_code_schema_migration_applied(transaction, migration)?
+            && attached_table_exists(transaction, "code_repository_framework_nodes")?
+            && attached_table_exists(transaction, "code_repository_framework_edges")?,
+    )
+}

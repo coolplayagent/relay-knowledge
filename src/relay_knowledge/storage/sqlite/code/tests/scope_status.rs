@@ -14,7 +14,7 @@ use crate::{
     },
     storage::{
         CodeIndexPublicationTarget, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion,
-        CodeIndexTaskSeed, SqliteGraphStore,
+        CodeIndexTaskSeed, SoftwareProjectionStore, SqliteGraphStore,
     },
 };
 

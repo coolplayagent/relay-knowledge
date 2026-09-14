@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     domain::{CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryStatus},
-    storage::{CodeRepositoryStore, StorageFuture},
+    storage::{RepositoryCatalogStore, StorageFuture},
 };
 
 use super::PartitionedSqliteKnowledgeStore;

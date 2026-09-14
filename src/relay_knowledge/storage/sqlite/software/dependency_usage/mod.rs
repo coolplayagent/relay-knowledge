@@ -18,7 +18,7 @@ use matching::{
     DependencyMatchIndex, component_alias_keys, import_match_candidates_with_python_locals,
 };
 use persistence::import_evidence;
-pub(super) use persistence::{delete_scope, insert_usages, usages_for_scope};
+pub(super) use persistence::{delete_scope, insert_usages, usage_from_row, usages_for_scope};
 pub(super) use schema::initialize_schema;
 
 const MAX_COMPONENT_ALIAS_EVIDENCE_PER_SCOPE: usize = 65_536;

@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use crate::storage::{FileContentChunk, FileContentEntry, FileIndexEntry};
+use crate::{
+    identity::stable_hash64,
+    storage::{FileContentChunk, FileContentEntry, FileIndexEntry},
+};
 
 use super::read::{self, MAX_CONTENT_INDEX_BYTES};
 const MAX_CONTENT_CHUNK_BYTES: usize = 4096;
@@ -172,19 +175,6 @@ fn push_content_chunk(
         end_line,
         content: text.to_owned(),
     });
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }
 
 #[cfg(test)]

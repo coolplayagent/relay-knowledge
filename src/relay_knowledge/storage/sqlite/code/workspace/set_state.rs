@@ -1,9 +1,7 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde_json::json;
 
-use crate::{domain::CodeRepositorySet, storage::StorageError};
+use crate::{clock::system_now_millis_or_zero, domain::CodeRepositorySet, storage::StorageError};
 
 use super::super::super::evidence_identity::stable_id;
 
@@ -200,7 +198,7 @@ pub(in super::super) fn clear_workspace_state(
             params![&set_id],
         )?;
     } else {
-        refresh_workspace_overlay_status(transaction, &set_id, current_timestamp_ms())?;
+        refresh_workspace_overlay_status(transaction, &set_id, system_now_millis_or_zero())?;
     }
 
     Ok(())
@@ -322,13 +320,6 @@ fn workspace_scope_metadata(
                 "workspace source scope '{source_scope}' is not published"
             ))
         })
-}
-
-pub(super) fn current_timestamp_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 #[cfg(test)]

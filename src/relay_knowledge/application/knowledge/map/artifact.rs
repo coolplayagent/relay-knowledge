@@ -1,4 +1,4 @@
-//! Knowledge Map v2 manifest, topic-shard, and history-archive file contracts.
+//! Repository Map manifest, topic-shard, and legacy history-archive contracts.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -7,13 +7,15 @@ use tokio::fs;
 
 use crate::domain::{
     KnowledgeMap, KnowledgeMapHistoryEntry, KnowledgeMapRoute, KnowledgeMapSource,
-    KnowledgeMapTopic,
+    KnowledgeMapTopic, RepositoryMapDirectory, RepositoryMapType, validate_directory_collection,
 };
 
 use super::error::KnowledgeMapServiceError;
 
 pub(super) const RECENT_HISTORY_LIMIT: usize = 16;
-pub(super) const ARTIFACT_SCHEMA_VERSION: u16 = 2;
+pub(super) const ARTIFACT_SCHEMA_VERSION: u16 = 4;
+pub(super) const DIRECTORY_ARTIFACT_SCHEMA_VERSION: u16 = 3;
+pub(super) const LEGACY_ARTIFACT_SCHEMA_VERSION: u16 = 2;
 pub(super) const HISTORY_INDEX_FANOUT: usize = 64;
 pub(super) const HISTORY_INDEX_MAX_HEIGHT: u8 = 10;
 
@@ -25,8 +27,15 @@ pub(super) struct KnowledgeMapSchemaProbe {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct KnowledgeMapManifest {
     pub(super) schema_version: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) artifact_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) map_type: Option<RepositoryMapType>,
     pub(super) map_version: u64,
     pub(super) updated_at: String,
+    #[serde(default)]
+    pub(super) directories: Vec<RepositoryMapDirectory>,
+    #[serde(default)]
     pub(super) topics: Vec<KnowledgeMapTopicRef>,
     pub(super) history: KnowledgeMapHistoryManifest,
 }
@@ -61,7 +70,10 @@ pub(super) struct KnowledgeMapTopicShard {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct KnowledgeMapHistoryManifest {
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub(super) archived_through: u64,
+    #[serde(default)]
+    pub(super) omitted_through: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) archive: Option<KnowledgeMapArchiveRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,10 +142,35 @@ pub(super) fn parse_manifest(
 ) -> Result<KnowledgeMapManifest, KnowledgeMapServiceError> {
     let manifest = serde_norway::from_str::<KnowledgeMapManifest>(content)
         .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
-    if manifest.schema_version != ARTIFACT_SCHEMA_VERSION || manifest.map_version == 0 {
+    if !matches!(
+        manifest.schema_version,
+        LEGACY_ARTIFACT_SCHEMA_VERSION
+            | DIRECTORY_ARTIFACT_SCHEMA_VERSION
+            | ARTIFACT_SCHEMA_VERSION
+    ) || manifest.map_version == 0
+    {
         return Err(KnowledgeMapServiceError::Integrity(
             "manifest schema_version or map_version is invalid".to_owned(),
         ));
+    }
+    if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        reject_v4_archive_fields(content)?;
+    }
+    if matches!(
+        manifest.schema_version,
+        DIRECTORY_ARTIFACT_SCHEMA_VERSION | ARTIFACT_SCHEMA_VERSION
+    ) {
+        if manifest.artifact_kind.as_deref() != Some("map") {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "repository map manifest artifact_kind must be 'map'".to_owned(),
+            ));
+        }
+        let map_type = manifest.map_type.ok_or_else(|| {
+            KnowledgeMapServiceError::Integrity(
+                "repository map manifest map_type is required".to_owned(),
+            )
+        })?;
+        validate_directory_collection(map_type, &manifest.directories, true)?;
     }
     let mut topic_ids = std::collections::HashSet::new();
     let mut folded_topic_ids = std::collections::HashSet::new();
@@ -170,6 +207,11 @@ pub(super) fn parse_manifest(
         }
     }
     validate_recent_history(&manifest)?;
+    if manifest.schema_version != ARTIFACT_SCHEMA_VERSION && manifest.history.omitted_through != 0 {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "legacy history must not contain an omitted checkpoint".to_owned(),
+        ));
+    }
     if let Some(archive) = &manifest.history.archive {
         if !is_scoped_contract_ref(
             &archive.r#ref,
@@ -195,6 +237,23 @@ pub(super) fn parse_manifest(
         }
     }
     Ok(manifest)
+}
+
+fn reject_v4_archive_fields(content: &str) -> Result<(), KnowledgeMapServiceError> {
+    let document = serde_norway::from_str::<serde_norway::Value>(content)
+        .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
+    let history = document.get("history").ok_or_else(|| {
+        KnowledgeMapServiceError::Integrity("manifest history is required".to_owned())
+    })?;
+    if ["archived_through", "archive", "index"]
+        .into_iter()
+        .any(|field| history.get(field).is_some())
+    {
+        return Err(KnowledgeMapServiceError::Integrity(
+            "v4 history must not reference archive artifacts".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn validate_history_index_ref_shape(
@@ -281,20 +340,21 @@ pub(super) fn validate_recent_history(
             "recent history must contain 1..={RECENT_HISTORY_LIMIT} entries"
         )));
     }
-    let mut expected = manifest
-        .history
-        .archived_through
-        .checked_add(1)
-        .ok_or_else(|| {
-            KnowledgeMapServiceError::Integrity("history version overflow".to_owned())
-        })?;
+    let checkpoint = if manifest.schema_version == ARTIFACT_SCHEMA_VERSION {
+        manifest.history.omitted_through
+    } else {
+        manifest.history.archived_through
+    };
+    let mut expected = checkpoint.checked_add(1).ok_or_else(|| {
+        KnowledgeMapServiceError::Integrity("history version overflow".to_owned())
+    })?;
     for entry in &manifest.history.recent {
         entry
             .validate()
             .map_err(|error| KnowledgeMapServiceError::Integrity(error.to_string()))?;
         if entry.version != expected {
             return Err(KnowledgeMapServiceError::Integrity(
-                "recent history is not contiguous with its archive checkpoint".to_owned(),
+                "recent history is not contiguous with its omission checkpoint".to_owned(),
             ));
         }
         expected = expected.checked_add(1).ok_or_else(|| {
@@ -306,15 +366,21 @@ pub(super) fn validate_recent_history(
             "recent history does not end at map_version".to_owned(),
         ));
     }
-    if (manifest.history.archived_through == 0) != manifest.history.archive.is_none() {
-        return Err(KnowledgeMapServiceError::Integrity(
-            "history archive reference and checkpoint disagree".to_owned(),
-        ));
-    }
-    if let Some(archive) = &manifest.history.archive {
-        validate_archive_ref_shape(archive, manifest.history.archived_through)?;
+    if manifest.schema_version != ARTIFACT_SCHEMA_VERSION {
+        if (manifest.history.archived_through == 0) != manifest.history.archive.is_none() {
+            return Err(KnowledgeMapServiceError::Integrity(
+                "history archive reference and checkpoint disagree".to_owned(),
+            ));
+        }
+        if let Some(archive) = &manifest.history.archive {
+            validate_archive_ref_shape(archive, manifest.history.archived_through)?;
+        }
     }
     Ok(())
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 fn validate_archive_ref_shape(
@@ -448,12 +514,13 @@ fn is_scoped_contract_ref(relative: &str, directory: &str) -> bool {
         && components.next().is_none()
 }
 
-pub(super) async fn read_verified_ref(
+pub(super) async fn read_verified_ref_in(
     repository_root: &Path,
+    contract_dir: &str,
     relative: &str,
     expected_digest: &str,
 ) -> Result<String, KnowledgeMapServiceError> {
-    let path = resolve_contract_ref(repository_root, relative)?;
+    let path = resolve_contract_ref_in(repository_root, contract_dir, relative)?;
     match fs::symlink_metadata(&path).await {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
@@ -468,18 +535,17 @@ pub(super) async fn read_verified_ref(
         Err(error) => return Err(error.into()),
     }
     let canonical_repository = fs::canonicalize(repository_root).await?;
-    let canonical_contract =
-        fs::canonicalize(repository_root.join(crate::project::AGENT_CONTRACT_DIR_NAME)).await?;
+    let canonical_contract = fs::canonicalize(repository_root.join(contract_dir)).await?;
     let artifact_dir = if relative.starts_with(&format!(
         "{}/",
         crate::project::KNOWLEDGE_MAP_TOPICS_DIR_NAME
     )) {
         repository_root
-            .join(crate::project::AGENT_CONTRACT_DIR_NAME)
+            .join(contract_dir)
             .join(crate::project::KNOWLEDGE_MAP_TOPICS_DIR_NAME)
     } else {
         repository_root
-            .join(crate::project::AGENT_CONTRACT_DIR_NAME)
+            .join(contract_dir)
             .join(crate::project::KNOWLEDGE_MAP_HISTORY_DIR_NAME)
     };
     reject_symlink(&artifact_dir).await?;
@@ -501,8 +567,9 @@ pub(super) async fn read_verified_ref(
     Ok(content)
 }
 
-pub(super) fn resolve_contract_ref(
+pub(super) fn resolve_contract_ref_in(
     repository_root: &Path,
+    contract_dir: &str,
     relative: &str,
 ) -> Result<PathBuf, KnowledgeMapServiceError> {
     let relative_path = Path::new(relative);
@@ -520,7 +587,5 @@ pub(super) fn resolve_contract_ref(
     {
         return Err(KnowledgeMapServiceError::UnsafePath(relative.to_owned()));
     }
-    Ok(repository_root
-        .join(crate::project::AGENT_CONTRACT_DIR_NAME)
-        .join(relative_path))
+    Ok(repository_root.join(contract_dir).join(relative_path))
 }

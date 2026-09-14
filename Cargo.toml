@@ -1,6 +1,6 @@
 [package]
 name = "relay-knowledge"
-version = "1.1.13"
+version = "1.1.17"
 edition = "2024"
 rust-version = "1.85"
 description = "Graph-database-based knowledge graph project."
@@ -33,7 +33,7 @@ opentelemetry = "0.32"
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-proto", "metrics", "reqwest-client", "reqwest-rustls", "trace"] }
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-rusqlite = { version = "0.32", features = ["bundled", "hooks", "limits"] }
+rusqlite = { version = "0.32", features = ["bundled", "hooks", "limits", "functions"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_norway = "0.9.42"
@@ -53,6 +53,7 @@ tree-sitter-containerfile = "0.8.0"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-gomod-orchard = "0.5.3"
 tree-sitter-go = "0.25.0"
+tree-sitter-html = "0.23.2"
 tree-sitter-ini = "1.4.0"
 tree-sitter-java = "0.23.5"
 tree-sitter-javascript = "0.25.0"
@@ -76,10 +77,13 @@ tree-sitter-xml = "0.7.0"
 tree-sitter-yaml = "0.7.2"
 notify = { version = "8.2.0", default-features = false, features = ["macos_fsevent"] }
 unicode-ident = "1.0"
+url = "2.5.8"
 quick-xml = "0.41"
 
 [dev-dependencies]
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
 rusqlite = { version = "0.32", features = ["trace"] }
+syn = { version = "2.0", features = ["full", "visit"] }
 
 [lints.rust]
 unsafe_code = "forbid"

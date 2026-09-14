@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Relay Knowledge Business Glossary v1",
+  "description": "Machine-readable structural schema for the authored knowledge/glossary/business-glossary.yaml contract; migration readers also accept the legacy .knowledge/business-glossary.yaml path. Objects intentionally allow unknown fields to remain compatible with the Serde readers. JSON Schema maxLength counts Unicode characters, while relay-knowledge enforces UTF-8 byte limits, the 4194304-byte document limit, domain and term identity, domain references, and case-insensitive alias uniqueness; relay-knowledge map validate is authoritative for those semantic checks. Unlike generated Knowledge Map artifacts, the version-controlled business glossary is intentionally authored and may be edited directly with normal source review.",
+  "type": "object",
+  "required": [
+    "schema_version"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "domains": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/domain"
+      }
+    },
+    "terms": {
+      "type": "array",
+      "maxItems": 10000,
+      "uniqueItems": true,
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/term"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "text128": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?=.*\\S)[^\\u0000]*$"
+    },
+    "text1024": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?=.*\\S)[^\\u0000]*$"
+    },
+    "text32768": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32768,
+      "pattern": "^(?=.*\\S)[^\\u0000]*$"
+    },
+    "nullableText128": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?=.*\\S)[^\\u0000]*$"
+    },
+    "nullableText1024": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?=.*\\S)[^\\u0000]*$"
+    },
+    "nullableText32768": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 32768,
+      "pattern": "^(?=.*\\S)[^\\u0000]*$"
+    },
+    "domain": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/text128"
+        },
+        "name": {
+          "$ref": "#/$defs/text1024"
+        },
+        "description": {
+          "$ref": "#/$defs/nullableText32768"
+        }
+      },
+      "additionalProperties": true
+    },
+    "termStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "deprecated"
+      ]
+    },
+    "aliasKind": {
+      "type": "string",
+      "enum": [
+        "synonym",
+        "abbreviation"
+      ]
+    },
+    "mappingRelation": {
+      "type": "string",
+      "enum": [
+        "represented_by",
+        "calculated_from"
+      ]
+    },
+    "technicalTargetKind": {
+      "type": "string",
+      "enum": [
+        "file",
+        "symbol",
+        "config_key",
+        "api",
+        "software_component",
+        "build_target",
+        "iac",
+        "design_element",
+        "database_table",
+        "database_column",
+        "metric",
+        "external"
+      ]
+    },
+    "alias": {
+      "type": "object",
+      "required": [
+        "value",
+        "kind"
+      ],
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/text1024"
+        },
+        "kind": {
+          "$ref": "#/$defs/aliasKind"
+        },
+        "language": {
+          "$ref": "#/$defs/nullableText128"
+        }
+      },
+      "additionalProperties": true
+    },
+    "semantics": {
+      "type": "object",
+      "properties": {
+        "formula": {
+          "$ref": "#/$defs/nullableText32768"
+        },
+        "aggregation": {
+          "$ref": "#/$defs/nullableText1024"
+        },
+        "unit": {
+          "$ref": "#/$defs/nullableText1024"
+        },
+        "grain": {
+          "$ref": "#/$defs/nullableText1024"
+        },
+        "time_basis": {
+          "$ref": "#/$defs/nullableText1024"
+        },
+        "includes": {
+          "type": "array",
+          "maxItems": 256,
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/text1024"
+          }
+        },
+        "excludes": {
+          "type": "array",
+          "maxItems": 256,
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/text1024"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "mapping": {
+      "type": "object",
+      "required": [
+        "relation",
+        "target_kind",
+        "target"
+      ],
+      "properties": {
+        "relation": {
+          "$ref": "#/$defs/mappingRelation"
+        },
+        "target_kind": {
+          "$ref": "#/$defs/technicalTargetKind"
+        },
+        "target": {
+          "$ref": "#/$defs/text1024"
+        },
+        "path": {
+          "$ref": "#/$defs/nullableText1024"
+        },
+        "source_scope": {
+          "$ref": "#/$defs/nullableText1024"
+        }
+      },
+      "additionalProperties": true
+    },
+    "term": {
+      "type": "object",
+      "required": [
+        "id",
+        "domain",
+        "canonical_name",
+        "definition"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/text128"
+        },
+        "domain": {
+          "$ref": "#/$defs/text128"
+        },
+        "canonical_name": {
+          "$ref": "#/$defs/text1024"
+        },
+        "definition": {
+          "$ref": "#/$defs/text32768"
+        },
+        "language": {
+          "$ref": "#/$defs/text128",
+          "default": "und"
+        },
+        "status": {
+          "$ref": "#/$defs/termStatus",
+          "default": "active"
+        },
+        "aliases": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/alias"
+          }
+        },
+        "semantics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/semantics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mappings": {
+          "type": "array",
+          "maxItems": 64,
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/mapping"
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

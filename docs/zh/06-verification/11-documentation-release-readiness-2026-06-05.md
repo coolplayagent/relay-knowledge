@@ -18,7 +18,7 @@
   `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`，共 998 行。
 - 英文书架现在列出已经存在但此前未进入索引的附录 A.6 和 A.7。
 - 中文书架现在列出附录 A.6 到 A.10，以及附录 B.11。
-- 英文导航显式标注尚待翻译的中文-only 基准附录 A.8 到 A.10，以及验证附录 B.5 到 B.6。
+- 英文导航显式标注尚待翻译的中文-only 基准附录 A.8 到 A.10，以及验证附录 B.3 到 B.4。
 
 ## 3. 文档改动
 
@@ -50,6 +50,20 @@ release 文档不能暗示尚未支持的产物、未受管后台循环、自动
 - `cargo test --all-targets --all-features` 通过。
 
 真正发版仍需要执行根 README 和 CI 中列出的常规 release 门禁，包括 package 检查、覆盖率、浏览器集成环境准备，以及准备 release tag 时的 release workflow dry-run 验证。
+
+## 6. 1.1.17 发布刷新 — 2026-09-07
+
+本次 documentation-only 准备新增中英文 1.1.17 发布页面，更新两种语言的 Pages
+首页与根 README，并在发布合同中记录 Actions 发布流程。说明覆盖 Map v4、
+16 条历史上限、迁移与备份要求、存储写入优化、worktree 恢复及共享本体 schema。
+产品代码和 workflow 保持不变。
+
+验证通过：`python3 tools/docs/check_docs.py --self-test-and-check`（214 个 Markdown
+文件）、1.1.17 skill metadata 校验、Cargo manifest/lock 版本一致性、Pages workflow
+双语版本与链接断言、本地 HTML 导航与资源、修改文件行数上限及 `git diff --check`。
+Release 质量门禁、平台构建、发布和部署仍以 tag 触发的 Release 与 main 触发的
+Pages Actions 结果为准。
+
 
 ---
 

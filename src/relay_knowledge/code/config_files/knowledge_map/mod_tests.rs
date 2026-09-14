@@ -45,7 +45,7 @@ fn emits_manifest_authorization_and_digest_verified_shard_facts() {
     let root = valid_root(&relative, &digest);
     let mut root_facts = Vec::new();
     facts(KNOWLEDGE_MAP_RELATIVE_PATH, "yaml", &root, &mut root_facts);
-    let shard_path = format!(".knowledge/{relative}");
+    let shard_path = format!("knowledge/{relative}");
     assert!(
         root_facts.iter().any(|fact| {
             fact.kind == "knowledge_map_topic_shard_ref" && fact.name == shard_path
@@ -233,6 +233,43 @@ fn incomplete_or_globally_inconsistent_v2_manifests_authorize_no_shards() {
 }
 
 #[test]
+fn v4_manifests_with_legacy_history_keys_authorize_no_shards() {
+    let digest = "a".repeat(64);
+    let relative = format!("topics/topic-{}-{digest}.yaml", stable_id("build"));
+    let valid = valid_root(&relative, &digest)
+        .replacen("schema_version: 2", "schema_version: 4", 1)
+        .replacen("archived_through", "omitted_through", 1);
+    let mut valid_definitions = Vec::new();
+    facts(
+        KNOWLEDGE_MAP_RELATIVE_PATH,
+        "yaml",
+        &valid,
+        &mut valid_definitions,
+    );
+    assert!(!valid_definitions.is_empty());
+    let forbidden_fields = [
+        ("archived_through", "0"),
+        ("archive", "null"),
+        ("index", "null"),
+    ];
+
+    for (field, value) in forbidden_fields {
+        let invalid = valid.replacen("history:\n", &format!("history:\n  {field}: {value}\n"), 1);
+        let mut definitions = Vec::new();
+        facts(
+            KNOWLEDGE_MAP_RELATIVE_PATH,
+            "yaml",
+            &invalid,
+            &mut definitions,
+        );
+        assert!(
+            definitions.is_empty(),
+            "v4 legacy history key authorized shard facts: {field}"
+        );
+    }
+}
+
+#[test]
 fn flow_style_v2_topics_emit_authorization_facts() {
     let shard = "schema_version: 2\ntopic: {id: build, title: Build, description: Build knowledge}\nsources: []\nroute: null\n";
     let digest = content_digest(shard.as_bytes());
@@ -245,8 +282,7 @@ fn flow_style_v2_topics_emit_authorization_facts() {
     facts(KNOWLEDGE_MAP_RELATIVE_PATH, "yaml", &root, &mut definitions);
 
     assert!(definitions.iter().any(|fact| {
-        fact.kind == "knowledge_map_topic_shard_ref"
-            && fact.name == format!(".knowledge/{relative}")
+        fact.kind == "knowledge_map_topic_shard_ref" && fact.name == format!("knowledge/{relative}")
     }));
 }
 
@@ -263,7 +299,6 @@ fn quoted_ref_keys_emit_manifest_authorization_facts() {
     facts(KNOWLEDGE_MAP_RELATIVE_PATH, "yaml", &root, &mut definitions);
 
     assert!(definitions.iter().any(|fact| {
-        fact.kind == "knowledge_map_topic_shard_ref"
-            && fact.name == format!(".knowledge/{relative}")
+        fact.kind == "knowledge_map_topic_shard_ref" && fact.name == format!("knowledge/{relative}")
     }));
 }

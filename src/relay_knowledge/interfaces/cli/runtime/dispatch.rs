@@ -3,7 +3,9 @@ use crate::{
         GraphInspectionRequest, HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence,
         IngestRequest, InterfaceKind, RequestContext,
     },
-    application::{KnowledgeMapService, RelayKnowledgeService},
+    application::{
+        KnowledgeMapService, ProcessRuntimeConfig, RelayKnowledgeService, RuntimeConfiguration,
+    },
     env::{EnvironmentConfig, RemoteCliEnvironmentConfig},
 };
 
@@ -23,6 +25,7 @@ mod tests;
 pub(crate) async fn run_command(
     command: CliCommand,
     knowledge_map_service: Option<&KnowledgeMapService>,
+    process: ProcessRuntimeConfig,
 ) -> Result<String, CliError> {
     if let CliAction::Help { path } = &command.action {
         return spec::render_help(path, command.format);
@@ -31,7 +34,7 @@ pub(crate) async fn run_command(
         return version::render_version(command.format);
     }
     if let CliAction::ServiceRun { mcp, web } = command.action.clone() {
-        return service::run_service(mcp, web).await;
+        return service::run_service(mcp, web, process).await;
     }
     if let CliAction::Map(map_command) = command.action.clone() {
         let context = RequestContext::for_interface(InterfaceKind::Cli);
@@ -79,9 +82,10 @@ pub(crate) async fn run_command(
         return Err(remote_unsupported_error());
     }
 
-    let service = RelayKnowledgeService::from_environment(&environment)
+    let runtime = RuntimeConfiguration::from_environment_with_process(&environment, process)
         .await
         .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
+    let service = RelayKnowledgeService::new(runtime);
 
     run_with_service(&service, command, context).await
 }

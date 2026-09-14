@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn map_storage_equal_source_fields_preserve_source_version_after_normalization() {
+    let mut map = KnowledgeMap::initial("now".to_owned());
+    let before = map.clone();
+    map.update_source(KnowledgeMapChange {
+        id: "repository-software-model".to_owned(),
+        topic: Some(" software-model ".to_owned()),
+        kind: Some(KnowledgeMapSourceKind::Repo),
+        uri: Some(" . ".to_owned()),
+        source_scope: Some("repo".to_owned()),
+        description: None,
+    })
+    .unwrap();
+    assert_eq!(map, before);
+    assert!(
+        !map.update_source_snapshot(
+            KnowledgeMapChange {
+                id: "repository-software-model".to_owned(),
+                topic: None,
+                kind: None,
+                uri: None,
+                source_scope: None,
+                description: None,
+            },
+            0
+        )
+        .unwrap()
+    );
+    assert_eq!(map, before);
+}
+
+#[test]
 fn initial_map_routes_the_repository_software_model() {
     let map = KnowledgeMap::initial("now".to_owned());
 
@@ -38,7 +69,7 @@ fn initial_map_routes_the_repository_business_glossary() {
 
     assert_eq!(route.source_order, ["repository-business-glossary"]);
     assert_eq!(source.kind, KnowledgeMapSourceKind::File);
-    assert_eq!(source.uri, ".knowledge/business-glossary.yaml");
+    assert_eq!(source.uri, "knowledge/glossary/business-glossary.yaml");
     assert_eq!(source.source_scope.as_deref(), Some("repo"));
 }
 
@@ -76,6 +107,58 @@ fn software_model_route_upgrade_is_idempotent() {
         !map.ensure_software_model_route()
             .expect("upgraded map should remain valid")
     );
+}
+
+#[test]
+fn software_model_route_upgrade_repairs_an_existing_reserved_source_without_route_membership() {
+    let mut map = KnowledgeMap::initial("now".to_owned());
+    map.routes
+        .iter_mut()
+        .find(|route| route.topic == "software-model")
+        .expect("software route should exist")
+        .source_order
+        .clear();
+
+    assert!(
+        map.ensure_software_model_route()
+            .expect("repairable reserved route drift should upgrade")
+    );
+    assert_eq!(
+        map.routes
+            .iter()
+            .find(|route| route.topic == "software-model")
+            .expect("software route should remain")
+            .source_order,
+        ["repository-software-model"]
+    );
+    map.validate_reserved_repository_routes()
+        .expect("repaired route should satisfy the reserved contract");
+}
+
+#[test]
+fn business_route_upgrade_repairs_an_existing_reserved_source_without_route_membership() {
+    let mut map = KnowledgeMap::initial("now".to_owned());
+    map.routes
+        .iter_mut()
+        .find(|route| route.topic == "business-knowledge")
+        .expect("business route should exist")
+        .source_order
+        .clear();
+
+    assert!(
+        map.ensure_business_knowledge_route()
+            .expect("repairable reserved route drift should upgrade")
+    );
+    assert_eq!(
+        map.routes
+            .iter()
+            .find(|route| route.topic == "business-knowledge")
+            .expect("business route should remain")
+            .source_order,
+        ["repository-business-glossary"]
+    );
+    map.validate_reserved_repository_routes()
+        .expect("repaired route should satisfy the reserved contract");
 }
 
 #[test]

@@ -1,7 +1,6 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use crate::{
-    paths::RuntimePaths, ports::release_metadata::ReleaseMetadataPort, project::PROJECT_NAME,
+    clock::system_now_millis_or_zero, paths::RuntimePaths,
+    ports::release_metadata::ReleaseMetadataPort, project::PROJECT_NAME,
 };
 
 use super::{
@@ -17,7 +16,7 @@ pub async fn check_for_updates(
     config: &UpdateRuntimeConfig,
     force_refresh: bool,
 ) -> VersionCheckResponse {
-    let now_ms = current_time_millis();
+    let now_ms = system_now_millis_or_zero();
     let cache_path = paths.version_check_cache_file();
     if !force_refresh
         && let Some(cached) =
@@ -56,15 +55,6 @@ fn notice_from_response(response: VersionCheckResponse) -> Option<String> {
             .unwrap_or_else(|| "unknown".to_owned()),
         response.current_version
     ))
-}
-
-fn current_time_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]

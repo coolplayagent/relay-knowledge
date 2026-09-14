@@ -61,6 +61,25 @@ fn legacy_scope_publication_columns_migrate_idempotently_and_default_active() {
     remove_database(&path);
 }
 
+#[test]
+fn current_catalog_schema_revalidation_does_not_request_a_write_lock() {
+    let path = unique_database_path("current-schema-read-fast-path");
+    initialize_catalog_schema(&path).expect("catalog schema should initialize");
+    let writer = Connection::open(&path).expect("writer should open");
+    writer
+        .execute_batch("BEGIN IMMEDIATE TRANSACTION")
+        .expect("writer should hold the reserved lock");
+
+    initialize_catalog_schema(&path)
+        .expect("current catalog validation should remain read-only under a writer");
+
+    writer
+        .execute_batch("ROLLBACK")
+        .expect("writer transaction should roll back");
+    drop(writer);
+    remove_database(&path);
+}
+
 fn unique_database_path(label: &str) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)

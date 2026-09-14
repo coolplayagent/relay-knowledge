@@ -28,27 +28,75 @@ pub const MODEL_FALLBACK_FILE_NAME: &str = "model-fallback.json";
 pub const MODEL_CATALOG_CACHE_FILE_NAME: &str = "model-catalog-cache.json";
 
 /// Repository-relative directory that stores shared agent contracts.
-pub const AGENT_CONTRACT_DIR_NAME: &str = ".knowledge";
+pub const AGENT_CONTRACT_DIR_NAME: &str = "knowledge";
+
+/// Legacy repository contract directory accepted by v3 migration readers.
+pub const LEGACY_AGENT_CONTRACT_DIR_NAME: &str = ".knowledge";
+
+/// Repository-relative CodeSpec governance directory.
+pub const CODESPEC_DIR_NAME: &str = "codespec";
 
 /// Repository-relative knowledge navigation contract filename.
 pub const KNOWLEDGE_MAP_FILE_NAME: &str = "knowledge-map.yaml";
 
 /// Repository-relative knowledge navigation contract path referenced by agents.
-pub const KNOWLEDGE_MAP_RELATIVE_PATH: &str = ".knowledge/knowledge-map.yaml";
+pub const KNOWLEDGE_MAP_RELATIVE_PATH: &str = "knowledge/knowledge-map.yaml";
+
+/// Legacy Knowledge Map root used by v1/v2 readers and v3 redirects.
+pub const LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH: &str = ".knowledge/knowledge-map.yaml";
+
+/// Retained v1/v2 Knowledge Map root used to preflight and execute v3 rollback.
+pub const LEGACY_KNOWLEDGE_MAP_BACKUP_FILE_NAME: &str = "knowledge-map.v2.yaml";
+
+/// Previous legacy Knowledge Map root retained by v1/v2 manifest publication.
+pub const LEGACY_KNOWLEDGE_MAP_PREVIOUS_FILE_NAME: &str = "knowledge-map.yaml.previous";
+
+/// Retained visible v3 Knowledge Map root kept after a rollback.
+pub const KNOWLEDGE_MAP_V3_RETAINED_FILE_NAME: &str = "knowledge-map.yaml.v3.previous";
+
+/// Retained ordinary publication backup kept outside the visible reader fallback after rollback.
+pub const KNOWLEDGE_MAP_V3_RETAINED_BACKUP_FILE_NAME: &str =
+    "knowledge-map.yaml.v3.previous.backup";
+
+/// Staged legacy redirect used by the recoverable v3 publication protocol.
+pub const LEGACY_KNOWLEDGE_MAP_REDIRECT_PREPARED_FILE_NAME: &str =
+    "knowledge-map.yaml.redirect.prepared";
+
+/// Previous legacy root used by the recoverable v3 redirect publication protocol.
+pub const LEGACY_KNOWLEDGE_MAP_REDIRECT_PREVIOUS_FILE_NAME: &str =
+    "knowledge-map.yaml.redirect.previous";
+
+/// Staged retained root used by the no-follow v3 rollback publication protocol.
+pub const LEGACY_KNOWLEDGE_MAP_ROLLBACK_PREPARED_FILE_NAME: &str =
+    "knowledge-map.yaml.rollback.prepared";
+
+/// Previous legacy live root used while atomically publishing a v3 rollback.
+pub const LEGACY_KNOWLEDGE_MAP_ROLLBACK_PREVIOUS_FILE_NAME: &str =
+    "knowledge-map.yaml.rollback.previous";
+
+/// Repository-relative CodeSpec navigation contract filename.
+pub const CODESPEC_MAP_FILE_NAME: &str = "codespec-map.yaml";
+
+/// Repository-relative CodeSpec navigation contract path.
+pub const CODESPEC_MAP_RELATIVE_PATH: &str = "codespec/codespec-map.yaml";
 
 /// Repository-relative authored business glossary filename.
 pub const BUSINESS_GLOSSARY_FILE_NAME: &str = "business-glossary.yaml";
 
 /// Repository-relative authored business glossary path.
-pub const BUSINESS_GLOSSARY_RELATIVE_PATH: &str = ".knowledge/business-glossary.yaml";
+pub const BUSINESS_GLOSSARY_RELATIVE_PATH: &str = crate::domain::BUSINESS_GLOSSARY_RELATIVE_PATH;
 
-/// Repository-local directory containing Knowledge Map v2 topic shards.
+/// Legacy authored glossary path accepted during v3 migration.
+pub const LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH: &str =
+    crate::domain::LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH;
+
+/// Repository-local directory containing content-addressed Knowledge Map topic shards.
 pub const KNOWLEDGE_MAP_TOPICS_DIR_NAME: &str = "topics";
 
-/// Repository-relative prefix containing Knowledge Map v2 topic shards.
-pub const KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX: &str = ".knowledge/topics/";
+/// Repository-relative prefix containing content-addressed Knowledge Map topic shards.
+pub const KNOWLEDGE_MAP_TOPICS_RELATIVE_PREFIX: &str = "knowledge/topics/";
 
-/// Repository-local directory containing immutable Knowledge Map history archives.
+/// Legacy repository-local directory recognized only for bounded migration cleanup.
 pub const KNOWLEDGE_MAP_HISTORY_DIR_NAME: &str = "history";
 
 /// Version-check cache filename stored under the cache directory.

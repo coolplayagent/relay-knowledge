@@ -1,5 +1,7 @@
 //! Derives stable content hashes and scoped identifiers for indexed records.
 
+pub(in crate::code) use crate::identity::stable_hash64;
+
 pub(in crate::code) fn stable_content_hash(bytes: &[u8]) -> String {
     format!("{:016x}", stable_hash64(bytes))
 }
@@ -15,17 +17,4 @@ pub(in crate::code) fn stable_id<'a>(
     }
 
     format!("{prefix}:{:016x}", stable_hash64(&bytes))
-}
-
-pub(in crate::code) fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }

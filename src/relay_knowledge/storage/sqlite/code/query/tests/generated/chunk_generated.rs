@@ -4,7 +4,10 @@ use crate::{
         CodeRepositorySelector, FreshnessPolicy, RepositoryCodeChunkRecord,
         RepositoryCodeFileRecord, RepositoryCodeRange,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 const TEST_SOURCE_SCOPE: &str = "code:test:chunk-generated:commit:tree";
@@ -51,6 +54,8 @@ async fn chunk_queries_prefer_handwritten_fts_rows_before_candidate_limit() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks,
         workspaces: Vec::new(),
@@ -119,6 +124,8 @@ async fn chunk_queries_apply_inline_path_before_candidate_limit() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: Vec::new(),
         chunks,
         workspaces: Vec::new(),

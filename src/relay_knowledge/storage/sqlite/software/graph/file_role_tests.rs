@@ -23,6 +23,22 @@ fn classifies_knowledge_map_and_documentation_before_generic_config() {
 }
 
 #[test]
+fn classifies_machine_readable_api_schemas_without_misclassifying_generated_clients() {
+    assert_eq!(
+        file_role("spec/catalog.openapi.yaml", "yaml", false),
+        "api_schema"
+    );
+    assert_eq!(
+        file_role("api/Swagger-v2.json", "json", false),
+        "api_schema"
+    );
+    assert_eq!(
+        file_role("generated/openapi-client.rs", "rust", false),
+        "source"
+    );
+}
+
+#[test]
 fn classifies_dependency_and_build_manifests_with_stable_precedence() {
     assert_eq!(
         file_role("requirements/dev.txt", "text", false),
@@ -40,14 +56,14 @@ fn classifies_dependency_and_build_manifests_with_stable_precedence() {
         file_role("BUILD.bazel", "starlark", false),
         "build_manifest"
     );
+    assert_eq!(
+        file_role("Dockerfile", "dockerfile", false),
+        "build_manifest"
+    );
 }
 
 #[test]
 fn limits_deployment_roles_to_deployment_scopes() {
-    assert_eq!(
-        file_role("Dockerfile.dev", "dockerfile", false),
-        "deployment"
-    );
     assert_eq!(
         file_role("systemd/relay.service", "ini", false),
         "deployment"

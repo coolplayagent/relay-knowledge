@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     domain::CodeScopeRetentionSummary,
-    storage::{CodeRepositoryStore, CodeScopeRetentionRequest, StorageError, StorageFuture},
+    storage::{CodeScopeRetentionRequest, CodeScopeRetentionStore, StorageError, StorageFuture},
 };
 
 use super::super::PartitionedSqliteKnowledgeStore;

@@ -47,6 +47,57 @@ fn receipt_decode_rejects_metrics_outside_the_frozen_budget() {
 }
 
 #[test]
+fn receipt_decode_scales_aggregate_work_by_the_durable_batch_count() {
+    let mut receipt = deletion_only_receipt();
+    receipt.changed_path_count = 2;
+    receipt.deleted_path_count = 0;
+    receipt.affected_path_count = 2;
+    receipt.blob_read_count = 2;
+    receipt.parsed_file_count = 2;
+    receipt.sqlite_write_count = 12;
+    receipt.batch_count = 2;
+    let encoded = encode(&receipt).expect("multi-batch receipt should encode");
+    let budget = CodeIndexResourceBudget::new(1, 4096, 8).expect("budget should validate");
+
+    assert_eq!(
+        decode(Some(encoded), 0, budget).expect("aggregate work should use two frozen quanta"),
+        Some(receipt)
+    );
+}
+
+#[test]
+fn deletion_paths_do_not_consume_parsed_file_batch_capacity() {
+    let mut receipt = deletion_only_receipt();
+    receipt.changed_path_count = 9;
+    receipt.deleted_path_count = 9;
+    receipt.affected_path_count = 9;
+    let encoded = encode(&receipt).expect("deletion-heavy receipt should encode");
+    let budget = CodeIndexResourceBudget::new(1, 4096, 8).expect("budget should validate");
+
+    assert_eq!(
+        decode(Some(encoded), 0, budget).expect("deleted paths are not parsed-file batches"),
+        Some(receipt)
+    );
+}
+
+#[test]
+fn receipt_decode_still_bounds_parsed_files_by_durable_batch_count() {
+    let mut receipt = deletion_only_receipt();
+    receipt.changed_path_count = 2;
+    receipt.deleted_path_count = 0;
+    receipt.affected_path_count = 2;
+    receipt.blob_read_count = 2;
+    receipt.parsed_file_count = 2;
+    receipt.sqlite_write_count = 2;
+    let encoded = encode(&receipt).expect("shape-valid receipt should encode");
+    let budget = CodeIndexResourceBudget::new(1, 4096, 8).expect("budget should validate");
+
+    let error = decode(Some(encoded), 0, budget)
+        .expect_err("two parsed files cannot fit one frozen file batch");
+    assert!(error.to_string().contains("frozen resource budget"));
+}
+
+#[test]
 fn receipt_decode_rejects_noncanonical_or_unbound_identity() {
     let budget = CodeIndexResourceBudget::new(1, 4096, 8).expect("budget should validate");
     let noncanonical = format!(" {}", encode(&deletion_only_receipt()).expect("receipt"));

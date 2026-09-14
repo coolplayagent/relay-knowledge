@@ -1,6 +1,12 @@
 use super::render_text;
 
 #[test]
+fn software_text_exposes_page_continuation() {
+    let text = render_text("code.repo.software", &serde_json::json!({"request":{"kind":"modules"}, "build_targets":[], "relationships":[], "status":{"stale":false}, "next_cursor":"sw1:abcd"})).unwrap();
+    assert!(text.contains("next_cursor=sw1:abcd"));
+}
+
+#[test]
 fn map_show_reports_complete_v1_history_window() {
     let rendered = render_text(
         "knowledge.map.show",
@@ -11,7 +17,7 @@ fn map_show_reports_complete_v1_history_window() {
                 "sources": [{"id": "repository-software-model"}],
                 "routes": [{"topic": "software-model"}],
                 "history": {
-                    "archived_through": 0,
+                    "omitted_through": 0,
                     "complete": true,
                     "recent": [{"version": 1}]
                 }
@@ -22,13 +28,13 @@ fn map_show_reports_complete_v1_history_window() {
 
     assert_eq!(
         rendered,
-        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=true history_archived_through=0 history_recent=1\n"
+        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=true history_omitted_through=0 history_recent=1\n"
     );
     assert!(!rendered.contains("map history"));
 }
 
 #[test]
-fn map_show_reports_truncated_v2_history_window() {
+fn map_show_reports_a_recent_only_history_window() {
     let rendered = render_text(
         "knowledge.map.show",
         &serde_json::json!({
@@ -38,7 +44,7 @@ fn map_show_reports_truncated_v2_history_window() {
                 "sources": [{"id": "repository-software-model"}],
                 "routes": [{"topic": "software-model"}],
                 "history": {
-                    "archived_through": 24,
+                    "omitted_through": 24,
                     "complete": false,
                     "recent": [{"version": 25}, {"version": 26}]
                 }
@@ -49,7 +55,7 @@ fn map_show_reports_truncated_v2_history_window() {
 
     assert_eq!(
         rendered,
-        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=false history_archived_through=24 history_recent=2\nhistory_notice=entries through version 24 are archived; use relay-knowledge map history --from 1 --limit 256 to start paging archived history\n"
+        "knowledge_map=.knowledge/knowledge-map.yaml topics=1 sources=1 routes=1 history_complete=false history_omitted_through=24 history_recent=2\nhistory_notice=entries through version 24 are outside this view; run relay-knowledge map history without --from to read the earliest available page\n"
     );
 }
 
@@ -61,6 +67,8 @@ fn render_text_covers_operational_and_code_repository_summaries() {
             serde_json::json!({
                 "path": ".knowledge/knowledge-map.yaml",
                 "map_version": 9,
+                "earliest_available_version": 5,
+                "omitted_through": 4,
                 "from_version": 5,
                 "through_version": 6,
                 "next_from_version": 7,
@@ -69,7 +77,7 @@ fn render_text_covers_operational_and_code_repository_summaries() {
                     {"version": 6, "action": "update", "actor": "cli", "summary": "Updated source"},
                 ],
             }),
-            "knowledge_map=.knowledge/knowledge-map.yaml map_version=9 from=5 through=6 next=7\nversion=5 action=add injected actor=cli spoofed summary=Added  source\nversion=6 action=update actor=cli summary=Updated source\n",
+            "knowledge_map=.knowledge/knowledge-map.yaml map_version=9 earliest=5 omitted_through=4 from=5 through=6 next=7\nversion=5 action=add injected actor=cli spoofed summary=Added  source\nversion=6 action=update actor=cli summary=Updated source\n",
         ),
         (
             "files.content",
@@ -224,13 +232,15 @@ fn render_text_covers_operational_and_code_repository_summaries() {
                     "stale": false,
                 },
                 "active_task": {
-                    "state": "running",
+                    "state": "retrying",
+                    "last_error_kind": "code_index",
+                    "last_error_message": "publication fence expired while finalizing",
                 },
                 "checkpoint": {
                     "state": "finalizing:rebuild_calls",
                 },
             }),
-            "repo=repo files=2 symbols=3 stale=false task=running checkpoint=finalizing:rebuild_calls\n",
+            "repo=repo files=2 symbols=3 stale=false task=retrying checkpoint=finalizing:rebuild_calls error_kind=code_index error=\"publication fence expired while finalizing\"\n",
         ),
         (
             "code.repo.report",
@@ -261,6 +271,11 @@ fn render_text_covers_operational_and_code_repository_summaries() {
                 "design_elements": [{"element_id": "design_element:1"}],
             }),
             "software scope=scope-1 components=1 dependency_usages=1 sdk_usages=2 files=1 topics=1 relationships=1 build_targets=1 iac_resources=1 design_elements=1 stale=false\n",
+        ),
+        (
+            "code.repo.software",
+            serde_json::json!({"request": {"kind": "modules"}, "build_targets": [{}, {}], "relationships": [{}], "status": {"stale": false}}),
+            "maven modules=2 relationships=1 stale=false\n",
         ),
         (
             "setup.doctor",

@@ -26,6 +26,23 @@ the filename, such as `05-hybrid-retrieval-advantage.md`. `README.md`
 files are volume covers and tables of contents; when listed as readable pages
 they are treated as chapter 0.
 
+## Naming and Ordering Policy
+
+- Use lowercase kebab-case after the two-digit chapter number. Prefer a concise
+  subject name over status words such as `full`, `new`, or `latest`.
+- Order user, capability, architecture, and research chapters by reading
+  dependency: concepts before workflows, workflows before operations, and
+  normative contracts before supporting reference pages.
+- Keep matching English and Chinese chapters on the same number. A missing
+  translation remains an explicit numbered gap in the other edition rather
+  than giving the same chapter two identities.
+- Order verification records by evidence date, then from broad system evidence
+  to narrower audits on the same date. Their numeric prefixes are navigation
+  order, not mutable status or priority.
+- Put narrow references and historical detail in indexed child directories.
+  Reference pages use an internal two-digit reading order; dated archives use
+  an ISO `YYYY-MM-DD-` filename prefix so lexical and chronological order agree.
+
 Every directory that contains Markdown has a `README.md` index. Each index links
 its sibling documents and child indexes, chapter prefixes are unique within a
 volume, code fences identify their language, and repository-local links must
@@ -58,6 +75,12 @@ Before tagging a new release, read the documentation in this order:
 
 The [2026-06-05 documentation audit](./en/06-verification/11-documentation-release-readiness-2026-06-05.md)
 remains historical evidence; it is not the current readiness result.
+
+The [2026-08-31 software-global evidence-priority record](./en/06-verification/14-software-global-evidence-priority-2026-08-31.md)
+records the focused typed-evidence ordering change. The later
+[2026-08-31 durable worktree delta record](./en/06-verification/15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
+records the bounded staging and pinned-query remediation. Neither supersedes
+the overall readiness record in step 4.
 
 The Chinese edition currently carries detailed deployment, SRE, and security
 addenda plus a few benchmark and verification records without standalone

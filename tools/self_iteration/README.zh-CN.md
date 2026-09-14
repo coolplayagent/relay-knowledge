@@ -1,6 +1,10 @@
 # relay-knowledge 自迭代
 
+`code_index_persistence_performance_suite_maven_lifecycle_loads_models_once` 用例通过 SQL trace 跟踪 128 个索引 POM 的 reset 与 lifecycle，要求 `maven_effective_model_loads=1`，并校验 reactor 模块和构建事实。重复物化 POM 会使现有 fast/performance gate 失败；有界 worker 阶段、publication fence 与不完整证据保留规则不变。
+
 中文 | [English](README.md)
+
+fast profile 默认包含 `java_class_calls`（`cases/repository_java_class_calls.json`）：生成 Java 类/方法调用对，并在 256 个噪声文件中加入 32,768 次无关调用。两个类名查询方向都必须返回正确成员证据，查询 p95 预算为 2,000 ms，用于保护 issue #388，查询不使用 canonical ID。设置 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=java_class_calls` 可运行定向 fast 评估。
 
 `tools/self_iteration` 是独立的 Rust 自迭代 harness，用 Codex 生成候选补丁，并用固定评估集判断它是否真正改进代码仓库检索、semantic/vector 检索、性能、稳定性或研究质量。它不属于产品 crate 的 `src/` 模块树，运行状态统一写入 `.git/relay-knowledge-self-iteration/`。旧的 tracked Python harness 已在功能对齐后移除，仓库根目录的 `self-iterate.sh` 会直接构建并运行 Rust binary。
 
@@ -62,6 +66,15 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 | 长期记忆 | `.git/relay-knowledge-self-iteration/memory/` | 记录采纳/拒绝模式、退化和 patch 索引，供下一轮 prompt 使用。 |
 | 无人值守状态 | `.git/relay-knowledge-self-iteration/unattended-state-v2.json` | 恢复 category rotation、失败计数、accepted 计数和 deep-check 调度。 |
 | 图表 | `.git/relay-knowledge-self-iteration/score-v2.csv`、`score-v2.svg` | 查看 scored-run 历史；绿色为已提交采纳，琥珀色为手动评估可采纳，红色为拒绝。 |
+
+fast 的 `map_storage_regression_cases` 门禁要求 32 次相同 source 更新新增
+0 文件、0 字节且 mtime 不变，并覆盖空闲后的 `map init` 分片回收、reader/recovery
+保护、有界清理批次和必要的 legacy 迁移。fixture 字节数只测量 map artifact，
+不代表 SQLite 数据库压缩效果。
+
+`code_index_persistence_performance_suite` 的 12,000 文件发布用例还会从持久化
+software 阶段继续执行，要求完成 checkpoint 前报告 12,000 条 SDK 关系，
+同时兼容关系表保持 0 行。
 
 ### 运行可观测性
 
@@ -200,9 +213,9 @@ prompt 只注入有界摘要，长期迭代不会随历史长度线性填满 LLM
 
 | 分组 | 覆盖内容 |
 | --- | --- |
-| 基础质量门禁 | 产品与 harness 的 `fmt --check`、Linux GNU glibc 2.31 baseline 策略门禁、`cargo build --release --bin relay-knowledge`、harness `cargo check`。 |
-| 产品 gate | `skill_metadata_policy_cases`、`business_knowledge_regression_cases`、`code_index_recovery_cases`、`code_index_health_isolation_cases`、`code_index_sqlite_lock_cases`、CLI contract case。 |
-| 默认仓库 | `index_performance_many_files`、`index_performance_c_fragment`、`c_syntax_fixture`、`cpp_syntax_fixture`、`cross_language_syntax_fixture`、`typescript_syntax_fixture`、`nonstandard_layout_fixture`、`software_global_fixture`、`project_alias_fixture`、`relay_teams`、`leveldb_cpp`、`temporal_samples_go`、`temporal_sdk_go`。 |
+| 基础质量门禁 | 产品与 harness 的 `fmt --check`、Linux GNU glibc 2.28 baseline 策略门禁、`cargo build --release --bin relay-knowledge`、harness `cargo check`。 |
+| 产品 gate | `skill_metadata_policy_cases`、`business_knowledge_regression_cases`、`code_index_recovery_cases`、`code_index_health_isolation_cases`、`code_index_sqlite_lock_cases`，以及覆盖 index-worker 和强类型 CodeSpec/Knowledge map 的 CLI contract case。 |
+| 默认仓库 | `index_performance_many_files`、`index_performance_c_fragment`、`c_syntax_fixture`、`cpp_syntax_fixture`、`cross_language_syntax_fixture`、`typescript_syntax_fixture`、`nonstandard_layout_fixture`、`software_global_fixture`、`repository_map_graph_fixture`、`project_alias_fixture`、`relay_teams`、`leveldb_cpp`、`temporal_samples_go`、`temporal_sdk_go`。 |
 | 默认取样 | 普通仓库默认取前 8 条 query case，并始终保留显式 `guardrail=true` case。 |
 | repository-set | 默认保留 `temporal_go_workspace` 的 2 条跨仓门槛 case。 |
 | semantic/vector | 默认运行 1 条 guardrail query。 |
@@ -218,19 +231,20 @@ prompt 只注入有界摘要，长期迭代不会随历史长度线性填满 LLM
 | 护栏 | 保护点 |
 | --- | --- |
 | `skill_metadata_policy_cases` | 拒绝把 Windows 命令或资产示例放进 bash/POSIX code fence，保证 agent-facing 指令保持 shell-specific。 |
-| CLI contract case | 验证 agent 可见 help 暴露 `repo index-worker`，并验证 idle worker 与 streaming worker 输出可解析 JSON。 |
-| `code_index_recovery_cases` | 覆盖过期 task lease 恢复、旧 worker 完成拒绝、attempt-budget dead-letter、checkpoint batch 续租、每个 durable finalization step 的执行前后续租边界、有界 finalization-step 推导、query-index subphase 从下一 unit 恢复，以及 writer lock 获取后拒绝 caller 传入的陈旧续租观测时间。其 `code_index_task_` 结构 case 同时冻结 v3 17-slot plan 与 grouped reference-search v2：cleanup/discover/build page count、occurrence-to-group 聚合、exact manifest、rollback/reopen replay、公平完整 occurrence expansion，以及带 v2 budget clamp 的 leased v1 restart。Retired query-index unit 1 不得重新创建或自动删除、既有同名 shape 继续严格校验、v1/v2 cursor 不得跳过物理 unit 1 且 token version 必须跨 writer quantum 保留，并且每个 fresh Restart 即使只有单 path，也只能在 empty owner 上预建 chunk unit 13/14、同时继续延后全部其他 heavy index。该 gate 在所有 non-smoke profile 中运行，包括 fast 与 performance-focused evaluation。 |
+| CLI contract case | 验证 agent 可见 help 暴露 `repo index-worker`，验证 idle worker 与 streaming worker 输出可解析 JSON，并保护强类型 CodeSpec/Knowledge map 的 help、校验、目录过滤、保留路由、有序 v4 shard 路由和 recent-only 历史边界。 |
+| `code_index_recovery_cases` | 覆盖过期 task lease 恢复、旧 worker 完成拒绝、attempt-budget dead-letter、checkpoint batch 续租、每个 durable finalization step 的执行前后续租边界、有界 finalization-step 推导、query-index subphase 从下一 unit 恢复，以及 writer lock 获取后拒绝 caller 传入的陈旧续租观测时间。其 `code_index_task_` case 还要求超限 worktree overlay 先克隆不可变基线、把 dirty delta 划分为确定性的有界批次、在批次间 lease takeover 后精确续跑，并持久化准确的多批收据。同一 gate 继续冻结 v3 17-slot plan 与 grouped reference-search v2：cleanup/discover/build page count、occurrence-to-group 聚合、exact manifest、rollback/reopen replay、公平完整 occurrence expansion，以及带 v2 budget clamp 的 leased v1 restart。Retired query-index unit 1 不得重新创建或自动删除、既有同名 shape 继续严格校验、v1/v2 cursor 不得跳过物理 unit 1 且 token version 必须跨 writer quantum 保留，并且每个 fresh Restart 即使只有单 path，也只能在 empty owner 上预建 chunk unit 13/14、同时继续延后全部其他 heavy index。该 gate 在所有 non-smoke profile 中运行，包括 fast 与 performance-focused evaluation。 |
 | `code_index_persistence_performance_suite` | 作为隔离的 `fast` stage 运行，timeout 为 120 秒，key budget 为 30,000 ms。直属 owner 与 SQLite trace 要求 1,025 条 reference、symbol、chunk 在默认 1,024-row 上限下各只使用两条受界 base statement；runtime variable-limit 边界测试强制各 owner 的精确单行下限；rollback/replay 测试保留 checkpoint、staging、FTS 与 fence ownership。Search-document trace/EQP 会在高位 raw orphan 之后跨越 runtime-clamped 1,024-document flush 边界，要求恰好两次主 FTS insert、每个 flush 一次带 equality constraint 的 `INT64_MAX` 点查，固定 12/6/5-variable 对应两行/单行/拒绝边界，拒绝 constructor 或 flush 执行任何 `max(rowid)` aggregate，并保持 post-insert FTS/metadata interval 精确。Grouped reference-search 测试禁止 nullable-range SQL，要求首条页/续页均使用 indexed keyset，证明 length-only lazy scan 会在 payload fetch 前拒绝超大 cursor，要求每个已接纳页面只点查最后一个 durable cursor，并以 SQLite VM-step measurement 证明 returning UPSERT 在不改变 page cap 的前提下移除了重复的 discovery-page grouped scan。其 build-page trace 还要求 1,025 个已接纳 group 只使用一条有序主 FTS `INSERT ... SELECT` 与一条 metadata insert，同时继续保护规范空字段内容和写入前 `INT64_MAX` 拒绝。普通 `finalizing:resolve_references:v1` 测试覆盖 multi-row keyset page、两条 control row 与完整记录 byte accounting、带每页 name/path cache 的 length-only owner probe、精确 budget 边界、rollback/reopen/fence replay，以及不随 hot symbol 尾部增长的 VM work。1,025 行 call-only 页面必须执行零 payload 点查和零 owner update、推进 exact count/cursor，且只点查末游标；专属 call-target 测试继续保护 stale-binding 校验。 |
 | `code_index_health_isolation_cases` | 验证 no-language-filter 仓库更新时 health 查询有界，`repo query --freshness allow-stale` 能读取最新已提交 scope。 |
 | `code_index_sqlite_lock_cases` | 保护重复进程 SQLite lock 避免、active-task 复用和不同 task fingerprint 的并发 claim。 |
 | `bm25_hierarchy_build` | 在独立 stage 中用 `cargo test --no-run` 编译并链接精确的 `--lib --all-features` test target。1,200 秒硬超时与现有 root Rust gate 上界一致，可覆盖干净环境的冷构建，不依赖预热，也不允许无限等待；该 preparation gate 没有 latency budget，不产生 BM25 性能结论。 |
 | `bm25_hierarchy_suite` | 在 Cargo build lock 已释放后的下一独立 stage 运行，保留原有 120 秒执行超时和 30 秒 non-key whole-suite 诊断预算；因此该指标只包含 Cargo freshness 检查与 50 条确定性产品测试，不包含冷编译/链接，超过 30 秒只影响诊断/评分，并不单独形成硬 gate 失败。测试保护 `simhash10-topical4-indexed-scope64-partition-ascii-subset128b-256t-a1-docidlen1-v4` 合同：一个 synthetic 4,096-document production-write/query-path fixture 保证 Recall@10 至少 0.9，并把 planned-MATCH result domain 从 768 行减到 448 行；同 v4 routed/flat score parity、selected-document/coarse-score bound、在 SQL scope 保持权威的同时用一个 `graph_bm25 MATCH` 对 business term、zero-weight scope64 token 与 scope-qualified group token 求交、hidden rank 与 rowid-sidecar hydrate、有界 persisted-DF probe、version-leading unscoped historical index、可观察 oversized-label degradation 与 fuzzy-posting bound，以及带 durable owner/expiry、phase/cursor、semantic/vector plan、128-document/4-MiB/8,192-label/8,192-link transaction budget、oversize-document isolation warning、companion-read pause、fence/swap/rollback 的可续跑 shadow rebuild。移除任一 invariant 都会在不依赖 wall-clock timing 的情况下失败。448/768 result-domain invariant 不是 posting scan、VM step 或 query-latency measurement；该 gate 不证明自然语料 recall/performance、equal-score cutoff 的确定 membership 或整个 hybrid pipeline 的 end-to-end bound。 |
 | syntax 与 layout fixture | 保护 external import unresolved metadata、C/C++ 可恢复 parser error、非顶层 `src/` 布局、project alias 复用同一 indexed scope 和 source/text fallback 底线。 |
-| `software_global_fixture` | 确保 `repo software` 投影事实来自已索引证据，不扫描包缓存、云 API、SDK 目录或未索引外部源码。 |
+| `software_global_fixture` | 确保 `repo software` 事实来自已索引证据，并保护 ontology 分类：普通 README heading 只保留为文档，机器可读 OpenAPI 输入成为 `api_schema` API entity，Dockerfile 是 build definition，CI job 不是 IaC resource，Terraform、Kubernetes、Compose 和 systemd 保持 deployment/resource 类型。Fixture 还检查 systems/APIs/resources/tests/deployments/releases、statement provenance、conflict、ontology/schema version 与 completeness，不扫描包缓存、云 API、SDK 目录或未索引外部源码。 |
+| `repository_map_graph_fixture` | 索引一个含 8 个内容寻址 topic shard 和 1 个未引用孤儿 shard 的有效 v4 Knowledge Map；要求 root/shard identity join 投影全部授权 topic 与 `documents` edge，禁止孤儿成为 map 证据，并在同一个 combined software view 中检查 dependency、build、IaC 与 design 维度。 |
 | `business_knowledge_regression_cases` | 每次 fast evaluation 运行，保护 acronym/alias 解析、跨 domain 同名词 ambiguity、竞争 definition 保留、mapping resolved/unresolved hint、route 授权与 business publication barrier。 |
 | `agent_workflow_fixture` | 用生成式 Rust、TypeScript、Python、YAML 和 Markdown 证据重放 coding-agent issue 分析任务，并约束工具调用、源码读取、输出/context 大小、证据数量、fallback 比例和总延迟。 |
 
-software lifecycle projection 先在 SQLite 中用当前支持的 manifest、CI/IaC 和 Markdown 路径语义超集过滤普通源码，再进入 Rust 物化边界。它预检固定的 32,768 candidate documents、262,144 chunks 和 256 MiB 上限，按 path 顺序一次流式物化一个文档并共同喂给 build/IaC/design collector，同时输出 candidate document/chunk/byte 计数；component、dependency usage、SDK、build、IaC 和 design 写入复用 prepared statement。对于单 SQLite 的 fenced full 或 incremental index，新 code scope 保持 stale，checkpoint 保持 `finalizing:software_projection`，直到 software facts 完成；fence 再校验后，software status、code scope/repository freshness、checkpoint completion 与 publication receipt 在同一 SQLite 事务同时可见。partitioned store 不宣称跨数据库原子：code/software facts 先在目标 shard 完成，而 catalog route 仍由当前 task 持有并保持 `staged`；随后一个 fenced control-database transaction 校验 owner，激活 repository/scope route，镜像 fresh status 并写入 receipt。active control route 尚未存在时，对外 checkpoint 仍保持未发布状态；control transaction 前后 crash 都可幂等收敛，不会重新解析已经耐久的 target。task `succeeded` 是之后的独立 fenced completion transaction，必须验证 receipt 与匹配的 fresh target，外部 worker response 仍等待该 task terminal 状态。
+software lifecycle projection 先在 SQLite 中用当前支持的 manifest、CI/IaC 和 Markdown 路径语义超集过滤普通源码，再进入 Rust 物化边界。它预检固定的 32,768 candidate documents、262,144 chunks 和 256 MiB 上限，按 path 顺序一次流式物化一个文档并共同喂给 build/IaC/design collector，同时输出 candidate document/chunk/byte 计数；component、dependency usage、SDK、build、IaC、design、entity、statement 和 diagnostic 都走有界存储路径。单 SQLite 的 fenced full 或 incremental index 依次推进 software projection v2 的 reset、dependencies、SDK usages、lifecycle、files、topics、relationships、ontology、publish；中间 phase 释放 writer 供 lease 续期时 code scope 仍保持 stale。fence 再校验后，software status、code scope/repository freshness、checkpoint completion 与 publication receipt 同时可见。partitioned store 不宣称跨数据库原子：code/software facts 先在目标 shard 完成，而 catalog route 仍由当前 task 持有并保持 `staged`；随后一个 fenced control-database transaction 校验 owner，激活 repository/scope route，镜像 fresh status 并写入 receipt。active control route 尚未存在时，对外 checkpoint 仍保持未发布状态；control transaction 前后 crash 都可幂等收敛，不会重新解析已经耐久的 target。task `succeeded` 是之后的独立 fenced completion transaction，必须验证 receipt 与匹配的 fresh target，外部 worker response 仍等待该 task terminal 状态。
 
 通用 library-test rail 会另行验证每篇文档 256 labels、每个 label 1,024 bytes、每篇文档 8,192 grams 的 fuzzy-index limit，以及 request-level disable 跳过全部 graph-search source family；这些 test 不属于按名称过滤的 `bm25_hierarchy_suite` fast gate。
 
@@ -251,7 +265,7 @@ RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2
 
 隔离是单轮内部的测量与磁盘生命周期边界，不替代共享状态覆盖。配置 `isolated_index_home=true` 的仓库会在唯一 run home 下获得一个子 home；harness 收集完 commands、cases、metrics 与内存 report 后删除它，只有显式传入 `--keep-workdirs` 才保留，评估报错时也会清理。创建与递归清理要求 run/isolation/home 每级都是非 symlink 目录，并满足 canonical direct-parent containment。repository-set member 若申请隔离会在配置合并后被拒绝，因为 overlay 必须从本轮公共 home 读取全部成员。小型 LevelDB 与 OpenTelemetry set 仍在同一个全新 run 内共享状态，用于保留顺序与 overlay 覆盖，但不会把状态带到下一轮。
 
-`.github/workflows/benchmark-checks.yml` 会在 pull request 上运行 1024 文件性能 fixture，并先断言 JSON 报告选择了 `target/release/relay-knowledge` release 产品二进制，再从同一报告直接验证冷任务/checkpoint 已完成、三路径增量 delta、两文件 blob/parse 预算、完成性命令和三项延迟预算。
+`.github/workflows/benchmark-checks.yml` 会先在计时 workload 外构建 release 产品，避免把 hosted runner 的冷编译器波动误报为索引延迟；随后在 pull request 上运行 1024 文件性能 fixture，断言 JSON 报告选择了 `target/release/relay-knowledge` 且增量 build gate 通过，再从同一报告直接验证冷任务/checkpoint 已完成、三路径增量 delta、两文件 blob/parse 预算、完成性命令和三项延迟预算。
 
 ### coding-agent 工作流门禁
 
@@ -364,8 +378,10 @@ and (
 | repository-set targets | 注册每个成员为 `scope=all` 仓库，创建显式 `repo-set`，刷新跨仓 overlay，再运行 `repo-set query`；case 可要求具体 member、source_scope、路径、行号和 excerpt 证据。 |
 | 冷索引与增量索引性能 targets | `repository_index_performance_targets.json` 配置冷索引 `index_budget_ms`/`register_index_budget_ms`、增量 `incremental_index_budget_ms`、完成性证据和 delta 读/解析上限；默认 fast 包含 1024 文件 fixture，`full`/`exhaustive` 还包含 2048 文件 wide fixture。 |
 | Hierarchical BM25 算法 gate | `fast`、`full`、`exhaustive` 先运行不带指标预算的 `bm25_hierarchy_build` preparation gate，以 1,200 秒有界超时覆盖冷构建；随后独占运行 `bm25_hierarchy_suite`，保留原有 120 秒超时与 30 秒 non-key 诊断预算。固定 SQLite fixture 校验 v4 fingerprint/scope partition、同 schema flat parity、synthetic production-write/query-path Recall@10 >= 0.9 floor、planned-MATCH result-domain reduction、hard SQL authorization、single-FTS hidden-rank/rowid-hydrate shape、persisted-DF 与 65,536-posting admission bound、route-document `fts_rowid`/version/label-state invariant、version-leading global fallback index、可观察 oversized-label degradation 与 8,192-posting exhaustion、durable checkpoint takeover、全部四类 rebuild work budget、oversize-document isolation 与 bounded warning identity、当前 writer fence、companion-read pause、complete-reader activation 与 swap rollback。报告把 build preparation 与 whole-suite duration、捕获的 `BM25_WORK` 分开保留；这些都不是 query latency 或 FTS posting/VM-step work，equal-score cutoff membership、自然语料和整个 pipeline 的结论不属于该 synthetic gate。 |
-| 软件全域投影 targets | `repository_software_global_targets.json` 运行 `repo software`，覆盖 dependencies、sdks、files、topics、relationships、build、iac、design 和 all 投影 kind，且事实只能来自已索引证据。 |
-| CLI contract cases | 直接运行产品 CLI，不需要大仓；默认 fast 覆盖 `repo index-worker` help、idle JSON 和 streaming JSON。 |
+| 软件全域 ontology targets | `repository_software_global_targets.json` 运行全部兼容和类型化 `repo software` kind，检查 ontology version 1.0.0、projection schema 8、statement provenance 100% 完整、机器可读 OpenAPI provenance 以及关键禁止误分类。这些 case 位于 fast fixture，`--categories performance` 也会选中它们，使投影吞吐/查询预算与语义分类回归共同受保护，同时禁止在产品代码中加入仓库特判。 |
+| Repository Map 图谱 targets | `repository_map_targets.json` 把 8 个只读 CLI contract 与一个生成式 v4 仓库组合起来；4 个真实索引 case 覆盖内容寻址 root 授权、8 个 map topic/relationship 维度、孤儿隔离、跨维度 typed statement provenance，以及查询热路径不读 live source 的 combined software projection。 |
+| Framework graph targets | `repository_framework_targets.json` 在锁定的 Angular/Vue 官方仓库上运行独立 `repo framework` surface。Case 同时评分 graph node/edge，并执行声明的冷索引、p50 与 p95 预算。 |
+| CLI contract cases | 直接运行产品 CLI，不需要大仓；默认 fast 覆盖 `repo index-worker` help、idle/streaming JSON，以及强类型 CodeSpec/Knowledge map 的 help、校验、目录过滤、保留/有序多源路由和仅保留近期记录的历史分页。 |
 | semantic/vector suite | 写入小型 evidence，刷新 semantic/vector 索引，验证 query 命中 `retriever_sources`、`backend_statuses` 和相关排序；外部 provider 只从运行时环境继承。 |
 | research_judge_suite | 把候选 diff、确定性评估摘要、文档片段、竞争力目标和实现护栏交给 LLM 或 coding-agent judge；它不替代确定性 gate。 |
 
@@ -382,6 +398,7 @@ and (
 | `/opt/workspace/leveldb` | 默认 | C/C++ 类方法、自由函数、头文件、table cache、recovery、callers、hybrid lookup 和 filters。 |
 | `/opt/workspace/temporal-samples-go`、`/opt/workspace/temporal-sdk-go` | 默认 | Go 全仓索引和 Temporal sample 到 SDK 的 repository-set API 使用关系。 |
 | `/opt/workspace/opentelemetry-collector-contrib`、`/opt/workspace/opentelemetry-collector` | 默认 | Go 全仓索引和 contrib 到 core 的 receiver factory、component type 使用关系。 |
+| `/opt/workspace/angular`、`/opt/workspace/vue` | 默认 | 锁定官方 Angular layout 与 Vue SFC playground scope，通过 framework graph 覆盖 component、rendered selector、prop 与 template variable。 |
 | `/opt/workspace/linux` | `exhaustive` | C 大仓 symbol、函数、syscall 风格宏、导出符号、include、references、callers、callees、mmap flow、epoll/eventfd；`linux_full` 重复测量完整初始索引时间。 |
 | `/opt/workspace/kubernetes` | `exhaustive` | Go command constructor、kubelet flow、API types、clientset/generic client、authorizer、informer imports、callers、hybrid lookup 和 filters。 |
 | `/opt/workspace/spring-framework` | `exhaustive` | Java context、bean factory、webmvc servlet/handler mapping、imports 和 filtered lookup。 |
@@ -420,6 +437,8 @@ clone_pinned_repository https://github.com/temporalio/samples-go.git /opt/worksp
 clone_pinned_repository https://github.com/temporalio/sdk-go.git /opt/workspace/temporal-sdk-go ff47f19909ac85aacff89645360de0dba6f6f898
 clone_pinned_repository https://github.com/open-telemetry/opentelemetry-collector-contrib.git /opt/workspace/opentelemetry-collector-contrib 84fe8df16c34efbb7e929310c955df8f4861d2f4
 clone_pinned_repository https://github.com/open-telemetry/opentelemetry-collector.git /opt/workspace/opentelemetry-collector 31e51520f30fc5c4362949e41307ea57b7b45a9d
+clone_pinned_repository https://github.com/angular/angular.git /opt/workspace/angular 133cafda42028fbd8efd7840d6ff3fea25223166
+clone_pinned_repository https://github.com/vuejs/core.git /opt/workspace/vue d63616ca17de965ed32dcb449a4c5cd9982f15d2
 
 # exhaustive profile 的 tree-sitter 语言真实仓库。
 clone_pinned_repository https://github.com/nvm-sh/nvm.git /opt/workspace/nvm 53855417eb66b9c35b732ac39358f1aae3ee1977
@@ -431,4 +450,6 @@ clone_pinned_repository https://github.com/scala/scala3.git /opt/workspace/scala
 clone_pinned_repository https://github.com/Alamofire/Alamofire.git /opt/workspace/alamofire 7595cbcf59809f9977c5f6378500de2ad73b7ddb
 ```
 
-所有 repository target 都必须使用 `scope=all`。评估器会拒绝非全量 scope，full-scope 注册不会向 `repo register` 传递 path 或 language filter，并且默认 guardrail 会验证产品注册拒绝 `--language`；case 级 filter 只用于验证查询端过滤能力。缺失外部 dependency source 不是 parser、index、file、scope 或 response degradation，应暴露为 unresolved edge metadata，例如 `resolution_state` 和 `target_hint`，不能用 source/text fallback 掩盖授权范围、依赖覆盖或 parser 恢复问题。
+所有 repository target 都必须使用 `scope=all`，评估器会拒绝其他值。普通 full-scope 注册不会把 repository `path_filters` 或 `language_filters` 传给 `repo register`，默认 guardrail 会验证产品注册拒绝 `--language`；case 级 filter 继续用于验证查询端过滤能力。两个官方 framework target 使用独立 `registration_path_filters` 字段，只授权锁定的 Angular layout 与 Vue SFC playground 源码范围，同时在这些 scope 内保留全部索引阶段。缺失外部 dependency source 不是 parser、index、file、scope 或 response degradation，应暴露为 unresolved edge metadata，例如 `resolution_state` 和 `target_hint`，不能用 source/text fallback 掩盖授权范围、依赖覆盖或 parser 恢复问题。
+
+Fast `software_relationship_storage_cases` 门禁执行 `cargo test --lib software_relationship_storage -- --nocapture`，覆盖 4,096 map topic、零持久边写入/新增页、Unicode 规范化后的配置边去重、稳定 ID/证据、limit 前 scope 过滤与有界计数/查询耗时；16,384 条 usage fixture 要求窗口前 path/language 过滤至少减半 VM 工作量，规范化字符集必须与每个 Rust Unicode scalar 一致。该门禁保护 schema 8 去除冗余兼容边存储且保留类型化 ontology statement 的合同。

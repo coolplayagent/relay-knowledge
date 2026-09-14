@@ -31,11 +31,14 @@ target/debug/relay-knowledge help --format json
 
 ## 安装发布版
 
+1.1.17 引入只保留最近 16 条历史的 Repository Map v4。迁移、备份与安装说明见
+[1.1.17 发布说明](pages/zh/releases/1.1.17.html)。
+
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)
 提供 Linux x64/ARM64、macOS Intel/Apple Silicon 和 Windows x64/ARM64
 预构建压缩包。将二进制放入 `PATH` 前，应使用 `checksums.txt` 校验所选压缩包；
 GitHub artifact attestation 覆盖同一组压缩包摘要。Linux GNU 压缩包以
-glibc 2.31 为 baseline。
+glibc 2.28 为 baseline。
 
 Rust 用户也可以从 crates.io 安装：
 
@@ -49,6 +52,11 @@ relay-knowledge service doctor
 通过 CLI 而不是 MCP/ACP 使用本地图谱。平台细节、校验、服务安装、升级、回滚和
 卸载合同见 [CLI skill 包](skills/relay-knowledge-cli/README.md)与
 [安装、发布与升级](docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md)。
+
+采用 software projection schema 8 的构建从索引事实推导兼容关系，不再重复存储
+关系 payload。已有 scope 需要通过持久任务刷新投影。降级到 schema-7 reader 前，
+先停止服务并恢复升级前的数据库及全部分片，或在独立 runtime home 中重新索引；
+旧 reader 需要其自身物化的关系数据。
 
 ## 能力概览
 
@@ -166,17 +174,31 @@ Session、授权、取消、审计、平台服务管理器和诊断说明见
 ./run.sh status
 ./run.sh stop --force
 ./check.sh
+./check.sh --deep
 ```
 
 主要本地质量门禁：
 
 ```bash
 cargo fmt --all -- --check
+cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 python3 tools/docs/check_docs.py --self-test-and-check
 ```
+
+默认 `./check.sh` 使用 stable 工具链，适合日常改动。deep profile 还会执行
+确定性 benchmark、针对无 FFI 核心领域不变量的 Miri，以及覆盖 library 和 binary
+的 AddressSanitizer。先安装 nightly 前置组件：
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+Miri 和 sanitizer 也作为 Linux pull request job 自动运行。它们依赖 nightly、
+需要重建插桩产物且明显慢于 stable check/Clippy/test，因此不进入普通 commit hook。
 
 架构边界、async 与资源预算、UT 覆盖率、文档完整性和手写文件少于 1,000 行的要求都属于
 [工程硬约束](docs/zh/03-architecture-specs/02-engineering-hard-constraints.md)，
@@ -216,4 +238,5 @@ uv run --extra dev pytest tests/browser
 [安装与运行时目录](docs/zh/01-user-guide/01-install-and-runtime.md)。
 
 可选本地 hook：`pre-commit install` 和
-`pre-commit run --all-files`。
+`pre-commit run --all-files`。Rust 改动在 commit 前执行 `cargo check`、Clippy
+和 tests；test 命令通过 `--all-targets` 同时覆盖确定性 benchmark target。

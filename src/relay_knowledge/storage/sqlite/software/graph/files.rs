@@ -2,6 +2,7 @@ use rusqlite::{Connection, params, params_from_iter, types::Value};
 
 use crate::{
     domain::{GraphVersion, SoftwareFile, SoftwareFileInput, SoftwareGlobalRequest},
+    project::{KNOWLEDGE_MAP_RELATIVE_PATH, LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH},
     storage::StorageError,
 };
 
@@ -88,18 +89,20 @@ fn software_file_page(
                         AND shard_identity.name = root_identity.name
                        WHERE refs.source_scope = files.source_scope
                          AND refs.repository_id = files.repository_id
-                         AND refs.path = '.knowledge/knowledge-map.yaml'
+                         AND refs.path IN (?3, ?4)
                          AND refs.kind = 'knowledge_map_topic_shard_ref'
                          AND refs.name = files.path
                    ) AS authorized_topic_shard
             FROM code_repository_files files
             WHERE files.source_scope = ?1 AND files.path > ?2
             ORDER BY files.path ASC
-            LIMIT ?3
+            LIMIT ?5
             ",
             vec![
                 Value::Text(source_scope.to_owned()),
                 Value::Text(path.to_owned()),
+                Value::Text(KNOWLEDGE_MAP_RELATIVE_PATH.to_owned()),
+                Value::Text(LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH.to_owned()),
                 Value::Integer(limit as i64),
             ],
         ),
@@ -137,17 +140,19 @@ fn software_file_page(
                         AND shard_identity.name = root_identity.name
                        WHERE refs.source_scope = files.source_scope
                          AND refs.repository_id = files.repository_id
-                         AND refs.path = '.knowledge/knowledge-map.yaml'
+                         AND refs.path IN (?2, ?3)
                          AND refs.kind = 'knowledge_map_topic_shard_ref'
                          AND refs.name = files.path
                    ) AS authorized_topic_shard
             FROM code_repository_files files
             WHERE files.source_scope = ?1
             ORDER BY files.path ASC
-            LIMIT ?2
+            LIMIT ?4
             ",
             vec![
                 Value::Text(source_scope.to_owned()),
+                Value::Text(KNOWLEDGE_MAP_RELATIVE_PATH.to_owned()),
+                Value::Text(LEGACY_KNOWLEDGE_MAP_RELATIVE_PATH.to_owned()),
                 Value::Integer(limit as i64),
             ],
         ),

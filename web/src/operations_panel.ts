@@ -121,11 +121,11 @@ function operationForm(callbacks: OperationsCallbacks): HTMLElement {
           appState.map.repository = value;
         }),
         numberControl("From version", appState.map.fromVersion, (value) => {
-          appState.map.fromVersion = positiveInt(value, 1);
+          appState.map.fromVersion = value.trim() === "" ? null : positiveInt(value, 1);
         }),
         numberControl("Limit", appState.map.limit, (value) => {
-          appState.map.limit = Math.min(256, positiveInt(value, 16));
-        }, 256)
+          appState.map.limit = Math.min(16, positiveInt(value, 16));
+        }, 16)
       );
       break;
     case "code":
@@ -591,7 +591,7 @@ function inputControl(
 
 function numberControl(
   label: string,
-  value: number,
+  value: number | null,
   onInput: (value: string) => void,
   max?: number
 ): HTMLElement {
@@ -603,7 +603,7 @@ function numberControl(
     input.max = String(max);
   }
   input.name = fieldName(label);
-  input.value = String(value);
+  input.value = value === null ? "" : String(value);
   input.addEventListener("input", () => {
     onInput(input.value);
     updatePreview();

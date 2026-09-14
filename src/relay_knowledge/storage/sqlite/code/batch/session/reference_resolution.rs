@@ -3,8 +3,12 @@
 use rusqlite::Transaction;
 
 use super::{
-    TransactionAdvance, checkpoint, finalization_target_is_unpublished, finalize,
-    require_unpublished_finalization_owner, require_unpublished_finalization_target,
+    checkpoint,
+    finalization::{
+        TransactionAdvance, finalization_target_is_unpublished,
+        require_unpublished_finalization_owner, require_unpublished_finalization_target,
+    },
+    finalize,
 };
 use crate::{
     domain::{

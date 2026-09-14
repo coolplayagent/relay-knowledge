@@ -10,6 +10,7 @@ fn profile(properties: BTreeMap<String, TaggedValue>) -> RawProfile {
             line: 1,
         },
         active_by_default: false,
+        modules: Vec::new(),
         properties,
         dependencies: Vec::new(),
         dependency_management: Vec::new(),

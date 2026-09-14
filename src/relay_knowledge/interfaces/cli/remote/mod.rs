@@ -6,16 +6,19 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::{
     api::{
         ApiError, BusinessKnowledgeQueryResponse, CodeGraphContextResponse,
-        CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
-        CodeRepositoryIndexStartResponse, CodeRepositoryListResponse, CodeRepositoryQueryResponse,
-        CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse,
-        CodeRepositoryStatusResponse, CodeRepositoryUpdateRequest, CodebaseViewResponse, ErrorKind,
-        RepositoryGraphNeighborhoodResponseV1, RequestContext, SoftwareGlobalResponse,
+        CodeRepositoryFeatureFlagsResponse, CodeRepositoryFrameworkGraphResponse,
+        CodeRepositoryImpactResponse, CodeRepositoryIndexStartResponse, CodeRepositoryListResponse,
+        CodeRepositoryQueryResponse, CodeRepositoryReportResponse,
+        CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
+        CodeRepositoryUpdateRequest, CodebaseViewResponse, ErrorKind,
+        RepositoryGraphNeighborhoodResponseV1, RequestContext, SoftwareGlobalExportResponse,
+        SoftwareGlobalResponse,
     },
     domain::{
         BusinessKnowledgeQueryRequest, CodeFeatureFlagRequest, CodeGraphContextRequest,
-        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRetrievalRequest, FreshnessPolicy,
-        RepositoryGraphNeighborhoodRequest, SoftwareGlobalRequest,
+        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRetrievalRequest,
+        FrameworkGraphRequest, FreshnessPolicy, RepositoryGraphNeighborhoodRequest,
+        SoftwareGlobalRequest,
     },
     env::NetworkEnvOverrides,
     net::{
@@ -26,7 +29,7 @@ use crate::{
 
 use super::{
     CliAction, CliError, OutputFormat,
-    render::render_response,
+    render::{render_response, serialize_line},
     repo::{self, RepoCommand},
 };
 use crate::interfaces::code_index_mode::{mode_for_index_ref, selector_for_index_request};
@@ -43,9 +46,11 @@ pub(super) fn supports(action: &CliAction) -> bool {
                 | RepoCommand::Graph { .. }
                 | RepoCommand::Context { .. }
                 | RepoCommand::FeatureFlags { .. }
+                | RepoCommand::FrameworkGraph { .. }
                 | RepoCommand::Impact { .. }
                 | RepoCommand::Report { .. }
                 | RepoCommand::Software { .. }
+                | RepoCommand::SoftwareExport { .. }
                 | RepoCommand::Business { .. }
                 | RepoCommand::View(_)
                 | RepoCommand::Status { .. }
@@ -309,6 +314,7 @@ pub(super) async fn run_remote(
             .map(Some)
         }
         RepoCommand::FeatureFlags {
+            filters,
             alias,
             query,
             limit,
@@ -329,6 +335,7 @@ pub(super) async fn run_remote(
                 *limit,
                 *freshness,
             )
+            .and_then(|request|request.with_filters(filters.clone()))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = client
                 .post_repository::<_, CodeRepositoryFeatureFlagsResponse>(
@@ -340,6 +347,47 @@ pub(super) async fn run_remote(
 
             render_response(
                 "code.repo.feature_flags",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+            .map(Some)
+        }
+        RepoCommand::FrameworkGraph {
+            alias,
+            query,
+            frameworks,
+            kinds,
+            limit,
+            ref_selector,
+            path_filters,
+            freshness,
+        } => {
+            let request = FrameworkGraphRequest::new(
+                query.clone(),
+                repo::selector(
+                    alias.clone(),
+                    ref_selector.clone(),
+                    path_filters.clone(),
+                    Vec::new(),
+                    format,
+                )?,
+                frameworks.clone(),
+                kinds.clone(),
+                *limit,
+                *freshness,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = client
+                .post_repository::<_, CodeRepositoryFrameworkGraphResponse>(
+                    alias,
+                    "framework-graph",
+                    &request,
+                )
+                .await?;
+
+            render_response(
+                "code.repo.framework_graph",
                 response.metadata.clone(),
                 &response,
                 format,
@@ -385,6 +433,8 @@ pub(super) async fn run_remote(
             repo::render_report_response(&response, format).map(Some)
         }
         RepoCommand::Software {
+            cursor,
+            path_filters,
             alias,
             ref_selector,
             kind,
@@ -395,7 +445,7 @@ pub(super) async fn run_remote(
                 repo::selector(
                     alias.clone(),
                     ref_selector.clone(),
-                    Vec::new(),
+                    path_filters.clone(),
                     Vec::new(),
                     format,
                 )?,
@@ -403,6 +453,7 @@ pub(super) async fn run_remote(
                 *freshness,
                 *limit,
             )
+            .and_then(|request| request.with_cursor(cursor.clone()))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = client
                 .post_repository::<_, SoftwareGlobalResponse>(alias, "software", &request)
@@ -415,6 +466,32 @@ pub(super) async fn run_remote(
                 format,
             )
             .map(Some)
+        }
+        RepoCommand::SoftwareExport {
+            alias,
+            ref_selector,
+            profile,
+            freshness,
+            limit,
+        } => {
+            let request = SoftwareGlobalRequest::new(
+                repo::selector(
+                    alias.clone(),
+                    ref_selector.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    format,
+                )?,
+                crate::domain::SoftwareGlobalKind::All,
+                *freshness,
+                *limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let endpoint = format!("software/export/{}", profile.as_str());
+            let response = client
+                .post_repository::<_, SoftwareGlobalExportResponse>(alias, &endpoint, &request)
+                .await?;
+            serialize_line(&response.document).map(Some)
         }
         RepoCommand::Business {
             alias,

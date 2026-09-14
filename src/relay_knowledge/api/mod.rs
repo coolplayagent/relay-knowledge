@@ -3,13 +3,18 @@
 mod contracts;
 mod operations;
 
+pub(crate) use operations::BUSINESS_GLOSSARY_EXAMPLE;
+pub use operations::{
+    BusinessKnowledgeBootstrap, BusinessKnowledgeDiagnosticReason, BusinessKnowledgeDiagnostics,
+};
+
 pub(crate) use contracts::CodeRepositoryFreshnessInput;
 pub use contracts::*;
 pub use operations::{
     AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, BusinessKnowledgeQueryResponse,
     CodeIndexWorkerRunRequest, CodeIndexWorkerRunResponse, CodeIndexWorkerStatus,
-    CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
-    CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
+    CodeRepositoryFeatureFlagsResponse, CodeRepositoryFrameworkGraphResponse,
+    CodeRepositoryImpactResponse, CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
     CodeRepositoryIndexStartResponse, CodeRepositoryListResponse, CodeRepositoryQueryResponse,
     CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse,
     CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse, CodeRepositorySetAddResponse,
@@ -25,7 +30,7 @@ pub use operations::{
     ProposalDecisionApiRequest, ProposalDecisionResponse, ProposalListApiRequest,
     ProposalListResponse, ProposalShowResponse, RepositoryGraphNeighborhoodResponseV1,
     ServiceDefinitionWriteResponse, ServiceOperatorResponse, ServiceRecoveryReport,
-    ServiceStatusResponse, SoftwareGlobalResponse, StorageShardDiagnostics,
-    StorageTopologyDiagnostics, StorageTopologyResponse, WorkerRunRequest, WorkerRunResponse,
-    WorkerStatusRequest, WorkerStatusResponse,
+    ServiceStatusResponse, SoftwareGlobalExportResponse, SoftwareGlobalResponse,
+    StorageShardDiagnostics, StorageTopologyDiagnostics, StorageTopologyResponse, WorkerRunRequest,
+    WorkerRunResponse, WorkerStatusRequest, WorkerStatusResponse,
 };

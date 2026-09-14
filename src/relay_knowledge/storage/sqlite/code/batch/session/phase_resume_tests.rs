@@ -6,7 +6,9 @@ use crate::{
         CodeIndexBatch, CodeParseStatus, CodeQueryIndexRepairResumePhase,
         CodeRepositoryRegistration, code_query_index_repair, code_query_index_subphase,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore, StorageError},
+    storage::{
+        CodeIndexPublicationStore as _, RepositoryCatalogStore as _, SqliteGraphStore, StorageError,
+    },
 };
 use rusqlite::params;
 

@@ -44,8 +44,18 @@ pub(super) const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_feature_flags",
-        columns: "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt",
+        columns: "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt, metadata_json",
         cursor: CodeScopeCursor::Key("usage_id"),
+    },
+    CodeScopeTable {
+        table: "code_repository_framework_nodes",
+        columns: "repository_id, source_scope, node_id, file_id, path, framework, kind, name, detail, symbol_snapshot_id, byte_start, byte_end, line_start, line_end",
+        cursor: CodeScopeCursor::Key("node_id"),
+    },
+    CodeScopeTable {
+        table: "code_repository_framework_edges",
+        columns: "repository_id, source_scope, edge_id, file_id, path, framework, kind, source_node_id, target_node_id, target_hint, resolution_state, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end",
+        cursor: CodeScopeCursor::Key("edge_id"),
     },
     CodeScopeTable {
         table: "code_repository_routes",
@@ -78,6 +88,21 @@ pub(super) const REFERENCE_SEARCH_SCOPE_TABLES: &[CodeScopeTable] = &[
 ];
 
 pub(super) const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
+    CodeScopeTable {
+        table: "maven_reactor_status",
+        columns: "source_scope, complete",
+        cursor: CodeScopeCursor::Singleton,
+    },
+    CodeScopeTable {
+        table: "maven_reactor_modules",
+        columns: "source_scope, module_id, path, directory, payload",
+        cursor: CodeScopeCursor::Key("module_id"),
+    },
+    CodeScopeTable {
+        table: "maven_reactor_edges",
+        columns: "source_scope, edge_id, source_id, target_id, kind, resolution_state, dependency_scope, profile, payload",
+        cursor: CodeScopeCursor::Key("edge_id"),
+    },
     CodeScopeTable {
         table: "code_repository_index_checkpoints",
         columns: "source_scope, repository_id, state, resolved_commit_sha, tree_hash, path_filters_json, language_filters_json, total_path_count, parsed_file_count, committed_file_count, committed_symbol_count, committed_reference_count, committed_chunk_count, committed_fact_row_count, incremental_summary_json, batch_count, last_path, resource_budget_json, updated_at_ms, error_message",
@@ -115,7 +140,7 @@ pub(super) const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "software_global_status",
-        columns: "source_scope, repository_id, projected_graph_version, stale, component_count, sdk_usage_count, file_count, topic_count, relationship_count, build_target_count, iac_resource_count, design_element_count, projection_schema_version, last_error",
+        columns: "source_scope, repository_id, projected_graph_version, stale, component_count, sdk_usage_count, file_count, topic_count, relationship_count, build_target_count, iac_resource_count, design_element_count, projection_schema_version, ontology_version, source_coverage_json, completeness_basis_points, freshness, conflict_count, entity_count, statement_count, diagnostic_count, last_error",
         cursor: CodeScopeCursor::Singleton,
     },
     CodeScopeTable {
@@ -132,5 +157,20 @@ pub(super) const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
         table: "software_design_elements",
         columns: "element_id, repository_id, source_scope, language_id, element_kind, name, parent, summary, source_kind, evidence_path, evidence_line_start, evidence_line_end, confidence_basis_points, created_graph_version",
         cursor: CodeScopeCursor::Key("element_id"),
+    },
+    CodeScopeTable {
+        table: "software_entities",
+        columns: "occurrence_id, entity_key, repository_id, source_scope, entity_kind, name, namespace, source_kind, primary_evidence_path, language_id, evidence_refs_json, attributes_json, created_graph_version",
+        cursor: CodeScopeCursor::Key("occurrence_id"),
+    },
+    CodeScopeTable {
+        table: "software_statements",
+        columns: "statement_id, source_scope, subject_id, predicate, object_id, object_value, source_kind, evidence_refs_json, primary_evidence_path, assertion_mode, resolution_state, valid_from, valid_to, observed_at, extractor_id, extractor_version, confidence_basis_points, fact_state",
+        cursor: CodeScopeCursor::Key("statement_id"),
+    },
+    CodeScopeTable {
+        table: "software_ontology_diagnostics",
+        columns: "diagnostic_id, source_scope, shape_id, code, severity, statement_id, entity_key, field, message",
+        cursor: CodeScopeCursor::Key("diagnostic_id"),
     },
 ];

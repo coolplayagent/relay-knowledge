@@ -22,9 +22,17 @@ Common scripts are split by responsibility:
 ./run.sh status
 ./run.sh stop --force
 ./check.sh
+./check.sh --deep
 ```
 
-`build.sh` builds `target/release/relay-knowledge` and `web/dist`. `run.sh` only manages a local service process and asks you to run `./build.sh` if artifacts are missing. `check.sh` runs fmt, clippy, tests, coverage, Web build, and the browser integration gate when available.
+`build.sh` builds `target/release/relay-knowledge` and `web/dist`. `run.sh` only manages a local service process and asks you to run `./build.sh` if artifacts are missing. `check.sh` runs documentation, fmt, `cargo check`, Clippy, tests, coverage, the Web build, and the browser integration gate when available. `check.sh --deep` additionally runs the deterministic benchmark, an FFI-free Miri subset, and AddressSanitizer. The deep profile requires nightly components and fails with an installation command instead of silently skipping them:
+
+```bash
+rustup toolchain install nightly --profile minimal --component miri,rust-src
+./check.sh --deep
+```
+
+AddressSanitizer is limited to the Linux and macOS targets selected by the script. Linux x86_64 CI is the authoritative cross-developer sanitizer gate.
 
 ## 1.2 Local Execution
 

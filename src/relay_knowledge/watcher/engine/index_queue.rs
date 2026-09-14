@@ -17,6 +17,18 @@ use crate::watcher::{
     },
 };
 
+#[derive(Debug)]
+struct CommitReconciliationError {
+    operation: &'static str,
+    source: crate::code::CodeIndexError,
+}
+
+impl CommitReconciliationError {
+    const fn new(operation: &'static str, source: crate::code::CodeIndexError) -> Self {
+        Self { operation, source }
+    }
+}
+
 pub(super) async fn process_debounced_paths(
     state: &Arc<RwLock<WatcherInternalState>>,
     diagnostics_tx: &watch::Sender<WatcherDiagnostics>,
@@ -77,10 +89,7 @@ async fn reconcile_commit_heads(
     if repositories.is_empty() {
         return;
     }
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let now_ms = crate::clock::system_now_millis_or_zero();
     let mut reconciled = 0u64;
     let mut queued = 0u64;
     let mut failures = 0u64;
@@ -98,10 +107,14 @@ async fn reconcile_commit_heads(
             let language_filters = repository.language_filters.clone();
             let comparison_base = base_commit.clone();
             let active_is_worktree = repository.last_indexed_commit.starts_with("worktree:");
-            move || -> Result<Option<(String, String, Option<u64>)>, crate::code::CodeIndexError> {
-                let head_commit = crate::code::resolve_repository_ref(&root, "HEAD")?;
+            move || -> Result<Option<(String, String, Option<u64>)>, CommitReconciliationError> {
+                let head_commit = crate::code::resolve_repository_ref(&root, "HEAD")
+                    .map_err(|error| CommitReconciliationError::new("resolve_head", error))?;
                 if head_commit == comparison_base {
-                    let observation = crate::code::repository_worktree_observation_bounded(&root)?;
+                    let observation = crate::code::repository_worktree_observation_bounded(&root)
+                        .map_err(|error| {
+                        CommitReconciliationError::new("observe_worktree", error)
+                    })?;
                     if active_is_worktree && observation.is_none() {
                         return Ok(None);
                     }
@@ -112,7 +125,8 @@ async fn reconcile_commit_heads(
                     &head_commit,
                     &path_filters,
                     &language_filters,
-                )?;
+                )
+                .map_err(|error| CommitReconciliationError::new("resolve_snapshot", error))?;
                 Ok(Some((resolved.0, resolved.1, None)))
             }
         })
@@ -124,8 +138,9 @@ async fn reconcile_commit_heads(
                 failures += 1;
                 tracing::warn!(
                     repository = %repository.alias,
-                    error = %error,
-                    "Git commit reconciliation could not resolve HEAD"
+                    operation = error.operation,
+                    error = %error.source,
+                    "Git commit reconciliation failed"
                 );
                 continue;
             }
@@ -253,10 +268,7 @@ async fn enqueue_repository_tasks(
     task_sink: &TaskQueueSink,
 ) {
     let repositories = state.read().await.repositories.clone();
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let now_ms = crate::clock::system_now_millis_or_zero();
     let mut queued_tasks = 0u64;
     let mut queued_paths = HashSet::new();
     let mut deferred_paths = HashSet::new();

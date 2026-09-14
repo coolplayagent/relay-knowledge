@@ -8,7 +8,10 @@ use crate::{
         CodeRepositorySelector, CodeRetrievalRequest, CodeRouteRecord, FreshnessPolicy,
         RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
     },
-    storage::{CodeRepositoryStore, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    },
 };
 
 const TEST_SOURCE_SCOPE: &str = "code:test:route-generated:commit:tree";
@@ -57,6 +60,8 @@ async fn route_queries_filter_generated_rows_before_candidate_limit() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes,
         chunks: Vec::new(),
         workspaces: Vec::new(),
@@ -112,6 +117,8 @@ async fn hybrid_route_queries_search_routes_before_chunk_early_exit() {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes: vec![route("route-1", "route-file", path, "liveInventory")],
         chunks: vec![chunk(
             "chunk-1",
@@ -576,6 +583,8 @@ async fn store_with_routes(routes: Vec<CodeRouteRecord>) -> SqliteGraphStore {
         calls: Vec::new(),
         dependencies: Vec::new(),
         feature_flags: Vec::new(),
+        framework_nodes: Vec::new(),
+        framework_edges: Vec::new(),
         routes,
         chunks: Vec::new(),
         workspaces: Vec::new(),

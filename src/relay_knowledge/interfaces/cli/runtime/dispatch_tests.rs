@@ -17,6 +17,7 @@ async fn process_free_help_and_version_actions_skip_runtime_configuration() {
             help: true,
         },
         None,
+        ProcessRuntimeConfig::default(),
     )
     .await
     .expect("help should render");
@@ -28,6 +29,7 @@ async fn process_free_help_and_version_actions_skip_runtime_configuration() {
             help: false,
         },
         None,
+        ProcessRuntimeConfig::default(),
     )
     .await
     .expect("version should render");
@@ -58,14 +60,18 @@ async fn map_history_uses_repository_service_resolved_before_dispatch() {
     let output = run_command(
         CliCommand {
             action: CliAction::Map(MapCommand::History {
-                from_version: 1,
-                limit: 64,
+                selection: crate::interfaces::cli::map::MapSelection::One(
+                    crate::domain::RepositoryMapType::Knowledge,
+                ),
+                from_version: Some(1),
+                limit: 16,
             }),
             format: OutputFormat::Json,
             remote_base_url: None,
             help: false,
         },
         Some(&service),
+        ProcessRuntimeConfig::default(),
     )
     .await
     .expect("map history should use the resolved repository service");

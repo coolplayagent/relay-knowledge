@@ -14,7 +14,8 @@ use crate::{
 use super::super::runtime::{concurrency::run_limited, contracts::EvalRuntime};
 use super::{
     additional_languages::*, agent_workflow::*, c_and_cpp::*, common_languages::*,
-    cross_language::*, nonstandard_layout::*, software_global::*, writer::write_fixture_file,
+    cross_language::*, nonstandard_layout::*, repository_maps::*, software_global::*,
+    writer::write_fixture_file,
 };
 
 pub(in crate::evaluator) fn prepare_repository_path(
@@ -60,11 +61,17 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
     if fixture == "grep_budget_v1" {
         return write_grep_budget_fixture(root);
     }
+    if fixture == "java_class_calls_v1" {
+        return super::java_class_calls::write_java_class_calls(root);
+    }
     if fixture == "index_performance_many_files_v1" {
         return write_index_performance_many_files_fixture(root);
     }
     if fixture == "index_performance_c_fragment_v1" {
         return write_index_performance_c_fragment_fixture(root);
+    }
+    if fixture == "repository_map_graph_v4" {
+        return write_repository_map_graph_v4_fixture(root);
     }
     if fixture == "index_performance_wide_mixed_files_v1" {
         return write_index_performance_wide_mixed_files_fixture(root);
@@ -274,7 +281,10 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("deploy/app.yaml", SOFTWARE_GLOBAL_K8S),
             ("infra/main.tf", SOFTWARE_GLOBAL_TERRAFORM),
             ("service/relay-global.service", SOFTWARE_GLOBAL_SYSTEMD),
+            ("api/openapi.yaml", SOFTWARE_GLOBAL_OPENAPI),
             ("docs/architecture.md", SOFTWARE_GLOBAL_ARCHITECTURE_MD),
+            ("README.md", SOFTWARE_GLOBAL_README_MD),
+            ("docs/catalog.md", SOFTWARE_GLOBAL_CATALOG_MD),
             (
                 ".knowledge/knowledge-map.yaml",
                 SOFTWARE_GLOBAL_KNOWLEDGE_MAP,

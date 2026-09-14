@@ -254,6 +254,9 @@ fn software_projection_result_count(structured: &Value) -> Option<usize> {
         "build_targets",
         "iac_resources",
         "design_elements",
+        "entities",
+        "statements",
+        "diagnostics",
     ];
     let mut count = 0;
     let mut found = false;

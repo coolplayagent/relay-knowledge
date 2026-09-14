@@ -11,15 +11,24 @@ it tells agents to treat cold and incremental indexing as durable single-writer
 tasks so command-runner timeouts do not interrupt or obscure progress.
 
 Repository bootstrap initializes or upgrades the
-`.knowledge/knowledge-map.yaml` contract and the code map as one recoverable
+`codespec/codespec-map.yaml`, `knowledge/knowledge-map.yaml`, and the code map as one recoverable
 workflow. The YAML contains stable `software-model` and `business-knowledge`
 routes; the latter points to the version-controlled authored
-`.knowledge/business-glossary.yaml`. Snapshot-bound business, architecture,
+`knowledge/glossary/business-glossary.yaml`. Snapshot-bound business, architecture,
 build, deployment, dependency, and design facts remain in the indexed `repo
 business`/`repo software`/`repo view` read models. Before a spec or coding task,
 agents pin one ref and combine those models with business/domain views and code
 context. After a commit, they refresh the durable code task, impact/context
 evidence, and final map validation together.
+
+The bundle includes Draft 2020-12 JSON Schemas for all four persisted Knowledge
+Map v2 artifact classes and for the authored Business Glossary v1 document.
+They support machine-readable field discovery and structural checks without
+replacing the CLI's runtime and semantic validation. Unknown fields remain
+accepted to match current Serde readers. The Knowledge Map schema does not make
+generated shards, archives, or index nodes agent-editable; the separate glossary
+schema describes a version-controlled source that is intentionally edited under
+normal review.
 
 For code-structure questions such as function definitions, symbol locations,
 references, callers, callees, call graphs, and call chains, agents should use
@@ -113,12 +122,26 @@ bounded by an explicit cap.
 - `agents/openai.yaml`: UI metadata for OpenAI-compatible agent surfaces.
 - `references/cli-workflows.md`: detailed CLI workflows and safety defaults.
 - `references/knowledge-map-workflows.md`: agent workflow for CRUD operations
-  on the `.knowledge/knowledge-map.yaml` navigation contract plus repository
+  on the visible CodeSpec and Knowledge navigation contracts plus repository
   bootstrap and spec-grounded incremental development.
+- `references/knowledge-map.schema.json`: Draft 2020-12 structural schema for
+  the v4 root manifest, topic shards, bounded recent history, and redirect;
+  `relay-knowledge map validate` remains authoritative for cross-file and
+  semantic integrity.
+- `references/codespec-map.schema.json`: Draft 2020-12 structural schema for
+  `codespec/codespec-map.yaml` and its typed directory governance fields.
+- `references/business-glossary.schema.json`: Draft 2020-12 structural schema
+  for authored Business Glossary v1 domains, terms, aliases, semantics, and
+  technical mappings; `relay-knowledge map validate` remains authoritative for
+  runtime byte bounds and semantic integrity.
 - `assets/linux-x86_64/relay-knowledge`: Linux x64 release binary in generated
-  release packages, built and checked against the glibc 2.31 baseline.
+  GitHub Release packages, built and checked against the glibc 2.28 baseline.
 - `assets/windows-x86_64/relay-knowledge.exe`: Windows x64 release binary in
-  generated release packages.
+  generated GitHub Release packages.
+
+ClawHub receives the instruction and reference files without embedded binaries
+because the registry limits individual files to 10 MB. The runtime-selection
+rules therefore use a published `PATH` install when those assets are absent.
 
 Keep the `SKILL.md` frontmatter `description` at or below 1024 Unicode
 characters. Local checks, pre-commit, PR CI, release packaging, and ClawHub

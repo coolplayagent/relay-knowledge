@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::KnowledgeMapSourceKind;
+use crate::domain::{KnowledgeMapChange, KnowledgeMapSourceKind};
 
 #[tokio::test]
 async fn writes_and_reads_yaml_contract() {
@@ -218,45 +218,6 @@ async fn init_upgrades_legacy_map_once() {
     assert_eq!(shown.map.sources.len(), 1);
     assert_eq!(shown.map.sources[0].id, "repository-software-model");
     assert_eq!(shown.map.history.recent.last().expect("history").version, 2);
-    let _ = fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
-async fn init_creates_and_then_preserves_business_glossary_without_version_churn() {
-    let root = temp_root("business-glossary-init");
-    fs::create_dir_all(&root).await.expect("root should create");
-    fs::write(
-        root.join("AGENTS.md"),
-        "Knowledge map: .knowledge/knowledge-map.yaml\n",
-    )
-    .await
-    .expect("agent contract should write");
-    let service = KnowledgeMapService::new(root.clone());
-    let context = RequestContext::for_interface(crate::api::InterfaceKind::Cli);
-
-    let initialized = service.init(&context).await.expect("init should work");
-    let glossary_path = root.join(".knowledge/business-glossary.yaml");
-    let empty = fs::read(&glossary_path)
-        .await
-        .expect("glossary should exist");
-    crate::domain::BusinessGlossary::parse(&empty).expect("empty glossary should validate");
-    let authored = "schema_version: 1\ndomains:\n  - id: sales\n    name: Sales\nterms: []\n";
-    fs::write(&glossary_path, authored)
-        .await
-        .expect("authored glossary should write");
-
-    let repeated = service
-        .init(&context)
-        .await
-        .expect("repeat init should work");
-    let validation = service
-        .validate(&context)
-        .await
-        .expect("validate should run");
-
-    assert_eq!(repeated.map_version, initialized.map_version);
-    assert_eq!(fs::read_to_string(&glossary_path).await.unwrap(), authored);
-    assert!(validation.valid);
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -520,7 +481,7 @@ async fn route_rejects_overflow_and_unsafe_archive_metadata() {
 }
 
 #[tokio::test]
-async fn show_rejects_a_non_content_addressed_archive_head() {
+async fn show_rejects_archive_fields_in_a_recent_only_manifest() {
     let root = temp_root("invalid-show-archive-ref");
     fs::create_dir_all(&root).await.expect("root should create");
     let service = KnowledgeMapService::new(root.clone());
@@ -531,6 +492,7 @@ async fn show_rejects_a_non_content_addressed_archive_head() {
         .expect("manifest should read");
     let mut manifest = parse_manifest(&content).expect("manifest should parse");
     manifest.map_version = 2;
+    manifest.history.omitted_through = 1;
     manifest.history.archived_through = 1;
     manifest.history.archive = Some(KnowledgeMapArchiveRef {
         r#ref: "history/archive.yaml".to_owned(),
@@ -547,8 +509,12 @@ async fn show_rejects_a_non_content_addressed_archive_head() {
     let error = service
         .show(&context, None)
         .await
-        .expect_err("show must reject a structurally invalid archive head");
-    assert!(error.to_string().contains("not content addressed"));
+        .expect_err("show must reject archive fields in schema v4");
+    let message = error.to_string();
+    assert!(
+        message.contains("must not reference archive artifacts"),
+        "unexpected validation error: {message}"
+    );
     let _ = fs::remove_dir_all(root).await;
 }
 
@@ -983,8 +949,12 @@ fn temp_root(label: &str) -> PathBuf {
     ))
 }
 
+#[path = "history_cleanup_tests.rs"]
+mod history_cleanup_tests;
+#[path = "history_legacy_tests.rs"]
+mod history_legacy_tests;
 #[path = "history_tests.rs"]
 mod history_tests;
-
 #[path = "path_tests.rs"]
 mod path_tests;
+use std::time::{SystemTime, UNIX_EPOCH};
