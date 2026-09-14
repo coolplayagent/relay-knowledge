@@ -40,8 +40,8 @@ async fn projection_preserves_homonyms_conflicts_and_unresolved_hints() {
         .expect("query");
 
     assert_eq!(
-        result.resolution,
-        crate::domain::BusinessKnowledgeResolution::Ambiguous
+        result.result.status,
+        crate::domain::BusinessKnowledgeResultStatus::Ambiguous
     );
     assert_eq!(result.terms.len(), 2);
     assert!(result.terms.iter().any(|term| !term.conflicts.is_empty()));
@@ -100,7 +100,7 @@ async fn projection_preserves_homonyms_conflicts_and_unresolved_hints() {
     );
 }
 
-fn registration() -> crate::domain::CodeRepositoryRegistration {
+pub(super) fn registration() -> crate::domain::CodeRepositoryRegistration {
     crate::domain::CodeRepositoryRegistration::new(
         "repository-1",
         "repo",
@@ -111,7 +111,7 @@ fn registration() -> crate::domain::CodeRepositoryRegistration {
     .expect("registration")
 }
 
-fn projection() -> BusinessKnowledgeProjectionInput {
+pub(super) fn projection() -> BusinessKnowledgeProjectionInput {
     let domains = vec![
         BusinessDomainDefinition {
             id: "sales".to_owned(),

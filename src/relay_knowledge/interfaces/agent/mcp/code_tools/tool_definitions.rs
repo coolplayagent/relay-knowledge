@@ -187,7 +187,7 @@ pub(in crate::interfaces::agent::mcp) fn code_software_query_tool_definition() -
 pub(in crate::interfaces::agent::mcp) fn code_business_query_tool_definition() -> Value {
     json!({
         "name": CODE_BUSINESS_QUERY_TOOL,
-        "description": "Read route-authorized business terms, aliases, semantics, conflicts, evidence, and declared technical mappings from one indexed repository snapshot.",
+        "description": "Read route-authorized business terms, aliases, semantics, conflicts, evidence, and declared technical mappings from one indexed repository snapshot. The response separates request.mode, result.status/match_type, knowledge.state and freshness; diagnostics provide actionable guidance.",
         "inputSchema": {
             "type": "object",
             "properties": {

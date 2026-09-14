@@ -10,6 +10,153 @@ use serde_json::Value;
 const ALIAS: &str = "knowledge-loop-fixture";
 
 #[test]
+fn business_bootstrap_explains_uncommitted_empty_and_filtered_snapshots() {
+    let fixture = AcceptanceFixture::create();
+    let initialized = fixture.cli(["map", "init", "--format", "json"]);
+    assert_eq!(
+        selected_map(&initialized, "knowledge")["business_bootstrap"]["schema_version"],
+        1
+    );
+    assert!(
+        selected_map(&initialized, "codespec")
+            .get("business_bootstrap")
+            .is_none()
+    );
+    fixture.cli([
+        "repo",
+        "register",
+        fixture.repository_text(),
+        "--alias",
+        ALIAS,
+        "--path",
+        "src",
+        "--format",
+        "json",
+    ]);
+    fixture.cli(["repo", "index", ALIAS, "--ref", "HEAD", "--format", "json"]);
+    let absent = fixture.cli([
+        "repo", "business", ALIAS, "--kind", "all", "--ref", "HEAD", "--format", "json",
+    ]);
+    assert_eq!(absent["diagnostics"]["reason"], "no_business_sources");
+    assert_eq!(absent["result"]["status"], "unavailable");
+    assert_eq!(absent["knowledge"]["state"], "no_sources");
+    assert_eq!(absent["knowledge"]["source_count"], 0);
+    assert_eq!(absent["knowledge"]["stale"], false);
+    assert_eq!(absent["scope"]["resolved_commit_sha"], fixture.commit);
+
+    git(&fixture.repository, ["add", "codespec", "knowledge"]);
+    git(
+        &fixture.repository,
+        ["commit", "-m", "commit empty glossary"],
+    );
+    fixture.cli(["repo", "index", ALIAS, "--ref", "HEAD", "--format", "json"]);
+    let empty = fixture.cli([
+        "repo", "business", ALIAS, "--kind", "all", "--ref", "HEAD", "--format", "json",
+    ]);
+    assert_eq!(empty["diagnostics"]["reason"], "empty_glossary");
+    assert_eq!(empty["result"]["status"], "no_match");
+    assert_eq!(empty["knowledge"]["state"], "empty_glossary");
+    assert_eq!(empty["knowledge"]["source_count"], 1);
+    assert_eq!(empty["knowledge"]["term_count"], 0);
+    assert_eq!(empty["knowledge"]["stale"], false);
+
+    let glossary_path = "knowledge/glossary/business-glossary.yaml";
+    let example = empty["diagnostics"]["bootstrap"]["schema_example"]
+        .as_str()
+        .unwrap()
+        .replace("src/billing.rs", "src/lib.rs");
+    write(&fixture.repository, glossary_path, &example);
+    // Even re-indexing HEAD must ignore an authored but uncommitted glossary.
+    fixture.cli(["repo", "index", ALIAS, "--ref", "HEAD", "--format", "json"]);
+    let uncommitted = fixture.cli([
+        "repo", "business", ALIAS, "--ref", "HEAD", "--format", "json",
+    ]);
+    assert_eq!(uncommitted["diagnostics"]["reason"], "empty_glossary");
+    git(&fixture.repository, ["add", glossary_path]);
+    git(
+        &fixture.repository,
+        ["commit", "-m", "author mapped business term"],
+    );
+    fixture.cli(["repo", "index", ALIAS, "--ref", "HEAD", "--format", "json"]);
+    let populated = fixture.cli([
+        "repo", "business", ALIAS, "--ref", "HEAD", "--format", "json",
+    ]);
+    assert!(populated.get("diagnostics").is_none());
+    assert_eq!(populated["knowledge"]["term_count"], 1);
+    assert_eq!(populated["knowledge"]["mapping_count"], 1);
+    assert_eq!(
+        populated["terms"][0]["mappings"][0]["resolution_state"],
+        "resolved"
+    );
+    assert!(populated.get("resolution").is_none());
+    assert!(populated.get("status").is_none());
+    assert_eq!(populated["request"]["mode"], "list");
+    assert_eq!(populated["result"]["status"], "matched");
+    assert_eq!(populated["knowledge"]["state"], "mapped");
+    let exact = fixture.cli([
+        "repo", "business", ALIAS, "--query", "MRR", "--kind", "terms", "--format", "json",
+    ]);
+    assert_eq!(exact["request"]["mode"], "search");
+    assert_eq!(exact["result"]["status"], "matched");
+    assert_eq!(exact["result"]["match_type"], "exact");
+    assert_eq!(exact["result"]["returned_term_count"], 1);
+    assert_eq!(exact["result"]["returned_mapping_count"], 0);
+    assert_eq!(exact["knowledge"]["mapping_count"], 1);
+    assert!(exact.get("diagnostics").is_none());
+    for filter in ["--query", "--domain"] {
+        let unmatched = fixture.cli([
+            "repo",
+            "business",
+            ALIAS,
+            filter,
+            "absent-value",
+            "--ref",
+            "HEAD",
+            "--format",
+            "json",
+        ]);
+        assert_eq!(unmatched["diagnostics"]["reason"], "no_match");
+        assert_eq!(unmatched["result"]["status"], "no_match");
+        assert_eq!(unmatched["knowledge"]["state"], "mapped");
+        assert_eq!(unmatched["knowledge"]["term_count"], 1);
+    }
+    let graph_only = fixture.cli([
+        "repo",
+        "business",
+        ALIAS,
+        "--freshness",
+        "graph-only",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(graph_only["diagnostics"]["reason"], "graph_only");
+    assert_eq!(graph_only["knowledge"]["state"], "unknown");
+    assert_eq!(graph_only["result"]["status"], "unavailable");
+
+    let without_mappings = example.split("    mappings:").next().unwrap();
+    write(&fixture.repository, glossary_path, without_mappings);
+    git(&fixture.repository, ["add", glossary_path]);
+    git(
+        &fixture.repository,
+        ["commit", "-m", "retain term without mappings"],
+    );
+    fixture.cli(["repo", "index", ALIAS, "--ref", "HEAD", "--format", "json"]);
+    let no_mappings = fixture.cli([
+        "repo", "business", ALIAS, "--kind", "mappings", "--format", "json",
+    ]);
+    assert_eq!(no_mappings["diagnostics"]["reason"], "no_mappings");
+    assert_eq!(no_mappings["knowledge"]["state"], "terms_only");
+    assert_eq!(no_mappings["result"]["status"], "no_match");
+    let terms = fixture.cli([
+        "repo", "business", ALIAS, "--kind", "terms", "--format", "json",
+    ]);
+    assert!(terms.get("diagnostics").is_none());
+    assert_eq!(terms["knowledge"]["state"], "terms_only");
+    assert_eq!(terms["result"]["status"], "matched");
+    assert_eq!(terms["terms"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn bootstrap_binds_business_software_and_context_to_one_indexed_commit() {
     let mut fixture = AcceptanceFixture::create();
 
@@ -186,9 +333,10 @@ terms:
     assert_eq!(context["repository_scope"]["stale"], false);
     assert_eq!(software["status"]["source_scope"], indexed_scope);
     assert_eq!(software["status"]["stale"], false);
-    assert_eq!(business["status"]["source_scope"], indexed_scope);
-    assert_eq!(business["status"]["resolved_commit_sha"], fixture.commit);
-    assert_eq!(business["resolution"], "exact");
+    assert_eq!(business["knowledge"]["source_scope"], indexed_scope);
+    assert_eq!(business["knowledge"]["resolved_commit_sha"], fixture.commit);
+    assert_eq!(business["result"]["status"], "matched");
+    assert_eq!(business["result"]["match_type"], "exact");
     assert_eq!(
         business["terms"][0]["canonical_name"],
         "Monthly Recurring Revenue"

@@ -1,4 +1,10 @@
 mod audit;
+mod business_guidance;
+
+pub(crate) use business_guidance::BUSINESS_GLOSSARY_EXAMPLE;
+pub use business_guidance::{
+    BusinessKnowledgeBootstrap, BusinessKnowledgeDiagnosticReason, BusinessKnowledgeDiagnostics,
+};
 mod graph_canvas;
 mod graph_maintenance;
 mod ingestion;

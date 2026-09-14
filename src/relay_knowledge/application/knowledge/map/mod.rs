@@ -11,7 +11,7 @@ use crate::project::{
 };
 use crate::{
     api::RequestContext,
-    domain::{BusinessGlossary, KnowledgeMap, RepositoryMapType, validate_directory_collection},
+    domain::{KnowledgeMap, RepositoryMapType, validate_directory_collection},
     project::{
         CODESPEC_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_RELATIVE_PATH, KNOWLEDGE_MAP_TOPICS_DIR_NAME,
         LEGACY_AGENT_CONTRACT_DIR_NAME, LEGACY_BUSINESS_GLOSSARY_RELATIVE_PATH,
@@ -19,6 +19,7 @@ use crate::{
 };
 
 mod artifact;
+mod business_bootstrap;
 mod contracts;
 mod error;
 mod fs_contract;
@@ -108,7 +109,7 @@ impl KnowledgeMapService {
                     now_stamp(),
                 );
                 self.write_map(&mut snapshot).await?;
-                return Ok(self.mutation_response(
+                return Ok(self.initialization_response(
                     context,
                     snapshot.map.map_version,
                     "initialized repository software-model and business-knowledge routes"
@@ -119,14 +120,14 @@ impl KnowledgeMapService {
                 let response_summary =
                     snapshot.record_required_publication(existing_schema_version, now_stamp());
                 self.write_map(&mut snapshot).await?;
-                return Ok(self.mutation_response(
+                return Ok(self.initialization_response(
                     context,
                     snapshot.map.map_version,
                     response_summary,
                 ));
             }
             self.finalize_recent_history_migration().await?;
-            return Ok(self.mutation_response(
+            return Ok(self.initialization_response(
                 context,
                 snapshot.map.map_version,
                 if glossary_created {
@@ -144,7 +145,7 @@ impl KnowledgeMapService {
             self.ensure_default_business_glossary().await?;
         }
         self.write_map(&mut snapshot).await?;
-        Ok(self.mutation_response(
+        Ok(self.initialization_response(
             context,
             snapshot.map.map_version,
             match self.map_type {
@@ -529,6 +530,7 @@ impl KnowledgeMapService {
         summary: String,
     ) -> KnowledgeMapMutationResponse {
         KnowledgeMapMutationResponse {
+            business_bootstrap: None,
             metadata: metadata(context),
             path: self.relative_path().to_owned(),
             map_type: self.map_type,
@@ -540,29 +542,6 @@ impl KnowledgeMapService {
     fn business_glossary_path(&self) -> PathBuf {
         self.repository_root
             .join(crate::project::BUSINESS_GLOSSARY_RELATIVE_PATH)
-    }
-
-    async fn ensure_default_business_glossary(&self) -> Result<bool, KnowledgeMapServiceError> {
-        let contract = self.repository_root.join(self.contract_dir_name());
-        let owned_contract = ensure_owned_directory(&self.repository_root, &contract).await?;
-        let path = self.business_glossary_path();
-        if fs::try_exists(&path).await? {
-            ensure_regular_file_within(&path, &owned_contract).await?;
-            let content = fs::read(&path).await?;
-            BusinessGlossary::parse(&content)?;
-            return Ok(false);
-        }
-        let yaml = serialize_yaml(&BusinessGlossary::empty_v1())?;
-        let temp = temporary_path(&path);
-        if let Err(error) = fs::write(&temp, yaml.as_bytes()).await {
-            let _ = fs::remove_file(&temp).await;
-            return Err(error.into());
-        }
-        if let Err(error) = fs::rename(&temp, &path).await {
-            let _ = fs::remove_file(temp).await;
-            return Err(error.into());
-        }
-        Ok(true)
     }
 }
 

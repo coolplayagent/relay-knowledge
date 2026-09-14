@@ -33,6 +33,7 @@ fn map_init() -> CliCommandSpec {
         &[
             "Defaults to all and creates v3 typed directory roots; Knowledge migration preserves valid v1/v2 content while ensuring built-in routes.",
             "A conflicting reserved repository-software-model source is rejected rather than overwritten.",
+            "Knowledge initialization returns business_bootstrap with the glossary path, schema example and commit/index steps. New glossaries are empty; existing definitions are preserved.",
             "The repository root is discovered from .git, exact map files, or AGENTS.md compatibility fallback.",
         ],
     )

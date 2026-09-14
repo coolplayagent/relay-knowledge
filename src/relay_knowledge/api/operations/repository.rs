@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::{ApiMetadata, CodeRepositoryFreshnessDiagnostics, CodeRepositoryScopeMetadata},
     domain::{
-        BusinessDomain, BusinessKnowledgeQueryRequest, BusinessKnowledgeResolution,
-        BusinessKnowledgeStatus, BusinessTerm, CodeFeatureFlagGraph, CodeFeatureFlagRequest,
+        BusinessDomain, BusinessKnowledgeQueryRequest, BusinessKnowledgeResult,
+        BusinessKnowledgeSummary, BusinessTerm, CodeFeatureFlagGraph, CodeFeatureFlagRequest,
         CodeImpactPathGroups, CodeImpactRequest, CodeIndexCheckpoint, CodeIndexSummary,
         CodeIndexTaskRecord, CodeRepositoryRegistration, CodeRepositoryRemovalSummary,
         CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositoryStatus, CodeRetrievalHit,
@@ -234,11 +234,13 @@ pub struct SoftwareGlobalExportResponse {
 /// Repository-scoped authored business knowledge projection response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BusinessKnowledgeQueryResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<crate::api::BusinessKnowledgeDiagnostics>,
     pub metadata: ApiMetadata,
     pub scope: CodeRepositoryScopeMetadata,
     pub request: BusinessKnowledgeQueryRequest,
-    pub status: BusinessKnowledgeStatus,
-    pub resolution: BusinessKnowledgeResolution,
+    pub knowledge: BusinessKnowledgeSummary,
+    pub result: BusinessKnowledgeResult,
     pub domains: Vec<BusinessDomain>,
     pub terms: Vec<BusinessTerm>,
 }

@@ -5,7 +5,7 @@ mod read_model;
 mod resolution;
 mod row_mapping;
 mod schema;
-
+mod selection;
 const PROJECTION_SCHEMA_VERSION: i64 = 1;
 const AUTHORED_CONFIDENCE: u16 = 10_000;
 

@@ -3,6 +3,11 @@
 mod contracts;
 mod operations;
 
+pub(crate) use operations::BUSINESS_GLOSSARY_EXAMPLE;
+pub use operations::{
+    BusinessKnowledgeBootstrap, BusinessKnowledgeDiagnosticReason, BusinessKnowledgeDiagnostics,
+};
+
 pub(crate) use contracts::CodeRepositoryFreshnessInput;
 pub use contracts::*;
 pub use operations::{

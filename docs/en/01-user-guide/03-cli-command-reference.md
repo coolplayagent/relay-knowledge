@@ -297,3 +297,30 @@ The skill intentionally does not configure MCP, call MCP tools, or manage ACP
 sessions. Use the MCP/ACP chapters for protocol-level agent access.
 
 `repo software --kind dependencies` returns Maven module targets and declared POM edges alongside components and source usages. `--kind modules` selects only the reactor graph. Both share a per-page `--limit` (maximum 500) across their arrays and return `next_cursor` when more facts exist. Continue using `--cursor <token>` with the same ref and filters; accumulate pages until the cursor is absent. `repo impact` returns default-profile downstream POM evidence chains. See [Software Global Modeling](../03-architecture-specs/21-software-global-domain-modeling.md).
+
+
+### Business glossary bootstrap and empty results
+
+`repo business` reads authored definitions and declared mappings; `repo index` does not infer business terms from code. Knowledge `map init` results include `business_bootstrap` with the default glossary path, schema version, a complete YAML example, documentation URL and authoring steps. New glossary files remain empty and contain a commented example; repeated initialization preserves reviewed content.
+
+Run these commands from the registered repository root, replacing `demo` with its alias:
+
+```bash
+relay-knowledge map init --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
+```
+
+Edit the routed glossary (default `knowledge/glossary/business-glossary.yaml`) with repository-specific domains, terms and technical mappings. Commit the Knowledge Map, its referenced topic files and the glossary, then index the new commit:
+
+```bash
+relay-knowledge repo index demo --ref HEAD --format json
+relay-knowledge repo business demo --kind all --ref HEAD --format json
+```
+
+HEAD reads committed files only; uncommitted authoring is ignored even when HEAD is indexed again.
+
+The response removes the mixed `resolution` and top-level business `status`. `request.mode` is derived from `query` as `list` or `search`; inbound mode values are ignored. `result.status` is `matched`, `no_match`, `ambiguous` or `unavailable`. `result.match_type` is `exact` or `partial` only for matching searches. Returned term/mapping counts describe the output slice; `truncated` reports pagination. Kind eligibility and domain/text matching precede classification and limit, so unmapped terms do not consume mapping-query slots and cross-domain exact ambiguity survives truncation. A domain name shared by multiple domain IDs does not disambiguate; use a unique ID.
+
+`knowledge.state` uses scope-wide persisted counts: `no_sources`, `empty_glossary`, `terms_only` or `mapped`. The same object retains counts, repository/commit/scope identity, graph version and `stale`. `mapped` means at least one declared mapping, not complete coverage or resolved targets; per-mapping `resolution_state` is unchanged. `graph-only` yields `unknown` knowledge and `unavailable` results; zero placeholder counts do not prove an empty glossary. No sources yields `unavailable`; an indexed empty glossary yields `no_match`. With `allow-stale`, a result may be `matched` and `knowledge.stale=true`. Storage failures still return errors.
+
+Diagnostics provide reason-specific `next_steps`: inspect routes and committed files for no sources, author/commit/re-index for empty glossaries or missing mappings, adjust filters for no match, specify a domain for ambiguity, and re-index/change freshness for stale or unread projections. Authoring reasons include a `bootstrap` schema resource. Default paths do not prove which legacy/additional sources were indexed. Queries never scan workspace YAML. CLI, HTTP and MCP share this contract; context still consumes the same commit-bound terms and mappings. This response contract change needs no database migration.
