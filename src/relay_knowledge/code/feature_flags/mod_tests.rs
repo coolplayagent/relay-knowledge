@@ -689,3 +689,97 @@ fn detects_common_source_key_shapes() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn consul_configuration_requires_ctmpl_extension() {
+    for path in [
+        "charts/templates/service.yaml",
+        "layout.gotmpl",
+        "layout.tmpl",
+        "layout.tpl",
+        "config.ctmpl",
+    ] {
+        let rows = extract_feature_flags(FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path,
+            language_id: "gotemplate",
+            content: "apiVersion: apps/v1\nreplicas: 3\n",
+            config_facts: &[],
+        })
+        .unwrap();
+        assert_eq!(rows.is_empty(), !path.ends_with(".ctmpl"), "{path}");
+    }
+}
+
+#[test]
+fn multiline_java_sdk_metadata_uses_the_call_opener() {
+    let source = "class App { void run() {\nvar client = OpenFeature.getClient();\n// @config domain=payments hot-reload=true\nclient.getBooleanValue(\n\"sdk_feature\", false);\n} }";
+    let rows = extract_feature_flags(FeatureFlagFileInput {
+        language_id: "java",
+        path: "App.java",
+        ..input(source)
+    })
+    .unwrap();
+    let row = rows.iter().find(|r| r.source_key == "sdk_feature").unwrap();
+    assert_eq!(row.metadata.domain.as_deref(), Some("payments"));
+    assert_eq!(row.metadata.hot_reload, Some(true));
+}
+
+#[test]
+fn non_consul_templates_retain_structured_boolean_definitions() {
+    let content = "feature: true\n{{ .Values.image }}";
+    let facts = [ConfigFact {
+        name: "feature".into(),
+        kind: "config_key",
+        value_kind: ConfigValueKind::Boolean,
+        range: ConfigRange {
+            byte_start: 0,
+            byte_end: 13,
+            line_start: 1,
+            line_end: 1,
+        },
+    }];
+    for path in ["templates/deployment.yaml", "templates/_helpers.tpl"] {
+        let rows = extract_feature_flags(FeatureFlagFileInput {
+            language_id: "gotemplate",
+            path,
+            config_facts: &facts,
+            ..input(content)
+        })
+        .unwrap();
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == "feature" && r.edge_kind == "defines_config")
+        );
+    }
+}
+
+#[test]
+fn java_registry_and_sdk_share_the_per_file_fact_budget() {
+    for count in [9998, 9999] {
+        let fields = (0..count)
+            .map(|i| format!("K{i}=\"flag{i}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let source = format!(
+            "class Keys {{ static final String {fields}; void run() {{\nvar client = OpenFeature.getClient();\nclient.getBooleanValue(\"sdk_feature\", false);\n}} }}"
+        );
+        let result = extract_feature_flags(FeatureFlagFileInput {
+            language_id: "java",
+            path: "Keys.java",
+            ..input(&source)
+        });
+        if count == 9998 {
+            assert_eq!(result.unwrap().len(), 10000);
+        } else {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("file fact budget exceeded")
+            );
+        }
+    }
+}

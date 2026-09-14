@@ -208,7 +208,7 @@ SQLite connection 执行职责在物理上统一收敛到 `storage::sqlite::conn
 
 共享 import resolution 必须在物理上收敛到 `code::identity::import_resolution`：`context` 独占不可变 file、module-path、Go-module 与 symbol-name 索引；`module_paths` 独占 exact/source-root 文件定位、directory/tree 定位、quoted specifier 与规范化 join；`symbols` 独占 path、directory、namespace、language、kind 与 package declaration 匹配；`outcome` 独占 resolution state、confidence 写回、聚合与 target-hint 转换。`mod.rs` 只提供窄内部接口，每个有行为 owner 直接挂载同级测试，test-only record builder 只留在具名 `test_support`。各语言 resolver 只消费该边界，不得把语言规则移入共享层。不得恢复复合 `import_resolution.rs`、把匹配算法塞回 identity facade，或把定向测试合并成通用 import-resolution 测试桶。
 
-Feature-flag extraction 必须物理收敛在 `code::feature_flags`：`comments/` 独占有状态 comment、quoted-string、template-literal、interpolation 与 Rust lifetime shielding；`config/` 独占有界 boolean-key 扫描和受支持 configuration path 判定，两者都直接挂载 `mod_tests.rs` contract。`extractors/` 子域继续由 `source_keys` 独占环境变量、配置读取、预处理器和 usage-edge 规则，`sdk_calls` 独占 SDK receiver 生命周期、调用参数和多行 continuation，`lexical` 只维护这两个领域共享的字面量感知扫描与 source-key 不变量，`parameters`、`sdk_methods` 和 `templates` 维护各自聚焦规则；行为 owner 直接挂载一一配对的同级测试文件，其 `mod.rs` 仅作为内部重导出接口。`feature_flags/` 根只能包含 `comments/`、`config/`、`extractors/`、facade 与 facade tests，不得恢复平铺 `comments.rs` 或 `config.rs`。不得再把 source-key 与 SDK 状态机合并回 facade，也不得让 source-key 提取反向依赖 SDK policy。
+Feature-flag extraction 必须物理收敛在 `code::feature_flags`：`comments/` 独占有状态 comment、quoted-string、template-literal、interpolation 与 Rust lifetime shielding；`config/` 独占有界 boolean-key 扫描和受支持 configuration path 判定，两者都直接挂载 `mod_tests.rs` contract。`extractors/` 子域继续由 `source_keys` 独占环境变量、配置读取、预处理器和 usage-edge 规则，`sdk_calls` 独占 SDK receiver 生命周期、调用参数和多行 continuation，`lexical` 只维护这两个领域共享的字面量感知扫描与 source-key 不变量，`parameters`、`sdk_methods` 和 `templates` 维护各自聚焦规则；行为 owner 直接挂载一一配对的同级测试文件，其 `mod.rs` 仅作为内部重导出接口。`registry/` 子域独占有界 Java 配置读取、键/getter/类型证据、守卫值流、properties/INI/template/Shell 提取及邻接注释元数据；语言和语法 owner 挂载具名同级测试文件。快照绑定解析与一致性检查仍归 storage 所有，registry 提取不得反向依赖 SDK receiver policy。`feature_flags/` 根只能包含 `comments/`、`config/`、`extractors/`、`registry/`、facade 与 facade tests，不得恢复平铺 `comments.rs` 或 `config.rs`。不得再把 source-key 与 SDK 状态机合并回 facade，也不得让 source-key 提取反向依赖 SDK policy。
 
 ### 3.8 服务生命周期计划
 
@@ -403,3 +403,5 @@ Maven reactor 的模块身份、坐标匹配、持久化与有界反向遍历由
 ---
 
 导航: 上一章: [1. 架构愿景与算法版图](01-architecture-vision-and-algorithm-map.md) | 下一章: [3. 基础运行时层](03-foundational-runtime.md)
+
+配置注册表抽取在既有代码索引 worker 中运行，查询阶段不得扫描源码或改变调用图。查询最多解析 1,000 个符号身份、执行四轮扩展，最多接纳 10,000 条使用关系和 16 MiB 事实文本，并共享两秒及两百万 SQLite 步预算；单条元数据限制为 64 KiB。超限必须返回明确的不完整分析错误，不能转换成空成功结果或错误的缺失键结论。增量复制保留元数据与 read-to-guard 身份。测试应覆盖真实注册、索引、查询、跨文件绑定、歧义、筛选及陈旧/增量行为。

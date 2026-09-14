@@ -12,4 +12,6 @@ pub(super) use sdk_calls::{
     sdk_continued_flag_key, sdk_flag_keys_for_line, sdk_next_pending_argument_index,
     sdk_pending_argument_index,
 };
-pub(super) use source_keys::{config_read_keys, env_keys, preprocessor_flag_keys, usage_edge_kind};
+pub(super) use source_keys::{
+    config_read_keys, env_keys, is_config_reader, preprocessor_flag_keys, usage_edge_kind,
+};

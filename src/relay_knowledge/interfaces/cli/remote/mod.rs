@@ -314,6 +314,7 @@ pub(super) async fn run_remote(
             .map(Some)
         }
         RepoCommand::FeatureFlags {
+            filters,
             alias,
             query,
             limit,
@@ -334,6 +335,7 @@ pub(super) async fn run_remote(
                 *limit,
                 *freshness,
             )
+            .and_then(|request|request.with_filters(filters.clone()))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = client
                 .post_repository::<_, CodeRepositoryFeatureFlagsResponse>(

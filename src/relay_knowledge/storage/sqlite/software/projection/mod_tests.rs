@@ -922,3 +922,44 @@ fn software_relationship_storage_reclaims_legacy_scope_only_after_successful_ref
         graph::relationship_count_for_scope(&connection, "scope-1").unwrap()
     );
 }
+
+#[test]
+fn ontology_configuration_projection_excludes_internal_registry_evidence() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    create_test_schema(&connection);
+    initialize_schema(&connection).unwrap();
+    seed_scope(&connection);
+    for (index, (kind, edge)) in [
+        ("config_key", "declares_string_constant"),
+        ("config_symbol", "config_type_declaration"),
+        ("config_symbol", "config_type_hierarchy"),
+        ("config_key", "declares_config_getter"),
+        ("config_symbol", "reads_config"),
+        ("config_key", "defines_config"),
+        ("env_var", "reads_config"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        connection.execute("INSERT INTO code_repository_feature_flags VALUES ('repo','scope-1',?1,?1,'src/main.cc','java',?1,?2,?1,?3,9000,'extracted',1,1)", params![format!("key{index}"), kind, edge]).unwrap();
+    }
+    refresh_projection(&mut connection, "scope-1").unwrap();
+    let names = connection
+        .prepare(
+            "SELECT name FROM software_entities WHERE entity_kind='configuration' ORDER BY name",
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(names, ["key5", "key6"]);
+    let retained: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM code_repository_feature_flags",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, 7);
+}

@@ -115,6 +115,8 @@ pub(super) fn collect_configurations(
                edge_kind, confidence_basis_points, line_start, line_end
         FROM code_repository_feature_flags
         WHERE source_scope = ?1
+          AND source_kind != 'config_symbol'
+          AND edge_kind NOT IN ('declares_string_constant', 'declares_config_getter')
         ORDER BY path ASC, line_start ASC, feature_flag_id ASC
         ",
     )?;

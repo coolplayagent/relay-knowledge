@@ -49,6 +49,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     initialize_index_task_schema(connection)?;
     initialize_repository_set_schema(connection)?;
     initialize_search_schema(connection)?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_feature_flags",
+        "metadata_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )?;
     initialize_retention_schema(connection)?;
     super::super::schema::columns::ensure_column(
         connection,

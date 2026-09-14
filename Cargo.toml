@@ -33,7 +33,7 @@ opentelemetry = "0.32"
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-proto", "metrics", "reqwest-client", "reqwest-rustls", "trace"] }
 opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-rusqlite = { version = "0.32", features = ["bundled", "hooks", "limits"] }
+rusqlite = { version = "0.32", features = ["bundled", "hooks", "limits", "functions"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_norway = "0.9.42"

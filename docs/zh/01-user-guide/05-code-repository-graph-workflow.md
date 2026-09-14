@@ -315,3 +315,58 @@ relay-knowledge repo status repo --format json
 6. 文件是否被诊断为 unsupported、binary、oversized、invalid UTF-8 或 parser failed。
 
 `repo impact` 需要 `--head` 对应已索引 snapshot。先运行 `repo index repo --ref <head>` 或 `repo update repo --base <base> --head <head>`，再运行 impact。
+
+### 配置键、读取位置与受控代码
+
+`repo feature-flags` 将 Java 系统属性、环境变量读取、常量键及零参数配置 getter，与 properties、INI、Consul-template（`.ctmpl`）和 Shell 导出的环境变量连接起来。配置符号只在当前返回的仓库快照中解析，不依赖 canonical callers/callees 查询，也不修改 Python/C++ 解析。生产环境开关实时值不在静态注册表范围内。
+
+`defines_config` 表示文件定义，`declares_config_key` 表示 Java 常量键或模板输出键，`reads_config` 表示读取位置。`guards_code` 的 `metadata.read_usage_id` 将条件位置连接到提供值的读取位置。Java 局部绑定在重新赋值后停止传播；延迟执行的类、方法与 lambda 函数体不会覆盖外层绑定。字段、参数及局部 getter 接收者使用词法类型证据。匿名接收者与未知动态值不会被猜测为默认实现；指向不同配置键的符号关系保留未解析状态。
+
+每条使用关系包含来源格式以及可选的默认值、值类型、所属领域、热加载能力，未知值保持缺省。相邻注释如 `# @config domain=business hot-reload=true` 提供显式领域信息。properties 续行及 Unicode 转义保持键值身份；INI 节内键使用 `section.key`。环境变量与系统属性属于不同命名空间。
+
+```powershell
+relay-knowledge repo feature-flags demo --query feature_x --domain business --source properties --hot-reload true --format json
+relay-knowledge repo feature-flags demo --query feature_y --consistency --format json
+```
+
+来源筛选选择符合条件的配置组，并保留其关联 Java 使用关系。一致性分析比较已授权注册范围内、当前返回快照中已观察到的格式，报告 `read_without_definition`、`missing_from_format` 和 `conflicting_defaults`；它不判断生产配置。陈旧或未解析的分析不能证明某键不存在。返回数量限制与完整性分析预算分开处理。注册命令中的 `--path src` 只是范围示例，不要求仓库采用固定目录布局。
+
+远程 CLI 与 Web 仓库端点使用相同的领域请求，其中 `filters` 对象包含 `domain`、`source`、`hot_reload`、`consistency`。MCP 在 `relay_code_feature_flags` 参数中直接暴露这四个字段。
+
+Java getter 值流还支持已确认属于 java.lang 的 Boolean/Integer/Long/Double 解析及装箱转换。无法解析的 getter 返回值流通过 `metadata.flow_incomplete` 标记，不能宣称一致性分析完整。字符串常量只有被范围内的配置读取引用、带显式 `@config domain=...` / `hot-reload=...` 元数据，或遵循声明约定（所属类型名以 `Keys` 结尾、字段名以 `_KEY` 结尾）时才公开为配置声明。其余字符串仅作为内部符号候选，不进入配置查询及通用配置视图。
+
+一致性检查从限定范围的已索引文件清单获取格式覆盖，包含空模板和只有注释的模板，并遵守注册时的仓库路径、语言限制。`conflicting_default_sources` 返回冲突默认值对应的使用记录，可直接通过 `metadata.default_value`、`path`、`line_range`、`excerpt`、`usage_id` 定位每个来源；原有简短 `conflicting_defaults` 诊断继续保留。
+
+Java SDK 开关继续使用现有 SDK 提取器，与配置读取同时提取。静态平台导入不会被无关兄弟类、嵌套类或不适用的重载方法遮蔽。Shell 先赋值后明确导出的变量保留定义与默认值；properties 转义解码不再改变 INI/模板的反斜杠。扩展查询和一致性查询保留所在符号的信息。结果数量限制在符号键解析、分组和排序后应用：候选仍受 10,000 条使用记录预算约束，超出预算或 SQLite 时间/步骤预算时返回明确的分析不完整错误。返回陈旧快照时，即使其持久化状态曾为已完成且新鲜，也不能给出确定性的一致性结论。
+
+一致性查询先应用查询词，再对关联的配置事实执行预算和符号展开；文件格式清单独立遵守注册时的路径及语言范围，不随查询展示筛选收窄。常量引用集合只收集一次，避免每个声明重复扫描全部记录。Java 接收者类型会擦除泛型参数；对已有局部变量的简单赋值可关联后续条件，重新赋值后停止传播；显式静态导入优先于通配符导入。Shell `set -a` / `set -o allexport` 作用于后续赋值，关闭该选项不会撤销已导出变量的属性。通用代码及软件视图不展示原始符号 getter 记录；解析后的配置使用关系仍通过 `feature-flags` 查询。
+
+配置一致性范围说明：注册时的路径和语言限制是证据的授权边界。查询时的路径和语言筛选只投影返回的 `usages`，跨文件绑定及一致性仍使用该已授权快照中的关联证据和格式清单；因此 `conflicting_default_sources` 可以指出显示路径之外、但注册范围之内的定义。仅查看 Java 使用位置不会把已注册的 properties 定义误报为缺失。
+
+### 配置注册表验收矩阵
+
+| 契约 | 必须满足的结果 | 验证 |
+| --- | --- | --- |
+| Java 读取、常量和 getter（#389/#394） | 真实键、可定位的读取与关联守卫；遵守导入、重载、可见性和非虚分派 | Java 接收者矩阵及快照绑定回归 |
+| Properties、INI、ctmpl、Shell、dotenv（#394） | 符合格式的定义、默认值及位置；保留引号内容和续行 | 格式及执行范围矩阵 |
+| 元数据及筛选（#394） | 默认值/类型/领域/格式/热加载；CLI、Web、MCP 使用同一请求契约 | 领域、接口和真实索引服务验收 |
+| 一致性（#394） | 从授权证据生成可定位的默认值冲突、格式缺失及读取缺失诊断 | 范围、陈旧、歧义和增量快照测试 |
+| 未知或条件行为 | 保留证据及不确定性，不从不完整分析推断运行值或确定缺失 | 条件导出/模板和未解析绑定回归 |
+| 资源上限 | 文件事实、元数据、扩展及查询超限前返回明确错误 | 边界和超限测试 |
+
+这是有界静态分析，不执行任意 Java、Shell 或模板程序。不能仅为获得无意见审查而删除上述预期行为。检视意见依据该契约及可复现行为判断；描述中的前提不准确，不代表已证实的问题不成立。
+
+本次 Java 平台读取规则清单为 System.getProperty/getenv、直接 System.getenv().get/getOrDefault 和 System.getProperties().getProperty、Boolean.getBoolean、Integer.getInteger、Long.getLong，支持已列明的字面量/常量键及可证明的 getter 转发/转换。等价的全限定名和静态导入形式使用同一规则。“注册表”不隐含承诺识别任意新增 API；但清单内的错误绑定、证据丢失和错误默认值仍属于必须修复的缺陷。
+
+
+外部类 getter 回退需要已索引继承证据；延迟模板定义不发布根模板默认值。Shell 引号选项遵循引号移除规则，接口静态方法不参与继承。十六进制 Double 默认字符串仍明确不支持：保留原始证据，默认值未知，一致性不完整；本次不扩展为任意 Java 数值语法求值。 Fact version: `config-registry-v49`.
+
+软件本体配置投影排除内部常量、类型/getter 标记及未解析符号行，同时保留其索引证据。Shell set 选项与 export 选项采用相同的静态引号移除规则，覆盖启用、禁用及选项终止符。 Fact version: `config-registry-v50`.
+
+显式但无法求值的 Java 默认值使一致性不完整；已知 String 常量表达式参与重载适用性判断。模板行内不输出值的控制动作保留静态/条件文本。聚合后仍支持边类型查询。无路径/语言投影的纯元数据查询先筛选匹配组，再执行有界符号扩展。集合 containsKey 存在性 API 和命名模板体执行不在限定抽取清单中；缺少定义诊断描述已观察的静态证据，不表示运行时渲染或取值。 Fact version: `config-registry-v51`.
+
+Shell 内置命令名先静态解码，引号、拼接和转义形式使用相同导出分类，普通命令的赋值操作数保留默认值。for/select 循环变量在循环体中遮蔽继承环境值，循环输入展开仍保留读取证据，循环后的可能覆盖保持不确定。Java 属性读取显式 null 默认值经布尔转换得到 false；其他无法求值的默认值仍标记不完整。catch 参数在其语句体内绑定接收者并遮蔽外层字段；无法证明唯一静态类型的 multi-catch 接收者保持未解析。 Fact version: `config-registry-v52`.
+
+配置自由文本查询同时匹配持久化元数据、配置键和使用位置，最终分组匹配与行评分遵守 SQL 元数据搜索契约。显式查询不含任何字母、数字或下划线时，在加载数据前报错；省略查询参数才表示不筛选注册表。Java try-with-resources 声明在 try 体和后续资源初始化中绑定接收者，不在 catch/finally 中生效。Shell 已识别导出内置命令前的赋值，仅在该命令导出同名变量时形成配置定义；普通命令的临时环境赋值不定义父环境配置。 Fact version: `config-registry-v53`.
+
+已证明的 getter 转换同时规范化显式环境回退值与属性回退值，属性特有的可空默认处理保持独立。已知平台通配静态导入只贡献实际提供的受支持成员，final var 配置键须有已证明的 String 初始化值。具名 Java 局部类型使用词法身份，互不相关的方法或代码块不会共享 getter 提供者。异步 Shell 命令不能定义或修改父环境配置及导出状态。nameref 别名跟踪和 command/builtin 分派包装器不在有限 Shell 抽取清单内；直接内置命令名及引号等价形式的识别不执行包装器或间接变量写入。缺少定义诊断描述该清单内已观察的静态证据。 Fact version: `config-registry-v54`.

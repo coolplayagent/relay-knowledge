@@ -87,6 +87,7 @@ pub enum RepoCommand {
         exclude_generated: bool,
     },
     FeatureFlags {
+        filters: crate::domain::CodeConfigFilter,
         alias: String,
         query: Option<String>,
         limit: usize,

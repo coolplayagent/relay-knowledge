@@ -62,7 +62,7 @@ fn relationship_facts_sql(paths: &[String], languages: &[String]) -> String {
                               THEN 'configures' ELSE 'references' END
             ORDER BY confidence_basis_points DESC, line_end DESC, usage_id ASC
         ) AS edge_rank
-        FROM code_repository_feature_flags flags WHERE source_scope = ?1
+        FROM code_repository_feature_flags flags WHERE source_scope = ?1 AND source_kind != 'config_symbol' AND edge_kind NOT IN ('declares_string_constant','declares_config_getter')
         {paths} {language_guard}
     )"
     )

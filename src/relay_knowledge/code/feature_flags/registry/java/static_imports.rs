@@ -1,0 +1,84 @@
+//! Static-import method shadowing is limited to lexical owners and applicable signatures.
+use super::names::text;
+use tree_sitter::Node;
+pub(super) fn shadows(method: Node<'_>, call: Node<'_>, content: &str) -> bool {
+    let mut owner = method.parent();
+    while let Some(node) = owner {
+        if matches!(
+            node.kind(),
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+        ) {
+            if call.start_byte() < node.start_byte() || call.end_byte() > node.end_byte() {
+                return false;
+            }
+            break;
+        }
+        owner = node.parent();
+    }
+    let Some(params) = method.child_by_field_name("parameters") else {
+        return false;
+    };
+    let Some(args) = call.child_by_field_name("arguments") else {
+        return false;
+    };
+    let mut cursor = params.walk();
+    let params = params.named_children(&mut cursor).collect::<Vec<_>>();
+    let varargs = params
+        .last()
+        .is_some_and(|p| p.kind() == "spread_parameter");
+    if (!varargs && params.len() != args.named_child_count())
+        || (varargs && args.named_child_count() < params.len().saturating_sub(1))
+    {
+        return false;
+    }
+    for (index, param) in params.iter().enumerate() {
+        let Ok(argument_index) = u32::try_from(index) else {
+            return true;
+        };
+        if param.kind() == "spread_parameter" {
+            break;
+        }
+        if args
+            .named_child(argument_index)
+            .is_some_and(|arg| super::names::string_expression(arg, content, 0))
+        {
+            if let Some(ty) = param.child_by_field_name("type") {
+                if rejects_string(ty, content) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Reject signatures known to be incompatible with a Java String argument.
+pub(super) fn rejects_string(ty: Node<'_>, content: &str) -> bool {
+    let name = text(ty, content);
+    if matches!(
+        name,
+        "int" | "long" | "boolean" | "float" | "double" | "byte" | "short" | "char"
+    ) || name.ends_with("[]")
+    {
+        return true;
+    }
+    let simple = name.strip_prefix("java.lang.").unwrap_or(name);
+    matches!(
+        simple,
+        "Integer"
+            | "Long"
+            | "Boolean"
+            | "Float"
+            | "Double"
+            | "Byte"
+            | "Short"
+            | "Character"
+            | "Number"
+            | "Void"
+            | "StringBuilder"
+            | "StringBuffer"
+    ) && (name.starts_with("java.lang.") || super::names::platform_visible(ty, simple, content))
+}

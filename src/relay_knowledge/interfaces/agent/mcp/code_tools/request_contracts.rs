@@ -88,6 +88,8 @@ pub(super) struct CodeImpactArgs {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct CodeFeatureFlagsArgs {
+    #[serde(flatten)]
+    pub(super) filters: crate::domain::CodeConfigFilter,
     pub(super) repository: String,
     #[serde(default)]
     pub(super) query: Option<String>,

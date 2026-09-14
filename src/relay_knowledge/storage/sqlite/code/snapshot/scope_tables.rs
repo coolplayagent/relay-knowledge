@@ -44,7 +44,7 @@ pub(super) const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_feature_flags",
-        columns: "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt",
+        columns: "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt, metadata_json",
         cursor: CodeScopeCursor::Key("usage_id"),
     },
     CodeScopeTable {

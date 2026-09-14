@@ -27,6 +27,7 @@ async fn software_relationship_storage_rejects_invalid_public_flags_before_fence
         CodeParseStatus::Parsed,
     )];
     facts.feature_flags = vec![crate::domain::CodeFeatureFlagRecord {
+        metadata: Default::default(),
         repository_id: "repo".into(),
         source_scope: SOURCE_SCOPE.into(),
         feature_flag_id: "flag".into(),

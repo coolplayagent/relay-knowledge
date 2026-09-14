@@ -75,10 +75,13 @@ fn relationship_fixture() -> Connection {
             ('component', 'repo', 'scope', 'cargo', 'dep', '1', NULL, 'normal', 'manifest', 'declared', 'rust', 'Cargo.toml', 5, 5, 10000, 1);
          INSERT INTO software_sdk_usages VALUES
             ('sdk', 'repo', 'scope', 'rust', 'external_sdk', NULL, 'unresolved', 'src/lib.rs', 2, 2, 5000, 1);
-         INSERT INTO code_repository_feature_flags VALUES
+         INSERT INTO code_repository_feature_flags (source_scope,feature_flag_id,usage_id,source_key,edge_kind,confidence_basis_points,confidence_tier,path,line_start,line_end) VALUES
             ('scope', 'flag', 'read', 'FEATURE', 'reads_config', 8000, 'inferred', 'src/lib.rs', 8, 8),
             ('scope', 'flag', 'guard', 'FEATURE', 'guards_code', 9000, 'extracted', 'src/lib.rs', 8, 10),
-            ('scope', 'flag', 'reference', 'FEATURE', 'other', 7000, 'ambiguous', 'src/lib.rs', 8, 8);"
+            ('scope', 'flag', 'reference', 'FEATURE', 'other', 7000, 'ambiguous', 'src/lib.rs', 8, 8),
+            ('scope', 'internal', 'candidate', 'HELLO', 'declares_string_constant', 9000, 'extracted', 'src/lib.rs', 9, 9),
+            ('scope', 'internal', 'getter', 'getHello', 'declares_config_getter', 9000, 'extracted', 'src/lib.rs', 10, 10);
+         ALTER TABLE code_repository_feature_flags ADD COLUMN source_kind TEXT DEFAULT 'config_key';"
     ).expect("scoped evidence");
     connection
 }
@@ -318,7 +321,7 @@ fn software_relationship_storage_normalizes_configuration_identity_before_rankin
         let connection = relationship_fixture();
         connection
             .execute(
-                "INSERT INTO code_repository_feature_flags VALUES
+                "INSERT INTO code_repository_feature_flags (source_scope,feature_flag_id,usage_id,source_key,edge_kind,confidence_basis_points,confidence_tier,path,line_start,line_end) VALUES
                  ('scope', ?1, 'normalized-duplicate', 'FEATURE', 'reads_config',
                   9500, 'extracted', 'src/lib.rs', 8, 12)",
                 [target],
@@ -358,12 +361,12 @@ fn software_relationship_storage_filters_configuration_before_window_work() {
         "INSERT INTO software_files VALUES
             ('selected', 'repo', 'scope', 'config/feature.ini', 'ini', 'configuration', 'parsed', 1),
             ('unrelated', 'repo', 'scope', 'other/source.rs', 'rust', 'source', 'parsed', 1);
-         INSERT INTO code_repository_feature_flags VALUES
+         INSERT INTO code_repository_feature_flags (source_scope,feature_flag_id,usage_id,source_key,edge_kind,confidence_basis_points,confidence_tier,path,line_start,line_end) VALUES
             ('scope', 'selected-flag', 'selected', 'FEATURE', 'reads_config', 9000, 'extracted', 'config/feature.ini', 1, 1);
          WITH RECURSIVE numbers(value) AS (
              SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 16384
          )
-         INSERT INTO code_repository_feature_flags
+         INSERT INTO code_repository_feature_flags (source_scope,feature_flag_id,usage_id,source_key,edge_kind,confidence_basis_points,confidence_tier,path,line_start,line_end)
          SELECT 'scope', 'flag-' || value, 'usage-' || value, 'FEATURE',
                 'reads_config', 8000, 'inferred', 'other/source.rs', value, value
          FROM numbers;"
