@@ -555,3 +555,19 @@ fn bare_exports_use_export_annotations_and_preserve_assignment_value_evidence() 
         assert!(row.excerpt.contains("FLAG=true"));
     }
 }
+
+#[test]
+fn conditional_unsets_before_bare_exports_keep_uncertain_definition_evidence() {
+    let rows = facts(
+        "bash",
+        "FLAG=true; if test -f marker; then unset FLAG; fi; export FLAG; echo $FLAG",
+    );
+    let definition = rows
+        .iter()
+        .find(|r| r.source_key == "FLAG" && r.edge_kind == "defines_config")
+        .unwrap();
+    assert!(definition.metadata.default_value.is_none());
+    assert!(definition.metadata.flow_incomplete.is_some());
+    let rows = facts("bash", "FLAG=true; unset FLAG; export FLAG; echo $FLAG");
+    assert!(rows.iter().all(|r| r.edge_kind != "defines_config"));
+}

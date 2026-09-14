@@ -666,9 +666,17 @@ pub(super) fn key_symbol(node: Node<'_>, content: &str) -> Option<String> {
                     text(field, content)
                 ));
             }
-            if object.kind() == "this" {
-                let name = text(field, content);
-                return Some(field_symbol(node, name, content));
+            if object.kind() == "this"
+                || (object.kind() == "field_access"
+                    && object
+                        .child_by_field_name("field")
+                        .is_some_and(|field| field.kind() == "this"))
+            {
+                return Some(format!(
+                    "{}.{}",
+                    receiver_type(object, content, 0)?,
+                    text(field, content)
+                ));
             }
             if object.kind() == "identifier" && binding(object, owner, content).is_some() {
                 return None;

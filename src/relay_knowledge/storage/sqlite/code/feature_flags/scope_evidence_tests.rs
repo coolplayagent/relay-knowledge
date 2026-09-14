@@ -908,3 +908,26 @@ fn qualified_enclosing_this_getters_bind_outer_reads_and_guards() {
         "{groups:?}"
     );
 }
+
+#[test]
+fn qualified_enclosing_key_fields_resolve_explicit_outer_owner() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[(
+            "Outer.java",
+            r#"package app; class Outer {final String KEY="outer_key"; class Inner {final String KEY="inner_key"; String read(){return System.getProperty(Outer.this.KEY);}}}"#,
+        )],
+    );
+    let groups = search(
+        &db,
+        &status(),
+        &request(Some("outer_key"), CodeConfigFilter::default()),
+    )
+    .unwrap();
+    assert!(
+        groups.iter().any(|g| g.source_key == "outer_key"
+            && g.usages.iter().any(|u| u.edge_kind == "reads_config")),
+        "{groups:?}"
+    );
+}

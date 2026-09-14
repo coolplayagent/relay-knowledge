@@ -490,3 +490,64 @@ fn combined_metadata_filters_match_across_resolved_symbolic_usages_without_query
         }
     }
 }
+
+#[test]
+fn query_path_projection_keeps_authorized_consistency_evidence_but_registration_bounds_it() {
+    let db = fixture();
+    add(
+        &db,
+        "feature",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            default_value: Some("false".into()),
+            ..Default::default()
+        },
+    );
+    db.execute(
+        "UPDATE code_repository_feature_flags SET path='src/Reader.java'",
+        [],
+    )
+    .unwrap();
+    add(
+        &db,
+        "feature",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            default_value: Some("true".into()),
+            ..Default::default()
+        },
+    );
+    db.execute("UPDATE code_repository_feature_flags SET path='config/app.properties',language_id='properties' WHERE edge_kind='defines_config'",[]).unwrap();
+    let mut query = request(
+        None,
+        CodeConfigFilter {
+            consistency: true,
+            ..Default::default()
+        },
+    );
+    query.repository.path_filters = vec!["src".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert_eq!(groups.len(), 1);
+    assert!(groups[0].usages.iter().all(|u| u.path.starts_with("src/")));
+    assert_eq!(groups[0].conflicting_default_sources.len(), 2);
+    assert!(
+        !groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d == "read_without_definition")
+    );
+    let mut restricted = status();
+    restricted.path_filters = vec!["src".into()];
+    let groups = search(&db, &restricted, &query).unwrap();
+    assert!(groups[0].conflicting_default_sources.is_empty());
+    assert!(
+        groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d == "read_without_definition")
+    );
+}

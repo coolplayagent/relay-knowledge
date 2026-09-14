@@ -455,6 +455,10 @@ fn prior_assignment<'a>(
                 && export_mode(node, content) == Some(false)
                 && command_names(node, key, content)?
             {
+                if conditional {
+                    uncertain = true;
+                    continue;
+                }
                 return Ok(None);
             }
             let conditional = match node.kind() {
