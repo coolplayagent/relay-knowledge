@@ -261,14 +261,39 @@ fn read(
     };
     let method = text(name, input.content);
     let object = node.child_by_field_name("object");
-    let platform = object
+    let collection = object.filter(|object| {
+        object.kind() == "method_invocation"
+            && object
+                .child_by_field_name("arguments")
+                .is_some_and(|a| a.named_child_count() == 0)
+            && object
+                .child_by_field_name("name")
+                .is_some_and(|n| matches!(text(n, input.content), "getenv" | "getProperties"))
+    });
+    let platform_node = collection.unwrap_or(node);
+    let platform_method = platform_node
+        .child_by_field_name("name")
+        .map(|n| text(n, input.content))
+        .unwrap_or(method);
+    let platform_object = platform_node.child_by_field_name("object");
+    let platform = platform_object
         .map(|object| text(object, input.content))
-        .or_else(|| names::static_owner(node, method, input.content));
+        .or_else(|| names::static_owner(platform_node, platform_method, input.content));
     let is_system = matches!(platform, Some("java.lang.System"))
-        || (platform == Some("System") && names::platform_visible(node, "System", input.content));
+        || (platform == Some("System")
+            && names::platform_visible(platform_node, "System", input.content));
     let is_boolean = matches!(platform, Some("java.lang.Boolean"))
         || (platform == Some("Boolean") && names::platform_visible(node, "Boolean", input.content));
     let kind = match method {
+        "get" if collection.is_some() && is_system && platform_method == "getenv" => {
+            Some("env_var")
+        }
+        "getProperty"
+            if collection.is_some() && is_system && platform_method == "getProperties" =>
+        {
+            Some("config_key")
+        }
+        _ if collection.is_some() => None,
         "getProperty" if is_system => Some("config_key"),
         "getenv" if is_system => Some("env_var"),
         "getBoolean" if is_boolean => Some("config_key"),
@@ -284,7 +309,7 @@ fn read(
         let count = arguments.named_child_count();
         if count == 0
             || count > 2
-            || (((is_system && method == "getenv") || is_boolean) && count != 1)
+            || (((is_system && platform_method == "getenv") || is_boolean) && count != 1)
         {
             return Ok(None);
         }
@@ -316,15 +341,19 @@ fn read(
             ));
         }
         row.metadata.reference = reference;
-        if object.is_none() && (is_system || is_boolean) {
+        if platform_object.is_none() && (is_system || is_boolean) {
             row.metadata.static_import_reference = Some(format!(
                 "{}/{}",
-                field_symbol(node, method, input.content),
-                arguments.named_child_count()
+                field_symbol(platform_node, platform_method, input.content),
+                if collection.is_some() {
+                    0
+                } else {
+                    arguments.named_child_count()
+                }
             ));
         }
         row.metadata.implicit_platform_owner =
-            platform.and_then(|owner| types::platform_shadow(node, owner, input.content));
+            platform.and_then(|owner| types::platform_shadow(platform_node, owner, input.content));
         row.metadata.value_type = Some(
             if matches!(
                 method,

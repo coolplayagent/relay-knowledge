@@ -339,3 +339,87 @@ fn boolean_conversions_normalize_explicit_property_fallbacks() {
         assert_eq!(read.metadata.unconverted_default.as_deref(), Some(fallback));
     }
 }
+
+#[test]
+fn system_collection_accessors_keep_reads_guards_defaults_and_shadows() {
+    let rows = facts(
+        "java",
+        r#"class App { void run() {
+        if (System.getenv().get("FLAG") != null) {}
+        System.getProperties().getProperty("feature", "fallback");
+        java.lang.System.getenv().get("QUALIFIED");
+    }}"#,
+    );
+    for key in ["FLAG", "feature", "QUALIFIED"] {
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == key && r.edge_kind == "reads_config"),
+            "{key}"
+        );
+    }
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "FLAG" && r.edge_kind == "guards_code")
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.source_key == "feature")
+            .unwrap()
+            .metadata
+            .default_value
+            .as_deref(),
+        Some("fallback")
+    );
+    for source in [
+        r#"class App { void run(Custom System) { System.getenv().get("hidden"); } }"#,
+        r#"class System {} class App { void run() { System.getProperties().getProperty("hidden"); } }"#,
+        r#"class App { void run() { System.getenv().get("hidden", "invalid"); } }"#,
+    ] {
+        assert!(
+            !facts("java", source)
+                .iter()
+                .any(|r| r.source_key == "hidden")
+        );
+    }
+    let rows = facts(
+        "java",
+        r#"import static java.lang.System.getenv; class App { void run() { getenv().get("IMPORTED"); } }"#,
+    );
+    let row = rows.iter().find(|r| r.source_key == "IMPORTED").unwrap();
+    assert_eq!(row.source_kind, "env_var");
+    assert!(
+        row.metadata
+            .static_import_reference
+            .as_deref()
+            .unwrap()
+            .ends_with(".getenv/0")
+    );
+}
+#[test]
+fn text_block_keys_and_fallbacks_retain_runtime_values() {
+    let rows = facts(
+        "java",
+        r#"class App { void run() {
+        System.getProperty("certificate", """
+            line one
+              line two
+            """);
+        System.getProperty("""
+            feature\
+            """);
+    }}"#,
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.source_key == "certificate")
+            .unwrap()
+            .metadata
+            .default_value
+            .as_deref(),
+        Some("line one\n  line two\n")
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "feature" && r.edge_kind == "reads_config")
+    );
+}

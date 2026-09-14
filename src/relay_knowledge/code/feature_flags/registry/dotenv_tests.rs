@@ -1,7 +1,7 @@
 use super::*;
 #[test]
 fn spaced_dotenv_assignments_preserve_values_comments_and_source_spans() {
-    let source = "# @config domain=payments hot-reload=true\nFLAG = true\nexport TEXT = 'a # b'\nMULTI = \"line1\nline2\" # comment\nEMPTY =\nDYNAMIC = ${OTHER}\nnot valid = false\n";
+    let source = "# @config domain=payments hot-reload=true\nFLAG = true\nexport\tTEXT = 'a # b'\nMULTI = \"line1\nline2\" # comment\nEMPTY =\nDYNAMIC = ${OTHER}\nnot valid = false\n";
     let rows = extract(&FeatureFlagFileInput {
         repository_id: "repo",
         source_scope: "scope",

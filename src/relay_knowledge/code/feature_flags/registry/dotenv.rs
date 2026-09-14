@@ -10,7 +10,10 @@ pub(super) fn extract(
         let end = natural_line_end(input.content, start);
         offset = end;
         let line = input.content[start..end].trim();
-        let line = line.strip_prefix("export ").map_or(line, str::trim_start);
+        let line = line
+            .strip_prefix("export")
+            .filter(|rest| rest.starts_with([' ', '\t']))
+            .map_or(line, |rest| rest.trim_start_matches([' ', '\t']));
         let Some((key, _)) = line.split_once('=') else {
             continue;
         };

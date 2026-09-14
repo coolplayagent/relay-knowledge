@@ -1,5 +1,5 @@
 //! Bounded Java Unicode translation and string escape decoding.
-pub(super) fn decode(raw: &str) -> Option<String> {
+pub(super) fn decode(raw: &str, text_block: bool) -> Option<String> {
     if raw.len() > 65_536 {
         return None;
     }
@@ -25,17 +25,51 @@ pub(super) fn decode(raw: &str) -> Option<String> {
         }
     }
     let translated = String::from_utf16(&translated).ok()?;
+    let translated = if text_block {
+        let normalized = translated.replace("\r\n", "\n").replace('\r', "\n");
+        let (opening, content) = normalized.split_once('\n')?;
+        if !opening.chars().all(|c| matches!(c, ' ' | '\t' | '\u{c}')) {
+            return None;
+        }
+        let whitespace = |c: char| matches!(c, '\u{9}'..='\u{d}' | '\u{1c}'..='\u{20}' | '\u{1680}' | '\u{2000}'..='\u{2006}' | '\u{2008}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{205f}' | '\u{3000}');
+        let lines = content.split('\n').collect::<Vec<_>>();
+        let indent = lines
+            .iter()
+            .enumerate()
+            .filter(|(i, line)| *i + 1 == lines.len() || !line.trim_matches(whitespace).is_empty())
+            .map(|(_, line)| line.chars().take_while(|c| whitespace(*c)).count())
+            .min()
+            .unwrap_or(0);
+        lines
+            .iter()
+            .map(|line| {
+                let remove = line
+                    .chars()
+                    .take(indent)
+                    .take_while(|c| whitespace(*c))
+                    .count();
+                line[line.chars().take(remove).map(char::len_utf8).sum::<usize>()..]
+                    .trim_end_matches(whitespace)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        translated
+    };
     let mut chars = translated.chars().peekable();
     let mut result = String::new();
     while let Some(ch) = chars.next() {
         if ch != '\\' {
-            if matches!(ch, '\n' | '\r' | '"') {
+            if !text_block && matches!(ch, '\n' | '\r' | '"') {
                 return None;
             }
             result.push(ch);
             continue;
         }
         let escaped = chars.next()?;
+        if text_block && escaped == '\n' {
+            continue;
+        }
         result.push(match escaped {
             'b' => '\u{0008}',
             't' => '\t',

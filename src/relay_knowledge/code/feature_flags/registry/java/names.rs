@@ -207,8 +207,11 @@ fn literal_bounded(
     }
     let value = match node.kind() {
         "string_literal" => {
-            let raw = text(node, content).strip_prefix('"')?.strip_suffix('"')?;
-            super::strings::decode(raw)
+            let raw = text(node, content);
+            let text_block = raw.starts_with("\"\"\"");
+            let delimiter = if text_block { "\"\"\"" } else { "\"" };
+            let raw = raw.strip_prefix(delimiter)?.strip_suffix(delimiter)?;
+            super::strings::decode(raw, text_block)
         }
         "parenthesized_expression" => literal_bounded(
             node.named_child(0)?,

@@ -279,3 +279,5 @@ Template syntax validation and extraction share quote/comment-aware action bound
 Qualified enclosing-instance key fields resolve through the explicit outer owner. Conditional unsets before bare exports retain earlier assignment evidence with an unknown default and incomplete flow. Query projection and registered authorization remain distinct for consistency evidence, as clarified in the workflow guide. Fact version: `config-registry-v44`.
 
 Multiline template actions are tracked through their closing delimiters, preventing action continuations from becoming output definitions. The per-file fact limit covers registry and legacy/SDK extraction together. Proven Double conversions retain canonical NaN and signed Infinity defaults, including overflow from valid decimal input. Fact version: `config-registry-v45`.
+
+Configuration fact version `config-registry-v46` recognizes direct System environment/property collection reads with platform shadow checks, dotenv export followed by spaces or tabs, and Java text-block keys/defaults with newline, indentation and escape processing. Reindex older scopes through the normal durable workflow.
