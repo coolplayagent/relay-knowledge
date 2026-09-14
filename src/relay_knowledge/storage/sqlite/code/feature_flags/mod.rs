@@ -114,6 +114,10 @@ fn feature_flag_sql_query(
         mut where_clause,
         params: mut filter_params,
     } = feature_flag_sql_filter(source_scope, status, request, terms);
+    let metadata_only = terms.is_empty()
+        && request.repository.path_filters.is_empty()
+        && request.repository.language_filters.is_empty();
+    let mut metadata_candidates = Vec::new();
     for (field, value) in [
         ("domain", request.filters.domain.clone().map(Value::Text)),
         (
@@ -129,10 +133,21 @@ fn feature_flag_sql_query(
         ),
     ] {
         if let Some(value) = value {
-            let symbolic = "flag.source_kind='config_symbol' OR ";
-            where_clause.push_str(&format!(" AND ({symbolic}EXISTS (SELECT 1 FROM code_repository_feature_flags metadata_flag WHERE metadata_flag.source_scope=flag.source_scope AND metadata_flag.feature_flag_id=flag.feature_flag_id AND json_extract(metadata_flag.metadata_json,'$.{field}') = ?))"));
+            let predicate = format!(
+                "EXISTS (SELECT 1 FROM code_repository_feature_flags metadata_flag WHERE metadata_flag.source_scope=flag.source_scope AND metadata_flag.feature_flag_id=flag.feature_flag_id AND json_extract(metadata_flag.metadata_json,'$.{field}') = ?)"
+            );
+            if metadata_only {
+                metadata_candidates.push(predicate);
+            } else {
+                where_clause.push_str(&format!(
+                    " AND (flag.source_kind='config_symbol' OR {predicate})"
+                ));
+            }
             filter_params.push(value);
         }
+    }
+    if !metadata_candidates.is_empty() {
+        where_clause.push_str(&format!(" AND ({})", metadata_candidates.join(" OR ")));
     }
     if !request.repository.path_filters.is_empty()
         || !request.repository.language_filters.is_empty()

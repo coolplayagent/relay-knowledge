@@ -574,3 +574,54 @@ fn property_getter_conversion_matrix_canonicalizes_direct_and_collection_default
         }
     }
 }
+
+#[test]
+fn explicit_unknown_fallback_matrix_is_incomplete_without_affecting_absent_defaults() {
+    for reader in [
+        "System.getProperty",
+        "System.getenv().getOrDefault",
+        "System.getProperties().getProperty",
+    ] {
+        let source = format!(
+            "class C {{ String getMode() {{ return {reader}(\"mode\", chooseDefault()); }} }}"
+        );
+        let rows = facts("java", &source);
+        let row = rows.iter().find(|r| r.source_key == "mode").unwrap();
+        assert!(row.metadata.default_value.is_none());
+        assert_eq!(
+            row.metadata.flow_incomplete.as_deref(),
+            Some("unevaluated_explicit_default")
+        );
+    }
+    let rows = facts(
+        "java",
+        "class C { String getMode() { return System.getProperty(\"mode\"); } }",
+    );
+    assert!(
+        rows.iter()
+            .find(|r| r.source_key == "mode")
+            .unwrap()
+            .metadata
+            .flow_incomplete
+            .is_none()
+    );
+}
+#[test]
+fn static_import_overload_matrix_recognizes_symbolic_and_parenthesized_strings() {
+    for argument in ["KEY", "(KEY)", "(\"FLAG\")", "KEY + \"\""] {
+        let source = format!(
+            "import static java.lang.System.getenv; class C {{ static final String KEY = \"FLAG\"; static String getenv(Integer ignored) {{ return null; }} void run() {{ if(getenv({argument}) != null) {{}} }} }}"
+        );
+        let rows = facts("java", &source);
+        assert!(
+            rows.iter().any(|r| r.edge_kind == "reads_config"
+                && (r.source_key == "FLAG"
+                    || r.metadata.target_kind.as_deref() == Some("env_var"))),
+            "{argument}: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|r| r.edge_kind == "guards_code"),
+            "{argument}: {rows:?}"
+        );
+    }
+}

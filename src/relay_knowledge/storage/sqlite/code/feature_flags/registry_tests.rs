@@ -569,3 +569,60 @@ fn excessive_query_terms_fail_before_sql_statement_preparation() {
         "{error:?}"
     );
 }
+
+#[test]
+fn edge_kind_queries_survive_final_group_matching() {
+    let db = fixture();
+    for edge in ["reads_config", "guards_code"] {
+        add(
+            &db,
+            "flag",
+            "config_key",
+            edge,
+            CodeConfigMetadata::default(),
+        );
+        let groups = search(
+            &db,
+            &status(),
+            &request(Some(edge), CodeConfigFilter::default()),
+        )
+        .unwrap();
+        assert_eq!(groups.len(), 1, "{edge}");
+        assert_eq!(groups[0].source_key, "flag");
+    }
+}
+#[test]
+fn metadata_seeds_exclude_more_than_ten_thousand_unrelated_symbols() {
+    let db = fixture();
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "dotenv".into(),
+            domain: Some("payments".into()),
+            hot_reload: Some(true),
+            ..Default::default()
+        },
+    );
+    db.execute_batch("WITH RECURSIVE counter(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM counter WHERE n<10001) INSERT INTO code_repository_feature_flags SELECT 'symbol:'||n,'symbol:'||n,'file','src/Noise.java','java','noise','config_symbol','Noise.get'||n,'reads_config',9000,'extracted',0,1,1,1,'noise','{}','scope' FROM counter;").unwrap();
+    for filters in [
+        CodeConfigFilter {
+            source: Some("dotenv".into()),
+            ..Default::default()
+        },
+        CodeConfigFilter {
+            domain: Some("payments".into()),
+            ..Default::default()
+        },
+        CodeConfigFilter {
+            hot_reload: Some(true),
+            ..Default::default()
+        },
+    ] {
+        let groups = search(&db, &status(), &request(None, filters)).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].source_key, "flag");
+    }
+}

@@ -374,9 +374,10 @@ fn matches_group(
             .usages
             .iter()
             .map(|u| format!(
-                "{} {} {} {}",
+                "{} {} {} {} {}",
                 u.path,
                 u.excerpt,
+                u.edge_kind,
                 u.metadata.bindings.join(" "),
                 u.metadata.reference.as_deref().unwrap_or("")
             ))

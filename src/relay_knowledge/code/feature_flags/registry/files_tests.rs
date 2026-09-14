@@ -503,3 +503,26 @@ fn deferred_template_definitions_do_not_publish_root_defaults() {
         );
     }
 }
+
+#[test]
+fn inline_template_control_actions_preserve_possible_and_unconditional_output() {
+    for (source, uncertain) in [
+        ("{{if .Enabled}}feature=true{{end}}", true),
+        ("{{range .Items}}feature=true{{end}}", true),
+        ("{{if .Enabled}}{{end}}feature=true", false),
+        ("{{define \"unused\"}}other=false{{end}}feature=true", false),
+        ("feature={{if .Enabled}}true{{else}}false{{end}}", true),
+    ] {
+        let rows = facts("gotemplate", source);
+        let row = rows
+            .iter()
+            .find(|r| r.source_key == "feature")
+            .unwrap_or_else(|| panic!("{source}: {rows:?}"));
+        assert_eq!(
+            row.metadata.flow_incomplete.is_some(),
+            uncertain,
+            "{source}"
+        );
+        assert_eq!(row.metadata.default_value.is_none(), uncertain, "{source}");
+    }
+}

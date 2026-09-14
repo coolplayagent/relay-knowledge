@@ -166,7 +166,7 @@ pub(super) fn package_name(node: Node<'_>, content: &str) -> String {
         })
         .unwrap_or_default()
 }
-fn string_expression(node: Node<'_>, content: &str, depth: usize) -> bool {
+pub(super) fn string_expression(node: Node<'_>, content: &str, depth: usize) -> bool {
     if depth >= 16 {
         return false;
     }

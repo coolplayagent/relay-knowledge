@@ -43,7 +43,7 @@ pub(super) fn shadows(method: Node<'_>, call: Node<'_>, content: &str) -> bool {
         }
         if args
             .named_child(argument_index)
-            .is_some_and(|arg| arg.kind() == "string_literal")
+            .is_some_and(|arg| super::names::string_expression(arg, content, 0))
         {
             if let Some(ty) = param.child_by_field_name("type") {
                 if rejects_string(ty, content) {

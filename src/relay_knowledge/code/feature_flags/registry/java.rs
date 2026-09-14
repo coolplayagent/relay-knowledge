@@ -400,6 +400,9 @@ fn read(
         row.metadata.default_value = arguments
             .named_child(1)
             .and_then(|value| literal(value, input.content, 1));
+        if arguments.named_child(1).is_some() && row.metadata.default_value.is_none() {
+            row.metadata.flow_incomplete = Some("unevaluated_explicit_default".into());
+        }
         if method == "getBoolean" && is_boolean {
             row.metadata.default_value = Some("false".to_owned());
         }

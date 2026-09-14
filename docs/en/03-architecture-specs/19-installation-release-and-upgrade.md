@@ -296,3 +296,5 @@ Enclosing getter fallback requires indexed inheritance evidence; deferred templa
 Software ontology configuration projection excludes internal constants, type/getter markers and unresolved symbolic rows while retaining their indexed evidence. Shell set options use the same static quote removal as export options, including enable/disable and the option terminator. Fact version: `config-registry-v50`.
 
 Business configuration-key mappings apply the same public-fact filter; internal symbols remain stored for registry resolution.
+
+Explicit unevaluated Java fallbacks make consistency incomplete; known String constant expressions participate in overload applicability. Inline non-output template control actions preserve static/conditional text. Edge-kind query terms remain searchable after grouping. Metadata-only queries without path/language projections seed matching groups before bounded symbol expansion. Collection containsKey presence APIs and executing named template bodies are outside the finite extraction inventory; missing-definition diagnostics describe observed static evidence, not runtime rendering or values. Fact version: `config-registry-v51`.

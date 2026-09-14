@@ -266,18 +266,19 @@ fn template_output_line(
     end: usize,
     state: &mut TemplateOutputState,
 ) -> Result<String, DomainError> {
-    state.uncertain |= state.depth > 0;
     let mut begin = start.max(state.skip_until).min(end);
     let mut output = String::new();
     for _ in 0..32 {
         let Some(relative) = content[begin..end].find("{{") else {
             if state.deferred_depth.is_none() {
+                state.uncertain |= state.depth > 0 && !content[begin..end].trim().is_empty();
                 output.push_str(&content[begin..end]);
             }
             return Ok(output);
         };
         let open = begin + relative;
         if state.deferred_depth.is_none() {
+            state.uncertain |= state.depth > 0 && !content[begin..open].trim().is_empty();
             output.push_str(&content[begin..open]);
         }
         let action = &content[open + 2..];
@@ -320,7 +321,6 @@ fn template_output_line(
                     if command == Some("define") && state.deferred_depth.is_none() {
                         state.deferred_depth = Some(state.depth);
                     }
-                    state.uncertain = true;
                 }
                 Some("end") => {
                     if state.deferred_depth == Some(state.depth) {
@@ -335,7 +335,21 @@ fn template_output_line(
                 .split_whitespace();
             let assignment = words.next().is_some_and(|word| word.starts_with('$'))
                 && words.next().is_some_and(|word| matches!(word, ":=" | "="));
-            if !assignment && state.deferred_depth.is_none() {
+            let control = matches!(
+                command,
+                Some(
+                    "if" | "with"
+                        | "range"
+                        | "define"
+                        | "block"
+                        | "end"
+                        | "else"
+                        | "break"
+                        | "continue"
+                )
+            );
+            if !assignment && !control && state.deferred_depth.is_none() {
+                state.uncertain |= state.depth > 0;
                 output.push_str("{{}}");
             }
         } else if close - open > 8192 {
@@ -360,6 +374,7 @@ fn template_output_line(
         ));
     }
     if state.deferred_depth.is_none() {
+        state.uncertain |= state.depth > 0 && !content[begin..end].trim().is_empty();
         output.push_str(&content[begin..end]);
     }
     Ok(output)
