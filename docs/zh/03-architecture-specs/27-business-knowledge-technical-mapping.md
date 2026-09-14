@@ -74,6 +74,16 @@ relay-knowledge repo business <alias> --kind all --query MRR --domain revenue --
 
 验收覆盖 map init/upgrade/idempotency、path/digest/schema bounds、homonym/acronym/conflicting definition、fenced publication/replay/stale repair、resolved/unresolved mapping、canonical exact retrieval、business-to-code context、declared domain view，以及固定 commit 的端到端闭环。公式计算、OWL/RDF 推理、外部 Wiki/数据库抓取和 Web 编辑器不属于 v1。
 
+Issue #391
+
+响应移除含义混杂的 `resolution` 和顶层业务 `status`。`request.mode` 由是否存在 `query` 推导为 `list` 或 `search`，忽略调用方传入的 mode。`result.status` 为 `matched`、`no_match`、`ambiguous` 或 `unavailable`；仅搜索命中时返回 `result.match_type=exact|partial`。返回术语/映射计数表示输出切片的实际数量，`truncated` 标记分页。kind 准入、domain/文本匹配先于结果判定和 limit，避免无映射术语占据映射查询名额，也避免截断掩盖跨域精确匹配歧义。多个 domain ID 共用名称时，按该名称筛选仍可能有歧义，应指定唯一 ID。
+
+`knowledge.state` 由 scope 整体持久化计数推导为 `no_sources`、`empty_glossary`、`terms_only` 或 `mapped`，同一对象保留计数、repository/commit/scope 身份、图版本和 `stale`。`mapped` 仅表示至少一条声明映射，不保证全覆盖或目标已解析；各 mapping 的 `resolution_state` 不变。`graph-only` 返回 `unknown` 知识状态和 `unavailable` 结果，零计数仅是未读取投影的占位值。无业务源返回 `unavailable`，已索引空词表返回 `no_match`。`allow-stale` 可同时返回 `matched` 和 `knowledge.stale=true`；存储读取失败继续返回错误。
+
+诊断提供针对原因的 `next_steps`：无业务源检查 route 和已提交文件；空词表或缺失映射提示编写、提交和重建索引；无匹配调整筛选；歧义指定 domain；过期或未读取投影提示重建索引或调整 freshness。需要编写知识时附带 `bootstrap` schema 资源。默认路径不证明实际索引了哪些 legacy/额外源。查询不扫描工作区 YAML。CLI、HTTP、MCP 共用此合同，context 继续消费同一 commit 下的术语与映射。本次响应结构变更不需要数据库迁移。
+
+Domain 的 `business::result` 拥有就绪状态合同；SQLite 的 `business::selection` 独占准入、匹配和分页前结果判定，配套同级测试。API 的 `operations::business_guidance` 解释结果；`application::knowledge::map::business_bootstrap` 独占安全编写初始化。
+
 ---
 
 导航：上一章：[26. Git Commit + Knowledge](26-git-commit-knowledge-development-loop.md) | 返回：[架构规格](README.md)

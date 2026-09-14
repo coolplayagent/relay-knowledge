@@ -851,7 +851,8 @@ pub(in crate::interfaces::cli::spec) fn repo_business() -> CliCommandSpec {
         ],
         &["relay-knowledge repo business core --kind all --query MRR --format json"],
         &[
-            "The command reads the fenced business projection; it never scans glossary YAML at query time."
+            "The command reads the fenced business projection; it never scans glossary YAML at query time.",
+            "Code indexing does not infer business terms. Run map init for glossary schema and authoring guidance, commit the map and glossary, then repo index before querying. Responses separate request.mode, result.status/match_type and knowledge.state; empty results include structured diagnostics."
         ],
     )
 }

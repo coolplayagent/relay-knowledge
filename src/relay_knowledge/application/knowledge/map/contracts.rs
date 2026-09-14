@@ -127,6 +127,8 @@ pub struct KnowledgeMapSourceAddRequest {
 /// Response shared by map mutation commands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KnowledgeMapMutationResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub business_bootstrap: Option<crate::api::BusinessKnowledgeBootstrap>,
     pub metadata: ApiMetadata,
     pub path: String,
     pub map_type: RepositoryMapType,

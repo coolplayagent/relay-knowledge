@@ -243,3 +243,30 @@ software/architecture model、impact 和 code context 证据。
 MCP/ACP 对应章节。
 
 `repo software --kind dependencies` 返回 Maven 模块、POM 声明依赖、组件和源码使用记录；`--kind modules` 只返回 reactor 图。两者每页所有数组共享 `--limit`（上限 500），有后续数据时返回 `next_cursor`。保持 ref 和过滤条件不变，使用 `--cursor <token>` 继续读取，直到游标省略；合并各页得到完整结果。`repo impact` 返回默认 profile 的下游 POM 证据链。详见[软件全域模型](../03-architecture-specs/21-software-global-domain-modeling.md)。
+
+
+### 业务词表初始化与空结果
+
+`repo business` 读取人工编写的定义和声明的映射；`repo index` 不从代码推导业务术语。Knowledge `map init` 的结果包含 `business_bootstrap`，提供默认词表路径、schema 版本、完整 YAML 示例、文档链接和编写步骤。新词表保持为空，仅附带注释示例；重复初始化保留已有内容。
+
+在已注册仓库根目录执行以下命令，将 `demo` 替换为仓库别名：
+
+```bash
+relay-knowledge map init --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
+```
+
+编辑 route 授权的词表（默认为 `knowledge/glossary/business-glossary.yaml`），填写真实业务 domain、term 和技术映射。将 Knowledge Map、其引用的 topic 文件和词表提交到 Git，再索引新提交：
+
+```bash
+relay-knowledge repo index demo --ref HEAD --format json
+relay-knowledge repo business demo --kind all --ref HEAD --format json
+```
+
+HEAD 只读取已提交文件；即使重新索引 HEAD，也不会加载未提交的词表。
+
+响应移除含义混杂的 `resolution` 和顶层业务 `status`。`request.mode` 由是否存在 `query` 推导为 `list` 或 `search`，忽略调用方传入的 mode。`result.status` 为 `matched`、`no_match`、`ambiguous` 或 `unavailable`；仅搜索命中时返回 `result.match_type=exact|partial`。返回术语/映射计数表示输出切片的实际数量，`truncated` 标记分页。kind 准入、domain/文本匹配先于结果判定和 limit，避免无映射术语占据映射查询名额，也避免截断掩盖跨域精确匹配歧义。多个 domain ID 共用名称时，按该名称筛选仍可能有歧义，应指定唯一 ID。
+
+`knowledge.state` 由 scope 整体持久化计数推导为 `no_sources`、`empty_glossary`、`terms_only` 或 `mapped`，同一对象保留计数、repository/commit/scope 身份、图版本和 `stale`。`mapped` 仅表示至少一条声明映射，不保证全覆盖或目标已解析；各 mapping 的 `resolution_state` 不变。`graph-only` 返回 `unknown` 知识状态和 `unavailable` 结果，零计数仅是未读取投影的占位值。无业务源返回 `unavailable`，已索引空词表返回 `no_match`。`allow-stale` 可同时返回 `matched` 和 `knowledge.stale=true`；存储读取失败继续返回错误。
+
+诊断提供针对原因的 `next_steps`：无业务源检查 route 和已提交文件；空词表或缺失映射提示编写、提交和重建索引；无匹配调整筛选；歧义指定 domain；过期或未读取投影提示重建索引或调整 freshness。需要编写知识时附带 `bootstrap` schema 资源。默认路径不证明实际索引了哪些 legacy/额外源。查询不扫描工作区 YAML。CLI、HTTP、MCP 共用此合同，context 继续消费同一 commit 下的术语与映射。本次响应结构变更不需要数据库迁移。
