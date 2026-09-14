@@ -25,7 +25,7 @@ const PREVIEW_MAX_LARGEST_FILES: usize = 10;
 const DEFAULT_TEXT_FILE_BUDGET_BYTES: usize = 512 * 1024;
 
 /// Returns a non-mutating preview of the effective repository indexing scope.
-pub fn preview_repository_scope(
+pub(in crate::code) fn preview_repository_layout(
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
 ) -> Result<CodeRepositoryScopePreview, CodeIndexError> {
@@ -43,7 +43,6 @@ pub fn preview_repository_scope(
     let mut selected_file_count = 0usize;
     let mut unsupported_file_count = 0usize;
     let mut generated_or_heavy_file_count = 0usize;
-    let mut expected_degraded_file_count = 0usize;
     let mut language_distribution = BTreeMap::<String, (usize, usize)>::new();
     let mut largest_files = Vec::<CodeRepositoryLargestFile>::new();
     let mut excluded_paths = Vec::<CodeRepositoryExcludedPath>::new();
@@ -84,9 +83,6 @@ pub fn preview_repository_scope(
         if is_generated || is_heavy {
             generated_or_heavy_file_count += 1;
         }
-        if is_unsupported || is_heavy {
-            expected_degraded_file_count += 1;
-        }
         largest_files.push(CodeRepositoryLargestFile {
             path: entry.path.clone(),
             byte_count: entry.byte_count,
@@ -120,7 +116,8 @@ pub fn preview_repository_scope(
         selected_byte_count,
         unsupported_file_count,
         generated_or_heavy_file_count,
-        expected_degraded_file_count,
+        // The index preview workflow fills this after validating parser batches.
+        expected_degraded_file_count: 0,
         language_distribution: language_distribution
             .into_iter()
             .map(

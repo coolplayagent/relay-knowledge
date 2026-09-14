@@ -6,16 +6,16 @@ use crate::{
         RequestContext,
     },
     application::service::RelayKnowledgeService,
-    code::preview_repository_scope,
     domain::CodeIndexRequest,
 };
 
 use super::super::{
-    blocking::run_blocking_code,
     errors::storage_api_error,
     repository::{registration_from_status, required_code_repository},
     scope::merged_filters,
 };
+
+mod worker;
 
 impl RelayKnowledgeService {
     /// Previews the effective code repository indexing scope without writing rows.
@@ -29,8 +29,7 @@ impl RelayKnowledgeService {
             required_code_repository(store.as_ref(), &request.repository.repository).await?;
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
-        let preview =
-            run_blocking_code(move || preview_repository_scope(&registration, &selector)).await?;
+        let preview = worker::validate_scope(registration, selector).await?;
         let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
         let language_filters = merged_filters(
             &status.language_filters,

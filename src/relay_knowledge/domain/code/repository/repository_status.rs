@@ -70,6 +70,7 @@ pub struct CodeRepositoryScopePreview {
     pub selected_byte_count: usize,
     pub unsupported_file_count: usize,
     pub generated_or_heavy_file_count: usize,
+    /// Parser-validated degradation count for the selected snapshot, not a metadata estimate.
     pub expected_degraded_file_count: usize,
     pub language_distribution: Vec<CodeRepositoryLanguagePreview>,
     pub largest_files: Vec<CodeRepositoryLargestFile>,

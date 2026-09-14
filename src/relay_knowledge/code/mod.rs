@@ -51,6 +51,8 @@ mod worktree_overlay_tests;
 pub(crate) use business_glossary::load_business_knowledge_projection;
 pub use error::CodeIndexError;
 pub(crate) use index::CodeIndexPlanRecovery;
+pub use index::preview_repository_scope;
+pub(crate) use index::preview_repository_scope_cancellable;
 pub use index::{
     CodeIndexPlan, prepare_full_index_plan, prepare_full_index_plan_with_workspace_detection,
 };
@@ -59,7 +61,7 @@ pub use index::{
     changed_paths_for_diff_with_path_filters, deleted_symbol_names_for_diff,
 };
 pub use registration::register_repository;
-pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
+pub use scope::partition_changed_paths_for_selector;
 pub(crate) use source::git::{
     first_parent_ancestors_bounded, repository_worktree_observation_bounded,
     resolve_git_ref_bounded, resolve_git_tree_bounded,
