@@ -68,6 +68,7 @@ fn search_bounded(
         .query
         .as_deref()
         .map(query_terms)
+        .transpose()?
         .unwrap_or_default();
     let query = feature_flag_sql_query(scope, status, request, &terms);
     let mut rows = load(connection, &query.sql, &query.params)?;

@@ -23,6 +23,8 @@ fn feature_flag_sql_applies_scope_and_bounded_candidate_budget() {
         .query
         .as_deref()
         .map(query_terms)
+        .transpose()
+        .unwrap()
         .unwrap_or_default();
 
     let query = feature_flag_sql_query("scope", &status(), &request, &terms);
@@ -79,5 +81,22 @@ fn status() -> CodeRepositoryStatus {
         chunk_count: 0,
         stale: false,
         degraded_reason: None,
+    }
+}
+
+#[test]
+fn configuration_query_terms_reject_overflow_without_truncating() {
+    assert_eq!(query_terms(&vec!["x"; 64].join(" ")).unwrap().len(), 64);
+    assert_eq!(query_terms(&"x".repeat(256)).unwrap()[0].len(), 256);
+    for query in [
+        vec!["x"; 65].join(" "),
+        vec!["x"; 5000].join(" "),
+        "x".repeat(257),
+        " ".repeat(10001),
+        "İ".repeat(100),
+    ] {
+        let error = query_terms(&query).unwrap_err();
+        assert!(matches!(error, StorageError::InvalidInput(_)));
+        assert!(error.to_string().contains("budget exceeded"));
     }
 }

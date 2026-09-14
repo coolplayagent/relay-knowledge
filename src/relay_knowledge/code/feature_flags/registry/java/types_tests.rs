@@ -156,3 +156,19 @@ fn oversized_parent_metadata_keeps_bounded_incomplete_hierarchy() {
     assert!(hierarchy.metadata.bindings.is_empty());
     assert!(serde_json::to_string(&hierarchy.metadata).unwrap().len() < 65536);
 }
+
+#[test]
+fn collection_and_numeric_platform_shadow_signatures_are_persisted() {
+    let rows = raw_facts(
+        "java",
+        "class Base { public Object getenv(){return null;} public Object getProperties(){return null;} public int getInteger(String key,int value){return value;} public String getProperty(String key,int unrelated){return key;} }",
+    );
+    let row = rows
+        .iter()
+        .find(|r| r.edge_kind == "config_type_declaration")
+        .unwrap();
+    for method in ["getenv/0", "getProperties/0", "getInteger/2"] {
+        assert!(row.metadata.java_methods.contains_key(method), "{method}");
+    }
+    assert!(!row.metadata.java_methods.contains_key("getProperty/2"));
+}

@@ -83,3 +83,27 @@ fn dotenv_hashes_require_comment_boundaries_and_support_all_line_endings() {
         }
     }
 }
+
+#[test]
+fn dotenv_bom_is_ignored_only_at_the_file_start() {
+    let source = "\u{feff}export\tFIRST=true\n\u{feff}SECOND=false\nTHIRD=true\n";
+    let rows = extract(&FeatureFlagFileInput {
+        repository_id: "repo",
+        source_scope: "scope",
+        file_id: "file",
+        path: ".env",
+        language_id: "unknown",
+        content: source,
+        config_facts: &[],
+    })
+    .unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|r| r.source_key.as_str())
+            .collect::<Vec<_>>(),
+        ["FIRST", "THIRD"]
+    );
+    assert_eq!(rows[0].byte_range.start, 0);
+    assert_eq!(rows[0].metadata.default_value.as_deref(), Some("true"));
+    assert!(source[rows[1].byte_range.start as usize..].starts_with("THIRD"));
+}

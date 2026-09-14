@@ -200,6 +200,8 @@ dotenv（.env）赋值均索引为环境变量定义，包括布尔、字符串�
 
 `repo feature-flags` 读取索引阶段写入的配置驱动特性开关图事实，默认列出所选 repository scope 内的开关、配置来源和代码使用关系；`--query` 只做名称、配置 key、路径或 excerpt 过滤。JSON 响应包含与 `repo query` 相同的 `freshness` 对象，包括 pending task、checkpoint cursor、index lag、stale/degraded reason，以及返回 feature-flag usage 文件的 direct-source-read paths。抽取器识别环境变量、config/settings key、布尔配置声明，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用。它不会同步 provider 控制面的状态、策略、segment 或 rollout variant。该命令不会在查询时扫描全仓库源码；新增或修正开关抽取逻辑后，需要重新 `repo index` 或 `repo update` 才能看到新事实。
 
+`repo feature-flags --query` 最多接受 10,000 个 UTF-8 字节、64 个词，每个词在大小写规范化后最多 256 个 UTF-8 字节。超限会在构造 SQL 前返回明确的输入预算错误，不会静默截断查询词。
+
 配置注册表支持 `--domain <domain>`（显式注释中的领域值）、`--source java|properties|ini|ctmpl|shell|dotenv` 和 `--hot-reload true|false`。来源和领域值不区分大小写；未知领域或热加载元数据不匹配显式过滤条件。过滤条件选择配置分组，并保留其关联使用关系。`--query` 使用 Unicode 小写匹配。`--consistency` 增加读取未定义、缺少格式和默认值冲突诊断；`conflicting_default_sources` 给出每个默认值对应的路径、行号和 excerpt。关联绑定未解析或值流不受支持时，相应分组标记 `analysis_complete: false`，不推断缺失，但仍报告已加载默认值证明的冲突；数据过期或降级时不输出确定的一致性结论；无关分组仍可独立分析。使用关系、字节、符号、展开深度或 SQLite 查询超出预算时返回明确的分析不完整错误，需要收窄查询范围。Java 嵌套类型及带显式注释的常量字段参与绑定解析。配置行号范围不包含末尾换行符。 绑定结果和配置证据按引用及剩余深度缓存，避免接口使用关系重复扫描全部实现。Java getter 标记计入每文件 10,000 条事实预算，getter 收集也受限。局部变量守卫不匹配无关的同名方法或字段。Shell 定义要求主 shell 中无条件的赋值和导出；条件分支、延迟执行函数及子 shell 内的导出不能证明主 shell 配置已定义。
 
 配置注解只接受相应格式的注释语法，执行语句和字符串不能提供元数据。Java 无接收者的零参数 getter 调用仅绑定可见的已声明方法，字符串按有界 Java 转义规则解码。Shell 条件赋值后仍保留可能的继承环境变量读取。绑定或流分析不完整时不推断缺失，但保留已加载默认值能够证明的冲突及其来源位置。

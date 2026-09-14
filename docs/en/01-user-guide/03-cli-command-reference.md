@@ -169,6 +169,8 @@ Do not pass kind values across command families. Use `repo impact` for impact
 analysis, `repo framework` for Angular/Vue template semantics, and
 `repo feature-flags` for feature flags; they are not `repo query --kind` values.
 
+`repo feature-flags --query` accepts at most 10,000 UTF-8 bytes, 64 terms and 256 UTF-8 bytes per term after case normalization. Exceeding these limits returns an explicit input-budget error before SQL construction; query terms are not silently truncated.
+
 `--path` is the CLI flag for a path filter. `repo register --path` stores the
 indexed scope, while `repo query --path`, `repo framework --path`, and `repo feature-flags --path` narrow
 reads inside that indexed scope. `repo index` does not accept `--path`; it uses

@@ -931,3 +931,30 @@ fn qualified_enclosing_key_fields_resolve_explicit_outer_owner() {
         "{groups:?}"
     );
 }
+
+#[test]
+fn inherited_zero_arity_collection_shadow_and_getter_overloads_resolve() {
+    let db = fixture();
+    java_files(
+        &db,
+        &[
+            (
+                "Base.java",
+                r#"class Base {public Object getenv(){return null;} boolean isEnabled(){return Boolean.getBoolean("inherited");}}"#,
+            ),
+            (
+                "Child.java",
+                r#"import static java.lang.System.getenv; class Child extends Base {boolean isEnabled(int n){return false;} void run(){getenv().get("hidden"); if(isEnabled()) {}}}"#,
+            ),
+        ],
+    );
+    let mut query = request(None, CodeConfigFilter::default());
+    query.repository.path_filters = vec!["Child.java".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert!(!groups.iter().any(|g| g.source_key == "hidden"));
+    assert!(
+        groups.iter().any(|g| g.source_key == "inherited"
+            && g.usages.iter().any(|u| u.edge_kind == "guards_code")),
+        "{groups:?}"
+    );
+}

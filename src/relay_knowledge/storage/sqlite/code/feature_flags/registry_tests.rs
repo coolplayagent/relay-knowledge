@@ -551,3 +551,21 @@ fn query_path_projection_keeps_authorized_consistency_evidence_but_registration_
             .any(|d| d == "read_without_definition")
     );
 }
+
+#[test]
+fn excessive_query_terms_fail_before_sql_statement_preparation() {
+    let db = fixture();
+    db.execute("DROP TABLE code_repository_feature_flags", [])
+        .unwrap();
+    let query = "x ".repeat(5000);
+    let error = search(
+        &db,
+        &status(),
+        &request(Some(&query), CodeConfigFilter::default()),
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("query term budget exceeded"),
+        "{error:?}"
+    );
+}

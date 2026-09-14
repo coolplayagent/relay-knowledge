@@ -423,3 +423,39 @@ fn text_block_keys_and_fallbacks_retain_runtime_values() {
             .any(|r| r.source_key == "feature" && r.edge_kind == "reads_config")
     );
 }
+
+#[test]
+fn numeric_property_readers_preserve_defaults_and_platform_visibility() {
+    let rows = facts(
+        "java",
+        r#"import static java.lang.Integer.getInteger;
+    class App { void run() {
+        if (Integer.getInteger("threads", 0x10) > 1) {}
+        Long.getLong("timeout");
+        java.lang.Long.getLong("delay", 2_000L);
+        getInteger("imported", -4);
+    }}"#,
+    );
+    for (key, default) in [
+        ("threads", Some("16")),
+        ("timeout", None),
+        ("delay", Some("2000")),
+        ("imported", Some("-4")),
+    ] {
+        let row = rows
+            .iter()
+            .find(|r| r.source_key == key && r.edge_kind == "reads_config")
+            .unwrap();
+        assert_eq!(row.metadata.value_type.as_deref(), Some("number"));
+        assert_eq!(row.metadata.default_value.as_deref(), default);
+    }
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "threads" && r.edge_kind == "guards_code")
+    );
+    let rows = facts(
+        "java",
+        r#"class Integer {} class App { void run(Custom Long) { Integer.getInteger("hidden", 1); Long.getLong("hidden", 1); }}"#,
+    );
+    assert!(!rows.iter().any(|r| r.source_key == "hidden"));
+}

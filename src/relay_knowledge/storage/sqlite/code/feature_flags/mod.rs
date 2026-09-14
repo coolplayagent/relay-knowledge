@@ -389,13 +389,33 @@ fn escape_like_pattern(value: &str) -> String {
     escaped
 }
 
-fn query_terms(query: &str) -> Vec<String> {
-    query
-        .split(|character: char| !(character.is_alphanumeric() || character == '_'))
-        .map(str::trim)
-        .filter(|term| !term.is_empty())
-        .map(str::to_lowercase)
-        .collect()
+fn query_terms(query: &str) -> Result<Vec<String>, StorageError> {
+    const MAX_TERMS: usize = 64;
+    const MAX_TERM_BYTES: usize = 256;
+    if query.len() > 10_000 {
+        return Err(StorageError::InvalidInput(
+            "configuration query byte budget exceeded (10000)".into(),
+        ));
+    }
+    let mut terms = Vec::new();
+    for term in query
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|t| !t.is_empty())
+    {
+        if terms.len() >= MAX_TERMS || term.len() > MAX_TERM_BYTES {
+            return Err(StorageError::InvalidInput(
+                "configuration query term budget exceeded (64 terms, 256 bytes per term)".into(),
+            ));
+        }
+        let term = term.to_lowercase();
+        if term.len() > MAX_TERM_BYTES {
+            return Err(StorageError::InvalidInput(
+                "configuration query normalized term budget exceeded (256 bytes)".into(),
+            ));
+        }
+        terms.push(term);
+    }
+    Ok(terms)
 }
 
 fn row_matches_terms(row: &FeatureFlagRow, terms: &[String]) -> bool {

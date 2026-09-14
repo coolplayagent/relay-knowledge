@@ -284,7 +284,21 @@ fn read(
             && names::platform_visible(platform_node, "System", input.content));
     let is_boolean = matches!(platform, Some("java.lang.Boolean"))
         || (platform == Some("Boolean") && names::platform_visible(node, "Boolean", input.content));
+    let numeric_owner = match (method, platform) {
+        ("getInteger", Some("java.lang.Integer")) => Some("Integer"),
+        ("getLong", Some("java.lang.Long")) => Some("Long"),
+        ("getInteger", Some("Integer"))
+            if names::platform_visible(node, "Integer", input.content) =>
+        {
+            Some("Integer")
+        }
+        ("getLong", Some("Long")) if names::platform_visible(node, "Long", input.content) => {
+            Some("Long")
+        }
+        _ => None,
+    };
     let kind = match method {
+        _ if numeric_owner.is_some() && collection.is_none() => Some("config_key"),
         "get" if collection.is_some() && is_system && platform_method == "getenv" => {
             Some("env_var")
         }
@@ -341,7 +355,7 @@ fn read(
             ));
         }
         row.metadata.reference = reference;
-        if platform_object.is_none() && (is_system || is_boolean) {
+        if platform_object.is_none() && (is_system || is_boolean || numeric_owner.is_some()) {
             row.metadata.static_import_reference = Some(format!(
                 "{}/{}",
                 field_symbol(platform_node, platform_method, input.content),
@@ -373,6 +387,16 @@ fn read(
             .and_then(|value| literal(value, input.content, 1));
         if method == "getBoolean" && is_boolean {
             row.metadata.default_value = Some("false".to_owned());
+        }
+        if let Some(owner) = numeric_owner {
+            row.metadata.value_type = Some("number".into());
+            row.metadata.default_value = row.metadata.default_value.take().filter(|v| {
+                if owner == "Integer" {
+                    v.parse::<i32>().is_ok()
+                } else {
+                    v.parse::<i64>().is_ok()
+                }
+            });
         }
         // Preserve the target namespace even when a constant supplies the key.
         if source_kind == "config_symbol" {

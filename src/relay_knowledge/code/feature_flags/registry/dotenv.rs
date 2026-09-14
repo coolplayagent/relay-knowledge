@@ -9,7 +9,13 @@ pub(super) fn extract(
         let start = offset;
         let end = natural_line_end(input.content, start);
         offset = end;
-        let line = input.content[start..end].trim();
+        let line = &input.content[start..end];
+        let line = if start == 0 {
+            line.strip_prefix('\u{feff}').unwrap_or(line)
+        } else {
+            line
+        };
+        let line = line.trim();
         let line = line
             .strip_prefix("export")
             .filter(|rest| rest.starts_with([' ', '\t']))

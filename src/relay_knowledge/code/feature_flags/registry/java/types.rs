@@ -179,7 +179,15 @@ impl Hierarchy {
                         continue;
                     };
                     let name = names::text(name, input.content);
-                    if !matches!(name, "getProperty" | "getenv" | "getBoolean") {
+                    if !matches!(
+                        name,
+                        "getProperty"
+                            | "getProperties"
+                            | "getenv"
+                            | "getBoolean"
+                            | "getInteger"
+                            | "getLong"
+                    ) {
                         continue;
                     }
                     let Some(parameters) = method.child_by_field_name("parameters") else {
@@ -190,14 +198,17 @@ impl Hierarchy {
                     let varargs = parameters
                         .last()
                         .is_some_and(|p| p.kind() == "spread_parameter");
-                    if parameters.iter().any(|p| {
+                    if parameters.iter().enumerate().any(|(index, p)| {
+                        if index > 0 && matches!(name, "getInteger" | "getLong") {
+                            return false;
+                        }
                         p.child_by_field_name("type").is_some_and(|ty| {
                             super::static_imports::rejects_string(ty, input.content)
                         })
                     }) {
                         continue;
                     }
-                    for arity in 1..=2 {
+                    for arity in 0..=2 {
                         if (varargs && arity >= parameters.len().saturating_sub(1))
                             || (!varargs && arity == parameters.len())
                         {

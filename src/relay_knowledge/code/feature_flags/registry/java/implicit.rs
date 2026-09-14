@@ -15,7 +15,6 @@ pub(super) fn owner(mut node: Node<'_>, method: &str, content: &str) -> Option<S
             }
             let mut cursor = parent.walk();
             let mut candidates = 0;
-            let mut matching_name = false;
             for member in parent.named_children(&mut cursor) {
                 budget = budget.checked_sub(1)?;
                 if member.kind() != "method_declaration"
@@ -25,7 +24,6 @@ pub(super) fn owner(mut node: Node<'_>, method: &str, content: &str) -> Option<S
                 {
                     continue;
                 }
-                matching_name = true;
                 if member
                     .child_by_field_name("parameters")
                     .is_some_and(|p| p.named_child_count() == 0)
@@ -33,7 +31,7 @@ pub(super) fn owner(mut node: Node<'_>, method: &str, content: &str) -> Option<S
                     candidates += 1;
                 }
             }
-            if matching_name {
+            if candidates > 0 {
                 return (candidates == 1).then(|| {
                     names::field_symbol(node, "", content)
                         .trim_end_matches('.')
