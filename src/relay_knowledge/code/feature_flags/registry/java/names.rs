@@ -339,31 +339,24 @@ pub(super) fn binding<'a>(mut node: Node<'a>, name: &str, content: &str) -> Opti
         {
             return Some(parent);
         }
-        if !explicit_field
-            && parent.kind() == "catch_clause"
-            && parent.child_by_field_name("body") == Some(node)
-        {
-            let mut cursor = parent.walk();
-            for parameter in parent.named_children(&mut cursor) {
-                budget = budget.checked_sub(1)?;
-                if parameter.kind() == "catch_formal_parameter"
-                    && parameter
-                        .child_by_field_name("name")
-                        .is_some_and(|n| text(n, content) == name)
-                {
-                    return Some(parameter);
-                }
+        let parameters = match parent.kind() {
+            "catch_clause" if parent.child_by_field_name("body") == Some(node) => Some(parent),
+            "resource_specification" => Some(parent),
+            "try_with_resources_statement" if parent.child_by_field_name("body") == Some(node) => {
+                parent.child_by_field_name("resources")
             }
-        }
-        if let Some(parameters) = parent
-            .child_by_field_name("parameters")
-            .filter(|_| !explicit_field)
-        {
+            _ => parent.child_by_field_name("parameters"),
+        };
+        if let Some(parameters) = parameters.filter(|_| !explicit_field) {
             if parameters.kind() == "identifier" && text(parameters, content) == name {
                 return Some(parameters);
             }
             let mut cursor = parameters.walk();
             for parameter in parameters.named_children(&mut cursor) {
+                budget = budget.checked_sub(1)?;
+                if parameter.kind() == "resource" && parameter.start_byte() >= position {
+                    break;
+                }
                 if parameter.kind() == "identifier" && text(parameter, content) == name {
                     return Some(parameter);
                 }

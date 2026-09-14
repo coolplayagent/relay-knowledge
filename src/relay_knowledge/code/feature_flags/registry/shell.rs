@@ -229,9 +229,10 @@ fn export_mode(node: Node<'_>, content: &str) -> Result<Option<bool>, DomainErro
     }
     let mut cursor = node.walk();
     let mut words = node.children(&mut cursor).filter(|child| !child.is_extra());
-    let Some(command) = words.next() else {
+    let Some(command) = node.child_by_field_name("name").or_else(|| words.next()) else {
         return Ok(None);
     };
+    let command_end = command.end_byte();
     let Some(command) = values::static_value(Some(command), content)? else {
         return Ok(None);
     };
@@ -248,6 +249,9 @@ fn export_mode(node: Node<'_>, content: &str) -> Result<Option<bool>, DomainErro
                 "configuration",
                 "shell command option budget exceeded",
             ));
+        }
+        if word.start_byte() < command_end {
+            continue;
         }
         if values::assignment(word, content)?.is_some() {
             break;
@@ -304,6 +308,27 @@ fn shell_external(
             ));
         }
         budget -= 1;
+        // Prefix assignment values see earlier prefixes; command arguments are
+        // expanded before that temporary environment is established.
+        if parent.kind() == "command" && node.kind() == "variable_assignment" {
+            let mut previous = node.prev_named_sibling();
+            while let Some(assignment) = previous {
+                budget = budget.checked_sub(1).ok_or_else(|| {
+                    DomainError::invalid(
+                        "configuration",
+                        "shell export analysis incomplete: lexical budget exceeded",
+                    )
+                })?;
+                if assignment.kind() == "variable_assignment"
+                    && assignment
+                        .child_by_field_name("name")
+                        .is_some_and(|name| &content[name.byte_range()] == key)
+                {
+                    return Ok((false, uncertain));
+                }
+                previous = assignment.prev_named_sibling();
+            }
+        }
         if parent.kind() == "for_statement"
             && parent.child_by_field_name("body") == Some(node)
             && parent
@@ -453,7 +478,12 @@ fn command_names(node: Node<'_>, key: &str, content: &str) -> Result<bool, Domai
                 "shell command operand budget exceeded",
             ));
         }
-        if child.kind() == "command_name" || child.is_extra() {
+        if child.kind() == "command_name"
+            || child.is_extra()
+            || node
+                .child_by_field_name("name")
+                .is_some_and(|name| child.start_byte() < name.end_byte())
+        {
             continue;
         }
         if let Some((name, _)) = values::assignment(child, content)? {
@@ -471,6 +501,31 @@ fn prior_assignment<'a>(
     key: &str,
     content: &str,
 ) -> Result<Option<(Node<'a>, bool)>, DomainError> {
+    if export_mode(export, content)? == Some(true) && command_names(export, key, content)? {
+        if let Some(command) = export.child_by_field_name("name") {
+            let mut cursor = export.walk();
+            let mut prefix = None;
+            for (index, child) in export.named_children(&mut cursor).enumerate() {
+                if index >= 1024 {
+                    return Err(DomainError::invalid(
+                        "configuration",
+                        "shell command operand budget exceeded",
+                    ));
+                }
+                if child.start_byte() >= command.start_byte() {
+                    break;
+                }
+                if child.kind() == "variable_assignment"
+                    && values::assignment(child, content)?.is_some_and(|(name, _)| name == key)
+                {
+                    prefix = Some(child);
+                }
+            }
+            if let Some(prefix) = prefix {
+                return Ok(Some((prefix, false)));
+            }
+        }
+    }
     let mut scope = export;
     let mut previous = scope.prev_named_sibling();
     let mut budget = 1024_usize;
@@ -526,6 +581,18 @@ fn prior_assignment<'a>(
                     .is_some_and(|parent| parent.kind() == "command"))
                 && values::assignment(node, content)?.is_some_and(|(name, _)| name == key)
             {
+                if let Some(command) = node.parent().filter(|parent| {
+                    parent.kind() == "command"
+                        && parent
+                            .child_by_field_name("name")
+                            .is_some_and(|name| node.end_byte() <= name.start_byte())
+                }) {
+                    if export_mode(command, content)? != Some(true)
+                        || !command_names(command, key, content)?
+                    {
+                        continue;
+                    }
+                }
                 if conditional {
                     uncertain = true;
                     continue;

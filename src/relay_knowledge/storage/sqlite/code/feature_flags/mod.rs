@@ -422,19 +422,31 @@ fn query_terms(query: &str) -> Result<Vec<String>, StorageError> {
         }
         terms.push(term);
     }
+    if terms.is_empty() {
+        return Err(StorageError::InvalidInput(
+            "configuration query must contain an alphanumeric character or underscore".into(),
+        ));
+    }
     Ok(terms)
 }
 
-fn row_matches_terms(row: &FeatureFlagRow, terms: &[String]) -> bool {
+fn row_matches_terms(row: &FeatureFlagRow, terms: &[String]) -> Result<bool, StorageError> {
     let haystack = format!(
-        "{} {} {} {} {} {}",
-        row.name, row.source_kind, row.source_key, row.edge_kind, row.path, row.excerpt
+        "{} {} {} {} {} {} {}",
+        row.name,
+        row.source_kind,
+        row.source_key,
+        row.edge_kind,
+        row.path,
+        row.excerpt,
+        serde_json::to_string(&row.metadata)
+            .map_err(|e| StorageError::InvalidInput(e.to_string()))?
     )
     .to_lowercase();
-    terms.iter().all(|term| haystack.contains(term))
+    Ok(terms.iter().all(|term| haystack.contains(term)))
 }
 
-fn score_row(row: &FeatureFlagRow, terms: &[String]) -> f64 {
+fn score_row(row: &FeatureFlagRow, terms: &[String]) -> Result<f64, StorageError> {
     let edge_score = match row.edge_kind.as_str() {
         "guards_code" => 20.0,
         "defines_config" => 16.0,
@@ -443,13 +455,13 @@ fn score_row(row: &FeatureFlagRow, terms: &[String]) -> f64 {
     let confidence = f64::from(row.confidence_basis_points) / 1000.0;
     let query_bonus = if terms.is_empty() {
         0.0
-    } else if row_matches_terms(row, terms) {
+    } else if row_matches_terms(row, terms)? {
         8.0
     } else {
         0.0
     };
 
-    edge_score + confidence + query_bonus
+    Ok(edge_score + confidence + query_bonus)
 }
 
 fn edge_priority(edge_kind: &str) -> usize {

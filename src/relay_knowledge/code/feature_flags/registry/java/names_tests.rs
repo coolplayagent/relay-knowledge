@@ -442,6 +442,91 @@ fn multi_catch_receivers_shadow_fields_without_guessing_a_common_type() {
 }
 
 #[test]
+fn resource_receivers_shadow_fields_only_inside_the_try_scope() {
+    for (resource, expected) in [
+        (
+            "FeatureConfig cfg = open()",
+            Some("FeatureConfig.isEnabled"),
+        ),
+        (
+            "final @Marker external.FeatureConfig cfg = open()",
+            Some("external.FeatureConfig.isEnabled"),
+        ),
+        (
+            "var cfg = new FeatureConfig()",
+            Some("FeatureConfig.isEnabled"),
+        ),
+        ("var cfg = open()", None),
+    ] {
+        let rows = facts(
+            "java",
+            &format!(
+                "class App {{ OuterConfig cfg; void run() {{ try ({resource}) {{ if(cfg.isEnabled()) {{}} if(this.cfg.isEnabled()) {{}} }} catch(Exception ex) {{ if(cfg.isEnabled()) {{}} }} finally {{ if(cfg.isEnabled()) {{}} }} if(cfg.isEnabled()) {{}} }} }}"
+            ),
+        );
+        for edge in ["reads_config", "guards_code"] {
+            let usages = rows
+                .iter()
+                .filter(|r| r.edge_kind == edge)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                usages.len(),
+                4 + usize::from(expected.is_some()),
+                "{resource}: {rows:?}"
+            );
+            assert_eq!(
+                usages
+                    .iter()
+                    .filter(|r| {
+                        r.metadata.reference.as_deref() == Some("OuterConfig.isEnabled")
+                    })
+                    .count(),
+                4,
+                "{resource}: {rows:?}"
+            );
+            if let Some(reference) = expected {
+                assert_eq!(
+                    usages
+                        .iter()
+                        .filter(|r| r.metadata.reference.as_deref() == Some(reference))
+                        .count(),
+                    1,
+                    "{resource}: {rows:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn resource_initializers_resolve_only_preceding_declarations() {
+    let rows = facts(
+        "java",
+        r#"class App { OuterConfig cfg; void run() {
+        try (FeatureConfig first = open(cfg.isEnabled());
+             FeatureConfig cfg = open();
+             Other next = open(cfg.isEnabled())) {
+            if(cfg.isEnabled()) {}
+        }
+        try (cfg) { if(cfg.isEnabled()) {} }
+    }}"#,
+    );
+    for (edge, expected) in [("reads_config", 2), ("guards_code", 1)] {
+        for reference in ["FeatureConfig.isEnabled", "OuterConfig.isEnabled"] {
+            assert_eq!(
+                rows.iter()
+                    .filter(|r| {
+                        r.edge_kind == edge && r.metadata.reference.as_deref() == Some(reference)
+                    })
+                    .count(),
+                expected,
+                "{reference}: {rows:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn composed_java_keys_resolve_bounded_final_string_references() {
     let rows = facts(
         "java",

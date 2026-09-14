@@ -832,3 +832,93 @@ fn export_command_word_budget_errors_remain_observable() {
         "{error}"
     );
 }
+
+#[test]
+fn export_prefix_assignments_bind_only_matching_operands_and_latest_values() {
+    for export in ["export", "\"export\"", "declare -x"] {
+        for prior in ["", "FOO=old; "] {
+            for operand in ["FOO", "\"FOO\""] {
+                let source = format!("{prior}FOO=bar {export} {operand}; export FOO");
+                let rows = facts("bash", &source);
+                let definitions = rows
+                    .iter()
+                    .filter(|row| row.source_key == "FOO" && row.edge_kind == "defines_config")
+                    .collect::<Vec<_>>();
+                assert!(!definitions.is_empty(), "{source}");
+                assert!(
+                    definitions
+                        .iter()
+                        .all(|row| row.metadata.default_value.as_deref() == Some("bar")),
+                    "{source}: {rows:?}"
+                );
+            }
+        }
+    }
+    for source in [
+        "FOO=bar export FOO=baz; export FOO",
+        "FOO=bar \"export\" FOO=baz; export FOO",
+        "FOO=bar FOO=baz export FOO; export FOO",
+    ] {
+        let rows = facts("bash", source);
+        let definitions = rows
+            .iter()
+            .filter(|row| row.source_key == "FOO" && row.edge_kind == "defines_config")
+            .collect::<Vec<_>>();
+        assert!(!definitions.is_empty(), "{source}");
+        assert!(
+            definitions
+                .iter()
+                .all(|row| row.metadata.default_value.as_deref() == Some("baz")),
+            "{source}: {rows:?}"
+        );
+    }
+    for source in [
+        "FOO=bar export OTHER; export FOO",
+        "FOO=bar export -n FOO; export FOO",
+        "FOO=bar echo FOO; export FOO",
+        "(FOO=bar export FOO)",
+        "f() { FOO=bar export FOO; }",
+    ] {
+        assert!(
+            !facts("bash", source)
+                .iter()
+                .any(|row| row.source_key == "FOO" && row.edge_kind == "defines_config"),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn prefix_value_reads_observe_prior_prefixes_but_arguments_observe_outer_values() {
+    for command in ["export FOO", "\"export\" FOO", "echo"] {
+        let source = format!("FOO=$FOO BAR=$FOO {command} \"$FOO\"");
+        let rows = facts("bash", &source);
+        let positions = source
+            .match_indices("$FOO")
+            .map(|(offset, _)| offset)
+            .collect::<Vec<_>>();
+        let mut reads = rows
+            .iter()
+            .filter(|row| row.source_key == "FOO" && row.edge_kind == "reads_config")
+            .map(|row| row.byte_range.start as usize)
+            .collect::<Vec<_>>();
+        reads.sort_unstable();
+        assert_eq!(
+            reads,
+            vec![positions[0], positions[2]],
+            "{source}: {rows:?}"
+        );
+    }
+    for source in [
+        "FOO=$OTHER export FOO",
+        "if ready; then FOO=bar export FOO; fi",
+    ] {
+        let rows = facts("bash", source);
+        assert!(
+            rows.iter().any(|row| row.source_key == "FOO"
+                && row.edge_kind == "defines_config"
+                && row.metadata.default_value.is_none()),
+            "{source}: {rows:?}"
+        );
+    }
+}

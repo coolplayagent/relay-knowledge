@@ -309,7 +309,7 @@ fn search_bounded(
                     .consistency_diagnostics
                     .push("unresolved_or_ambiguous_config_symbol".to_owned());
             }
-            group.score = group.score.max(score_row(&resolved, &terms));
+            group.score = group.score.max(score_row(&resolved, &terms)?);
             group.usages.push(CodeFeatureFlagUsage {
                 usage_id: resolved.usage_id,
                 path: resolved.path,
@@ -327,10 +327,13 @@ fn search_bounded(
             });
         }
     }
-    let mut groups = groups
-        .into_values()
-        .filter(|group| matches_group(group, request, &terms))
-        .collect::<Vec<_>>();
+    let mut matched = Vec::new();
+    for group in groups.into_values() {
+        if matches_group(&group, request, &terms)? {
+            matched.push(group);
+        }
+    }
+    let mut groups = matched;
     for group in &mut groups {
         group.usages.sort_by(|a, b| {
             edge_priority(&a.edge_kind)
@@ -364,28 +367,18 @@ fn matches_group(
     group: &CodeFeatureFlagGraph,
     request: &CodeFeatureFlagRequest,
     terms: &[String],
-) -> bool {
-    let haystack = format!(
-        "{} {} {} {}",
-        group.name,
-        group.source_key,
-        group.source_kind,
-        group
-            .usages
-            .iter()
-            .map(|u| format!(
-                "{} {} {} {} {}",
-                u.path,
-                u.excerpt,
-                u.edge_kind,
-                u.metadata.bindings.join(" "),
-                u.metadata.reference.as_deref().unwrap_or("")
-            ))
-            .collect::<Vec<_>>()
-            .join(" ")
-    )
-    .to_lowercase();
-    terms.iter().all(|term| haystack.contains(term))
+) -> Result<bool, StorageError> {
+    let mut haystack = format!("{} {} {}", group.name, group.source_key, group.source_kind);
+    for usage in &group.usages {
+        let metadata = serde_json::to_string(&usage.metadata)
+            .map_err(|e| StorageError::InvalidInput(e.to_string()))?;
+        haystack.push_str(&format!(
+            " {} {} {} {}",
+            usage.path, usage.excerpt, usage.edge_kind, metadata
+        ));
+    }
+    let haystack = haystack.to_lowercase();
+    Ok(terms.iter().all(|term| haystack.contains(term))
         && request.filters.domain.as_ref().is_none_or(|v| {
             group
                 .usages
@@ -402,7 +395,7 @@ fn matches_group(
                 .usages
                 .iter()
                 .any(|u| u.metadata.hot_reload == Some(v))
-        })
+        }))
 }
 fn incomplete(reason: &str) -> StorageError {
     StorageError::InvalidInput(format!(

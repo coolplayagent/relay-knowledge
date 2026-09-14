@@ -100,3 +100,19 @@ fn configuration_query_terms_reject_overflow_without_truncating() {
         assert!(error.to_string().contains("budget exceeded"));
     }
 }
+
+#[test]
+fn supplied_queries_require_a_searchable_term() {
+    for query in ["", " ", ".", "... --", "🧪", "💡.🚀"] {
+        assert!(
+            query_terms(query)
+                .unwrap_err()
+                .to_string()
+                .contains("alphanumeric"),
+            "{query}"
+        );
+    }
+    for (query, expected) in [("_", "_"), ("feature.🧪", "feature"), ("账务", "账务")] {
+        assert_eq!(query_terms(query).unwrap(), vec![expected]);
+    }
+}

@@ -626,3 +626,82 @@ fn metadata_seeds_exclude_more_than_ten_thousand_unrelated_symbols() {
         assert_eq!(groups[0].source_key, "flag");
     }
 }
+
+#[test]
+fn metadata_only_query_terms_survive_group_matching_and_affect_rank() {
+    let db = fixture();
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            domain: Some("payments".into()),
+            default_value: Some("disabled".into()),
+            value_type: Some("boolean".into()),
+            hot_reload: Some(true),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            flow_incomplete: Some("unevaluated_explicit_default".into()),
+            ..Default::default()
+        },
+    );
+    let all = search(&db, &status(), &request(None, CodeConfigFilter::default())).unwrap();
+    for query in [
+        "payments",
+        "properties",
+        "disabled",
+        "boolean",
+        "true",
+        "domain",
+        "hot_reload",
+        "unevaluated_explicit_default",
+        "payments unevaluated_explicit_default",
+    ] {
+        let groups = search(
+            &db,
+            &status(),
+            &request(Some(query), CodeConfigFilter::default()),
+        )
+        .unwrap();
+        assert_eq!(groups.len(), 1, "{query}");
+        assert_eq!(groups[0].usages.len(), 2, "{query}");
+        if query == "payments" {
+            assert!(groups[0].score > all[0].score);
+        }
+    }
+    assert!(
+        search(
+            &db,
+            &status(),
+            &request(Some("unrelated_metadata"), CodeConfigFilter::default())
+        )
+        .unwrap()
+        .is_empty()
+    );
+}
+
+#[test]
+fn zero_term_queries_fail_before_loading_registry_rows() {
+    let db = fixture();
+    db.execute("DROP TABLE code_repository_feature_flags", [])
+        .unwrap();
+    for query in [".", "--", "🧪"] {
+        let error = search(
+            &db,
+            &status(),
+            &request(Some(query), CodeConfigFilter::default()),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("alphanumeric"), "{error}");
+    }
+}
