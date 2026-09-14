@@ -228,3 +228,17 @@ fn legacy_source_hashes(
 #[cfg(test)]
 #[path = "columns_tests.rs"]
 mod tests;
+
+pub(super) const CODE_REPOSITORY_FILES_COLUMNS: &[&str] = &[
+    "repository_id",
+    "source_scope",
+    "file_id",
+    "path",
+    "language_id",
+    "blob_hash",
+    "byte_len",
+    "line_count",
+    "parse_status",
+    "is_generated",
+    "degraded_reason",
+];

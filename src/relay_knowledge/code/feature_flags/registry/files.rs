@@ -8,15 +8,12 @@ mod pipelines;
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
-    if input.language_id == "bash" {
-        return super::shell::extract(input);
-    }
     let mut records = Vec::new();
     let mut offset = 0;
     let mut start = 0;
     let mut logical = String::new();
     let mut section = String::new();
-    let mut comment_end = 0;
+    let mut template_state = TemplateOutputState::default();
     let mut segments = input.content.split_inclusive(['\r', '\n']).peekable();
     while let Some(segment) = segments.next() {
         if logical.is_empty() {
@@ -24,7 +21,12 @@ pub(super) fn extract(
         }
         let line = segment.trim_end_matches(['\r', '\n']);
         let line = if input.language_id == "gotemplate" {
-            template_output_line(input.content, offset, offset + line.len(), &mut comment_end)?
+            template_output_line(
+                input.content,
+                offset,
+                offset + line.len(),
+                &mut template_state,
+            )?
         } else {
             line.to_owned()
         };
@@ -38,8 +40,18 @@ pub(super) fn extract(
         } else {
             line.trim_start_matches(PROPERTY_WHITESPACE)
         });
-        if input.language_id == "gotemplate" && comment_end > offset {
+        if input.language_id == "gotemplate" && template_state.skip_until > offset {
             continue;
+        }
+        if input.language_id == "gotemplate" {
+            let following = input.content[offset..].trim_start_matches([' ', '\t', '\r', '\n']);
+            if following
+                .strip_prefix("{{-")
+                .is_some_and(|tail| tail.starts_with([' ', '\t', '\r', '\n']))
+            {
+                logical.truncate(logical.trim_end_matches([' ', '\t', '\r', '\n']).len());
+                continue;
+            }
         }
         if input.language_id == "properties"
             && !logical
@@ -99,11 +111,17 @@ pub(super) fn extract(
                         };
                         set_default(&mut row.metadata, value);
                     }
+                    if input.language_id == "gotemplate" && template_state.uncertain {
+                        row.metadata.default_value = None;
+                        row.metadata.value_type = None;
+                        row.metadata.flow_incomplete = Some("conditional_template_output".into());
+                    }
                     records.push(row);
                 }
             }
         }
         logical.clear();
+        template_state.uncertain = false;
     }
     if input.language_id == "gotemplate" {
         template_reads(input, &mut records)?;
@@ -234,13 +252,21 @@ pub(super) fn quoted(raw: &str) -> Option<(String, usize)> {
 #[path = "files_tests.rs"]
 mod tests;
 
+#[derive(Default)]
+struct TemplateOutputState {
+    skip_until: usize,
+    depth: usize,
+    uncertain: bool,
+}
+
 fn template_output_line(
     content: &str,
     start: usize,
     end: usize,
-    comment_end: &mut usize,
+    state: &mut TemplateOutputState,
 ) -> Result<String, DomainError> {
-    let mut begin = start.max(*comment_end).min(end);
+    state.uncertain |= state.depth > 0;
+    let mut begin = start.max(state.skip_until).min(end);
     let mut output = String::new();
     for _ in 0..32 {
         let Some(relative) = content[begin..end].find("{{") else {
@@ -257,13 +283,40 @@ fn template_output_line(
             .starts_with("/*");
         let Some(close) = action_end(content, open + 2) else {
             if is_comment {
-                *comment_end = content.len();
+                state.skip_until = content.len();
             } else {
                 output.push_str(&content[open..end]);
             }
             return Ok(output);
         };
+        let left_trim = action
+            .strip_prefix('-')
+            .is_some_and(|tail| tail.starts_with([' ', '\t', '\r', '\n']));
+        let right_trim = content[open + 2..close]
+            .strip_suffix('-')
+            .is_some_and(|prefix| prefix.ends_with([' ', '\t', '\r', '\n']));
+        if left_trim {
+            output.truncate(output.trim_end_matches([' ', '\t', '\r', '\n']).len());
+        }
         if !is_comment {
+            let command = content[open + 2..close]
+                .trim_start_matches('-')
+                .split_whitespace()
+                .next();
+            match command {
+                Some("if" | "with" | "range") => {
+                    if state.depth >= 32 {
+                        return Err(DomainError::invalid(
+                            "configuration",
+                            "template control depth budget exceeded",
+                        ));
+                    }
+                    state.depth += 1;
+                    state.uncertain = true;
+                }
+                Some("end") => state.depth = state.depth.saturating_sub(1),
+                _ => {}
+            }
             let mut words = content[open + 2..close]
                 .trim_start_matches('-')
                 .split_whitespace();
@@ -272,24 +325,20 @@ fn template_output_line(
             if !assignment {
                 output.push_str("{{}}");
             }
-            *comment_end = close + 2;
-            begin = (*comment_end).min(end);
-            continue;
-        }
-        if close - open > 8192 {
+        } else if close - open > 8192 {
             return Err(DomainError::invalid(
                 "configuration",
                 "template comment byte budget exceeded",
             ));
         }
-        if action.starts_with('-') {
-            output.truncate(output.trim_end().len());
+        state.skip_until = close + 2;
+        if right_trim {
+            state.skip_until = content.len()
+                - content[state.skip_until..]
+                    .trim_start_matches([' ', '\t', '\r', '\n'])
+                    .len();
         }
-        *comment_end = close + 2;
-        begin = (*comment_end).min(end);
-        if content[open..close].trim_end().ends_with('-') {
-            begin = end - content[begin..end].trim_start().len();
-        }
+        begin = (state.skip_until).min(end);
     }
     if content[begin..end].contains("{{") {
         return Err(DomainError::invalid(

@@ -84,7 +84,7 @@ pub(super) fn search(
 ) -> Result<Vec<CodeFeatureFlagGraph>, StorageError> {
     let status = required_repository(connection, &request.repository)?;
     super::super::connection_runtime::retry::retry_sqlite_transient(|| {
-        search_with_status(connection, &status, &request)
+        registry::search(connection, &status, &request)
     })
 }
 
@@ -100,16 +100,8 @@ pub(super) fn search_scope(
             ))
         })?;
     super::super::connection_runtime::retry::retry_sqlite_transient(|| {
-        search_with_status(connection, &status, &request)
+        registry::search(connection, &status, &request)
     })
-}
-
-fn search_with_status(
-    connection: &Connection,
-    status: &CodeRepositoryStatus,
-    request: &CodeFeatureFlagRequest,
-) -> Result<Vec<CodeFeatureFlagGraph>, StorageError> {
-    registry::search(connection, status, request)
 }
 
 fn feature_flag_sql_query(

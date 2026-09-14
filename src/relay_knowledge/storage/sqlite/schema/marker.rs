@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::storage::StorageError;
 
-use super::code_capabilities::{CODE_REPOSITORY_FILES_COLUMNS, configuration_metadata_is_current};
+use super::columns::CODE_REPOSITORY_FILES_COLUMNS;
 use super::introspection::{
     index_has_columns, table_column_is_not_null, table_columns_have_no_defaults, table_exists,
     table_has_columns, table_has_exact_columns, table_has_exact_plain_columns,
@@ -466,7 +466,7 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
         || !reference_resolution_progress_schema_is_current(connection)?
         || !super::incremental_clone_marker::schema_is_current(connection)?
         || !reference_search_group_schema_is_current(connection)?
-        || !configuration_metadata_is_current(connection)?
+        || !table_column_is_not_null(connection, "code_repository_feature_flags", "metadata_json")?
     {
         return Ok(false);
     }

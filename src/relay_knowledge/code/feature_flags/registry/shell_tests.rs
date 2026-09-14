@@ -2,12 +2,10 @@ use crate::code::feature_flags::registry::test_support::*;
 use crate::code::feature_flags::{FeatureFlagFileInput, registry::extract};
 
 #[test]
-fn conditional_deferred_and_subshell_exports_do_not_define_parent_configuration() {
+fn deferred_and_subshell_exports_do_not_define_parent_configuration() {
     for declaration in [
         "(export FLAG=true)",
         "f() { export FLAG=true; }",
-        "if test x; then export FLAG=true; fi",
-        "FLAG=true; if test x; then export FLAG; fi",
         "set -a; (FLAG=true)",
     ] {
         let rows = facts("bash", &format!("{declaration}\necho \"$FLAG\""));
@@ -422,11 +420,7 @@ fn scoped_assignments_satisfy_reads_without_creating_parent_definitions() {
         r#"FLAG=internal; export FLAG; echo "$FLAG""#,
         r#"set -a; FLAG=internal; echo "$FLAG""#,
     ] {
-        for source in [
-            format!("f() {{ {body}; }}"),
-            format!("( {body} )"),
-            format!("if test -f marker; then {body}; fi"),
-        ] {
+        for source in [format!("f() {{ {body}; }}"), format!("( {body} )")] {
             assert!(
                 facts("bash", &source)
                     .iter()
@@ -434,6 +428,10 @@ fn scoped_assignments_satisfy_reads_without_creating_parent_definitions() {
                 "{source}"
             );
         }
+        let conditional = facts("bash", &format!("if test -f marker; then {body}; fi"));
+        assert!(conditional.iter().any(|r| r.source_key == "FLAG"
+            && r.edge_kind == "defines_config"
+            && r.metadata.flow_incomplete.is_some()));
     }
     let rows = facts("bash", r#"f() { export FLAG; echo "$FLAG"; }"#);
     assert!(rows.iter().any(|r| r.edge_kind == "reads_config"));
@@ -531,7 +529,9 @@ fn leading_short_circuit_exports_are_definite_but_right_operands_are_conditional
                 .all(|r| r.metadata.flow_incomplete.is_none())
         );
         let rows = facts("bash", &format!(": {op} export FLAG=true; echo $FLAG"));
-        assert!(rows.iter().all(|r| r.edge_kind != "defines_config"));
+        assert!(rows.iter().any(|r| r.edge_kind == "defines_config"
+            && r.metadata.default_value.is_none()
+            && r.metadata.flow_incomplete.is_some()));
         assert!(rows.iter().any(|r| r.metadata.flow_incomplete.is_some()));
     }
     let rows = facts("bash", "set -a && :; FLAG=true; echo $FLAG");
@@ -570,4 +570,25 @@ fn conditional_unsets_before_bare_exports_keep_uncertain_definition_evidence() {
     assert!(definition.metadata.flow_incomplete.is_some());
     let rows = facts("bash", "FLAG=true; unset FLAG; export FLAG; echo $FLAG");
     assert!(rows.iter().all(|r| r.edge_kind != "defines_config"));
+}
+
+#[test]
+fn export_execution_matrix_preserves_possible_parent_definitions() {
+    for source in [
+        "if test x; then export FLAG=true; fi",
+        "FLAG=true; if test x; then export FLAG; fi",
+        "while test x; do export FLAG=true; done",
+        "for x in one; do export FLAG=true; done",
+        "case x in x) export FLAG=true;; esac",
+        ": && export FLAG=true",
+        ": || export FLAG=true",
+    ] {
+        let rows = facts("bash", source);
+        let definition = rows
+            .iter()
+            .find(|r| r.source_key == "FLAG" && r.edge_kind == "defines_config")
+            .unwrap_or_else(|| panic!("{source}: {rows:?}"));
+        assert!(definition.metadata.default_value.is_none(), "{source}");
+        assert!(definition.metadata.flow_incomplete.is_some(), "{source}");
+    }
 }

@@ -17,7 +17,7 @@ pub(super) fn extract(
     let mut pending = vec![tree.root_node()];
     let mut rows = Vec::new();
     while let Some(node) = pending.pop() {
-        if node.kind() == "variable_assignment" && unconditional(node) {
+        if node.kind() == "variable_assignment" && export_scope(node).is_some() {
             let explicit = node
                 .parent()
                 .and_then(|parent| export_mode(parent, input.content))
@@ -40,8 +40,15 @@ pub(super) fn extract(
             };
             if explicit || enabled || uncertain {
                 if let Some(mut row) = definition(input, node)? {
-                    if uncertain && !explicit {
-                        row.metadata.flow_incomplete = Some("conditional_allexport".into());
+                    if (uncertain && !explicit) || export_scope(node) == Some(true) {
+                        row.metadata.flow_incomplete = Some(
+                            if export_scope(node) == Some(true) {
+                                "conditional_export"
+                            } else {
+                                "conditional_allexport"
+                            }
+                            .into(),
+                        );
                         row.metadata.default_value = None;
                         row.metadata.value_type = None;
                     }
@@ -50,7 +57,7 @@ pub(super) fn extract(
                 }
             }
         }
-        if export_mode(node, input.content) == Some(true) && unconditional(node) {
+        if export_mode(node, input.content) == Some(true) && export_scope(node).is_some() {
             let mut cursor = node.walk();
             for name in node
                 .named_children(&mut cursor)
@@ -77,7 +84,7 @@ pub(super) fn extract(
                                 );
                             }
                         }
-                        if uncertain {
+                        if uncertain || export_scope(node) == Some(true) {
                             row.metadata.default_value = None;
                             row.metadata.value_type = None;
                             row.metadata.flow_incomplete = Some("conditional_reassignment".into());
@@ -180,24 +187,23 @@ pub(super) fn extract(
     Ok(rows)
 }
 
-fn unconditional(mut node: Node<'_>) -> bool {
+/// Whether an export can affect the parent environment, and whether execution is conditional.
+fn export_scope(mut node: Node<'_>) -> Option<bool> {
+    let mut conditional = false;
     for _ in 0..1024 {
         let Some(parent) = node.parent() else {
-            return true;
+            return Some(conditional);
         };
-        if parent.kind() == "list" && parent.named_child(0) == Some(node) {
-            node = parent;
-            continue;
-        }
-        if !matches!(
-            parent.kind(),
-            "program" | "compound_statement" | "declaration_command"
-        ) {
-            return false;
+        match parent.kind() {
+            "program" | "compound_statement" | "declaration_command" => {}
+            "list" => conditional |= parent.named_child(0) != Some(node),
+            "if_statement" | "elif_clause" | "else_clause" | "while_statement"
+            | "for_statement" | "do_group" | "case_statement" | "case_item" => conditional = true,
+            _ => return None,
         }
         node = parent;
     }
-    false
+    None
 }
 
 fn export_mode(node: Node<'_>, content: &str) -> Option<bool> {
@@ -284,7 +290,10 @@ fn shell_external(
                             }
                         }
                         if names && !conditional {
-                            if inherited_external && exported && !unconditional(candidate) {
+                            if inherited_external
+                                && exported
+                                && export_scope(candidate) != Some(false)
+                            {
                                 let mut cursor = candidate.walk();
                                 let assigns =
                                     candidate
@@ -299,7 +308,7 @@ fn shell_external(
                                 let prior_local = !assigns
                                     && prior_assignment(candidate, key, content)?.is_some_and(
                                         |(assignment, conditional)| {
-                                            !conditional && !unconditional(assignment)
+                                            !conditional && export_scope(assignment) != Some(false)
                                         },
                                     );
                                 if assigns || prior_local {
@@ -318,7 +327,7 @@ fn shell_external(
                             uncertain |= !assigned;
                             continue;
                         }
-                        if inherited_external && !unconditional(candidate) {
+                        if inherited_external && export_scope(candidate) != Some(false) {
                             return Ok((false, uncertain));
                         }
                         let (enabled, conditional_mode) = options::allexport(candidate, content)?;
@@ -419,7 +428,21 @@ fn prior_assignment<'a>(
     let mut uncertain = false;
     loop {
         let Some(statement) = previous else {
-            let Some(parent) = scope.parent().filter(|p| p.kind() == "compound_statement") else {
+            let Some(parent) = scope.parent().filter(|p| {
+                matches!(
+                    p.kind(),
+                    "compound_statement"
+                        | "list"
+                        | "if_statement"
+                        | "elif_clause"
+                        | "else_clause"
+                        | "while_statement"
+                        | "for_statement"
+                        | "do_group"
+                        | "case_statement"
+                        | "case_item"
+                )
+            }) else {
                 break;
             };
             budget = budget.checked_sub(1).ok_or_else(|| {
@@ -428,6 +451,7 @@ fn prior_assignment<'a>(
                     "shell prior assignment analysis incomplete: node budget exceeded",
                 )
             })?;
+            uncertain |= !matches!(parent.kind(), "compound_statement" | "list");
             scope = parent;
             previous = scope.prev_named_sibling();
             continue;

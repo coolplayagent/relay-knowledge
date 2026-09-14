@@ -83,11 +83,8 @@ fn gotemplate_actions_balanced(content: &str) -> bool {
     let mut rest = content;
     loop {
         let Some(start) = rest.find("{{") else {
-            return !rest.contains("}}");
+            return true;
         };
-        if rest[..start].contains("}}") {
-            return false;
-        }
         let after_start = &rest[start + "{{".len()..];
         let Some(end) = template_action_end(after_start, 0) else {
             return false;

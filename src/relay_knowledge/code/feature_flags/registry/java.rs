@@ -2,7 +2,6 @@
 use super::*;
 use tree_sitter::Node;
 mod flow;
-mod implicit;
 mod names;
 mod numbers;
 mod static_imports;
@@ -59,6 +58,10 @@ pub(super) fn extract(
                             .is_some_and(|n| text(n, input.content) == "getProperty")
                         && (node.child_by_field_name("object").is_some_and(|n| {
                             matches!(text(n, input.content), "System" | "java.lang.System")
+                                || (n.kind() == "method_invocation"
+                                    && n.child_by_field_name("name").is_some_and(|name| {
+                                        text(name, input.content) == "getProperties"
+                                    }))
                         }) || (node.child_by_field_name("object").is_none()
                             && names::static_owner(node, "getProperty", input.content)
                                 == Some("java.lang.System")))
@@ -299,7 +302,9 @@ fn read(
     };
     let kind = match method {
         _ if numeric_owner.is_some() && collection.is_none() => Some("config_key"),
-        "get" if collection.is_some() && is_system && platform_method == "getenv" => {
+        "get" | "getOrDefault"
+            if collection.is_some() && is_system && platform_method == "getenv" =>
+        {
             Some("env_var")
         }
         "getProperty"
@@ -323,7 +328,13 @@ fn read(
         let count = arguments.named_child_count();
         if count == 0
             || count > 2
-            || (((is_system && platform_method == "getenv") || is_boolean) && count != 1)
+            || (((is_system && platform_method == "getenv") || is_boolean)
+                && count
+                    != if collection.is_some() && method == "getOrDefault" {
+                        2
+                    } else {
+                        1
+                    })
         {
             return Ok(None);
         }
@@ -412,7 +423,7 @@ fn read(
     let owner = if let Some(object) = object {
         receiver_type(object, input.content, 0)
     } else {
-        implicit::owner(node, method, input.content)
+        names::implicit_owner(node, method, input.content)
     };
     let Some(owner) = owner else {
         return Ok(None);

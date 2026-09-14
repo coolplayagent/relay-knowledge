@@ -461,6 +461,31 @@ pub(super) fn receiver_type(node: Node<'_>, content: &str, depth: usize) -> Opti
     if depth >= 16 {
         return None;
     }
+    if node.parent().is_some_and(|parent| {
+        parent.child_by_field_name("object") == Some(node)
+            && parent
+                .named_children(&mut parent.walk())
+                .any(|child| child.kind() == "super" && child != node)
+    }) {
+        let qualifier = qualified(node, text(node, content), content);
+        let mut scope = node.parent();
+        while let Some(current) = scope {
+            if is_type(current)
+                && current.child_by_field_name("name").is_some_and(|name| {
+                    field_symbol(name, "", content).trim_end_matches('.') == qualifier
+                })
+            {
+                let superclass = current.child_by_field_name("superclass")?;
+                return Some(qualified(
+                    current,
+                    text(superclass.named_child(0)?, content),
+                    content,
+                ));
+            }
+            scope = current.parent();
+        }
+        return Some(qualifier);
+    }
     match node.kind() {
         "this" => {
             if let Some(owner) = text(node, content).strip_suffix(".this") {
@@ -568,6 +593,14 @@ pub(super) fn receiver_type(node: Node<'_>, content: &str, depth: usize) -> Opti
     }
 }
 pub(super) fn exact_receiver(mut node: Node<'_>) -> bool {
+    if node.parent().is_some_and(|parent| {
+        parent.child_by_field_name("object") == Some(node)
+            && parent
+                .named_children(&mut parent.walk())
+                .any(|child| child.kind() == "super")
+    }) {
+        return true;
+    }
     for _ in 0..16 {
         match node.kind() {
             "super" => return true,
@@ -857,3 +890,57 @@ fn abrupt_exit(mut node: Node<'_>) -> bool {
 #[cfg(test)]
 #[path = "names_tests.rs"]
 mod tests;
+
+pub(super) fn implicit_owner(mut node: Node<'_>, method: &str, content: &str) -> Option<String> {
+    let mut budget = 4096usize;
+    while let Some(parent) = node.parent() {
+        budget = budget.checked_sub(1)?;
+        if matches!(parent.kind(), "class_body" | "interface_body" | "enum_body") {
+            // Anonymous owners cannot be represented by the enclosing named class.
+            if parent
+                .parent()
+                .is_some_and(|p| p.kind() == "object_creation_expression")
+            {
+                return None;
+            }
+            let mut cursor = parent.walk();
+            let mut candidates = 0;
+            for member in parent.named_children(&mut cursor) {
+                budget = budget.checked_sub(1)?;
+                if member.kind() != "method_declaration"
+                    || !member
+                        .child_by_field_name("name")
+                        .is_some_and(|n| text(n, content) == method)
+                {
+                    continue;
+                }
+                if member
+                    .child_by_field_name("parameters")
+                    .is_some_and(|p| p.named_child_count() == 0)
+                {
+                    candidates += 1;
+                }
+            }
+            if candidates > 0 {
+                return (candidates == 1).then(|| {
+                    field_symbol(node, "", content)
+                        .trim_end_matches('.')
+                        .to_owned()
+                });
+            }
+            // An inherited method may shadow an outer owner's method.
+            if parent.parent().is_some_and(|p| {
+                p.child_by_field_name("superclass").is_some()
+                    || p.child_by_field_name("interfaces").is_some()
+            }) {
+                return Some(
+                    field_symbol(node, "", content)
+                        .trim_end_matches('.')
+                        .to_owned(),
+                );
+            }
+        }
+        node = parent;
+    }
+    None
+}

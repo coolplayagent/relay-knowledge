@@ -724,3 +724,26 @@ fn final_local_string_keys_resolve_but_mutable_locals_remain_unknown() {
     );
     assert!(rows.iter().all(|r| r.source_key != "not_proven"));
 }
+
+#[test]
+fn qualified_super_dispatch_preserves_interface_and_enclosing_superclass_owners() {
+    for (source, expected) in [
+        (
+            "interface Config {default String getFlag(){return null;}} class App implements Config {String read(){return Config.super.getFlag();}}",
+            "Config.getFlag",
+        ),
+        (
+            "class Base {String getFlag(){return null;}} class Outer extends Base {class Inner {String read(){return Outer.super.getFlag();}}}",
+            "Base.getFlag",
+        ),
+    ] {
+        let rows = facts("java", source);
+        let row = rows
+            .iter()
+            .find(|r| {
+                r.edge_kind == "reads_config" && r.metadata.reference.as_deref() == Some(expected)
+            })
+            .unwrap_or_else(|| panic!("{rows:?}"));
+        assert!(row.metadata.exact_reference, "{row:?}");
+    }
+}

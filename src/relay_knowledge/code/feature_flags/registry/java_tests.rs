@@ -459,3 +459,118 @@ fn numeric_property_readers_preserve_defaults_and_platform_visibility() {
     );
     assert!(!rows.iter().any(|r| r.source_key == "hidden"));
 }
+
+#[test]
+fn java_platform_reader_matrix_preserves_namespace_default_and_shadowing() {
+    for (owner, method, args, key_kind, default) in [
+        (
+            "System",
+            "getProperty",
+            r#""matrix", "off""#,
+            "config_key",
+            Some("off"),
+        ),
+        ("System", "getenv", r#""matrix""#, "env_var", None),
+        (
+            "Boolean",
+            "getBoolean",
+            r#""matrix""#,
+            "config_key",
+            Some("false"),
+        ),
+        (
+            "Integer",
+            "getInteger",
+            r#""matrix", 4"#,
+            "config_key",
+            Some("4"),
+        ),
+        (
+            "Long",
+            "getLong",
+            r#""matrix", 8L"#,
+            "config_key",
+            Some("8"),
+        ),
+    ] {
+        for (imports, receiver) in [
+            (String::new(), owner.to_owned()),
+            (String::new(), format!("java.lang.{owner}")),
+            (
+                format!("import static java.lang.{owner}.{method};"),
+                String::new(),
+            ),
+        ] {
+            let call = format!(
+                "{}{method}({args})",
+                if receiver.is_empty() {
+                    String::new()
+                } else {
+                    format!("{receiver}.")
+                }
+            );
+            let rows = facts(
+                "java",
+                &format!(
+                    "{imports} class App {{void run(){{if(java.util.Objects.nonNull({call})){{}}}}}}"
+                ),
+            );
+            let row = rows
+                .iter()
+                .find(|r| r.source_key == "matrix" && r.edge_kind == "reads_config")
+                .unwrap();
+            assert_eq!(row.source_kind, key_kind);
+            assert_eq!(row.metadata.default_value.as_deref(), default);
+            assert!(
+                rows.iter()
+                    .any(|r| r.source_key == "matrix" && r.edge_kind == "guards_code")
+            );
+        }
+    }
+    for accessor in ["System.getenv()", "java.lang.System.getenv()", "getenv()"] {
+        let rows = facts(
+            "java",
+            &format!(
+                r#"import static java.lang.System.getenv; class App {{void run(){{if({accessor}.getOrDefault("matrix","off").equals("on")){{}}}}}}"#
+            ),
+        );
+        let row = rows
+            .iter()
+            .find(|r| r.source_key == "matrix" && r.edge_kind == "reads_config")
+            .unwrap();
+        assert_eq!(row.source_kind, "env_var");
+        assert_eq!(row.metadata.default_value.as_deref(), Some("off"));
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == "matrix" && r.edge_kind == "guards_code")
+        );
+    }
+}
+
+#[test]
+fn property_getter_conversion_matrix_canonicalizes_direct_and_collection_defaults() {
+    for reader in [
+        "System.getProperty",
+        "java.lang.System.getProperty",
+        "System.getProperties().getProperty",
+        "java.lang.System.getProperties().getProperty",
+        "getProperties().getProperty",
+    ] {
+        for (wrapper, value, expected, ty) in [
+            ("Integer.parseInt", "0007", "7", "number"),
+            ("Boolean.parseBoolean", "FALSE", "false", "boolean"),
+        ] {
+            let source = format!(
+                r#"import static java.lang.System.getProperties; class App {{Object getValue(){{return {wrapper}({reader}("matrix","{value}"));}}}}"#
+            );
+            let rows = facts("java", &source);
+            let row = rows.iter().find(|r| r.source_key == "matrix").unwrap();
+            assert_eq!(
+                row.metadata.default_value.as_deref(),
+                Some(expected),
+                "{reader}"
+            );
+            assert_eq!(row.metadata.value_type.as_deref(), Some(ty), "{reader}");
+        }
+    }
+}

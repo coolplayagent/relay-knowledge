@@ -321,11 +321,9 @@ fn template_comments_preserve_adjacent_metadata_and_following_output() {
         rows.iter()
             .any(|r| r.source_key == "feature" && r.edge_kind == "defines_config")
     );
-    assert!(
-        rows.iter().any(
-            |r| r.source_key == "other" && r.metadata.default_value.as_deref() == Some("false")
-        )
-    );
+    // The left trim marker removes the preceding newline, joining both output fragments.
+    assert!(rows.iter().any(|r| r.source_key == "feature"
+        && r.metadata.default_value.as_deref() == Some("trueother=false")));
 }
 
 #[test]
@@ -435,4 +433,55 @@ fn multiline_template_actions_do_not_become_output_assignments() {
         rows.iter()
             .any(|r| r.source_key == "other" && r.edge_kind == "reads_config")
     );
+}
+
+#[test]
+fn template_output_trim_matrix_preserves_static_values_and_action_reads() {
+    for action in [r#"$v := key "other""#, "/* note */"] {
+        for (left, right, expected) in [
+            ("", "", "pre  post"),
+            ("-", "", "pre post"),
+            ("", "-", "pre post"),
+            ("-", "-", "prepost"),
+        ] {
+            for newline in ["", "\n", "\r\n"] {
+                let source =
+                    format!("feature=pre {newline}{{{{{left} {action} {right}}}}}{newline} post\n");
+                if !newline.is_empty() && (left.is_empty() || right.is_empty()) {
+                    continue;
+                }
+                let rows = facts("gotemplate", &source);
+                let row = rows
+                    .iter()
+                    .find(|r| r.source_key == "feature" && r.edge_kind == "defines_config")
+                    .unwrap_or_else(|| panic!("{source:?}: {rows:?}"));
+                assert_eq!(
+                    row.metadata.default_value.as_deref(),
+                    Some(expected),
+                    "{source:?}"
+                );
+                assert!(rows.iter().all(|r| !r.source_key.starts_with('$')));
+            }
+        }
+    }
+}
+
+#[test]
+fn template_control_output_is_possible_evidence_without_a_known_default() {
+    for control in ["if .Enabled", "with .Config", "range .Items"] {
+        let source = format!("{{{{{control}}}}}\nfeature=true\n{{{{end}}}}\nalways=false\n");
+        let rows = facts("gotemplate", &source);
+        let row = rows.iter().find(|r| r.source_key == "feature").unwrap();
+        assert!(row.metadata.default_value.is_none());
+        assert!(row.metadata.flow_incomplete.is_some());
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.source_key == "always")
+                .unwrap()
+                .metadata
+                .default_value
+                .as_deref(),
+            Some("false")
+        );
+    }
 }

@@ -18,7 +18,8 @@ pub(super) fn extract(
         "gotemplate" if input.path.to_ascii_lowercase().ends_with(".ctmpl") => {
             files::extract(input)
         }
-        "properties" | "ini" | "bash" => files::extract(input),
+        "properties" | "ini" => files::extract(input),
+        "bash" => shell::extract(input),
         _ => Ok(Vec::new()),
     }
 }

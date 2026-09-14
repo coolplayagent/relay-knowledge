@@ -1,4 +1,3 @@
-mod code_capabilities;
 pub(super) mod columns;
 pub(super) mod incremental_clone_marker;
 pub(super) mod initialization;

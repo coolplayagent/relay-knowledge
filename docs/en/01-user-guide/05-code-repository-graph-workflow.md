@@ -342,3 +342,18 @@ Consistency format coverage comes from the scoped indexed file inventory, includ
 Java SDK feature flags continue through the existing SDK extractor alongside configuration reads. Static platform imports ignore unrelated sibling/nested classes and inapplicable method overloads. Shell assignments exported by a later unconditional command retain their source defaults; properties escape decoding does not alter INI/template backslashes. Expanded and consistency usages retain containing-symbol evidence. The result limit applies after symbolic keys are resolved and ranked: candidates are bounded by the 10,000-usage budget, with an explicit incomplete-analysis error on overflow or SQLite time/step interruption. A served stale snapshot cannot emit definitive consistency diagnostics, even when its stored status originally recorded a completed fresh index.
 
 Consistency queries apply query terms before the fact budget and expand only connected bindings; the file-format inventory remains bounded by the registered scope independently of query projection. Referenced constant bindings are collected once instead of rescanning all records per declaration. Java receiver names erase generic arguments, simple assignments to existing local variables propagate to subsequent conditions until reassignment, and explicit static imports take precedence over wildcard imports. Shell `set -a` / `set -o allexport` applies to subsequent assignments; disabling allexport does not remove an existing variable's export attribute. General codebase and software views exclude raw symbolic getter rows; resolved configuration usage remains available through `feature-flags`.
+
+### Configuration registry acceptance matrix
+
+| Contract | Required result | Verification |
+| --- | --- | --- |
+| Java reads, constants and getters (#389/#394) | Real key, located read, linked guard; respect imports, overloads, visibility and nonvirtual dispatch | Java receiver matrix and snapshot binding regressions |
+| Properties, INI, ctmpl, Shell and dotenv (#394) | Format-correct definitions, defaults and locations; preserve quoted text and continuations | Format and execution matrices |
+| Metadata and filters (#394) | Default/type/domain/source/hot-reload; CLI, Web and MCP use the same request | Domain, interface and real index-service acceptance tests |
+| Consistency (#394) | Located conflicting defaults and missing-format/read diagnostics from authorized evidence | Scoped, stale, ambiguous and incremental snapshot tests |
+| Unknown or conditional behavior | Retain evidence and uncertainty; never infer runtime state or definite absence from incomplete analysis | Conditional export/template and unresolved-binding regressions |
+| Resource bounds | Explicit errors before exceeding file facts, metadata, expansion or query budgets | Boundary and overflow tests |
+
+This is bounded static analysis, not execution of arbitrary Java, Shell or templates. The expected behaviors above must not be removed merely to obtain a clean review. Findings are assessed against this contract and reproducible behavior; an inaccurate premise does not by itself invalidate a demonstrated bug.
+
+The Java platform-reader inventory for this change is System.getProperty/getenv, direct System.getenv().get/getOrDefault and System.getProperties().getProperty, Boolean.getBoolean, Integer.getInteger and Long.getLong, with supported literal/constant keys and proven getter forwarding/conversions. Equivalent qualified/static-import forms share the same rules. Additional arbitrary APIs are not implicitly promised by the registry label; demonstrated misbinding, lost evidence or wrong defaults within this inventory remain defects.
