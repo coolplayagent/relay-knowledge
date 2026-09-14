@@ -485,3 +485,21 @@ fn template_control_output_is_possible_evidence_without_a_known_default() {
         );
     }
 }
+
+#[test]
+fn deferred_template_definitions_do_not_publish_root_defaults() {
+    for body in ["feature=true", "{{if .Enabled}}\nfeature=true\n{{end}}"] {
+        let source = format!("{{{{define \"cfg\"}}}}\n{body}\n{{{{end}}}}\nalways=false\n");
+        let rows = facts("gotemplate", &source);
+        assert!(!rows.iter().any(|r| r.source_key == "feature"), "{rows:?}");
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.source_key == "always")
+                .unwrap()
+                .metadata
+                .default_value
+                .as_deref(),
+            Some("false")
+        );
+    }
+}

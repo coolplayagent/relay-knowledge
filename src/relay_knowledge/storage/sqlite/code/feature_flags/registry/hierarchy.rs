@@ -100,6 +100,7 @@ impl Hierarchy {
                 .chain(row.metadata.same_package_reference.iter())
                 .chain(row.metadata.static_import_reference.iter())
                 .chain(row.metadata.lexical_field_reference.iter())
+                .chain(row.metadata.lexical_getter_references.iter())
             {
                 if let Some((owner, _)) = symbol.rsplit_once('.') {
                     closure.insert(owner.to_owned());
@@ -172,6 +173,31 @@ impl Hierarchy {
                     .is_none_or(|owner| !self.declarations.contains(owner))
         });
         for row in rows {
+            for candidate in &row.metadata.lexical_getter_references {
+                row.metadata.reference = Some(candidate.clone());
+                if self.has_accessible_member(&format!("{candidate}/0"), &self.methods) {
+                    break;
+                }
+                let Some((owner, _)) = candidate.rsplit_once('.') else {
+                    break;
+                };
+                let mut pending = vec![owner];
+                let mut seen = BTreeSet::new();
+                while let Some(owner) = pending.pop() {
+                    if seen.insert(owner) {
+                        pending.extend(
+                            self.parents
+                                .get(owner)
+                                .into_iter()
+                                .flatten()
+                                .map(String::as_str),
+                        );
+                    }
+                }
+                if seen.iter().any(|owner| !self.declarations.contains(*owner)) {
+                    break;
+                }
+            }
             if let Some(candidate) = &row.metadata.lexical_field_reference {
                 if self.has_accessible_member(candidate, &self.fields) {
                     row.metadata.reference = Some(candidate.clone());
@@ -208,6 +234,7 @@ impl Hierarchy {
             return false;
         };
         let package = self.packages.get(owner);
+        let initial_owner = owner;
         let mut pending = vec![(owner.to_owned(), false)];
         let mut seen = BTreeSet::new();
         while let Some((owner, crossed)) = pending.pop() {
@@ -219,10 +246,11 @@ impl Hierarchy {
                     .zip(self.packages.get(&owner))
                     .is_some_and(|(a, b)| a != b);
             let key = format!("{owner}.{method}");
-            if members
-                .get(&key)
-                .is_some_and(|v| v != "private" && (v != "package" || !crossed))
-            {
+            if members.get(&key).is_some_and(|v| {
+                owner == initial_owner
+                    || (!matches!(v.as_str(), "private" | "noninherited")
+                        && (v != "package" || !crossed))
+            }) {
                 return true;
             }
             pending.extend(

@@ -357,3 +357,6 @@ Java SDK 开关继续使用现有 SDK 提取器，与配置读取同时提取。
 这是有界静态分析，不执行任意 Java、Shell 或模板程序。不能仅为获得无意见审查而删除上述预期行为。检视意见依据该契约及可复现行为判断；描述中的前提不准确，不代表已证实的问题不成立。
 
 本次 Java 平台读取规则清单为 System.getProperty/getenv、直接 System.getenv().get/getOrDefault 和 System.getProperties().getProperty、Boolean.getBoolean、Integer.getInteger、Long.getLong，支持已列明的字面量/常量键及可证明的 getter 转发/转换。等价的全限定名和静态导入形式使用同一规则。“注册表”不隐含承诺识别任意新增 API；但清单内的错误绑定、证据丢失和错误默认值仍属于必须修复的缺陷。
+
+
+外部类 getter 回退需要已索引继承证据；延迟模板定义不发布根模板默认值。Shell 引号选项遵循引号移除规则，接口静态方法不参与继承。十六进制 Double 默认字符串仍明确不支持：保留原始证据，默认值未知，一致性不完整；本次不扩展为任意 Java 数值语法求值。 Fact version: `config-registry-v49`.

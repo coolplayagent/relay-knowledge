@@ -289,3 +289,6 @@ Configuration registry acceptance contract: Java platform reads, symbolic consta
 The redundant query forwarding function and the intermediate Shell-to-files routing were also removed; shared services, indexing writes and tests remain intact.
 
 The equivalent-reader matrix also covers wrapper conversion of defaults through direct and collection property access, so the same numeric/Boolean fallback has the same canonical value.
+
+
+Enclosing getter fallback requires indexed inheritance evidence; deferred template definitions do not publish root defaults. Quoted Shell options obey quote removal, and static interface methods are not inherited. Hexadecimal Double fallback strings remain explicitly unsupported: raw evidence is retained, the default is unknown and consistency is incomplete; this change does not evaluate arbitrary Java numeric syntax. Fact version: `config-registry-v49`.

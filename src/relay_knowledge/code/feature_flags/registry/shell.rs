@@ -210,11 +210,21 @@ fn export_mode(node: Node<'_>, content: &str) -> Option<bool> {
     if !matches!(node.kind(), "declaration_command" | "unset_command") {
         return None;
     }
-    let mut words = content[node.byte_range()].split_whitespace();
-    let command = words.next()?;
-    let options = words
-        .take_while(|word| *word != "--" && word.starts_with(['-', '+']))
-        .collect::<Vec<_>>();
+    let mut cursor = node.walk();
+    let mut words = node.children(&mut cursor).filter(|child| !child.is_extra());
+    let command = &content[words.next()?.byte_range()];
+    let mut decoded = Vec::new();
+    for word in words {
+        if word.kind() == "variable_assignment" {
+            break;
+        }
+        let value = values::static_value(Some(word), content).ok()??;
+        if value == "--" || !value.starts_with(['-', '+']) {
+            break;
+        }
+        decoded.push(value);
+    }
+    let options = decoded.iter().map(String::as_str).collect::<Vec<_>>();
     if options
         .iter()
         .any(|option| option.starts_with('-') && option.contains('f'))

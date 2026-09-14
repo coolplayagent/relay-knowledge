@@ -891,7 +891,12 @@ fn abrupt_exit(mut node: Node<'_>) -> bool {
 #[path = "names_tests.rs"]
 mod tests;
 
-pub(super) fn implicit_owner(mut node: Node<'_>, method: &str, content: &str) -> Option<String> {
+pub(super) fn implicit_owner(
+    mut node: Node<'_>,
+    method: &str,
+    content: &str,
+) -> Option<Vec<String>> {
+    let mut owners = Vec::new();
     let mut budget = 4096usize;
     while let Some(parent) = node.parent() {
         budget = budget.checked_sub(1)?;
@@ -922,18 +927,22 @@ pub(super) fn implicit_owner(mut node: Node<'_>, method: &str, content: &str) ->
                 }
             }
             if candidates > 0 {
-                return (candidates == 1).then(|| {
+                if candidates != 1 {
+                    return None;
+                }
+                owners.push(
                     field_symbol(node, "", content)
                         .trim_end_matches('.')
-                        .to_owned()
-                });
+                        .to_owned(),
+                );
+                return Some(owners);
             }
             // An inherited method may shadow an outer owner's method.
             if parent.parent().is_some_and(|p| {
                 p.child_by_field_name("superclass").is_some()
                     || p.child_by_field_name("interfaces").is_some()
             }) {
-                return Some(
+                owners.push(
                     field_symbol(node, "", content)
                         .trim_end_matches('.')
                         .to_owned(),
@@ -942,5 +951,5 @@ pub(super) fn implicit_owner(mut node: Node<'_>, method: &str, content: &str) ->
         }
         node = parent;
     }
-    None
+    (!owners.is_empty()).then_some(owners)
 }

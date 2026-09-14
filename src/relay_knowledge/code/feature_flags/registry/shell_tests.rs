@@ -592,3 +592,25 @@ fn export_execution_matrix_preserves_possible_parent_definitions() {
         assert!(definition.metadata.flow_incomplete.is_some(), "{source}");
     }
 }
+
+#[test]
+fn quoted_export_option_matrix_matches_unquoted_options() {
+    for option in ["-n", "'-n'", "\"-n\"", "-\"n\"", "\\-n"] {
+        let rows = facts(
+            "bash",
+            &format!("FLAG=true; export {option} FLAG; echo \"$FLAG\""),
+        );
+        assert!(
+            !rows.iter().any(|r| r.source_key == "FLAG"),
+            "{option}: {rows:?}"
+        );
+    }
+    for command in ["export \"-x\"", "declare '-x'", "export --"] {
+        let rows = facts("bash", &format!("{command} FLAG=true; echo $FLAG"));
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == "FLAG" && r.edge_kind == "defines_config"),
+            "{command}: {rows:?}"
+        );
+    }
+}

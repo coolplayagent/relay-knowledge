@@ -83,3 +83,18 @@ fn converted_numeric_fallbacks_use_decimal_runtime_values_and_reject_invalid_inp
         assert_eq!(metadata.flow_incomplete.is_some(), expected.is_none());
     }
 }
+
+#[test]
+fn unsupported_hexadecimal_double_preserves_raw_evidence_and_incompleteness() {
+    let mut metadata = crate::domain::CodeConfigMetadata {
+        default_value: Some("0x1.0p2".into()),
+        ..Default::default()
+    };
+    convert_default(&mut metadata, &["Double".into()], false);
+    assert_eq!(metadata.unconverted_default.as_deref(), Some("0x1.0p2"));
+    assert!(metadata.default_value.is_none());
+    assert_eq!(
+        metadata.flow_incomplete.as_deref(),
+        Some("invalid_or_unsupported_numeric_default")
+    );
+}

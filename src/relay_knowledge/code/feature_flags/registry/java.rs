@@ -97,6 +97,10 @@ pub(super) fn extract(
                         guard.end_byte(),
                     )?;
                     usage.metadata.reference.clone_from(&row.metadata.reference);
+                    usage
+                        .metadata
+                        .lexical_getter_references
+                        .clone_from(&row.metadata.lexical_getter_references);
                     usage.metadata.exact_reference = row.metadata.exact_reference;
                     usage
                         .metadata
@@ -420,15 +424,15 @@ fn read(
     {
         return Ok(None);
     }
-    let owner = if let Some(object) = object {
-        receiver_type(object, input.content, 0)
+    let owners = if let Some(object) = object {
+        receiver_type(object, input.content, 0).map(|owner| vec![owner])
     } else {
         names::implicit_owner(node, method, input.content)
     };
-    let Some(owner) = owner else {
+    let Some(owners) = owners else {
         return Ok(None);
     };
-    let key = format!("{owner}.{method}");
+    let key = format!("{}.{method}", owners[0]);
     let mut row = record(
         input,
         "config_symbol",
@@ -438,6 +442,12 @@ fn read(
         node.end_byte(),
     )?;
     row.metadata.reference = Some(key);
+    if owners.len() > 1 {
+        row.metadata.lexical_getter_references = owners
+            .iter()
+            .map(|owner| format!("{owner}.{method}"))
+            .collect();
+    }
     row.metadata.exact_reference = node
         .child_by_field_name("object")
         .is_some_and(names::exact_receiver);

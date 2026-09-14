@@ -746,3 +746,81 @@ async fn feature_flags_resolve_platform_shadows_and_static_getters_across_files(
         }
     }
 }
+
+#[tokio::test]
+async fn feature_flags_resolve_enclosing_getters_and_noninherited_interface_methods() {
+    let repo = FixtureRepo::create("lexical-getter-fallback");
+    for (path, source) in [
+        ("src/Base.java", "package app; class Base {}"),
+        (
+            "src/Outer.java",
+            "package app; class Outer { boolean isEnabled() { return java.lang.Boolean.getBoolean(\"outer\"); } class Inner extends Base { void run() { if(isEnabled()) {} } } }",
+        ),
+        (
+            "src/Provider.java",
+            "package app; interface Provider { static String getenv(String key) { return key; } }",
+        ),
+        (
+            "src/Reader.java",
+            "package app; import static java.lang.System.getenv; class Reader implements Provider { void run() { if(getenv(\"REAL_ENV\") != null) {} } }",
+        ),
+        (
+            "src/BlockingBase.java",
+            "package app; class BlockingBase { boolean isEnabled() { return false; } }",
+        ),
+        (
+            "src/Blocked.java",
+            "package app; class Blocked { boolean isEnabled() { return java.lang.Boolean.getBoolean(\"blocked\"); } class Inner extends BlockingBase { void run() { if(isEnabled()) {} } } }",
+        ),
+    ] {
+        repo.write(path, source);
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "fixture"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-lexical").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-lexical"),
+        )
+        .await
+        .unwrap();
+    for (path, key, guard) in [
+        ("src/Outer.java", "outer", true),
+        ("src/Reader.java", "REAL_ENV", true),
+        ("src/Blocked.java", "blocked", false),
+    ] {
+        for query in [None, Some(key.to_owned())] {
+            let response = service
+                .query_code_repository_feature_flags(
+                    CodeFeatureFlagRequest::new(
+                        query,
+                        filtered_selector("fixture", "HEAD", path),
+                        10,
+                        FreshnessPolicy::WaitUntilFresh,
+                    )
+                    .unwrap(),
+                    context("query-lexical"),
+                )
+                .await
+                .unwrap();
+            let group = response
+                .flags
+                .iter()
+                .find(|g| g.source_key == key)
+                .unwrap_or_else(|| panic!("{response:?}"));
+            assert_eq!(
+                group.usages.iter().any(|u| u.edge_kind == "guards_code"),
+                guard,
+                "{path}: {response:?}"
+            );
+        }
+    }
+}

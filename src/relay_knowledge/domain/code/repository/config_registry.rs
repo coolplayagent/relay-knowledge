@@ -37,7 +37,7 @@ pub struct CodeConfigMetadata {
     /// Same-package alternatives for wildcard-ambiguous supertypes.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub same_package_parents: std::collections::BTreeMap<String, String>,
-    /// String-compatible platform-name member signatures and visibility.
+    /// Platform-reader and zero-argument getter signatures: visibility or noninherited.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub java_methods: std::collections::BTreeMap<String, String>,
     /// Lexical member signature that takes precedence over a static platform import.
@@ -46,6 +46,9 @@ pub struct CodeConfigMetadata {
     /// Lexical field candidate checked before accepting a static key import.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lexical_field_reference: Option<String>,
+    /// Ordered enclosing getter candidates, checked only after indexed inheritance lookup.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub lexical_getter_references: Vec<String>,
     /// Default supplied by a proven Boolean conversion of a property read.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub boolean_converted_default: bool,

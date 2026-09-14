@@ -179,15 +179,21 @@ impl Hierarchy {
                         continue;
                     };
                     let name = names::text(name, input.content);
-                    if !matches!(
-                        name,
-                        "getProperty"
-                            | "getProperties"
-                            | "getenv"
-                            | "getBoolean"
-                            | "getInteger"
-                            | "getLong"
-                    ) {
+                    let zero_getter = (name.starts_with("get") || name.starts_with("is"))
+                        && method
+                            .child_by_field_name("parameters")
+                            .is_some_and(|p| p.named_child_count() == 0);
+                    if !zero_getter
+                        && !matches!(
+                            name,
+                            "getProperty"
+                                | "getProperties"
+                                | "getenv"
+                                | "getBoolean"
+                                | "getInteger"
+                                | "getLong"
+                        )
+                    {
                         continue;
                     }
                     let Some(parameters) = method.child_by_field_name("parameters") else {
@@ -212,10 +218,14 @@ impl Hierarchy {
                         if (varargs && arity >= parameters.len().saturating_sub(1))
                             || (!varargs && arity == parameters.len())
                         {
-                            declaration
-                                .metadata
-                                .java_methods
-                                .insert(format!("{name}/{arity}"), visibility(method).into());
+                            declaration.metadata.java_methods.insert(
+                                format!("{name}/{arity}"),
+                                if inheritable(method, input.content) {
+                                    visibility(method).into()
+                                } else {
+                                    "noninherited".into()
+                                },
+                            );
                         }
                     }
                 }
@@ -351,9 +361,13 @@ pub(super) fn inheritable(method: Node<'_>, content: &str) -> bool {
     let mut cursor = method.walk();
     !method.named_children(&mut cursor).any(|child| {
         child.kind() == "modifiers"
-            && names::text(child, content)
-                .split_whitespace()
-                .any(|word| word == "private")
+            && names::text(child, content).split_whitespace().any(|word| {
+                word == "private"
+                    || (word == "static"
+                        && method
+                            .parent()
+                            .is_some_and(|p| p.kind() == "interface_body"))
+            })
     })
 }
 pub(super) fn static_receiver(node: Node<'_>, content: &str) -> Option<String> {

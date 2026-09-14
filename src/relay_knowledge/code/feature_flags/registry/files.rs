@@ -256,6 +256,7 @@ mod tests;
 struct TemplateOutputState {
     skip_until: usize,
     depth: usize,
+    deferred_depth: Option<usize>,
     uncertain: bool,
 }
 
@@ -270,11 +271,15 @@ fn template_output_line(
     let mut output = String::new();
     for _ in 0..32 {
         let Some(relative) = content[begin..end].find("{{") else {
-            output.push_str(&content[begin..end]);
+            if state.deferred_depth.is_none() {
+                output.push_str(&content[begin..end]);
+            }
             return Ok(output);
         };
         let open = begin + relative;
-        output.push_str(&content[begin..open]);
+        if state.deferred_depth.is_none() {
+            output.push_str(&content[begin..open]);
+        }
         let action = &content[open + 2..];
         let is_comment = action
             .trim_start()
@@ -304,7 +309,7 @@ fn template_output_line(
                 .split_whitespace()
                 .next();
             match command {
-                Some("if" | "with" | "range") => {
+                Some("if" | "with" | "range" | "define" | "block") => {
                     if state.depth >= 32 {
                         return Err(DomainError::invalid(
                             "configuration",
@@ -312,9 +317,17 @@ fn template_output_line(
                         ));
                     }
                     state.depth += 1;
+                    if command == Some("define") && state.deferred_depth.is_none() {
+                        state.deferred_depth = Some(state.depth);
+                    }
                     state.uncertain = true;
                 }
-                Some("end") => state.depth = state.depth.saturating_sub(1),
+                Some("end") => {
+                    if state.deferred_depth == Some(state.depth) {
+                        state.deferred_depth = None;
+                    }
+                    state.depth = state.depth.saturating_sub(1);
+                }
                 _ => {}
             }
             let mut words = content[open + 2..close]
@@ -322,7 +335,7 @@ fn template_output_line(
                 .split_whitespace();
             let assignment = words.next().is_some_and(|word| word.starts_with('$'))
                 && words.next().is_some_and(|word| matches!(word, ":=" | "="));
-            if !assignment {
+            if !assignment && state.deferred_depth.is_none() {
                 output.push_str("{{}}");
             }
         } else if close - open > 8192 {
@@ -346,6 +359,8 @@ fn template_output_line(
             "template action count budget exceeded",
         ));
     }
-    output.push_str(&content[begin..end]);
+    if state.deferred_depth.is_none() {
+        output.push_str(&content[begin..end]);
+    }
     Ok(output)
 }
