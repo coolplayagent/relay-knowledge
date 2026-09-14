@@ -64,7 +64,7 @@ pub(super) fn signed_literal(kind: &str, source: &str, operator: &str) -> Option
     }
 }
 
-/// Apply proven wrapper conversions to static property fallbacks, retaining raw evidence.
+/// Apply proven wrapper conversions to static reader fallbacks, retaining raw evidence.
 pub(super) fn convert_default(
     metadata: &mut crate::domain::CodeConfigMetadata,
     conversions: &[String],

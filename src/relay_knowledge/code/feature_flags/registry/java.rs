@@ -52,10 +52,9 @@ pub(super) fn extract(
                 if let Some((method, shadows, conversions)) =
                     flow::returning_method(node, input.content)
                 {
-                    if !conversions.is_empty()
-                        && node
-                            .child_by_field_name("name")
-                            .is_some_and(|n| text(n, input.content) == "getProperty")
+                    let property_read = node
+                        .child_by_field_name("name")
+                        .is_some_and(|n| text(n, input.content) == "getProperty")
                         && (node.child_by_field_name("object").is_some_and(|n| {
                             matches!(text(n, input.content), "System" | "java.lang.System")
                                 || (n.kind() == "method_invocation"
@@ -64,11 +63,14 @@ pub(super) fn extract(
                                     }))
                         }) || (node.child_by_field_name("object").is_none()
                             && names::static_owner(node, "getProperty", input.content)
-                                == Some("java.lang.System")))
-                    {
-                        let nullable = node
-                            .child_by_field_name("arguments")
-                            .is_some_and(nullable_property_default);
+                                == Some("java.lang.System")));
+                    let environment_read = row.source_kind == "env_var"
+                        || row.metadata.target_kind.as_deref() == Some("env_var");
+                    if !conversions.is_empty() && (property_read || environment_read) {
+                        let nullable = property_read
+                            && node
+                                .child_by_field_name("arguments")
+                                .is_some_and(nullable_property_default);
                         numbers::convert_default(&mut row.metadata, &conversions, nullable);
                         if nullable
                             && row.metadata.boolean_converted_default

@@ -645,6 +645,61 @@ fn property_getter_conversion_matrix_canonicalizes_direct_and_collection_default
 }
 
 #[test]
+fn environment_getter_fallbacks_share_proven_wrapper_conversions() {
+    for receiver in ["System.getenv()", "java.lang.System.getenv()", "getenv()"] {
+        for (wrapper, fallback, expected, ty) in [
+            ("Boolean.parseBoolean", "TRUE", "true", "boolean"),
+            ("Boolean.valueOf", "FALSE", "false", "boolean"),
+            ("Integer.parseInt", "0007", "7", "number"),
+            ("Long.valueOf", "+0007", "7", "number"),
+            ("Double.parseDouble", "7.0", "7", "number"),
+        ] {
+            let source = format!(
+                r#"import static java.lang.System.getenv; class Config {{ Object getValue() {{ return {wrapper}({receiver}.getOrDefault("FLAG", "{fallback}")); }} }}"#
+            );
+            let rows = facts("java", &source);
+            let read = rows
+                .iter()
+                .find(|row| row.source_key == "FLAG" && row.edge_kind == "reads_config")
+                .unwrap();
+            assert_eq!(
+                read.metadata.default_value.as_deref(),
+                Some(expected),
+                "{source}"
+            );
+            assert_eq!(read.metadata.value_type.as_deref(), Some(ty), "{source}");
+            assert_eq!(read.metadata.unconverted_default.as_deref(), Some(fallback));
+            assert!(read.metadata.flow_incomplete.is_none(), "{source}");
+        }
+    }
+    let source = r#"class Config { static final String KEY="FLAG"; boolean getFlag() { return Boolean.parseBoolean(System.getenv().getOrDefault(KEY,"TRUE")); } }"#;
+    let rows = facts("java", source);
+    let read = rows
+        .iter()
+        .find(|row| row.edge_kind == "reads_config")
+        .unwrap();
+    assert_eq!(read.metadata.target_kind.as_deref(), Some("env_var"));
+    assert_eq!(read.metadata.default_value.as_deref(), Some("true"));
+    for fallback in ["chooseDefault()", "null"] {
+        let rows = facts(
+            "java",
+            &format!(
+                r#"class Config {{ boolean getFlag() {{ return Boolean.parseBoolean(System.getenv().getOrDefault("FLAG", {fallback})); }} }}"#
+            ),
+        );
+        let read = rows
+            .iter()
+            .find(|row| row.edge_kind == "reads_config")
+            .unwrap();
+        assert!(read.metadata.default_value.is_none());
+        assert_eq!(
+            read.metadata.flow_incomplete.as_deref(),
+            Some("unevaluated_explicit_default")
+        );
+    }
+}
+
+#[test]
 fn explicit_unknown_fallback_matrix_is_incomplete_without_affecting_absent_defaults() {
     for reader in [
         "System.getProperty",

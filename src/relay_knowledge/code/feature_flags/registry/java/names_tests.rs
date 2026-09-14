@@ -297,6 +297,54 @@ fn explicit_static_imports_take_precedence_over_wildcards() {
 }
 
 #[test]
+fn wildcard_platform_imports_match_members_before_testing_ambiguity() {
+    let imports = "import static java.lang.System.*; import static java.lang.Boolean.*; import static java.lang.Integer.*; import static java.lang.Long.*; import static java.lang.Double.*;";
+    for method in [
+        "getenv",
+        "getProperty",
+        "getBoolean",
+        "getInteger",
+        "getLong",
+    ] {
+        let rows = facts(
+            "java",
+            &format!(r#"{imports} class App {{ void run() {{ {method}("FLAG"); }} }}"#),
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.source_key == "FLAG" && r.edge_kind == "reads_config"),
+            "{method}: {rows:?}"
+        );
+    }
+    for (extra, method, expected) in [
+        ("", "parseBoolean", Some("java.lang.Boolean")),
+        ("", "parseInt", Some("java.lang.Integer")),
+        ("", "parseLong", Some("java.lang.Long")),
+        ("", "parseDouble", Some("java.lang.Double")),
+        ("", "getProperties", Some("java.lang.System")),
+        ("", "valueOf", None),
+        ("import static unknown.Reader.*;", "getenv", None),
+        (
+            "import static java.lang.Boolean.valueOf;",
+            "valueOf",
+            Some("java.lang.Boolean"),
+        ),
+    ] {
+        let source = format!("{imports} {extra} class App {{}}");
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_java::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(&source, None).unwrap();
+        assert_eq!(
+            super::static_owner(tree.root_node(), method, &source),
+            expected,
+            "{method}: {extra}"
+        );
+    }
+}
+
+#[test]
 fn numeric_addition_is_not_misreported_as_string_concatenation() {
     let rows = facts(
         "java",
@@ -873,6 +921,40 @@ fn final_local_string_keys_resolve_but_mutable_locals_remain_unknown() {
             .any(|r| r.source_key == "feature" && r.edge_kind == "reads_config")
     );
     assert!(rows.iter().all(|r| r.source_key != "not_proven"));
+}
+
+#[test]
+fn inferred_string_keys_require_final_proven_initializers() {
+    for (declarations, expected) in [
+        (r#"final var key="FLAG";"#, Some("FLAG")),
+        (
+            r#"final var prefix="FL"; final var key=(prefix+"AG");"#,
+            Some("FLAG"),
+        ),
+        (r#"final var key=1+"FLAG";"#, Some("1FLAG")),
+        (r#"var key="FLAG";"#, None),
+        (r#"final var key=1+2;"#, None),
+        (r#"final var key=unknown();"#, None),
+        (r#"final var key=key;"#, None),
+        (r#"final var key=(Object)"FLAG";"#, None),
+    ] {
+        let rows = facts(
+            "java",
+            &format!("class App {{ void run() {{ {declarations} System.getenv(key); }} }}"),
+        );
+        let reads = rows
+            .iter()
+            .filter(|r| r.edge_kind == "reads_config")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reads.len(),
+            usize::from(expected.is_some()),
+            "{declarations}: {rows:?}"
+        );
+        if let Some(key) = expected {
+            assert_eq!(reads[0].source_key, key);
+        }
+    }
 }
 
 #[test]

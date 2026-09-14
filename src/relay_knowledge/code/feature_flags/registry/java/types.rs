@@ -9,6 +9,38 @@ fn is_type(node: Node<'_>) -> bool {
         "class_declaration" | "interface_declaration" | "enum_declaration" | "record_declaration"
     )
 }
+pub(super) fn field_symbol(mut node: Node<'_>, name: &str, content: &str) -> String {
+    let mut owners = Vec::new();
+    while let Some(parent) = node.parent() {
+        if is_type(parent) {
+            if let Some(name) = parent.child_by_field_name("name") {
+                owners.push(names::text(name, content).to_owned());
+            }
+        }
+        if is_type(node)
+            && !matches!(
+                parent.kind(),
+                "program"
+                    | "class_body"
+                    | "interface_body"
+                    | "enum_body"
+                    | "enum_body_declarations"
+                    | "annotation_type_body"
+            )
+        {
+            // A declaration offset is unique and repeatable within its indexed
+            // source snapshot, including overloaded methods and sibling blocks.
+            owners.push(format!("local@{}", node.start_byte()));
+        }
+        node = parent;
+    }
+    owners.reverse();
+    owners.push(name.to_owned());
+    let suffix = owners.join(".");
+    let head = owners.first().map_or(name, String::as_str);
+    let qualified_head = names::qualified(node, head, content);
+    format!("{}{}", qualified_head, &suffix[head.len()..])
+}
 pub(super) fn lexical(mut node: Node<'_>, head: &str, content: &str) -> Option<String> {
     let position = node.start_byte();
     let mut budget = 4096usize;
@@ -19,7 +51,7 @@ pub(super) fn lexical(mut node: Node<'_>, head: &str, content: &str) -> Option<S
                 .child_by_field_name("name")
                 .is_some_and(|n| names::text(n, content) == head)
         {
-            return Some(names::field_symbol(parent, head, content));
+            return Some(field_symbol(parent, head, content));
         }
         if matches!(parent.kind(), "class_body" | "interface_body" | "block") {
             let mut cursor = parent.walk();
@@ -31,7 +63,7 @@ pub(super) fn lexical(mut node: Node<'_>, head: &str, content: &str) -> Option<S
                         .child_by_field_name("name")
                         .is_some_and(|n| names::text(n, content) == head)
                 {
-                    return Some(names::field_symbol(declaration, head, content));
+                    return Some(field_symbol(declaration, head, content));
                 }
             }
         }
@@ -93,7 +125,7 @@ impl Hierarchy {
                 }
                 if let Some(name) = node.child_by_field_name("name") {
                     graph.insert(
-                        names::field_symbol(node, names::text(name, content), content),
+                        field_symbol(node, names::text(name, content), content),
                         parents,
                     );
                 }
@@ -119,7 +151,7 @@ impl Hierarchy {
         let Some(name) = node.child_by_field_name("name") else {
             return Ok(Vec::new());
         };
-        let owner = names::field_symbol(node, names::text(name, input.content), input.content);
+        let owner = field_symbol(node, names::text(name, input.content), input.content);
         let Some(parents) = self.0.get(&owner) else {
             return Ok(Vec::new());
         };
@@ -296,7 +328,7 @@ impl Hierarchy {
             return Ok(Vec::new());
         };
         let name = names::text(name, content);
-        let owner = names::field_symbol(method, "", content)
+        let owner = field_symbol(method, "", content)
             .trim_end_matches('.')
             .to_owned();
         let mut result = vec![format!("{owner}.{name}")];

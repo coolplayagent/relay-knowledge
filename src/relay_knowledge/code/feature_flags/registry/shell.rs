@@ -205,6 +205,9 @@ pub(super) fn extract(
 fn export_scope(mut node: Node<'_>) -> Option<bool> {
     let mut conditional = false;
     for _ in 0..1024 {
+        if node.next_sibling().is_some_and(|next| next.kind() == "&") {
+            return None;
+        }
         let Some(parent) = node.parent() else {
             return Some(conditional);
         };
@@ -360,6 +363,12 @@ fn shell_external(
                         ));
                     }
                     budget -= 1;
+                    if candidate
+                        .next_sibling()
+                        .is_some_and(|next| next.kind() == "&")
+                    {
+                        continue;
+                    }
                     if candidate.kind() == "for_statement"
                         && candidate
                             .child_by_field_name("variable")
@@ -568,6 +577,9 @@ fn prior_assignment<'a>(
                     "shell prior assignment analysis incomplete: node budget exceeded",
                 )
             })?;
+            if node.next_sibling().is_some_and(|next| next.kind() == "&") {
+                continue;
+            }
             if node.kind() == "for_statement"
                 && node
                     .child_by_field_name("variable")

@@ -922,3 +922,62 @@ fn prefix_value_reads_observe_prior_prefixes_but_arguments_observe_outer_values(
         );
     }
 }
+
+#[test]
+fn asynchronous_commands_preserve_parent_values_and_export_state() {
+    for source in [
+        "export FLAG=true & wait",
+        "FLAG=true export FLAG & wait",
+        "FLAG=true \"export\" FLAG & wait",
+        "export FLAG=true && echo done & wait",
+        "{ export FLAG=true; } & wait",
+        "if ready; then export FLAG=true; fi & wait",
+        "set -a & wait; FLAG=true",
+        "{ set -a; } & wait; FLAG=true",
+        "set -a; FLAG=true & wait",
+        "FLAG=true & wait; export FLAG",
+        "export FLAG=true & wait; FLAG=false",
+    ] {
+        assert!(
+            !facts("bash", source)
+                .iter()
+                .any(|row| row.edge_kind == "defines_config"),
+            "{source}"
+        );
+    }
+    for source in [
+        "FLAG=true; FLAG=false & wait; export FLAG",
+        "FLAG=true; FLAG=false export FLAG & wait; export FLAG",
+        "set -a; set +a & wait; FLAG=true",
+        "set -a; { set +a; } & wait; FLAG=true",
+    ] {
+        let rows = facts("bash", source);
+        let definitions = rows
+            .iter()
+            .filter(|row| row.edge_kind == "defines_config")
+            .collect::<Vec<_>>();
+        assert!(!definitions.is_empty(), "{source}");
+        assert!(
+            definitions
+                .iter()
+                .all(|row| row.metadata.default_value.as_deref() == Some("true")
+                    && row.metadata.flow_incomplete.is_none()),
+            "{source}: {rows:?}"
+        );
+    }
+    for mutation in [
+        "unset FLAG",
+        "export -n FLAG",
+        "{ unset FLAG; }",
+        "FLAG=false",
+    ] {
+        let source = format!("export FLAG=true; {mutation} & wait; echo $FLAG");
+        let rows = facts("bash", &source);
+        assert!(
+            rows.iter().any(|row| row.source_key == "FLAG"
+                && row.edge_kind == "reads_config"
+                && row.metadata.flow_incomplete.is_none()),
+            "{source}: {rows:?}"
+        );
+    }
+}

@@ -19,6 +19,12 @@ pub(super) fn allexport(mut node: Node<'_>, content: &str) -> Result<(bool, bool
                     ));
                 };
                 budget = remaining;
+                if candidate
+                    .next_sibling()
+                    .is_some_and(|next| next.kind() == "&")
+                {
+                    continue;
+                }
                 if let Some(mode) = mode(candidate, content)? {
                     if conditional {
                         uncertain = true;

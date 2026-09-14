@@ -1,6 +1,113 @@
 use crate::code::feature_flags::registry::test_support::*;
 
 #[test]
+fn method_and_block_local_types_do_not_collide_with_each_other_or_members() {
+    let first = r#"class Config { boolean getX(){return Boolean.getBoolean("first_flag");} }
+        Config first = new Config(); if(first.getX()) {}"#;
+    let second = r#"class Config { boolean getX(){return Boolean.getBoolean("second_flag");} }
+        Config second = new Config(); if(second.getX()) {}"#;
+    for bodies in [
+        format!("void a() {{{first}}} void b() {{{second}}}"),
+        format!("void run() {{{first}}} void run(int ignored) {{{second}}}"),
+        format!("void run() {{ {{ {first} }} {{ {second} }} }}"),
+    ] {
+        let source = format!(
+            r#"package app; class App {{
+              static class Config {{ boolean getX() {{return Boolean.getBoolean("member_flag");}} }}
+              void member() {{Config member = new Config(); if(member.getX()) {{}}}}
+              {bodies}
+            }}"#
+        );
+        let rows = raw_facts("java", &source);
+        let mut bindings = std::collections::BTreeSet::new();
+        for name in ["first", "second", "member"] {
+            let provider = rows
+                .iter()
+                .find(|row| row.source_key == format!("{name}_flag"))
+                .unwrap();
+            let binding = provider.metadata.declared_getter.as_ref().unwrap();
+            assert!(bindings.insert(binding.clone()), "{source}");
+            let usages = rows
+                .iter()
+                .filter(|row| row.excerpt.contains(&format!("{name}.getX()")))
+                .filter(|row| matches!(row.edge_kind.as_str(), "reads_config" | "guards_code"))
+                .collect::<Vec<_>>();
+            assert_eq!(usages.len(), 2, "{name}: {rows:?}");
+            assert!(
+                usages
+                    .iter()
+                    .all(|row| row.metadata.reference.as_ref() == Some(binding))
+            );
+            if name == "member" {
+                assert_eq!(binding, "app.App.Config.getX");
+            }
+        }
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.edge_kind == "config_type_declaration")
+                .map(|row| &row.source_key)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            4
+        );
+    }
+}
+
+#[test]
+fn local_type_self_super_and_nested_members_share_the_declaration_identity() {
+    let rows = raw_facts(
+        "java",
+        r#"package app; class App { void run() {
+          class Base { boolean getX(){ return Boolean.getBoolean("base_flag"); } }
+          class Config extends Base {
+            boolean getX(){ return Boolean.getBoolean("child_flag"); }
+            void check(Config self) {
+              if(this.getX()) {} if(self.getX()) {} if(super.getX()) {}
+            }
+            class Nested { boolean getX(){ return Boolean.getBoolean("nested_flag"); } }
+          }
+          Config child = new Config(); if(child.getX()) {}
+          Config.Nested nested = null; if(nested.getX()) {}
+        } }"#,
+    );
+    let mut bindings = std::collections::BTreeMap::new();
+    for key in ["base_flag", "child_flag", "nested_flag"] {
+        let provider = rows.iter().find(|row| row.source_key == key).unwrap();
+        bindings.insert(key, provider.metadata.declared_getter.as_ref().unwrap());
+    }
+    let child_owner = bindings["child_flag"].strip_suffix(".getX").unwrap();
+    let base_owner = bindings["base_flag"].strip_suffix(".getX").unwrap();
+    let hierarchy = rows
+        .iter()
+        .find(|row| row.edge_kind == "config_type_hierarchy" && row.source_key == child_owner)
+        .unwrap();
+    assert_eq!(hierarchy.metadata.bindings, [base_owner]);
+    assert_eq!(
+        bindings["nested_flag"],
+        &format!("{child_owner}.Nested.getX")
+    );
+    for (receiver, key) in [
+        ("this", "child_flag"),
+        ("self", "child_flag"),
+        ("super", "base_flag"),
+        ("child", "child_flag"),
+        ("nested", "nested_flag"),
+    ] {
+        let usages = rows
+            .iter()
+            .filter(|row| row.excerpt.contains(&format!("{receiver}.getX()")))
+            .filter(|row| matches!(row.edge_kind.as_str(), "reads_config" | "guards_code"))
+            .collect::<Vec<_>>();
+        assert_eq!(usages.len(), 2, "{receiver}: {rows:?}");
+        assert!(
+            usages
+                .iter()
+                .all(|row| row.metadata.reference.as_ref() == Some(bindings[key]))
+        );
+    }
+}
+
+#[test]
 fn static_and_private_getters_do_not_provide_ancestor_bindings() {
     for modifier in ["static", "private"] {
         let rows = facts(

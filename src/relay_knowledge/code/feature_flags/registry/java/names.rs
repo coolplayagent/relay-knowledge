@@ -1,4 +1,5 @@
 //! Bounded lexical names for configuration constants and getter receivers.
+pub(super) use super::types::field_symbol;
 use tree_sitter::Node;
 pub(super) fn text<'a>(node: Node<'_>, content: &'a str) -> &'a str {
     &content[node.byte_range()]
@@ -93,23 +94,6 @@ pub(super) fn qualified(node: Node<'_>, name: &str, content: &str) -> String {
         format!("{package}.{name}")
     }
 }
-pub(super) fn field_symbol(mut node: Node<'_>, name: &str, content: &str) -> String {
-    let mut owners = Vec::new();
-    while let Some(parent) = node.parent() {
-        if is_type(parent) {
-            if let Some(name) = parent.child_by_field_name("name") {
-                owners.push(text(name, content));
-            }
-        }
-        node = parent;
-    }
-    owners.reverse();
-    owners.push(name);
-    let suffix = owners.join(".");
-    let head = owners.first().copied().unwrap_or(name);
-    let qualified_head = qualified(node, head, content);
-    format!("{}{}", qualified_head, &suffix[head.len()..])
-}
 pub(super) fn key_literal(node: Node<'_>, content: &str) -> Option<String> {
     if node.kind() == "identifier" {
         let declaration = binding(node, text(node, content), content)?;
@@ -183,10 +167,22 @@ pub(super) fn string_expression(node: Node<'_>, content: &str, depth: usize) -> 
                         .is_some_and(|n| string_expression(n, content, depth + 1))
                 })
         }
-        "identifier" | "field_access" => constant_binding(node, content)
-            .and_then(|n| n.parent())
-            .and_then(|n| n.child_by_field_name("type"))
-            .is_some_and(|n| matches!(text(n, content), "String" | "java.lang.String")),
+        "identifier" | "field_access" => {
+            constant_binding(node, content).is_some_and(|declaration| {
+                let Some(owner) = declaration.parent() else {
+                    return false;
+                };
+                owner
+                    .child_by_field_name("type")
+                    .is_some_and(|ty| match text(ty, content) {
+                        "String" | "java.lang.String" => true,
+                        "var" if owner.kind() == "local_variable_declaration" => declaration
+                            .child_by_field_name("value")
+                            .is_some_and(|value| string_expression(value, content, depth + 1)),
+                        _ => false,
+                    })
+            })
+        }
         _ => false,
     }
 }
@@ -270,11 +266,7 @@ fn literal_bounded(
                             .split_whitespace()
                             .any(|word| word == "final")
                 });
-            if !is_final
-                || !owner
-                    .child_by_field_name("type")
-                    .is_some_and(|ty| matches!(text(ty, content), "String" | "java.lang.String"))
-            {
+            if !is_final || !string_expression(node, content, depth) {
                 return None;
             }
             literal_bounded(
@@ -799,12 +791,9 @@ pub(super) fn static_owner(node: Node<'_>, method: &str, content: &str) -> Optio
     let mut single = std::collections::BTreeSet::new();
     let mut wildcard = std::collections::BTreeSet::new();
     let mut pending = vec![root(node)];
-    let mut budget = 4096;
+    let mut budget = 4096usize;
     while let Some(current) = pending.pop() {
-        if budget == 0 {
-            return None;
-        }
-        budget -= 1;
+        budget = budget.checked_sub(1)?;
         if current.kind() == "method_declaration"
             && current
                 .child_by_field_name("name")
@@ -823,7 +812,24 @@ pub(super) fn static_owner(node: Node<'_>, method: &str, content: &str) -> Optio
                     if member == method {
                         single.insert(owner.to_owned());
                     }
-                    if member == "*" {
+                    if member == "*"
+                        && match owner {
+                            "java.lang.System" => {
+                                matches!(method, "getenv" | "getProperty" | "getProperties")
+                            }
+                            "java.lang.Boolean" => {
+                                matches!(method, "getBoolean" | "parseBoolean" | "valueOf")
+                            }
+                            "java.lang.Integer" => {
+                                matches!(method, "getInteger" | "parseInt" | "valueOf")
+                            }
+                            "java.lang.Long" => {
+                                matches!(method, "getLong" | "parseLong" | "valueOf")
+                            }
+                            "java.lang.Double" => matches!(method, "parseDouble" | "valueOf"),
+                            _ => true,
+                        }
+                    {
                         wildcard.insert(owner.to_owned());
                     }
                 }
