@@ -1,6 +1,7 @@
 mod business_projection;
 mod durable_incremental;
 mod fast_path;
+mod preview;
 mod queue;
 mod state;
 mod task;
@@ -17,7 +18,7 @@ use crate::{
     },
     code::{
         CodeIndexPlan, CodeIndexPlanRecovery, build_index_snapshot_with_workspace_detection,
-        prepare_full_index_plan_with_workspace_detection, preview_repository_scope,
+        prepare_full_index_plan_with_workspace_detection,
     },
     domain::{
         CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget, CodeIndexSnapshot,
@@ -944,8 +945,7 @@ impl RelayKnowledgeService {
         let status = required_code_repository(&store, &request.repository.repository).await?;
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
-        let preview =
-            run_blocking_code(move || preview_repository_scope(&registration, &selector)).await?;
+        let preview = preview::validate_scope(registration, selector).await?;
         let path_filters = crate::application::code_repository::scope::merged_filters(
             &status.path_filters,
             &request.repository.path_filters,
