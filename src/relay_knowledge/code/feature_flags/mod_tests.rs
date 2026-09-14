@@ -755,3 +755,31 @@ fn non_consul_templates_retain_structured_boolean_definitions() {
         );
     }
 }
+
+#[test]
+fn java_registry_and_sdk_share_the_per_file_fact_budget() {
+    for count in [9998, 9999] {
+        let fields = (0..count)
+            .map(|i| format!("K{i}=\"flag{i}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let source = format!(
+            "class Keys {{ static final String {fields}; void run() {{\nvar client = OpenFeature.getClient();\nclient.getBooleanValue(\"sdk_feature\", false);\n}} }}"
+        );
+        let result = extract_feature_flags(FeatureFlagFileInput {
+            language_id: "java",
+            path: "Keys.java",
+            ..input(&source)
+        });
+        if count == 9998 {
+            assert_eq!(result.unwrap().len(), 10000);
+        } else {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("file fact budget exceeded")
+            );
+        }
+    }
+}

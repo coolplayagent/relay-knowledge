@@ -158,6 +158,7 @@ fn collect_config_fact_records(
         if fact.kind != "config_key" || fact.value_kind != ConfigValueKind::Boolean {
             continue;
         }
+        registry::check_fact_budget(records.len())?;
         records.push(feature_flag_record_from_range(
             input,
             "config_key",
@@ -297,6 +298,7 @@ fn collect_line_records(
             continue;
         }
         seen.push((source_kind.to_owned(), source_key.clone(), edge_kind));
+        registry::check_fact_budget(records.len())?;
         let mut record = feature_flag_record(&context, source_kind, &source_key, edge_kind)?;
         if context.input.language_id == "java" {
             let metadata_offset = context

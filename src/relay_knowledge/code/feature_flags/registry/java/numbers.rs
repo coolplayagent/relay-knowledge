@@ -101,15 +101,32 @@ pub(super) fn convert_default(
                 "Long" => raw.parse::<i64>().ok().map(|v| v.to_string()),
                 "Double" => {
                     let raw = raw.trim_matches(|c| c <= '\u{20}');
+                    match raw {
+                        "NaN" | "+NaN" | "-NaN" => return Some("NaN".into()),
+                        "Infinity" | "+Infinity" => return Some("Infinity".into()),
+                        "-Infinity" => return Some("-Infinity".into()),
+                        _ => {}
+                    }
                     let raw = if raw.ends_with(['d', 'D', 'f', 'F']) {
                         &raw[..raw.len() - 1]
                     } else {
                         raw
                     };
-                    raw.parse::<f64>()
-                        .ok()
-                        .filter(|v| v.is_finite())
-                        .map(|v| v.to_string())
+                    if raw
+                        .bytes()
+                        .any(|b| b.is_ascii_alphabetic() && !matches!(b, b'e' | b'E'))
+                    {
+                        return None;
+                    }
+                    raw.parse::<f64>().ok().map(|v| {
+                        if v == f64::INFINITY {
+                            "Infinity".into()
+                        } else if v == f64::NEG_INFINITY {
+                            "-Infinity".into()
+                        } else {
+                            v.to_string()
+                        }
+                    })
                 }
                 _ => None,
             }

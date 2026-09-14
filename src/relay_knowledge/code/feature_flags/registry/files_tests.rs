@@ -407,3 +407,32 @@ fn grouped_pipeline_inputs_retain_keys_and_fallbacks() {
     );
     assert_eq!(rows[2].metadata.default_value.as_deref(), Some("false"));
 }
+
+#[test]
+fn multiline_template_actions_do_not_become_output_assignments() {
+    let rows = facts(
+        "gotemplate",
+        "{{\n$value := key \"feature\"\n}}defined=true\nvalue={{\nkey \"other\"\n}}\n",
+    );
+    assert!(
+        rows.iter().all(|r| !r.source_key.starts_with('$')),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "feature" && r.edge_kind == "reads_config")
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "defined"
+                && r.metadata.default_value.as_deref() == Some("true"))
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "value" && r.edge_kind == "declares_config_key")
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.source_key == "other" && r.edge_kind == "reads_config")
+    );
+}

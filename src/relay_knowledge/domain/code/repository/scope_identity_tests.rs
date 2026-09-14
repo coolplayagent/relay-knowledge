@@ -160,7 +160,7 @@ fn workspace_scope_semantics_are_canonical_and_backward_compatible() {
 #[test]
 fn configuration_registry_version_invalidates_previous_completed_scope() {
     let previous =
-        CODE_SNAPSHOT_FACT_VERSION.replace("-config-registry-v44", "-config-registry-v43");
+        CODE_SNAPSHOT_FACT_VERSION.replace("-config-registry-v45", "-config-registry-v44");
     assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
     let mut input = Vec::new();
     for value in ["git_snapshot", "repo", "tree"] {

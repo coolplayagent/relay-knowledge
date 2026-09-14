@@ -264,9 +264,16 @@ fn template_output_line(
             return Ok(output);
         };
         if !is_comment {
-            let stop = (close + 2).min(end);
-            output.push_str(&content[open..stop]);
-            begin = stop;
+            let mut words = content[open + 2..close]
+                .trim_start_matches('-')
+                .split_whitespace();
+            let assignment = words.next().is_some_and(|word| word.starts_with('$'))
+                && words.next().is_some_and(|word| matches!(word, ":=" | "="));
+            if !assignment {
+                output.push_str("{{}}");
+            }
+            *comment_end = close + 2;
+            begin = (*comment_end).min(end);
             continue;
         }
         if close - open > 8192 {

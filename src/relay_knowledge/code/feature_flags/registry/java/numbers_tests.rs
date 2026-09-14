@@ -62,7 +62,16 @@ fn converted_numeric_fallbacks_use_decimal_runtime_values_and_reject_invalid_inp
         ("Integer", " 8", None),
         ("Long", "8L", None),
         ("Integer", "0x10", None),
-        ("Double", "NaN", None),
+        ("Double", "NaN", Some("NaN")),
+        ("Double", "-NaN", Some("NaN")),
+        ("Double", "Infinity", Some("Infinity")),
+        ("Double", "+Infinity", Some("Infinity")),
+        ("Double", "-Infinity", Some("-Infinity")),
+        ("Double", "1e999", Some("Infinity")),
+        ("Double", "-1e999", Some("-Infinity")),
+        ("Double", "inf", None),
+        ("Double", "nan", None),
+        ("Double", "InfinityD", None),
     ] {
         let mut metadata = crate::domain::CodeConfigMetadata {
             default_value: Some(raw.into()),
