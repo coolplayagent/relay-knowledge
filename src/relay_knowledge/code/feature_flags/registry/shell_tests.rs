@@ -663,3 +663,172 @@ fn allexport_static_word_budget_errors_are_observable() {
         "{error}"
     );
 }
+
+#[test]
+fn decoded_builtin_names_preserve_export_definitions_and_disable_state() {
+    for export in ["export", "\"export\"", "'export'", "ex\"port\"", "\\export"] {
+        for operand in ["FLAG", "\"FLAG\"", "FLAG=true", "\"FLAG=true\""] {
+            let rows = facts(
+                "bash",
+                &format!("FLAG=true; {export} {operand}; echo $FLAG"),
+            );
+            assert!(
+                rows.iter().any(|row| row.source_key == "FLAG"
+                    && row.edge_kind == "defines_config"
+                    && row.metadata.default_value.as_deref() == Some("true")),
+                "{export} {operand}: {rows:?}"
+            );
+            assert!(
+                rows.iter()
+                    .any(|row| row.source_key == "FLAG" && row.edge_kind == "reads_config"),
+                "{export} {operand}: {rows:?}"
+            );
+        }
+        let rows = facts(
+            "bash",
+            &format!("FLAG=true; {export} '-n' FLAG; echo $FLAG"),
+        );
+        assert!(
+            !rows.iter().any(|row| row.source_key == "FLAG"),
+            "{export}: {rows:?}"
+        );
+    }
+    for unset in ["unset", "\"unset\"", "un'set'", "\\unset"] {
+        let rows = facts("bash", &format!("FLAG=true; {unset} FLAG; \"export\" FLAG"));
+        assert!(
+            !rows.iter().any(|row| row.edge_kind == "defines_config"),
+            "{unset}: {rows:?}"
+        );
+    }
+    for export in ["export", "\"export\""] {
+        let rows = facts(
+            "bash",
+            &format!("FLAG=true; {export} -n FLAG; {export} FLAG; echo $FLAG"),
+        );
+        assert!(
+            rows.iter().any(|row| row.source_key == "FLAG"
+                && row.edge_kind == "defines_config"
+                && row.metadata.default_value.as_deref() == Some("true")),
+            "{export}: {rows:?}"
+        );
+    }
+    for source in [
+        r#"FLAG=true; "$COMMAND" FLAG"#,
+        r#"FLAG=true; echo -x FLAG"#,
+        r#"FLAG=true; ("export" FLAG)"#,
+        r#"FLAG=true; f() { "export" FLAG; }"#,
+    ] {
+        assert!(
+            !facts("bash", source)
+                .iter()
+                .any(|row| row.edge_kind == "defines_config"),
+            "{source}"
+        );
+    }
+    let rows = facts("bash", r#""export" FLAG=$OTHER; echo $FLAG"#);
+    assert!(rows.iter().any(|row| row.source_key == "FLAG"
+        && row.edge_kind == "defines_config"
+        && row.metadata.default_value.is_none()));
+    for operand in [r#""FLAG=$OTHER""#, "FLAG=~", "FLAG=path:~"] {
+        let rows = facts("bash", &format!("\"export\" {operand}; echo $FLAG"));
+        assert!(
+            rows.iter().any(|row| row.source_key == "FLAG"
+                && row.edge_kind == "defines_config"
+                && row.metadata.default_value.is_none()),
+            "{operand}: {rows:?}"
+        );
+    }
+    let rows = facts("bash", r#""export" "FLAG=~""#);
+    assert!(
+        rows.iter()
+            .any(|row| row.source_key == "FLAG"
+                && row.metadata.default_value.as_deref() == Some("~"))
+    );
+    let rows = facts("bash", r#""export" "$NAME=true""#);
+    assert!(!rows.iter().any(|row| row.edge_kind == "defines_config"));
+    for export in ["export", "\"export\""] {
+        let rows = facts(
+            "bash",
+            &format!("FLAG=false; {export} FLAG=true; export FLAG"),
+        );
+        let definitions = rows
+            .iter()
+            .filter(|row| row.source_key == "FLAG" && row.edge_kind == "defines_config")
+            .collect::<Vec<_>>();
+        assert!(!definitions.is_empty());
+        assert!(
+            definitions
+                .iter()
+                .all(|row| row.metadata.default_value.as_deref() == Some("true")),
+            "{export}: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn loop_bindings_replace_inherited_values_only_inside_the_body() {
+    for keyword in ["for", "select"] {
+        let source = format!(
+            r#"{keyword} FLAG in "$FLAG" on off; do if test "$FLAG" = on; then echo "$OTHER"; fi; done; echo "$FLAG""#
+        );
+        let rows = facts("bash", &source);
+        let reads = rows
+            .iter()
+            .filter(|row| row.source_key == "FLAG" && row.edge_kind == "reads_config")
+            .collect::<Vec<_>>();
+        assert_eq!(reads.len(), 2, "{keyword}: {rows:?}");
+        assert!(
+            reads
+                .iter()
+                .any(|row| row.metadata.flow_incomplete.is_none())
+        );
+        assert!(
+            reads
+                .iter()
+                .any(|row| row.metadata.flow_incomplete.as_deref()
+                    == Some("conditional_reassignment"))
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.source_key == "OTHER" && row.edge_kind == "reads_config")
+        );
+    }
+    for source in [
+        r#"export FLAG=before; for FLAG in on off; do echo "$FLAG"; done"#,
+        r#"for FLAG in on off; do for INNER in "$FLAG"; do echo "$FLAG"; done; done"#,
+    ] {
+        assert!(
+            !facts("bash", source)
+                .iter()
+                .any(|row| row.source_key == "FLAG" && row.edge_kind == "reads_config"),
+            "{source}"
+        );
+    }
+    let rows = facts(
+        "bash",
+        "FLAG=before; for FLAG in on off; do :; done; export FLAG",
+    );
+    assert!(rows.iter().any(|row| row.source_key == "FLAG"
+        && row.edge_kind == "defines_config"
+        && row.metadata.default_value.is_none()
+        && row.metadata.flow_incomplete.is_some()));
+}
+
+#[test]
+fn export_command_word_budget_errors_remain_observable() {
+    let source = format!("{} FLAG=true", "\"ex\"".repeat(1100));
+    let error = extract(&FeatureFlagFileInput {
+        repository_id: "repo",
+        source_scope: "scope",
+        file_id: "file",
+        path: "config.sh",
+        language_id: "bash",
+        content: &source,
+        config_facts: &[],
+    })
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("lexical budget exceeded"),
+        "{error}"
+    );
+}

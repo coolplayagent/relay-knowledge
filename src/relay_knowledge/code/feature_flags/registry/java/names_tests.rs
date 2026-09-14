@@ -377,6 +377,71 @@ fn enhanced_for_receivers_use_loop_types_and_stop_outer_field_fallback() {
 }
 
 #[test]
+fn catch_receivers_use_parameter_types_only_inside_their_own_bodies() {
+    for (parameter, expected) in [
+        ("FeatureException config", "demo.FeatureException.isEnabled"),
+        (
+            "final @Marker external.FeatureException config",
+            "external.FeatureException.isEnabled",
+        ),
+        (
+            "/*1*/ /*2*/ /*3*/ /*4*/ /*5*/ FeatureException config",
+            "demo.FeatureException.isEnabled",
+        ),
+    ] {
+        let rows = facts(
+            "java",
+            &format!(
+                "package demo; class App {{ OuterConfig config; void run() {{ try {{}} catch ({parameter}) {{ if(config.isEnabled()) {{}} if(this.config.isEnabled()) {{}} }} if(config.isEnabled()) {{}} }} }}"
+            ),
+        );
+        for edge in ["reads_config", "guards_code"] {
+            assert_eq!(
+                rows.iter()
+                    .filter(|r| r.edge_kind == edge
+                        && r.metadata.reference.as_deref() == Some(expected))
+                    .count(),
+                1,
+                "{parameter}: {rows:?}"
+            );
+            assert_eq!(
+                rows.iter()
+                    .filter(|r| r.edge_kind == edge
+                        && r.metadata.reference.as_deref() == Some("demo.OuterConfig.isEnabled"))
+                    .count(),
+                2,
+                "{parameter}: {rows:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn multi_catch_receivers_shadow_fields_without_guessing_a_common_type() {
+    let rows = facts(
+        "java",
+        r#"class App { OuterConfig config; void run() {
+        try {} catch (FirstException | SecondException config) {
+            if(config.isEnabled()) {} if(this.config.isEnabled()) {}
+        }
+        if(config.isEnabled()) {}
+    }}"#,
+    );
+    for edge in ["reads_config", "guards_code"] {
+        let usages = rows
+            .iter()
+            .filter(|r| r.edge_kind == edge)
+            .collect::<Vec<_>>();
+        assert_eq!(usages.len(), 2, "{rows:?}");
+        assert!(
+            usages
+                .iter()
+                .all(|r| { r.metadata.reference.as_deref() == Some("OuterConfig.isEnabled") })
+        );
+    }
+}
+
+#[test]
 fn composed_java_keys_resolve_bounded_final_string_references() {
     let rows = facts(
         "java",

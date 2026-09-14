@@ -324,7 +324,7 @@ pub(super) fn binding<'a>(mut node: Node<'a>, name: &str, content: &str) -> Opti
                 .is_some_and(|object| object.kind() == "this")
     });
     let position = node.start_byte();
-    let mut budget = 2048;
+    let mut budget = 2048usize;
     while let Some(parent) = node.parent() {
         if budget == 0 {
             return None;
@@ -338,6 +338,22 @@ pub(super) fn binding<'a>(mut node: Node<'a>, name: &str, content: &str) -> Opti
                 .is_some_and(|n| text(n, content) == name)
         {
             return Some(parent);
+        }
+        if !explicit_field
+            && parent.kind() == "catch_clause"
+            && parent.child_by_field_name("body") == Some(node)
+        {
+            let mut cursor = parent.walk();
+            for parameter in parent.named_children(&mut cursor) {
+                budget = budget.checked_sub(1)?;
+                if parameter.kind() == "catch_formal_parameter"
+                    && parameter
+                        .child_by_field_name("name")
+                        .is_some_and(|n| text(n, content) == name)
+                {
+                    return Some(parameter);
+                }
+            }
         }
         if let Some(parameters) = parent
             .child_by_field_name("parameters")
@@ -532,7 +548,18 @@ pub(super) fn receiver_type(node: Node<'_>, content: &str, depth: usize) -> Opti
             };
             let ty = owner
                 .child_by_field_name("type")
-                .or_else(|| owner.child_by_field_name("right"))?;
+                .or_else(|| owner.child_by_field_name("right"))
+                .or_else(|| {
+                    // A multi-catch shadows outer names without proving a common receiver type.
+                    if owner.kind() != "catch_formal_parameter" {
+                        return None;
+                    }
+                    owner
+                        .named_children(&mut owner.walk())
+                        .take(2048)
+                        .find(|n| n.kind() == "catch_type" && n.named_child_count() == 1)?
+                        .named_child(0)
+                })?;
             if declaration.child_by_field_name("dimensions").is_some() {
                 return None;
             }

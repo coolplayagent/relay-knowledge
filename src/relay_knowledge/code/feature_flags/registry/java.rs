@@ -68,8 +68,15 @@ pub(super) fn extract(
                     {
                         let nullable = node
                             .child_by_field_name("arguments")
-                            .is_some_and(|n| n.named_child_count() == 1);
+                            .is_some_and(nullable_property_default);
                         numbers::convert_default(&mut row.metadata, &conversions, nullable);
+                        if nullable
+                            && row.metadata.boolean_converted_default
+                            && row.metadata.flow_incomplete.as_deref()
+                                == Some("unevaluated_explicit_default")
+                        {
+                            row.metadata.flow_incomplete = None;
+                        }
                     }
                     row.metadata.bindings = hierarchy.bindings(method, input.content)?;
                     row.metadata.declared_getter = row.metadata.bindings.first().cloned();
@@ -254,6 +261,25 @@ pub(super) fn extract(
             }
         }
     }
+}
+
+fn nullable_property_default(arguments: Node<'_>) -> bool {
+    let Some(mut value) = arguments.named_child(1) else {
+        return arguments.named_child_count() == 1;
+    };
+    for _ in 0..16 {
+        match value.kind() {
+            "null_literal" => return true,
+            "parenthesized_expression" => {
+                let Some(inner) = value.named_child(0) else {
+                    return false;
+                };
+                value = inner;
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 
 fn read(

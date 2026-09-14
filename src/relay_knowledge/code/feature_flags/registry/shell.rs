@@ -20,7 +20,9 @@ pub(super) fn extract(
         if node.kind() == "variable_assignment" && export_scope(node).is_some() {
             let explicit = node
                 .parent()
-                .and_then(|parent| export_mode(parent, input.content))
+                .map(|parent| export_mode(parent, input.content))
+                .transpose()?
+                .flatten()
                 == Some(true)
                 || {
                     let (external, _) = shell_external(
@@ -57,14 +59,26 @@ pub(super) fn extract(
                 }
             }
         }
-        if export_mode(node, input.content) == Some(true) && export_scope(node).is_some() {
+        if export_mode(node, input.content)? == Some(true) && export_scope(node).is_some() {
             let mut cursor = node.walk();
-            for name in node
-                .named_children(&mut cursor)
-                .filter(|n| matches!(n.kind(), "word" | "variable_name"))
-            {
-                let key = &input.content[name.byte_range()];
-                if let Some((assignment, uncertain)) = prior_assignment(node, key, input.content)? {
+            for name in node.named_children(&mut cursor).filter(|n| {
+                !matches!(n.kind(), "command_name" | "variable_assignment") && !n.is_extra()
+            }) {
+                if let Some(mut row) = definition(input, name)? {
+                    if export_scope(node) == Some(true) {
+                        row.metadata.default_value = None;
+                        row.metadata.value_type = None;
+                        row.metadata.flow_incomplete = Some("conditional_export".into());
+                    }
+                    check_fact_budget(rows.len())?;
+                    rows.push(row);
+                    continue;
+                }
+                let Some(key) = values::static_value(Some(name), input.content)? else {
+                    continue;
+                };
+                if let Some((assignment, uncertain)) = prior_assignment(node, &key, input.content)?
+                {
                     if let Some(mut row) = definition(input, assignment)? {
                         let site = metadata(input, node.start_byte());
                         row.metadata.domain = site.domain.or(row.metadata.domain);
@@ -206,19 +220,41 @@ fn export_scope(mut node: Node<'_>) -> Option<bool> {
     None
 }
 
-fn export_mode(node: Node<'_>, content: &str) -> Option<bool> {
-    if !matches!(node.kind(), "declaration_command" | "unset_command") {
-        return None;
+fn export_mode(node: Node<'_>, content: &str) -> Result<Option<bool>, DomainError> {
+    if !matches!(
+        node.kind(),
+        "declaration_command" | "unset_command" | "command"
+    ) {
+        return Ok(None);
     }
     let mut cursor = node.walk();
     let mut words = node.children(&mut cursor).filter(|child| !child.is_extra());
-    let command = &content[words.next()?.byte_range()];
+    let Some(command) = words.next() else {
+        return Ok(None);
+    };
+    let Some(command) = values::static_value(Some(command), content)? else {
+        return Ok(None);
+    };
+    if !matches!(
+        command.as_str(),
+        "export" | "declare" | "typeset" | "local" | "unset"
+    ) {
+        return Ok(None);
+    }
     let mut decoded = Vec::new();
-    for word in words {
-        if word.kind() == "variable_assignment" {
+    for (index, word) in words.enumerate() {
+        if index >= 1024 {
+            return Err(DomainError::invalid(
+                "configuration",
+                "shell command option budget exceeded",
+            ));
+        }
+        if values::assignment(word, content)?.is_some() {
             break;
         }
-        let value = values::static_value(Some(word), content).ok()??;
+        let Some(value) = values::static_value(Some(word), content)? else {
+            return Ok(None);
+        };
         if value == "--" || !value.starts_with(['-', '+']) {
             break;
         }
@@ -229,7 +265,7 @@ fn export_mode(node: Node<'_>, content: &str) -> Option<bool> {
         .iter()
         .any(|option| option.starts_with('-') && option.contains('f'))
     {
-        return None;
+        return Ok(None);
     }
     if command == "unset"
         || options.iter().any(|option| {
@@ -237,19 +273,19 @@ fn export_mode(node: Node<'_>, content: &str) -> Option<bool> {
                 || (option.starts_with('+') && option.contains('x'))
         })
     {
-        return Some(false);
+        return Ok(Some(false));
     }
     if options.contains(&"-p") {
-        return None;
+        return Ok(None);
     }
     if command == "export"
         || options
             .iter()
             .any(|option| option.starts_with('-') && option.contains('x'))
     {
-        return Some(true);
+        return Ok(Some(true));
     }
-    (command == "local").then_some(false)
+    Ok((command == "local").then_some(false))
 }
 fn shell_external(
     mut node: Node<'_>,
@@ -268,6 +304,14 @@ fn shell_external(
             ));
         }
         budget -= 1;
+        if parent.kind() == "for_statement"
+            && parent.child_by_field_name("body") == Some(node)
+            && parent
+                .child_by_field_name("variable")
+                .is_some_and(|variable| &content[variable.byte_range()] == key)
+        {
+            return Ok((false, uncertain));
+        }
         if matches!(
             parent.kind(),
             "program"
@@ -291,7 +335,14 @@ fn shell_external(
                         ));
                     }
                     budget -= 1;
-                    if let Some(exported) = export_mode(candidate, content) {
+                    if candidate.kind() == "for_statement"
+                        && candidate
+                            .child_by_field_name("variable")
+                            .is_some_and(|variable| &content[variable.byte_range()] == key)
+                    {
+                        uncertain |= !assigned;
+                    }
+                    if let Some(exported) = export_mode(candidate, content)? {
                         let names = command_names(candidate, key, content)?;
                         if names && conditional {
                             uncertain = true;
@@ -305,16 +356,11 @@ fn shell_external(
                                 && export_scope(candidate) != Some(false)
                             {
                                 let mut cursor = candidate.walk();
-                                let assigns =
-                                    candidate
-                                        .named_children(&mut cursor)
-                                        .take(1024)
-                                        .any(|child| {
-                                            child.kind() == "variable_assignment"
-                                                && child.child_by_field_name("name").is_some_and(
-                                                    |name| &content[name.byte_range()] == key,
-                                                )
-                                        });
+                                let mut assigns = false;
+                                for child in candidate.named_children(&mut cursor).take(1024) {
+                                    assigns |= values::assignment(child, content)?
+                                        .is_some_and(|(name, _)| name == key);
+                                }
                                 let prior_local = !assigns
                                     && prior_assignment(candidate, key, content)?.is_some_and(
                                         |(assignment, conditional)| {
@@ -382,25 +428,18 @@ fn definition(
     input: &FeatureFlagFileInput<'_>,
     node: Node<'_>,
 ) -> Result<Option<CodeFeatureFlagRecord>, DomainError> {
-    let Some(name) = node.child_by_field_name("name") else {
+    let Some((key, value)) = values::assignment(node, input.content)? else {
         return Ok(None);
     };
     let mut row = record(
         input,
         "env_var",
-        &input.content[name.byte_range()],
+        &key,
         "defines_config",
         node.start_byte(),
         node.end_byte(),
     )?;
-    let append = node
-        .child_by_field_name("value")
-        .is_some_and(|value| input.content[name.end_byte()..value.start_byte()].contains("+="));
-    if let Some(value) = if append {
-        None
-    } else {
-        values::static_value(node.child_by_field_name("value"), input.content)?
-    } {
+    if let Some(value) = value {
         set_default(&mut row.metadata, value);
     }
     Ok(Some(row))
@@ -414,11 +453,11 @@ fn command_names(node: Node<'_>, key: &str, content: &str) -> Result<bool, Domai
                 "shell command operand budget exceeded",
             ));
         }
-        if child.kind() == "variable_assignment" {
-            if child
-                .child_by_field_name("name")
-                .is_some_and(|n| &content[n.byte_range()] == key)
-            {
+        if child.kind() == "command_name" || child.is_extra() {
+            continue;
+        }
+        if let Some((name, _)) = values::assignment(child, content)? {
+            if name == key {
                 return Ok(true);
             }
         } else if values::static_value(Some(child), content)?.as_deref() == Some(key) {
@@ -474,10 +513,18 @@ fn prior_assignment<'a>(
                     "shell prior assignment analysis incomplete: node budget exceeded",
                 )
             })?;
-            if node.kind() == "variable_assignment"
+            if node.kind() == "for_statement"
                 && node
-                    .child_by_field_name("name")
-                    .is_some_and(|n| &content[n.byte_range()] == key)
+                    .child_by_field_name("variable")
+                    .is_some_and(|variable| &content[variable.byte_range()] == key)
+            {
+                uncertain = true;
+            }
+            if (node.kind() == "variable_assignment"
+                || node
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == "command"))
+                && values::assignment(node, content)?.is_some_and(|(name, _)| name == key)
             {
                 if conditional {
                     uncertain = true;
@@ -485,8 +532,16 @@ fn prior_assignment<'a>(
                 }
                 return Ok(Some((node, uncertain)));
             }
-            if node.kind() == "unset_command"
-                && export_mode(node, content) == Some(false)
+            if (node.kind() == "unset_command"
+                || (node.kind() == "command"
+                    && node
+                        .child_by_field_name("name")
+                        .map(|name| values::static_value(Some(name), content))
+                        .transpose()?
+                        .flatten()
+                        .as_deref()
+                        == Some("unset")))
+                && export_mode(node, content)? == Some(false)
                 && command_names(node, key, content)?
             {
                 if conditional {
@@ -497,6 +552,7 @@ fn prior_assignment<'a>(
             }
             let conditional = match node.kind() {
                 "compound_statement" | "declaration_command" | "list" => conditional,
+                "command" if export_mode(node, content)?.is_some() => conditional,
                 "if_statement" | "elif_clause" | "else_clause" | "while_statement"
                 | "for_statement" | "do_group" | "case_statement" | "case_item" => true,
                 _ => continue,

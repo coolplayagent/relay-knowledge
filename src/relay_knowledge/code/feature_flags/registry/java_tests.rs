@@ -321,6 +321,75 @@ fn boolean_conversions_preserve_nullable_property_fallback_only() {
 }
 
 #[test]
+fn null_property_default_matrix_preserves_boolean_false_without_unevaluated_flow() {
+    for reader in [
+        "System.getProperty",
+        "java.lang.System.getProperty",
+        "getProperty",
+        "System.getProperties().getProperty",
+        "java.lang.System.getProperties().getProperty",
+        "getProperties().getProperty",
+    ] {
+        for wrapper in ["Boolean.parseBoolean", "Boolean.valueOf"] {
+            for fallback in ["null", "((null))"] {
+                let source = format!(
+                    r#"import static java.lang.System.getProperty; import static java.lang.System.getProperties; class Config {{boolean getFlag(){{return {wrapper}({reader}("flag", {fallback}));}}}}"#
+                );
+                let rows = facts("java", &source);
+                let row = rows.iter().find(|r| r.source_key == "flag").unwrap();
+                assert_eq!(
+                    row.metadata.default_value.as_deref(),
+                    Some("false"),
+                    "{source}"
+                );
+                assert_eq!(
+                    row.metadata.value_type.as_deref(),
+                    Some("boolean"),
+                    "{source}"
+                );
+                assert!(row.metadata.boolean_converted_default, "{source}");
+                assert!(row.metadata.flow_incomplete.is_none(), "{source}");
+                assert!(row.metadata.bindings.contains(&"Config.getFlag".into()));
+            }
+        }
+    }
+}
+
+#[test]
+fn nullable_conversion_requires_known_null_and_boolean_value_flow() {
+    for (expression, fallback) in [
+        ("System.getProperty(\"flag\", null)", "null"),
+        (
+            "Integer.parseInt(System.getProperty(\"flag\", null))",
+            "null",
+        ),
+        (
+            "Double.valueOf(System.getProperties().getProperty(\"flag\", null))",
+            "null",
+        ),
+        (
+            "Boolean.parseBoolean(System.getProperty(\"flag\", chooseDefault()))",
+            "dynamic",
+        ),
+        (
+            "Boolean.valueOf(System.getProperties().getProperty(\"flag\", chooseDefault()))",
+            "dynamic",
+        ),
+    ] {
+        let source = format!("class Config {{Object getFlag(){{return {expression};}}}}");
+        let rows = facts("java", &source);
+        let row = rows.iter().find(|r| r.source_key == "flag").unwrap();
+        assert!(row.metadata.default_value.is_none(), "{fallback}: {source}");
+        assert!(!row.metadata.boolean_converted_default, "{source}");
+        assert_eq!(
+            row.metadata.flow_incomplete.as_deref(),
+            Some("unevaluated_explicit_default"),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn boolean_conversions_normalize_explicit_property_fallbacks() {
     for (fallback, expected) in [
         ("TRUE", "true"),
