@@ -130,6 +130,7 @@ pub(super) fn append_definition_source_fallback(
         }
         let path_metadata = metadata.get(&declaration.path);
         results.push(CodeRetrievalHit {
+            query_degraded: false,
             repository_id: status.repository_id.clone(),
             scope_id: status.last_indexed_scope_id.clone().unwrap_or_default(),
             resolved_commit_sha: status.last_indexed_commit.clone().unwrap_or_default(),
@@ -200,6 +201,7 @@ fn code_grep_hit(
     }
 
     CodeRetrievalHit {
+        query_degraded: degraded_reason.is_some(),
         repository_id: status.repository_id.clone(),
         scope_id: status.last_indexed_scope_id.clone().unwrap_or_default(),
         resolved_commit_sha: status.last_indexed_commit.clone().unwrap_or_default(),

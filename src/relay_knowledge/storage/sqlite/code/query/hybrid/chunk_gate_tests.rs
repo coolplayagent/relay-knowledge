@@ -212,6 +212,7 @@ fn chunk_gate_hit(excerpt: &str) -> CodeRetrievalHit {
 
 fn chunk_gate_hit_with_language(language_id: &str, excerpt: &str) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: TEST_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),

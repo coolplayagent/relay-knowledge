@@ -4,6 +4,7 @@ use crate::domain::{CodeRepositorySelector, FreshnessPolicy, RepositoryCodeRange
 #[test]
 fn callees_project_the_resolved_callee_identity() {
     let status = CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/repo".to_owned(),
@@ -114,6 +115,7 @@ fn caller_test_context_demotion_preserves_positive_evidence() {
 
 fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/repo".to_owned(),

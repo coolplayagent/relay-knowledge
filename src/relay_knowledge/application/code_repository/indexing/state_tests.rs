@@ -1,22 +1,29 @@
 use super::*;
 
-#[test]
-fn degraded_file_count_uses_index_status_reason_shape() {
-    let status = CodeRepositoryStatus {
-        degraded_reason: Some("25 file(s) degraded during code indexing".to_owned()),
-        ..status_for_scope()
-    };
-    let custom = CodeRepositoryStatus {
-        degraded_reason: Some("custom parser warning".to_owned()),
-        ..status.clone()
-    };
-
-    assert_eq!(degraded_file_count_from_status(&status), Some(25));
-    assert_eq!(degraded_file_count_from_status(&custom), None);
+#[tokio::test]
+async fn degraded_file_count_uses_structured_snapshot_measurement() {
+    let store: std::sync::Arc<dyn crate::storage::KnowledgeStore> =
+        std::sync::Arc::new(crate::storage::SqliteGraphStore::open_in_memory().unwrap());
+    let mut status = status_for_scope();
+    status.content_integrity = crate::domain::CodeContentIntegrity::measured("scope".into(), 25);
+    status.degraded_reason = Some("custom human-readable warning".into());
+    assert_eq!(
+        degraded_file_count_for_fresh_index(&store, &status)
+            .await
+            .unwrap(),
+        25
+    );
+    status.content_integrity = Default::default();
+    assert!(
+        degraded_file_count_for_fresh_index(&store, &status)
+            .await
+            .is_err()
+    );
 }
 
 fn status_for_scope() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "fixture".to_owned(),
         root_path: "/tmp/repo".to_owned(),

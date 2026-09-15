@@ -168,6 +168,7 @@ fn call_graph_hit() -> CodeRetrievalHit {
 
 fn call_graph_hit_at(path: &str) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: "scope".to_owned(),
         resolved_commit_sha: "commit".to_owned(),
@@ -216,6 +217,7 @@ fn freshness(
     direct_source_read_paths: Vec<String>,
 ) -> CodeRepositoryFreshnessDiagnostics {
     CodeRepositoryFreshnessDiagnostics {
+        content_integrity: Default::default(),
         state,
         freshness_policy: FreshnessPolicy::AllowStale,
         graph_version: 1,

@@ -835,6 +835,7 @@ fn freshness_with_active_match(
     direct_source_read_required: bool,
 ) -> CodeRepositoryFreshnessDiagnostics {
     CodeRepositoryFreshnessDiagnostics {
+        content_integrity: Default::default(),
         state: if direct_source_read_required {
             CodeRepositoryFreshnessState::Pending
         } else {
@@ -885,6 +886,7 @@ fn freshness_with_active_match(
 fn test_hit() -> CodeRetrievalHit {
     let range = RepositoryCodeRange { start: 1, end: 2 };
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: "scope".to_owned(),
         resolved_commit_sha: "commit".to_owned(),

@@ -304,3 +304,18 @@ Statically decoded Shell builtin names use the same export classification for qu
 Free-text configuration queries match persisted metadata as well as keys and located usages; final group matching and row scoring preserve the SQL metadata search contract. An explicitly supplied query containing no alphanumeric character or underscore is rejected before loading rows; omit the query for an unfiltered registry. Java try-with-resources declarations bind receivers in the try body and later resource initializers, not catch/finally blocks. Shell assignments preceding a recognized export builtin define configuration when that builtin exports the same variable; unrelated ordinary-command prefixes do not define the parent environment. Fact version: `config-registry-v53`.
 
 Proven getter conversions canonicalize explicit environment fallbacks as well as property fallbacks; property-specific nullable handling remains separate. Known platform wildcard imports contribute only supported members they actually expose, and final var keys require a proven String initializer. Named local Java types have lexical identities so unrelated methods or blocks cannot share getter providers. Asynchronous Shell commands cannot define or mutate the parent configuration/export state. Nameref alias tracking and command/builtin dispatch wrappers are outside the finite Shell extraction inventory; recognizing direct builtin names and quoted equivalents does not execute wrappers or indirect variable writes. Absence diagnostics describe observed static evidence within this inventory. Fact version: `config-registry-v54`.
+
+## File diagnostics and content integrity (#393)
+
+Indexed-version freshness and content coverage are independent. `freshness.state=fresh` means the requested version is indexed, not that every file parsed completely. Repository status, reports and query freshness include `content_integrity`: `state` (`complete`, `partial`, `unknown`), `degraded_file_count` (distinct paths) and `source_scope`. Missing fields in older responses mean `unknown`. The legacy `degraded_reason` remains diagnostic text and must not alone trigger reindexing.
+
+```powershell
+relay-knowledge repo diagnostics demo --ref HEAD --limit 50 --format json
+relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor $nextCursor --format json
+```
+
+Pages default to 50 diagnostics, capped at 200, ordered by path and message. Reuse the same ref and path filters with `next_cursor`; moving HEAD does not change the pinned snapshot. A removed snapshot produces an error. `repo report` retains its 20-entry summary and exposes `degradation_summary_truncated` and `diagnostics_command`. Healthy hits do not prove full coverage: missing facts can affect omitted files and cross-file relationships.
+
+HTTP: `GET /api/v1/code/repositories/{alias}/diagnostics`, with `ref`, JSON-array-string `path_filters`, `limit` and `cursor`. CLI supports `--remote`. MCP: `relay_code_diagnostics`, with `repository`, `ref_selector`, `path_filters`, `limit`, `cursor`, subject to authorization and context budgets.
+
+Existing diagnostic tables are reused; no migration or reindex is required. Update agents to inspect `content_integrity` when upgrading; older versions can still report overall `degraded` for partial content. Stale versions, unfinished tasks and graph-only responses retain conservative handling. Out-of-scope external dependencies remain unresolved edge metadata rather than file parse degradation.

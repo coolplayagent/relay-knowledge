@@ -416,6 +416,7 @@ fn code_status_for_repository_set_member(
 ) -> CodeRepositoryStatus {
     let member = &member_status.member;
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: member.repository_id.clone(),
         alias: member.repository_alias.clone(),
         root_path: base_status.root_path.clone(),

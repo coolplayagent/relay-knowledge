@@ -29,6 +29,7 @@ pub(super) struct CodeQueryFreshnessContext<'a> {
     pub(super) freshness_target: CodeRepositorySelector,
     pub(super) stale_reason: Option<String>,
     pub(super) degraded_reason: Option<String>,
+    pub(super) query_degraded: bool,
     pub(super) results: &'a [CodeRetrievalHit],
     pub(super) graph_version: u64,
 }
@@ -42,6 +43,7 @@ pub(super) struct CodeFeatureFlagFreshnessContext<'a> {
     pub(super) freshness_target: CodeRepositorySelector,
     pub(super) stale_reason: Option<String>,
     pub(super) degraded_reason: Option<String>,
+    pub(super) query_degraded: bool,
     pub(super) flags: &'a [CodeFeatureFlagGraph],
     pub(super) graph_version: u64,
 }
@@ -74,6 +76,8 @@ pub(super) async fn code_query_freshness_diagnostics(
 
     Ok(CodeRepositoryFreshnessDiagnostics::code_query(
         CodeRepositoryFreshnessInput {
+            content_integrity: context.scoped_status.content_integrity.clone(),
+            query_degraded: context.query_degraded,
             graph_version: context.graph_version,
             freshness_policy: context.request.freshness_policy,
             source_scope,
@@ -105,6 +109,8 @@ pub(super) async fn code_feature_flag_freshness_diagnostics(
 
     Ok(CodeRepositoryFreshnessDiagnostics::code_query(
         CodeRepositoryFreshnessInput {
+            content_integrity: context.scoped_status.content_integrity.clone(),
+            query_degraded: context.query_degraded,
             graph_version: context.graph_version,
             freshness_policy: context.request.freshness_policy,
             source_scope,
@@ -147,6 +153,8 @@ pub(super) async fn framework_graph_freshness_diagnostics(
             pending,
             cursor: checkpoint,
             direct_source_read_paths: framework_graph_paths(context.graph),
+            content_integrity: context.scoped_status.content_integrity.clone(),
+            query_degraded: false,
         },
     ))
 }

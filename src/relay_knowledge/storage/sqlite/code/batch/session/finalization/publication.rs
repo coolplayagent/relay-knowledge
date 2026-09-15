@@ -74,10 +74,10 @@ pub(super) fn publish_repository_scope(
     }
     let chunk_count =
         count_code_rows(transaction, "code_repository_chunks", &session.source_scope)?;
-    let degraded_file_count = count_code_rows(
-        transaction,
-        "code_repository_file_diagnostics",
-        &session.source_scope,
+    let degraded_file_count: usize = transaction.query_row(
+        "SELECT COUNT(DISTINCT path) FROM code_repository_file_diagnostics WHERE source_scope = ?1",
+        params![session.source_scope],
+        |row| row.get(0),
     )?;
     let degraded_reason = (degraded_file_count > 0)
         .then(|| format!("{degraded_file_count} file(s) degraded during code indexing"));

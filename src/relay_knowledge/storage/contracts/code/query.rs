@@ -90,6 +90,18 @@ pub trait CodeQueryReadStore: Send + Sync {
         })
     }
 
+    fn code_repository_diagnostics(
+        &self,
+        request: crate::domain::CodeDiagnosticsPageRequest,
+    ) -> StorageFuture<'_, crate::domain::CodeDiagnosticsPage> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "diagnostics for '{}' are unavailable",
+                request.source_scope
+            )))
+        })
+    }
+
     fn code_repository_report(
         &self,
         repository: String,

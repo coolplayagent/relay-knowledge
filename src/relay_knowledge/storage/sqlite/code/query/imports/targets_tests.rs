@@ -793,6 +793,7 @@ fn establish_exact_search_ownership(connection: &Connection) {
 
 fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/repo".to_owned(),

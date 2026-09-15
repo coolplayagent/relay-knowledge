@@ -260,3 +260,18 @@ Shell 内置命令名先静态解码，引号、拼接和转义形式使用相�
 配置自由文本查询同时匹配持久化元数据、配置键和使用位置，最终分组匹配与行评分遵守 SQL 元数据搜索契约。显式查询不含任何字母、数字或下划线时，在加载数据前报错；省略查询参数才表示不筛选注册表。Java try-with-resources 声明在 try 体和后续资源初始化中绑定接收者，不在 catch/finally 中生效。Shell 已识别导出内置命令前的赋值，仅在该命令导出同名变量时形成配置定义；普通命令的临时环境赋值不定义父环境配置。 Fact version: `config-registry-v53`.
 
 已证明的 getter 转换同时规范化显式环境回退值与属性回退值，属性特有的可空默认处理保持独立。已知平台通配静态导入只贡献实际提供的受支持成员，final var 配置键须有已证明的 String 初始化值。具名 Java 局部类型使用词法身份，互不相关的方法或代码块不会共享 getter 提供者。异步 Shell 命令不能定义或修改父环境配置及导出状态。nameref 别名跟踪和 command/builtin 分派包装器不在有限 Shell 抽取清单内；直接内置命令名及引号等价形式的识别不执行包装器或间接变量写入。缺少定义诊断描述该清单内已观察的静态证据。 Fact version: `config-registry-v54`.
+
+## 文件诊断与内容完整性（#393）
+
+代码索引的版本新鲜度与内容完整性分别表达。`freshness.state=fresh` 表示请求版本已追上，不保证每个文件都完整解析。仓库状态、报告与查询 freshness 的 `content_integrity` 包含 `state`（`complete`、`partial`、`unknown`）、`degraded_file_count`（按路径去重）和 `source_scope`。旧响应缺少该字段时按 `unknown` 处理。`degraded_reason` 保留为兼容诊断，不能单独用于判断是否需要重新索引。
+
+```powershell
+relay-knowledge repo diagnostics demo --ref HEAD --limit 50 --format json
+relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor $nextCursor --format json
+```
+
+分页默认 50 条，最多 200 条；按路径、消息排序。重复使用同一 ref 与路径过滤条件，传入返回的 `next_cursor` 继续读取；HEAD 移动不会改变已开始分页的快照。快照被清理后明确报错。`repo report` 继续展示最多 20 条摘要，并通过 `degradation_summary_truncated` 和 `diagnostics_command` 提供完整诊断入口。内容不完整时，即使命中的文件正常，也不能推断查询覆盖完整；缺失事实可能影响未命中文件或跨文件关系。
+
+HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包括 `ref`、JSON 数组字符串 `path_filters`、`limit` 和 `cursor`；CLI 支持 `--remote`。MCP 工具为 `relay_code_diagnostics`，接受 `repository`、`ref_selector`、`path_filters`、`limit`、`cursor`，并遵守授权及上下文预算。
+
+此变更复用现有诊断表，无需迁移或重建索引。升级时应将 agent 的完整性判断改为读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。

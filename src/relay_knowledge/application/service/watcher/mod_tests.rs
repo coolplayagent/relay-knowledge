@@ -4,6 +4,7 @@ use super::*;
 
 fn status(last_indexed_scope_id: Option<&str>, stale: bool) -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo-1".to_owned(),
         alias: "core".to_owned(),
         root_path: "/tmp/core".to_owned(),

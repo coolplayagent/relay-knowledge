@@ -123,13 +123,18 @@ impl RelayKnowledgeService {
             .search_code_scope(source_scope, request.clone())
             .await
             .map_err(storage_api_error)?;
+        let storage_query_degraded = results.iter().any(|hit| hit.query_degraded);
+        let storage_query_degraded_reason = results
+            .iter()
+            .filter(|hit| hit.query_degraded)
+            .find_map(|hit| hit.degraded_reason.clone());
         let fallback_degraded_reason =
             apply_code_grep_fallback(&store, &status, &scoped_status, &request, &mut results)
                 .await?;
-        let degraded_reason = results
-            .iter()
-            .find_map(|hit| hit.degraded_reason.clone())
+        let query_degraded = storage_query_degraded || fallback_degraded_reason.is_some();
+        let degraded_reason = storage_query_degraded_reason
             .or(fallback_degraded_reason)
+            .or_else(|| results.iter().find_map(|hit| hit.degraded_reason.clone()))
             .or_else(|| scoped_status.degraded_reason.clone())
             .or_else(|| stale_reason.clone());
         let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
@@ -147,6 +152,7 @@ impl RelayKnowledgeService {
         let freshness = code_query_freshness_diagnostics(
             &store,
             CodeQueryFreshnessContext {
+                query_degraded,
                 base_status: &status,
                 scoped_status: &scoped_status,
                 request: &request,
@@ -295,6 +301,7 @@ impl RelayKnowledgeService {
         let freshness = code_feature_flag_freshness_diagnostics(
             &store,
             CodeFeatureFlagFreshnessContext {
+                query_degraded: false,
                 base_status: &status,
                 scoped_status: &scoped_status,
                 request: &request,

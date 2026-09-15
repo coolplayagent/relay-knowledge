@@ -669,6 +669,7 @@ fn code_search_unavailable_error() -> StorageError {
 
 fn partial_code_hit(path: &str, layer: CodeRetrievalLayer, score: f64) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: CASE_INTENT_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
@@ -696,6 +697,7 @@ fn partial_code_hit(path: &str, layer: CodeRetrievalLayer, score: f64) -> CodeRe
 }
 
 fn assert_read_model_degraded(hit: &CodeRetrievalHit) {
+    assert!(hit.query_degraded);
     let reason = hit
         .degraded_reason
         .as_deref()

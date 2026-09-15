@@ -128,6 +128,7 @@ fn dependency_symbol_fallback_merge_keeps_direct_api_surfaces() {
     let mut duplicate_direct = fallback.clone();
     duplicate_direct.score = fallback.score - 0.1;
     duplicate_direct.retrieval_layers = vec![CodeRetrievalLayer::TextFallback];
+    duplicate_direct.query_degraded = true;
 
     let merged = merge_dependency_symbol_fallback_hits(
         vec![direct.clone(), duplicate_direct],
@@ -141,6 +142,7 @@ fn dependency_symbol_fallback_merge_keeps_direct_api_surfaces() {
     }));
     assert!(merged.iter().any(|hit| {
         hit.excerpt == fallback.excerpt
+            && hit.query_degraded
             && hit
                 .retrieval_layers
                 .contains(&CodeRetrievalLayer::TextFallback)
@@ -179,6 +181,7 @@ fn member_status(
 
 fn symbol_hit(canonical_symbol_id: &str, excerpt: &str) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: "scope".to_owned(),
         resolved_commit_sha: "commit".to_owned(),

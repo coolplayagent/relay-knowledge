@@ -659,3 +659,14 @@ with unmanaged CLI loops.
 
 This skill does not configure MCP, launch MCP Streamable HTTP, call MCP tools,
 or manage ACP sessions. Use relay-knowledge CLI commands only.
+
+## Partial code indexing diagnostics
+
+Freshness and content completeness are independent. Inspect `content_integrity` on repository status/report and query freshness. `partial` warns about missing facts even when the returned hits are healthy; `unknown` is not complete. Do not repeatedly index solely because legacy `degraded_reason` is present.
+
+```powershell
+relay-knowledge repo diagnostics core --ref HEAD --limit 50 --format json
+relay-knowledge repo diagnostics core --ref HEAD --limit 50 --cursor $nextCursor --format json
+```
+
+Retain the same ref and path filters across pages. The cursor pins the served scope; removed snapshots fail explicitly. `repo report` contains only the first 20 diagnostics and now reports truncation. Use `relay_code_diagnostics` over MCP for the same authorized read.

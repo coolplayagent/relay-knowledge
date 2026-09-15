@@ -32,7 +32,9 @@ pub use graph_records::{
     RouteHandlerRole, SymbolRole,
 };
 pub use repository::{
-    CodeCallRecord, CodeConfigFilter, CodeConfigMetadata, CodeFeatureFlagGraph,
+    CodeCallRecord, CodeConfigFilter, CodeConfigMetadata, CodeContentIntegrity,
+    CodeContentIntegrityState, CodeDiagnosticsCursor, CodeDiagnosticsPage,
+    CodeDiagnosticsPageRequest, CodeDiagnosticsRequest, CodeFeatureFlagGraph,
     CodeFeatureFlagRecord, CodeFeatureFlagRequest, CodeFeatureFlagUsage, CodeFileDiagnostic,
     CodeFileFingerprint, CodeImpactPathGroups, CodeImpactRequest, CodeImportRecord, CodeIndexMode,
     CodeIndexRequest, CodePathTombstone, CodeQueryKind, CodeRepositoryExcludedPath,

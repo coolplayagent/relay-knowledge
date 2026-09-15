@@ -40,6 +40,7 @@ fn request(query: &str, kind: CodeQueryKind, limit: usize) -> CodeRetrievalReque
 fn symbol_hit(id: &str, canonical_symbol_id: &str, excerpt: &str) -> CodeRetrievalHit {
     let range = RepositoryCodeRange { start: 1, end: 1 };
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),

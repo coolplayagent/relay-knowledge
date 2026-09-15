@@ -16,6 +16,9 @@ fn generated_repository_counts_default_when_deserializing_older_responses() {
     assert_eq!(totals.generated_symbol_count, 0);
 
     let mut report_json = serde_json::to_value(CodeRepositoryReport {
+        degradation_summary_truncated: false,
+        diagnostics_command: String::new(),
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "fixture".to_owned(),
         root_path: "/tmp/repo".to_owned(),

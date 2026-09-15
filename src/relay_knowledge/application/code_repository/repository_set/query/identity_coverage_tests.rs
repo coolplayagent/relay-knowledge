@@ -139,6 +139,7 @@ fn symbol_result(
     CodeRepositorySetQueryHit {
         member: member.member.clone(),
         hit: CodeRetrievalHit {
+            query_degraded: false,
             repository_id: member.member.repository_id.clone(),
             scope_id: member.member.source_scope.clone(),
             resolved_commit_sha: member.member.resolved_commit_sha.clone(),

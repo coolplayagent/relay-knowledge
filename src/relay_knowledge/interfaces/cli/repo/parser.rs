@@ -28,6 +28,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some("framework") => parse_framework_graph(&tokens[1..]),
         Some("impact") => parse_impact(&tokens[1..]),
         Some("status") => parse_status(&tokens[1..]),
+        Some("diagnostics") => super::diagnostics::parse(&tokens[1..]),
         Some("report") => parse_report(&tokens[1..]),
         Some("software") => parse_software(&tokens[1..]),
         Some("business") => parse_business(&tokens[1..]),

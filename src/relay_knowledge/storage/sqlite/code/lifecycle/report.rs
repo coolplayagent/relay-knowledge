@@ -96,7 +96,18 @@ pub(in crate::storage::sqlite::code) fn repository_report(
     }
     .to_owned();
 
+    let degradation_summary_truncated = connection.query_row(
+        "SELECT COUNT(*) > 20 FROM code_repository_file_diagnostics WHERE source_scope = ?1",
+        params![scope],
+        |row| row.get(0),
+    )?;
+    let diagnostics_command = format!(
+        "relay-knowledge repo diagnostics {} --ref {} --format json",
+        status.alias,
+        status.last_indexed_commit.as_deref().unwrap_or("HEAD")
+    );
     Ok(CodeRepositoryReport {
+        content_integrity: status.content_integrity.clone(),
         repository_id: status.repository_id,
         alias: status.alias,
         root_path: status.root_path,
@@ -114,6 +125,8 @@ pub(in crate::storage::sqlite::code) fn repository_report(
         resolved_edge_count: edge_counts.resolved,
         ambiguous_edge_count: edge_counts.ambiguous,
         unresolved_edge_count: edge_counts.unresolved,
+        degradation_summary_truncated,
+        diagnostics_command,
         degradation_summary,
         representative_queries,
         latency_samples: Vec::<CodeRepositoryLatencySample>::new(),
@@ -256,7 +269,7 @@ fn repository_degraded_file_count(
     connection
         .query_row(
             "
-            SELECT COUNT(*)
+            SELECT COUNT(DISTINCT path)
             FROM code_repository_file_diagnostics
             WHERE source_scope = ?1
             ",

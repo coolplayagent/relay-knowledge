@@ -106,6 +106,7 @@ fn grouped_import_lookup_executes_values_row_set_and_returns_siblings() {
         source_line_count: 10,
     }];
     let status = CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/repo".to_owned(),

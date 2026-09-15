@@ -57,7 +57,12 @@ pub(super) fn encoded_summary(
         blob_read_count: snapshot.files.len(),
         parsed_file_count: snapshot.files.len(),
         sqlite_write_count,
-        degraded_file_count: snapshot.diagnostics.len(),
+        degraded_file_count: snapshot
+            .diagnostics
+            .iter()
+            .map(|diagnostic| &diagnostic.path)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
         batch_count,
     };
     let encoded = super::super::checkpoint_receipt::encode(&receipt)?;

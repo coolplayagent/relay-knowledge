@@ -192,3 +192,6 @@ fn git_command<const N: usize>(path: &Path, args: [&str; N]) -> Command {
     command.current_dir(path).args(args);
     command
 }
+
+#[path = "diagnostics_tool_tests.rs"]
+mod diagnostics_tool_tests;

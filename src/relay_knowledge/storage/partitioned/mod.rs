@@ -33,7 +33,7 @@ use crate::{
 };
 
 use catalog::{SqliteShardCatalog, initialize_catalog_schema};
-use routing::{report_matches_active_control, repository_store_for_report, source_scope_store};
+use routing::source_scope_store;
 
 /// SQLite topology that keeps global control state in one DB and code facts in
 /// one DB per registered repository.
@@ -594,30 +594,26 @@ impl CodeQueryReadStore for PartitionedSqliteKnowledgeStore {
         Box::pin(async move { totals::code_repository_totals(this.control, this.catalog).await })
     }
 
+    fn code_repository_diagnostics(
+        &self,
+        request: crate::domain::CodeDiagnosticsPageRequest,
+    ) -> StorageFuture<'_, crate::domain::CodeDiagnosticsPage> {
+        let this = self.clone();
+        Box::pin(async move {
+            if let Some(shard) =
+                source_scope_store(&this.catalog, request.source_scope.clone()).await?
+            {
+                return shard.code_repository_diagnostics(request).await;
+            }
+            this.control.code_repository_diagnostics(request).await
+        })
+    }
+
     fn code_repository_report(
         &self,
         repository: String,
     ) -> StorageFuture<'_, CodeRepositoryReport> {
-        let this = self.clone();
-        Box::pin(async move {
-            if let Some(shard) =
-                repository_store_for_report(&this.control, &this.catalog, repository.clone())
-                    .await?
-            {
-                let report = shard.code_repository_report(repository.clone()).await?;
-                if report_matches_active_control(
-                    &this.control,
-                    &this.catalog,
-                    repository.clone(),
-                    &report,
-                )
-                .await?
-                {
-                    return Ok(report);
-                }
-            }
-            this.control.code_repository_report(repository).await
-        })
+        repository::report(self, repository)
     }
 
     fn code_repository_scope_symbol_generation_counts(

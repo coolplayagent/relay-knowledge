@@ -6,6 +6,7 @@ use crate::domain::{CodeRetrievalLayer, RepositoryCodeRange, StalenessHint};
 fn make_hit(staleness_hint: Option<StalenessHint>) -> CodeRetrievalHit {
     let r = RepositoryCodeRange { start: 0, end: 1 };
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: String::new(),
         scope_id: String::new(),
         resolved_commit_sha: String::new(),
@@ -92,4 +93,28 @@ fn merge_prefers_pending_index_over_stale() {
     merge_hit_provenance(&mut target, &pending_hit);
     assert_eq!(target.staleness_hint, Some(StalenessHint::PendingIndex {}));
     assert!(target.stale);
+}
+
+#[test]
+fn query_degradation_survives_file_diagnostics_and_hit_consolidation() {
+    let mut hit = make_hit(Some(StalenessHint::Fresh));
+    hit.degraded_reason = Some("file parsing is partial".into());
+    assert!(!hit.query_degraded);
+    mark_hits_degraded(std::slice::from_mut(&mut hit), "read model unavailable");
+    assert!(hit.query_degraded);
+    assert_eq!(
+        hit.degraded_reason.as_deref(),
+        Some("file parsing is partial")
+    );
+
+    let mut target = make_hit(Some(StalenessHint::Fresh));
+    merge_hit_provenance(&mut target, &hit);
+    assert!(target.query_degraded);
+    merge_hit_provenance(&mut target, &make_hit(Some(StalenessHint::Fresh)));
+    assert!(target.query_degraded);
+
+    let mut legacy = serde_json::to_value(target).unwrap();
+    legacy.as_object_mut().unwrap().remove("query_degraded");
+    let legacy: CodeRetrievalHit = serde_json::from_value(legacy).unwrap();
+    assert!(!legacy.query_degraded);
 }

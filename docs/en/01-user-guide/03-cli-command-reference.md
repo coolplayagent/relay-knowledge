@@ -324,3 +324,20 @@ The response removes the mixed `resolution` and top-level business `status`. `re
 `knowledge.state` uses scope-wide persisted counts: `no_sources`, `empty_glossary`, `terms_only` or `mapped`. The same object retains counts, repository/commit/scope identity, graph version and `stale`. `mapped` means at least one declared mapping, not complete coverage or resolved targets; per-mapping `resolution_state` is unchanged. `graph-only` yields `unknown` knowledge and `unavailable` results; zero placeholder counts do not prove an empty glossary. No sources yields `unavailable`; an indexed empty glossary yields `no_match`. With `allow-stale`, a result may be `matched` and `knowledge.stale=true`. Storage failures still return errors.
 
 Diagnostics provide reason-specific `next_steps`: inspect routes and committed files for no sources, author/commit/re-index for empty glossaries or missing mappings, adjust filters for no match, specify a domain for ambiguity, and re-index/change freshness for stale or unread projections. Authoring reasons include a `bootstrap` schema resource. Default paths do not prove which legacy/additional sources were indexed. Queries never scan workspace YAML. CLI, HTTP and MCP share this contract; context still consumes the same commit-bound terms and mappings. This response contract change needs no database migration.
+
+## File diagnostics and content integrity (#393)
+
+Indexed-version freshness and content coverage are independent. `freshness.state=fresh` means the requested version is indexed, not that every file parsed completely. Repository status, reports and query freshness include `content_integrity`: `state` (`complete`, `partial`, `unknown`), `degraded_file_count` (distinct paths) and `source_scope`. Missing fields in older responses mean `unknown`. The legacy `degraded_reason` remains diagnostic text and must not alone trigger reindexing.
+
+Query capability failures remain conservative: if a search read model is unavailable, surviving hits carry `query_degraded=true` and the response remains `freshness.state=degraded`, even when source fallback supplies usable matches. This flag is separate from file parse warnings and defaults to `false` on older hits; it does not override the response freshness or establish complete content coverage.
+
+```powershell
+relay-knowledge repo diagnostics demo --ref HEAD --limit 50 --format json
+relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor $nextCursor --format json
+```
+
+Pages default to 50 diagnostics, capped at 200, ordered by path and message. Reuse the same ref and path filters with `next_cursor`; moving HEAD does not change the pinned snapshot. A removed snapshot produces an error. `repo report` retains its 20-entry summary and exposes `degradation_summary_truncated` and `diagnostics_command`. Healthy hits do not prove full coverage: missing facts can affect omitted files and cross-file relationships.
+
+HTTP: `GET /api/v1/code/repositories/{alias}/diagnostics`, with `ref`, JSON-array-string `path_filters`, `limit` and `cursor`. CLI supports `--remote`. MCP: `relay_code_diagnostics`, with `repository`, `ref_selector`, `path_filters`, `limit`, `cursor`, subject to authorization and context budgets.
+
+Existing diagnostic tables are reused; no migration or reindex is required. Update agents to inspect `content_integrity` when upgrading; older versions can still report overall `degraded` for partial content. Stale versions, unfinished tasks and graph-only responses retain conservative handling. Out-of-scope external dependencies remain unresolved edge metadata rather than file parse degradation.

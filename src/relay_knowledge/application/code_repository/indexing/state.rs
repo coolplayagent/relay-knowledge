@@ -110,23 +110,28 @@ pub(super) async fn degraded_file_count_for_fresh_index(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     scoped_status: &CodeRepositoryStatus,
 ) -> Result<usize, ApiError> {
-    if let Some(count) = degraded_file_count_from_status(scoped_status) {
+    if let Some(count) = scoped_status.content_integrity.degraded_file_count {
         return Ok(count);
     }
-    let report = store
-        .code_repository_report(scoped_status.repository_id.clone())
+    let source_scope = scoped_status
+        .last_indexed_scope_id
+        .clone()
+        .ok_or_else(|| ApiError::invalid_argument("missing diagnostic scope"))?;
+    let page = store
+        .code_repository_diagnostics(crate::domain::CodeDiagnosticsPageRequest {
+            repository_id: scoped_status.repository_id.clone(),
+            source_scope,
+            resolved_commit_sha: scoped_status
+                .last_indexed_commit
+                .clone()
+                .ok_or_else(|| ApiError::invalid_argument("missing diagnostic commit"))?,
+            path_filters: Vec::new(),
+            limit: 1,
+            after: None,
+        })
         .await
         .map_err(storage_api_error)?;
-
-    Ok(report.degraded_file_count)
-}
-
-fn degraded_file_count_from_status(status: &CodeRepositoryStatus) -> Option<usize> {
-    let reason = status.degraded_reason.as_deref()?;
-    let (count, rest) = reason.split_once(' ')?;
-    (rest == "file(s) degraded during code indexing")
-        .then(|| count.parse().ok())
-        .flatten()
+    Ok(page.degraded_file_count)
 }
 
 pub(super) fn index_start_from_completed(

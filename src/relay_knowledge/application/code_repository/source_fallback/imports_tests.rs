@@ -84,6 +84,7 @@ fn request(query: &str) -> CodeRetrievalRequest {
 
 fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/tmp/repo".to_owned(),
@@ -108,6 +109,7 @@ fn unresolved_import_hit(
     excerpt: &str,
 ) -> crate::domain::CodeRetrievalHit {
     crate::domain::CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: "scope".to_owned(),
         resolved_commit_sha: "commit".to_owned(),

@@ -119,6 +119,7 @@ fn merge_duplicate_hit(existing: &mut CodeRetrievalHit, candidate: CodeRetrieval
 }
 
 fn merge_hit_metadata(target: &mut CodeRetrievalHit, mut source: CodeRetrievalHit) {
+    target.query_degraded |= source.query_degraded;
     target.stale |= source.stale
         || source
             .staleness_hint

@@ -797,6 +797,13 @@ impl CodeQueryReadStore for SqliteGraphStore {
         self.run_read(report::repository_totals)
     }
 
+    fn code_repository_diagnostics(
+        &self,
+        request: crate::domain::CodeDiagnosticsPageRequest,
+    ) -> StorageFuture<'_, crate::domain::CodeDiagnosticsPage> {
+        self.run_read(move |connection| lifecycle::diagnostics::page(connection, request))
+    }
+
     fn code_repository_report(
         &self,
         repository: String,

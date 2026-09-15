@@ -180,6 +180,7 @@ fn rejected_evidence(id: &str, content: &str) -> IngestEvidence {
 
 fn code_hit() -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: "main".to_owned(),
         resolved_commit_sha: "abc".to_owned(),
