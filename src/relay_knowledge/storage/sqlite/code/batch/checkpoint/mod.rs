@@ -268,7 +268,7 @@ pub(super) fn count_scope_diagnostics(
     connection
         .query_row(
             "
-            SELECT COUNT(*)
+            SELECT COUNT(DISTINCT path)
             FROM code_repository_file_diagnostics
             WHERE source_scope = ?1
             ",

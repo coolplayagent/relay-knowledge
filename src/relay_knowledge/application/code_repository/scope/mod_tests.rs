@@ -122,6 +122,7 @@ fn status_for_scope(
     language_filters: Vec<String>,
 ) -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "fixture".to_owned(),
         root_path: "/tmp/repo".to_owned(),

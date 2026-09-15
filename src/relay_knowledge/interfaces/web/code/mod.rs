@@ -23,6 +23,7 @@ use crate::{
 
 use super::{WebState, api_error_response};
 
+mod diagnostics;
 mod index_request;
 mod view_request;
 
@@ -67,6 +68,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/impact",
             post(code_repository_impact),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/diagnostics",
+            get(diagnostics::get),
         )
         .route(
             "/api/v1/code/repositories/{alias}/report",

@@ -437,3 +437,6 @@ fn context(name: &str) -> RequestContext {
         format!("trace-{name}"),
     )
 }
+
+#[path = "remote_diagnostics.rs"]
+mod diagnostics_tests;

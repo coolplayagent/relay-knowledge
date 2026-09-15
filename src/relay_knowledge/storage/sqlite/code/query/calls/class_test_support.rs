@@ -133,6 +133,7 @@ pub(super) fn database() -> Connection {
 
 pub(super) fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".into(),
         alias: "repo".into(),
         root_path: "/repo".into(),

@@ -66,6 +66,7 @@ fn feature_flag_sql_applies_scope_and_bounded_candidate_budget() {
 
 fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "fixture".to_owned(),
         root_path: "/tmp/repo".to_owned(),

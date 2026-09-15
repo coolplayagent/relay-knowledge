@@ -310,3 +310,18 @@ HEAD 只读取已提交文件；即使重新索引 HEAD，也不会加载未提�
 `knowledge.state` 由 scope 整体持久化计数推导为 `no_sources`、`empty_glossary`、`terms_only` 或 `mapped`，同一对象保留计数、repository/commit/scope 身份、图版本和 `stale`。`mapped` 仅表示至少一条声明映射，不保证全覆盖或目标已解析；各 mapping 的 `resolution_state` 不变。`graph-only` 返回 `unknown` 知识状态和 `unavailable` 结果，零计数仅是未读取投影的占位值。无业务源返回 `unavailable`，已索引空词表返回 `no_match`。`allow-stale` 可同时返回 `matched` 和 `knowledge.stale=true`；存储读取失败继续返回错误。
 
 诊断提供针对原因的 `next_steps`：无业务源检查 route 和已提交文件；空词表或缺失映射提示编写、提交和重建索引；无匹配调整筛选；歧义指定 domain；过期或未读取投影提示重建索引或调整 freshness。需要编写知识时附带 `bootstrap` schema 资源。默认路径不证明实际索引了哪些 legacy/额外源。查询不扫描工作区 YAML。CLI、HTTP、MCP 共用此合同，context 继续消费同一 commit 下的术语与映射。本次响应结构变更不需要数据库迁移。
+
+## 文件诊断与内容完整性（#393）
+
+代码索引的版本新鲜度与内容完整性分别表达。`freshness.state=fresh` 表示请求版本已追上，不保证每个文件都完整解析。仓库状态、报告与查询 freshness 的 `content_integrity` 包含 `state`（`complete`、`partial`、`unknown`）、`degraded_file_count`（按路径去重）和 `source_scope`。旧响应缺少该字段时按 `unknown` 处理。`degraded_reason` 保留为兼容诊断，不能单独用于判断是否需要重新索引。
+
+```powershell
+relay-knowledge repo diagnostics demo --ref HEAD --limit 50 --format json
+relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor $nextCursor --format json
+```
+
+分页默认 50 条，最多 200 条；按路径、消息排序。重复使用同一 ref 与路径过滤条件，传入返回的 `next_cursor` 继续读取；HEAD 移动不会改变已开始分页的快照。快照被清理后明确报错。`repo report` 继续展示最多 20 条摘要，并通过 `degradation_summary_truncated` 和 `diagnostics_command` 提供完整诊断入口。内容不完整时，即使命中的文件正常，也不能推断查询覆盖完整；缺失事实可能影响未命中文件或跨文件关系。
+
+HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包括 `ref`、JSON 数组字符串 `path_filters`、`limit` 和 `cursor`；CLI 支持 `--remote`。MCP 工具为 `relay_code_diagnostics`，接受 `repository`、`ref_selector`、`path_filters`、`limit`、`cursor`，并遵守授权及上下文预算。
+
+此变更复用现有诊断表，无需迁移或重建索引。升级时应将 agent 的完整性判断改为读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。

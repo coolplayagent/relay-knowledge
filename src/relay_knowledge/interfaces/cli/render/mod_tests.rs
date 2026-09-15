@@ -304,3 +304,12 @@ fn render_text_covers_operational_and_code_repository_summaries() {
         assert_eq!(rendered, expected);
     }
 }
+
+#[test]
+fn diagnostics_text_includes_paths_reasons_and_continuation() {
+    let response = serde_json::json!({"scope":{"scope_id":"scope"},"degraded_file_count":2,"diagnostics":[{"path":"src/a.py","parse_status":"partial","message":"syntax error"}],"next_cursor":"cursor"});
+    let output = super::render_text("code.repo.diagnostics", &response).unwrap();
+    assert!(output.contains("degraded_files=2"));
+    assert!(output.contains("src/a.py [partial]: syntax error"));
+    assert!(output.contains("next_cursor=cursor"));
+}

@@ -12,6 +12,7 @@ fn fixture() -> Connection {
 }
 fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".into(),
         alias: "fixture".into(),
         root_path: "/tmp/repo".into(),

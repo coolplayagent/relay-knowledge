@@ -128,3 +128,63 @@ pub(in crate::interfaces::cli::spec) fn repo_report() -> CliCommandSpec {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+pub(in crate::interfaces::cli::spec) fn repo_diagnostics() -> CliCommandSpec {
+    command!(
+        &["repo", "diagnostics"],
+        "relay-knowledge repo diagnostics <alias> [--ref <ref>] [--path <prefix>] [--limit <n>] [--cursor <token>]",
+        "List a bounded page of file indexing diagnostics.",
+        "code.repo.diagnostics",
+        CommandEffect::ReadOnly,
+        &[arg(
+            "alias",
+            true,
+            false,
+            "Registered repository alias.",
+            None,
+            &[]
+        )],
+        &[
+            opt(
+                "--ref",
+                Some("ref"),
+                false,
+                false,
+                "Indexed ref; continuation stays on the original snapshot.",
+                Some("HEAD"),
+                &[]
+            ),
+            opt(
+                "--path",
+                Some("prefix"),
+                false,
+                true,
+                "Restrict diagnostic paths.",
+                None,
+                &[]
+            ),
+            opt(
+                "--limit",
+                Some("n"),
+                false,
+                false,
+                "Diagnostic page size, from 1 to 200.",
+                Some("50"),
+                &[]
+            ),
+            opt(
+                "--cursor",
+                Some("token"),
+                false,
+                false,
+                "Continuation token returned by the previous page.",
+                None,
+                &[]
+            ),
+        ],
+        &["relay-knowledge repo diagnostics core --limit 50 --format json"],
+        &[
+            "The total counts distinct files. Diagnostics are ordered by path and message. Reuse the same ref and path filters with next_cursor."
+        ],
+    )
+}

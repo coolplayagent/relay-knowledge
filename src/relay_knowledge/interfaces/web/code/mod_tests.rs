@@ -637,3 +637,6 @@ fn unique_temp_dir(label: &str) -> PathBuf {
 
 #[path = "pagination_tests.rs"]
 mod pagination_tests;
+
+#[path = "diagnostics_tests.rs"]
+mod diagnostics_tests;

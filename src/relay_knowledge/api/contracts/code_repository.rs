@@ -202,6 +202,8 @@ pub struct CodeRepositoryIndexLag {
 /// Freshness governance fields returned with code graph answers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryFreshnessDiagnostics {
+    #[serde(default)]
+    pub content_integrity: crate::domain::CodeContentIntegrity,
     pub state: CodeRepositoryFreshnessState,
     pub freshness_policy: FreshnessPolicy,
     pub graph_version: u64,
@@ -226,6 +228,7 @@ pub struct CodeRepositoryFreshnessDiagnostics {
 impl CodeRepositoryFreshnessDiagnostics {
     pub fn legacy_unknown() -> Self {
         Self {
+            content_integrity: Default::default(),
             state: CodeRepositoryFreshnessState::Degraded,
             freshness_policy: FreshnessPolicy::AllowStale,
             graph_version: 0,
@@ -264,16 +267,23 @@ impl CodeRepositoryFreshnessDiagnostics {
             direct_source_read_required,
             input.pending.active_matches_request,
             input.scope_stale,
-            input.degraded_reason.as_ref(),
+            input
+                .degraded_reason
+                .as_ref()
+                .filter(|_| input.query_degraded),
         );
-        let agent_instructions = source_read_instructions(
+        let mut agent_instructions = source_read_instructions(
             direct_source_read_required,
             &input.requested_ref,
             &input.served_ref,
             &input.direct_source_read_paths,
         );
 
+        if input.content_integrity.state == crate::domain::CodeContentIntegrityState::Partial {
+            agent_instructions.push("Indexed content is partial; inspect repo diagnostics for this served ref before assuming query coverage is complete.".to_owned());
+        }
         Self {
+            content_integrity: input.content_integrity,
             state,
             freshness_policy: input.freshness_policy,
             graph_version: input.graph_version,
@@ -305,6 +315,8 @@ impl CodeRepositoryFreshnessDiagnostics {
         degraded_reason: String,
     ) -> Self {
         let input = CodeRepositoryFreshnessInput {
+            content_integrity: Default::default(),
+            query_degraded: true,
             graph_version,
             freshness_policy,
             source_scope,
@@ -339,10 +351,15 @@ impl CodeRepositoryFreshnessDiagnostics {
             &self.index_lag.served_ref,
             &self.direct_source_read_paths,
         );
+        if self.content_integrity.state == crate::domain::CodeContentIntegrityState::Partial {
+            self.agent_instructions.push("Indexed content is partial; inspect repo diagnostics for this served ref before assuming query coverage is complete.".to_owned());
+        }
     }
 }
 
 pub(crate) struct CodeRepositoryFreshnessInput {
+    pub content_integrity: crate::domain::CodeContentIntegrity,
+    pub query_degraded: bool,
     pub graph_version: u64,
     pub freshness_policy: FreshnessPolicy,
     pub source_scope: Option<String>,

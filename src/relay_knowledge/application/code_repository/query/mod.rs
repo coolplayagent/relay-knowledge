@@ -126,6 +126,7 @@ impl RelayKnowledgeService {
         let fallback_degraded_reason =
             apply_code_grep_fallback(&store, &status, &scoped_status, &request, &mut results)
                 .await?;
+        let query_degraded = fallback_degraded_reason.is_some();
         let degraded_reason = results
             .iter()
             .find_map(|hit| hit.degraded_reason.clone())
@@ -147,6 +148,7 @@ impl RelayKnowledgeService {
         let freshness = code_query_freshness_diagnostics(
             &store,
             CodeQueryFreshnessContext {
+                query_degraded,
                 base_status: &status,
                 scoped_status: &scoped_status,
                 request: &request,
@@ -295,6 +297,7 @@ impl RelayKnowledgeService {
         let freshness = code_feature_flag_freshness_diagnostics(
             &store,
             CodeFeatureFlagFreshnessContext {
+                query_degraded: false,
                 base_status: &status,
                 scoped_status: &scoped_status,
                 request: &request,

@@ -32,9 +32,9 @@ pub use proposal::{
     ProposalListResponse, ProposalShowResponse,
 };
 pub use repository::{
-    BusinessKnowledgeQueryResponse, CodeRepositoryFeatureFlagsResponse,
-    CodeRepositoryFrameworkGraphResponse, CodeRepositoryImpactResponse,
-    CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
+    BusinessKnowledgeQueryResponse, CodeRepositoryDiagnosticsResponse,
+    CodeRepositoryFeatureFlagsResponse, CodeRepositoryFrameworkGraphResponse,
+    CodeRepositoryImpactResponse, CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
     CodeRepositoryIndexStartResponse, CodeRepositoryListResponse, CodeRepositoryQueryResponse,
     CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse,
     CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,

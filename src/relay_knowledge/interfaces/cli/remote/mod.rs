@@ -48,6 +48,7 @@ pub(super) fn supports(action: &CliAction) -> bool {
                 | RepoCommand::FeatureFlags { .. }
                 | RepoCommand::FrameworkGraph { .. }
                 | RepoCommand::Impact { .. }
+                | RepoCommand::Diagnostics(_)
                 | RepoCommand::Report { .. }
                 | RepoCommand::Software { .. }
                 | RepoCommand::SoftwareExport { .. }
@@ -425,6 +426,10 @@ pub(super) async fn run_remote(
             )
             .map(Some)
         }
+        RepoCommand::Diagnostics(request) => {
+            let response = client.get_diagnostics(request).await?;
+            render_response("code.repo.diagnostics",response.metadata.clone(),&response,format).map(Some)
+        }
         RepoCommand::Report { alias } => {
             let response = client
                 .get_repository::<CodeRepositoryReportResponse>(alias, "report")
@@ -650,6 +655,38 @@ impl RemoteCliClient {
         .await
         .map_err(|error| qos_transport_error(error, self.format))?;
 
+        decode_response(response, self.format).await
+    }
+
+    async fn get_diagnostics(
+        &self,
+        request: &crate::domain::CodeDiagnosticsRequest,
+    ) -> Result<crate::api::CodeRepositoryDiagnosticsResponse, CliError> {
+        let mut url = repository_url(
+            &self.base_url,
+            &request.repository.repository,
+            "diagnostics",
+            self.format,
+        )?;
+        let paths = serde_json::to_string(&request.repository.path_filters)
+            .map_err(|e| CliError::invalid_api_argument(e.to_string(), self.format))?;
+        url.query_pairs_mut()
+            .append_pair("ref", &request.repository.ref_selector)
+            .append_pair("path_filters", &paths)
+            .append_pair("limit", &request.limit.to_string());
+        if let Some(cursor) = &request.cursor {
+            url.query_pairs_mut().append_pair("cursor", cursor);
+        }
+        let response = http::send_request_with_qos(
+            &self.qos,
+            &self.qos_policy,
+            self.client
+                .get(url)
+                .header("x-relay-request-id", &self.context.request_id)
+                .header("x-relay-trace-id", &self.context.trace_id),
+        )
+        .await
+        .map_err(|e| qos_transport_error(e, self.format))?;
         decode_response(response, self.format).await
     }
 

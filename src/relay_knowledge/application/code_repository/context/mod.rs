@@ -442,6 +442,9 @@ fn merge_context_freshness(
     parts: Vec<CodeRepositoryFreshnessDiagnostics>,
 ) -> CodeRepositoryFreshnessDiagnostics {
     for freshness in parts {
+        primary
+            .content_integrity
+            .merge(&freshness.content_integrity);
         primary.state = worse_freshness_state(primary.state, freshness.state);
         primary.scope_stale |= freshness.scope_stale;
         primary.direct_source_read_required |= freshness.direct_source_read_required;

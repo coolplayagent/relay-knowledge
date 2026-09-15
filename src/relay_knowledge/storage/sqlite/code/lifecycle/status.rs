@@ -116,6 +116,7 @@ pub(in crate::storage::sqlite::code) fn repository_statuses(
         )?;
         let rows = statement.query_map([], |row| {
             Ok(CodeRepositoryStatus {
+                content_integrity: super::diagnostics::content_integrity(connection, row.get(5)?)?,
                 repository_id: row.get(0)?,
                 alias: row.get(1)?,
                 root_path: row.get(2)?,
@@ -208,6 +209,10 @@ pub(in crate::storage::sqlite::code) fn repository_scope_status(
             let stored_language_filters = parse_json_list(row.get::<_, String>(9)?)?;
             Ok((
                 CodeRepositoryStatus {
+                    content_integrity: super::diagnostics::content_integrity(
+                        connection,
+                        Some(row.get(0)?),
+                    )?,
                     repository_id: base.repository_id.clone(),
                     alias: base.alias.clone(),
                     root_path: base.root_path.clone(),
@@ -292,6 +297,10 @@ pub(in crate::storage::sqlite::code) fn latest_repository_scope_status(
         let stored_language_filters = parse_json_list(row.get::<_, String>(10)?)?;
         Ok((
             CodeRepositoryStatus {
+                content_integrity: super::diagnostics::content_integrity(
+                    connection,
+                    Some(row.get(0)?),
+                )?,
                 repository_id: base.repository_id.clone(),
                 alias: base.alias.clone(),
                 root_path: base.root_path.clone(),
@@ -372,6 +381,10 @@ pub(in crate::storage::sqlite::code) fn repository_scope_status_by_source_scope(
             params![source_scope],
             |row| {
                 Ok(CodeRepositoryStatus {
+                    content_integrity: super::diagnostics::content_integrity(
+                        connection,
+                        Some(row.get(3)?),
+                    )?,
                     repository_id: row.get(0)?,
                     alias: row.get(1)?,
                     root_path: row.get(2)?,
@@ -402,6 +415,7 @@ fn repository_status_by_column(
     let status = connection
         .query_row(column.query(), params![repository], |row| {
             Ok(CodeRepositoryStatus {
+                content_integrity: super::diagnostics::content_integrity(connection, row.get(5)?)?,
                 repository_id: row.get(0)?,
                 alias: row.get(1)?,
                 root_path: row.get(2)?,

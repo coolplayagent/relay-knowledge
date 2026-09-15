@@ -244,3 +244,13 @@ pub struct BusinessKnowledgeQueryResponse {
     pub domains: Vec<BusinessDomain>,
     pub terms: Vec<BusinessTerm>,
 }
+
+/// One bounded page of diagnostics tied to an immutable published code scope.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CodeRepositoryDiagnosticsResponse {
+    pub metadata: crate::api::ApiMetadata,
+    pub scope: crate::api::CodeRepositoryScopeMetadata,
+    pub degraded_file_count: usize,
+    pub diagnostics: Vec<crate::domain::CodeFileDiagnostic>,
+    pub next_cursor: Option<String>,
+}

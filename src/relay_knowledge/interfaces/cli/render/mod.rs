@@ -279,6 +279,27 @@ where
         ),
         "code.repo.list" => render_code_repository_list(&value),
         "code.repo.status" => render_code_repository_status(&value),
+        "code.repo.diagnostics" => {
+            let mut lines = vec![format!(
+                "scope={} degraded_files={}",
+                value["scope"]["scope_id"].as_str().unwrap_or("unknown"),
+                value["degraded_file_count"]
+            )];
+            if let Some(diagnostics) = value["diagnostics"].as_array() {
+                for diagnostic in diagnostics {
+                    lines.push(format!(
+                        "{} [{}]: {}",
+                        diagnostic["path"].as_str().unwrap_or(""),
+                        diagnostic["parse_status"].as_str().unwrap_or("unknown"),
+                        diagnostic["message"].as_str().unwrap_or("")
+                    ));
+                }
+            }
+            if let Some(cursor) = value["next_cursor"].as_str() {
+                lines.push(format!("next_cursor={cursor}"));
+            }
+            lines.join("\n")
+        }
         "code.repo.report" => format!(
             "repo={} files={} freshness={}",
             value["report"]["alias"].as_str().unwrap_or(""),

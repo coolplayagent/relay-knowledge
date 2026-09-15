@@ -425,6 +425,18 @@ pub async fn run_repo(
                 format,
             )
         }
+        RepoCommand::Diagnostics(request) => {
+            let response = service
+                .code_repository_diagnostics(request, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+            render_response(
+                "code.repo.diagnostics",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
         RepoCommand::Report { alias } => {
             let response = service
                 .code_repository_report(

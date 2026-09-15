@@ -7,8 +7,8 @@ use crate::{
     },
     storage::{
         CodeIndexFinalizationStep, CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest,
-        CodeIndexTaskSeed, CodeIndexTaskStore as _, PartitionedSqliteKnowledgeStore,
-        RepositoryCatalogStore as _, SoftwareProjectionStore as _,
+        CodeIndexTaskSeed, CodeIndexTaskStore as _, CodeQueryReadStore as _,
+        PartitionedSqliteKnowledgeStore, RepositoryCatalogStore as _, SoftwareProjectionStore as _,
     },
 };
 
@@ -604,4 +604,47 @@ fn now_millis() -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+#[tokio::test]
+async fn partitioned_diagnostics_count_files_once_and_route_to_published_snapshot() {
+    use crate::domain::{CodeDiagnosticsPageRequest, CodeFileDiagnostic, CodeParseStatus};
+    let store = partitioned_store("diagnostics-paging");
+    store
+        .upsert_code_repository(super::publication_barrier_tests::registration())
+        .await
+        .unwrap();
+    let mut snapshot = super::publication_barrier_tests::snapshot("diagnostics-scope");
+    for message in ["first issue", "second issue"] {
+        snapshot.diagnostics.push(CodeFileDiagnostic {
+            repository_id: "repo".into(),
+            source_scope: "diagnostics-scope".into(),
+            path: "src/lib.rs".into(),
+            parse_status: CodeParseStatus::Partial,
+            message: message.into(),
+        });
+    }
+    snapshot.files[0].parse_status = CodeParseStatus::Partial;
+    snapshot.files[0].degraded_reason = Some("first issue".into());
+    let summary = super::seed_snapshot_for_test(&store, snapshot)
+        .await
+        .unwrap();
+    assert_eq!(summary.degraded_file_count, 1);
+    let status = store
+        .code_repository_status("fixture".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(status.content_integrity.degraded_file_count, Some(1));
+    let request = CodeDiagnosticsPageRequest {
+        repository_id: "repo".into(),
+        source_scope: "diagnostics-scope".into(),
+        path_filters: vec![],
+        limit: 1,
+        after: None,
+    };
+    let page = store.code_repository_diagnostics(request).await.unwrap();
+    assert_eq!(page.degraded_file_count, 1);
+    assert_eq!(page.diagnostics.len(), 1);
+    assert!(page.has_more);
 }

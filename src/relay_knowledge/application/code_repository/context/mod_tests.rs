@@ -216,6 +216,7 @@ fn freshness(
     direct_source_read_paths: Vec<String>,
 ) -> CodeRepositoryFreshnessDiagnostics {
     CodeRepositoryFreshnessDiagnostics {
+        content_integrity: Default::default(),
         state,
         freshness_policy: FreshnessPolicy::AllowStale,
         graph_version: 1,

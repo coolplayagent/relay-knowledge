@@ -835,6 +835,7 @@ fn freshness_with_active_match(
     direct_source_read_required: bool,
 ) -> CodeRepositoryFreshnessDiagnostics {
     CodeRepositoryFreshnessDiagnostics {
+        content_integrity: Default::default(),
         state: if direct_source_read_required {
             CodeRepositoryFreshnessState::Pending
         } else {

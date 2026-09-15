@@ -1,13 +1,17 @@
-//! Repository registration, status resolution, scope fallback, and removal.
+//! Repository registration, status resolution, report routing, scope fallback, and removal.
 
 use std::sync::Arc;
 
 use crate::{
-    domain::{CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryStatus},
-    storage::{RepositoryCatalogStore, StorageFuture},
+    domain::{
+        CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
+        CodeRepositoryStatus,
+    },
+    storage::{CodeQueryReadStore, RepositoryCatalogStore, StorageFuture},
 };
 
 use super::PartitionedSqliteKnowledgeStore;
+use super::routing::{report_matches_active_control, repository_store_for_report};
 
 pub(super) fn upsert(
     store: &PartitionedSqliteKnowledgeStore,
@@ -262,6 +266,32 @@ async fn status_has_active_route(
         .await?
         .as_deref()
         == Some(status.repository_id.as_str()))
+}
+
+/// Reads a report only from the active routed snapshot, falling back to control state.
+pub(super) fn report(
+    store: &PartitionedSqliteKnowledgeStore,
+    repository: String,
+) -> StorageFuture<'_, CodeRepositoryReport> {
+    let this = store.clone();
+    Box::pin(async move {
+        if let Some(shard) =
+            repository_store_for_report(&this.control, &this.catalog, repository.clone()).await?
+        {
+            let report = shard.code_repository_report(repository.clone()).await?;
+            if report_matches_active_control(
+                &this.control,
+                &this.catalog,
+                repository.clone(),
+                &report,
+            )
+            .await?
+            {
+                return Ok(report);
+            }
+        }
+        this.control.code_repository_report(repository).await
+    })
 }
 
 #[cfg(test)]

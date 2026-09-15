@@ -13,8 +13,9 @@ pub use contracts::*;
 pub use operations::{
     AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, BusinessKnowledgeQueryResponse,
     CodeIndexWorkerRunRequest, CodeIndexWorkerRunResponse, CodeIndexWorkerStatus,
-    CodeRepositoryFeatureFlagsResponse, CodeRepositoryFrameworkGraphResponse,
-    CodeRepositoryImpactResponse, CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
+    CodeRepositoryDiagnosticsResponse, CodeRepositoryFeatureFlagsResponse,
+    CodeRepositoryFrameworkGraphResponse, CodeRepositoryImpactResponse,
+    CodeRepositoryIndexResetResponse, CodeRepositoryIndexResponse,
     CodeRepositoryIndexStartResponse, CodeRepositoryListResponse, CodeRepositoryQueryResponse,
     CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryRemoveResponse,
     CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse, CodeRepositorySetAddResponse,

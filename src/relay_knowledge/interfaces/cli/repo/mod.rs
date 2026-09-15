@@ -9,6 +9,7 @@ use super::{
     render_response, serialize_line,
 };
 
+mod diagnostics;
 mod index;
 mod parser;
 mod query;
@@ -23,6 +24,7 @@ pub use runner::run_repo;
 /// Parsed `repo` CLI command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepoCommand {
+    Diagnostics(crate::domain::CodeDiagnosticsRequest),
     List,
     Register {
         root_path: String,

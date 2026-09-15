@@ -40,6 +40,7 @@ fn maven_impact_respects_request_and_indexed_language_and_path_filters() {
     .unwrap();
     connection.execute("INSERT INTO maven_reactor_edges VALUES ('scope','edge','a','b','depends_on','resolved','compile',NULL,?1)", [serde_json::to_string(&edge).unwrap()]).unwrap();
     let mut status = CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".into(),
         alias: "repo".into(),
         root_path: "/repo".into(),
