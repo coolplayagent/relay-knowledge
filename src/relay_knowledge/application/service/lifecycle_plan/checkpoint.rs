@@ -8,6 +8,40 @@ use std::{
 
 use crate::domain::{ServiceDefinitionPlan, ServiceManagerAction};
 
+pub(super) fn read_bounded_definition(path: &Path) -> Result<Option<String>, String> {
+    use std::io::Read;
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "read service definition {}: {error}",
+                path.display()
+            ));
+        }
+    };
+    let mut contents = String::new();
+    file.take(65_537)
+        .read_to_string(&mut contents)
+        .map_err(|error| error.to_string())?;
+    if contents.len() > 65_536 {
+        return Err("service definition exceeds 65536 bytes".to_owned());
+    }
+    Ok(Some(contents))
+}
+
+pub(super) fn restored_definition(plan: &ServiceDefinitionPlan) -> Result<Option<String>, String> {
+    validate_checkpoint(plan)?;
+    let checkpoint = read_checkpoint(plan)?;
+    checkpoint
+        .definition_backup_path
+        .map(|path| {
+            read_bounded_definition(Path::new(&path))?
+                .ok_or_else(|| "checkpointed service definition is missing".to_owned())
+        })
+        .transpose()
+}
+
 pub(super) fn write_file(path: &Path, contents: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;

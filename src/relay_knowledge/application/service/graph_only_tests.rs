@@ -101,6 +101,231 @@ async fn service_plan_metadata_uses_current_graph_version() {
 }
 
 #[tokio::test]
+async fn install_and_uninstall_plans_do_not_open_unavailable_storage() {
+    let root = unique_root("storage-free-lifecycle-plan");
+    std::fs::write(&root, b"parent is a file, so database open would fail").unwrap();
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [("RELAY_KNOWLEDGE_HOME", root.to_str().unwrap())],
+    )
+    .unwrap();
+    let mut runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .unwrap();
+    // This policy would also fail immediately if the lazy SQLite factory opened.
+    runtime.paths.windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
+    let service = RelayKnowledgeService::new(runtime);
+    for action in [
+        ServiceManagerAction::Install,
+        ServiceManagerAction::Uninstall,
+    ] {
+        let response = service
+            .service_plan(
+                ServicePlanRequest {
+                    action,
+                    dry_run: true,
+                    execute: false,
+                    target_version: None,
+                    install_dir: None,
+                },
+                RequestContext::for_interface(InterfaceKind::Cli),
+            )
+            .await
+            .expect("lifecycle plan must not require storage");
+        assert_eq!(response.metadata.graph_version, 0);
+        assert!(response.execution.is_none());
+        assert!(service.storage.ready_store().is_none());
+    }
+    assert_eq!(
+        std::fs::read(&root).unwrap(),
+        b"parent is a file, so database open would fail"
+    );
+    std::fs::remove_file(root).unwrap();
+}
+
+#[cfg(not(windows))]
+#[tokio::test]
+async fn executed_service_actions_reject_non_directory_ancestors_before_mutation() {
+    let root = unique_root("service-non-directory-preflight");
+    std::fs::write(&root, "blocked ancestor").unwrap();
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [("RELAY_KNOWLEDGE_HOME", root.to_str().unwrap())],
+    )
+    .unwrap();
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .unwrap();
+    let service = RelayKnowledgeService::new(runtime);
+    for action in [
+        ServiceManagerAction::Install,
+        ServiceManagerAction::Upgrade,
+        ServiceManagerAction::Rollback,
+        ServiceManagerAction::Uninstall,
+    ] {
+        let mut plan = service
+            .render_service_plan_for_request(&ServicePlanRequest {
+                action,
+                dry_run: false,
+                execute: true,
+                target_version: None,
+                install_dir: None,
+            })
+            .unwrap();
+        // Observe admission only; regressions cannot invoke a service manager.
+        plan.lifecycle_steps.clear();
+        plan.rollback_steps.clear();
+        for dry_run in [true, false] {
+            plan.dry_run = dry_run;
+            let result = service.execute_service_plan(&plan).await;
+            if !dry_run && action != ServiceManagerAction::Uninstall {
+                assert!(result.unwrap_err().message.contains("Not a directory"));
+            } else {
+                assert!(result.unwrap().completed_steps.is_empty());
+            }
+            assert!(service.storage.ready_store().is_none());
+            assert_eq!(std::fs::read(&root).unwrap(), b"blocked ancestor");
+        }
+    }
+    std::fs::remove_file(root).unwrap();
+}
+
+#[tokio::test]
+async fn lifecycle_plans_reject_an_existing_catalog_with_the_wrong_topology() {
+    let root = unique_root("lifecycle-topology-guard");
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [("RELAY_KNOWLEDGE_HOME", root.to_str().unwrap())],
+    )
+    .unwrap();
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .unwrap();
+    let partitioned = crate::storage::PartitionedSqliteKnowledgeStore::open(
+        runtime.paths.database_file(),
+        runtime.paths.clone(),
+    )
+    .unwrap();
+    partitioned
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "lifecycle-repository",
+                "lifecycle",
+                root.join("repository").display().to_string(),
+                Vec::new(),
+                Vec::new(),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    drop(partitioned);
+    let service = RelayKnowledgeService::new(runtime);
+    for action in [
+        ServiceManagerAction::Install,
+        ServiceManagerAction::Upgrade,
+        ServiceManagerAction::Rollback,
+        ServiceManagerAction::Uninstall,
+    ] {
+        let error = service
+            .service_plan(
+                ServicePlanRequest {
+                    action,
+                    dry_run: true,
+                    execute: false,
+                    target_version: None,
+                    install_dir: None,
+                },
+                RequestContext::for_interface(InterfaceKind::Cli),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("single_sqlite"));
+        assert!(error.message.contains("partitioned_sqlite"));
+        let mut plan = service
+            .render_service_plan_for_request(&ServicePlanRequest {
+                action,
+                dry_run: false,
+                execute: true,
+                target_version: None,
+                install_dir: None,
+            })
+            .unwrap();
+        // A regression must not run any actual service-manager commands.
+        plan.lifecycle_steps.clear();
+        plan.rollback_steps.clear();
+        assert!(
+            service
+                .execute_service_plan(&plan)
+                .await
+                .unwrap_err()
+                .message
+                .contains("partitioned_sqlite")
+        );
+        assert!(service.storage.ready_store().is_none());
+        assert!(!service.runtime.paths.service_dir.exists());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn service_start_actions_validate_automatic_storage_before_any_lifecycle_step() {
+    let root = unique_root("service-storage-preflight");
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [("RELAY_KNOWLEDGE_HOME", root.to_str().unwrap())],
+    )
+    .unwrap();
+    let mut runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .unwrap();
+    runtime.paths.windows_data_sid = Some("S-1-5-21-1-2-3-1001".to_owned());
+    let service = RelayKnowledgeService::new(runtime);
+    let mut plan = service
+        .render_service_plan_for_request(&ServicePlanRequest {
+            action: ServiceManagerAction::Install,
+            dry_run: false,
+            execute: true,
+            target_version: None,
+            install_dir: None,
+        })
+        .unwrap();
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|warning| warning.contains("before execution, automatic Windows storage"))
+    );
+    // Even a regression must never issue real service-manager commands in this
+    // test: an empty execution list observes only the orchestration preflight.
+    plan.lifecycle_steps.clear();
+    plan.rollback_steps.clear();
+    for action in [
+        ServiceManagerAction::Install,
+        ServiceManagerAction::Upgrade,
+        ServiceManagerAction::Rollback,
+        ServiceManagerAction::Uninstall,
+    ] {
+        for dry_run in [true, false] {
+            plan.action = action;
+            plan.dry_run = dry_run;
+            let result = service.execute_service_plan(&plan).await;
+            if !dry_run && action != ServiceManagerAction::Uninstall {
+                assert!(result.unwrap_err().message.contains("account policy"));
+            } else {
+                let report = result.unwrap();
+                assert_eq!(report.executed, !dry_run);
+                assert!(report.completed_steps.is_empty());
+            }
+            assert!(service.storage.ready_store().is_none());
+            assert!(
+                !root.exists(),
+                "preflight failure and storage-free actions must not create data"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn service_definition_write_metadata_uses_current_graph_version() {
     let root = unique_root("service-definition-metadata");
     let _ = std::fs::remove_dir_all(&root);

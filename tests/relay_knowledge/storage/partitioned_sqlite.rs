@@ -317,6 +317,18 @@ async fn partitioned_sqlite_graph_diagnostics_include_shard_maintenance() {
         .inspect_graph()
         .await
         .expect("graph diagnostics aggregate shards");
+    assert!(
+        store
+            .health_snapshot(0)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("storage_cold:")
+    );
+    store
+        .code_repository_totals()
+        .await
+        .expect("an explicit data query opens cold shards");
     let health = store
         .health_snapshot(0)
         .await

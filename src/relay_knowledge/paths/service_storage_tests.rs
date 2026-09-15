@@ -1,0 +1,225 @@
+//! Bounded Windows service definition parsing and path precedence.
+
+use super::*;
+
+fn fixture() -> (PathBuf, RuntimePaths, String) {
+    let root = std::env::temp_dir().join(format!(
+        "relay-restored-paths-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [(RELAY_KNOWLEDGE_HOME, root.to_str().unwrap())],
+    )
+    .unwrap();
+    let paths = RuntimePaths::resolve(&environment.platform, &environment.paths).unwrap();
+    let definition = format!(
+        "<service><env name=\"RELAY_KNOWLEDGE_DATA_DIR\" value=\"{}\"/></service>",
+        quick_xml::escape::escape(paths.data_dir.to_str().unwrap())
+    );
+    (root, paths, definition)
+}
+
+#[test]
+fn restored_definition_decodes_pinned_storage_and_retains_sid_policy() {
+    let (root, paths, definition) = fixture();
+    assert_eq!(
+        paths
+            .with_service_storage_overrides(&storage_overrides(&definition).unwrap())
+            .unwrap()
+            .data_dir,
+        paths.data_dir
+    );
+    let overrides = storage_overrides(r#"<service><env name="RELAY_KNOWLEDGE_HOME" value="C:/old &amp; private"/><env name="RELAY_KNOWLEDGE_DATA_DIR" value="D:/relay-knowledge/users/S-1-5-21-1-2-3-1001/data"></env></service>"#).unwrap();
+    if cfg!(windows) {
+        let restored = paths.with_service_storage_overrides(&overrides).unwrap();
+        assert_eq!(
+            restored.windows_data_sid.as_deref(),
+            Some("S-1-5-21-1-2-3-1001")
+        );
+        assert_eq!(restored.config_dir, paths.config_dir);
+    } else {
+        assert!(paths.with_service_storage_overrides(&overrides).is_err());
+    }
+    let home = storage_overrides(
+        r#"<service><env name="relay_knowledge_home" value="C:/old &amp; private"/></service>"#,
+    )
+    .unwrap();
+    assert_eq!(home.home, Some(PathBuf::from("C:/old & private")));
+    let portable_home = PathEnvOverrides {
+        home: Some(root.clone()),
+        ..Default::default()
+    };
+    assert_eq!(
+        paths
+            .with_service_storage_overrides(&portable_home)
+            .unwrap()
+            .data_dir,
+        root.join("data")
+    );
+    assert!(
+        paths
+            .with_service_storage_overrides(&PathEnvOverrides::default())
+            .is_err()
+    );
+}
+
+#[test]
+fn ambiguous_or_unbounded_service_definitions_are_rejected() {
+    for definition in [
+        "<service/>",
+        "<other></other>",
+        r#"<!DOCTYPE service><service><env name="RELAY_KNOWLEDGE_HOME" value="C:/old"/></service>"#,
+        r#"<service><env name="RELAY_KNOWLEDGE_HOME"/></service>"#,
+        r#"<service><env name="RELAY_KNOWLEDGE_HOME" value="C:/a"/><env name="relay_knowledge_home" value="C:/b"/></service>"#,
+        r#"<service><env name="RELAY_KNOWLEDGE_HOME" value="C:/old"/>"#,
+        r#"<service><env name="RELAY_KNOWLEDGE_HOME" value="&unknown;"/></service>"#,
+        r#"<service><nested><env name="RELAY_KNOWLEDGE_HOME" value="C:/old"/></nested></service>"#,
+    ] {
+        assert!(storage_overrides(definition).is_err(), "{definition}");
+    }
+    assert!(
+        storage_overrides(&format!(
+            "<service>{}{}</service>",
+            "<nested>".repeat(33),
+            "</nested>".repeat(33)
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn service_definition_rejects_elements_and_content_outside_its_root() {
+    let (_, _, definition) = fixture();
+    for invalid in [
+        format!("{definition}<extra/>"),
+        format!("<extra/>{definition}"),
+        format!("{definition}<extra></extra>"),
+        format!("{definition}extra"),
+        format!("{definition}<![CDATA[extra]]>"),
+        format!("{definition}&amp;"),
+        format!("{definition}<?xml version=\"1.0\"?>"),
+    ] {
+        assert!(storage_overrides(&invalid).is_err(), "{invalid}");
+    }
+    assert!(
+        storage_overrides(&format!(
+            "<?xml version=\"1.0\"?>\n<!--before-->{definition}<!--after-->\n"
+        ))
+        .is_ok()
+    );
+}
+
+#[test]
+fn windows_storage_aliases_cannot_hide_the_reserved_sid_tree() {
+    for path in [
+        "D:/relay-knowledge./users/S-1-5-18/data",
+        "D:/relay-knowledge /users/S-1-5-18/data",
+        "D:/relay-knowledge/users/S-1-5-18/data.",
+        "D:/elsewhere/../relay-knowledge/users/S-1-5-18/data",
+        "D:/RELAY-~1/users/S-1-5-18/data",
+        r"\\.\D:\relay-knowledge\users\S-1-5-18\data",
+        r"\\localhost\D$\relay-knowledge\users\S-1-5-18\data",
+        r"\\?\UNC\localhost\D$\relay-knowledge\users\S-1-5-18\data",
+        "//localhost/D$/relay-knowledge/users/S-1-5-18/data",
+        r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\relay-knowledge\users\S-1-5-18\data",
+        r"\\server\custom\data",
+    ] {
+        assert!(
+            windows_data_sid_from_path(Path::new(path)).is_err(),
+            "{path}"
+        );
+    }
+    assert!(
+        windows_data_sid_from_path(Path::new("/tmp/ordinary./data"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        windows_data_sid_from_path(Path::new("C:/Users/RUNNER~1/AppData/Local/custom/data"))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        windows_data_sid_from_path(Path::new(r"\\?\D:\relay-knowledge\users\S-1-5-18\data"))
+            .unwrap()
+            .as_deref(),
+        Some("S-1-5-18")
+    );
+}
+
+#[cfg(not(windows))]
+#[tokio::test]
+async fn service_storage_rejects_files_in_data_directory_ancestors() {
+    let (root, paths, _) = fixture();
+    paths
+        .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
+        .await
+        .unwrap();
+    assert!(!root.exists(), "validation must not provision storage");
+    std::fs::write(&root, "blocked ancestor").unwrap();
+    assert!(
+        paths
+            .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
+            .await
+            .is_err()
+    );
+    std::fs::remove_file(&root).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(&paths.data_dir, "blocked data directory").unwrap();
+    assert!(
+        paths
+            .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
+            .await
+            .is_err()
+    );
+    std::fs::remove_file(&paths.data_dir).unwrap();
+    std::fs::create_dir(&paths.data_dir).unwrap();
+    paths
+        .ensure_privileged_service_storage(StorageDirectoryAccess::OpenOrCreate)
+        .await
+        .unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn privileged_storage_rejects_a_legacy_directory_replaced_by_a_link() {
+    let (root, paths, _) = fixture();
+    std::fs::create_dir_all(&paths.data_dir).unwrap();
+    std::fs::write(paths.database_file(), "legacy graph").unwrap();
+    paths
+        .ensure_privileged_service_storage(StorageDirectoryAccess::ExistingOnly)
+        .await
+        .unwrap();
+    windows_storage::validate_service_inspection_tree(&paths.database_file())
+        .await
+        .unwrap();
+    let payload_link = paths.data_dir.join("linked.sqlite");
+    std::os::windows::fs::symlink_file(paths.database_file(), &payload_link).unwrap();
+    assert!(
+        windows_storage::validate_service_inspection_tree(&paths.database_file())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("reparse")
+    );
+    std::fs::remove_file(payload_link).unwrap();
+    let moved = root.join("moved-legacy-data");
+    std::fs::rename(&paths.data_dir, &moved).unwrap();
+    std::os::windows::fs::symlink_dir(&moved, &paths.data_dir).unwrap();
+    assert!(
+        paths
+            .ensure_privileged_service_storage(StorageDirectoryAccess::ExistingOnly)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("reparse")
+    );
+    std::fs::remove_dir(&paths.data_dir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}

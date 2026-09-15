@@ -106,6 +106,37 @@ jobs:
       - name: GraphRAG evaluation fixture gate
         run: cargo test --test relay_knowledge graphrag_fixture_dataset_scores_phase4_cases
 
+  windows-storage:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Native Windows account and ACL gate
+        shell: powershell
+        run: ./tests/runtime/windows_storage_security.ps1
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Windows storage unit gate
+        run: cargo test --lib --all-features paths::windows_storage
+
+      - name: Windows restored storage preflight unit gate
+        run: >-
+          cargo test --lib --all-features --
+          paths::service_storage
+          application::service::lifecycle_plan::checkpoint_storage_tests
+          storage::sqlite::connection_runtime::path_access
+          storage::sqlite::connection_runtime::maintenance::tests::inspection_batch
+          storage::partitioned::catalog::path_access_tests
+          storage::sqlite::code::snapshot::repository_import::path_tests
+
+      - name: Windows legacy SQLite upgrade integration gate
+        run: cargo test --test relay_knowledge --all-features windows_upgrade_reopens_existing_graph_for_cli_web_and_pinned_service
+
   benchmark:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest

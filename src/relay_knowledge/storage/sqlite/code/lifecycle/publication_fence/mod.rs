@@ -1,7 +1,5 @@
 //! Enforces attempt-scoped publication ownership at SQLite commit boundaries.
 
-use std::path::Path;
-
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 use crate::{
@@ -14,6 +12,11 @@ use crate::{
     storage::StorageError,
 };
 
+mod authority;
+
+pub(in crate::storage) use authority::PublicationAuthority;
+use authority::attach_authority;
+
 const AUTHORITY_SCHEMA: &str = "code_publication_authority";
 
 #[derive(Debug, Clone)]
@@ -25,7 +28,7 @@ pub(in crate::storage) struct PublicationFenceGuard {
 pub(in crate::storage) fn prepare_guard(
     connection: &Connection,
     fence: CodeIndexPublicationFence,
-    authority_path: Option<&Path>,
+    authority_path: Option<&PublicationAuthority>,
 ) -> Result<PublicationFenceGuard, StorageError> {
     if fence.repository_id.trim().is_empty()
         || fence.task_id.trim().is_empty()
@@ -759,30 +762,6 @@ fn filesystem_snapshot_identity(identity: &str) -> bool {
 
 fn parse_filters(value: &str) -> Result<Vec<String>, StorageError> {
     serde_json::from_str(value).map_err(|error| StorageError::InvalidInput(error.to_string()))
-}
-
-fn attach_authority(connection: &Connection, authority_path: &Path) -> Result<(), StorageError> {
-    let attached = connection
-        .query_row(
-            "SELECT file FROM pragma_database_list WHERE name = ?1",
-            params![AUTHORITY_SCHEMA],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    if let Some(attached) = attached {
-        if Path::new(&attached) == authority_path {
-            return Ok(());
-        }
-        return Err(StorageError::InvalidInput(format!(
-            "SQLite publication authority is already attached from '{}'",
-            attached
-        )));
-    }
-    connection.execute(
-        &format!("ATTACH DATABASE ?1 AS {AUTHORITY_SCHEMA}"),
-        params![authority_path.to_string_lossy().as_ref()],
-    )?;
-    Ok(())
 }
 
 fn now_millis() -> Result<u64, StorageError> {
