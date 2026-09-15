@@ -53,7 +53,7 @@ relay-knowledge repo diagnostics demo --ref HEAD --limit 50 --format json
 relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor $nextCursor --format json
 ```
 
-Pages default to 50 diagnostics, capped at 200, ordered by path and message. Reuse the same ref and path filters with `next_cursor`; moving HEAD does not change the pinned snapshot. A removed snapshot produces an error. `repo report` retains its 20-entry summary and exposes `degradation_summary_truncated` and `diagnostics_command`. Healthy hits do not prove full coverage: missing facts can affect omitted files and cross-file relationships.
+Pages default to 50 diagnostics, capped at 200, ordered by path and message. Reuse the same ref and path filters with `next_cursor`; moving HEAD or publishing a more specific scope does not change the pinned snapshot. Continuations read scope metadata and diagnostic rows from the same storage transaction and validate the repository and resolved commit. Cursors bind normalized path filters by a fixed-size fingerprint, so large accepted filters do not produce unusable continuations. A removed snapshot produces an error. `repo report` retains its 20-entry summary and exposes `degradation_summary_truncated` and `diagnostics_command`. Healthy hits do not prove full coverage: missing facts can affect omitted files and cross-file relationships.
 
 HTTP: `GET /api/v1/code/repositories/{alias}/diagnostics`, with `ref`, JSON-array-string `path_filters`, `limit` and `cursor`. CLI supports `--remote`. MCP: `relay_code_diagnostics`, with `repository`, `ref_selector`, `path_filters`, `limit`, `cursor`, subject to authorization and context budgets.
 

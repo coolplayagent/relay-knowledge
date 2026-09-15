@@ -327,6 +327,7 @@ fn language_request(query: &str, language: &str, limit: usize) -> CodeRetrievalR
 
 fn lexical_hit(path: &str, language_id: &str, score: f64, excerpt: &str) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: "code:test:hybrid-direct-gate:commit:tree".to_owned(),
         resolved_commit_sha: "commit".to_owned(),
@@ -355,6 +356,7 @@ fn lexical_hit(path: &str, language_id: &str, score: f64, excerpt: &str) -> Code
 
 fn symbol_hit(canonical_symbol_id: &str, excerpt: &str) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: "code:test:hybrid-direct-gate:commit:tree".to_owned(),
         resolved_commit_sha: "commit".to_owned(),

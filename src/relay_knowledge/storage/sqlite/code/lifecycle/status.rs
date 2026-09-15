@@ -2,8 +2,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
     domain::{
-        CodeRepositoryRegistration, CodeRepositoryStatus, code_snapshot_scope_is_fact_versioned,
-        code_snapshot_scope_matches_identity,
+        CodeContentIntegrity, CodeRepositoryRegistration, CodeRepositoryStatus,
+        code_snapshot_scope_is_fact_versioned, code_snapshot_scope_matches_identity,
     },
     storage::StorageError,
 };
@@ -116,7 +116,7 @@ pub(in crate::storage::sqlite::code) fn repository_statuses(
         )?;
         let rows = statement.query_map([], |row| {
             Ok(CodeRepositoryStatus {
-                content_integrity: super::diagnostics::content_integrity(connection, row.get(5)?)?,
+                content_integrity: content_integrity(connection, row.get(5)?)?,
                 repository_id: row.get(0)?,
                 alias: row.get(1)?,
                 root_path: row.get(2)?,
@@ -209,10 +209,7 @@ pub(in crate::storage::sqlite::code) fn repository_scope_status(
             let stored_language_filters = parse_json_list(row.get::<_, String>(9)?)?;
             Ok((
                 CodeRepositoryStatus {
-                    content_integrity: super::diagnostics::content_integrity(
-                        connection,
-                        Some(row.get(0)?),
-                    )?,
+                    content_integrity: content_integrity(connection, Some(row.get(0)?))?,
                     repository_id: base.repository_id.clone(),
                     alias: base.alias.clone(),
                     root_path: base.root_path.clone(),
@@ -297,10 +294,7 @@ pub(in crate::storage::sqlite::code) fn latest_repository_scope_status(
         let stored_language_filters = parse_json_list(row.get::<_, String>(10)?)?;
         Ok((
             CodeRepositoryStatus {
-                content_integrity: super::diagnostics::content_integrity(
-                    connection,
-                    Some(row.get(0)?),
-                )?,
+                content_integrity: content_integrity(connection, Some(row.get(0)?))?,
                 repository_id: base.repository_id.clone(),
                 alias: base.alias.clone(),
                 root_path: base.root_path.clone(),
@@ -363,7 +357,7 @@ fn status_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
 }
 
 pub(in crate::storage::sqlite::code) fn repository_scope_status_by_source_scope(
-    connection: &mut Connection,
+    connection: &Connection,
     source_scope: &str,
 ) -> Result<Option<CodeRepositoryStatus>, StorageError> {
     connection
@@ -381,10 +375,7 @@ pub(in crate::storage::sqlite::code) fn repository_scope_status_by_source_scope(
             params![source_scope],
             |row| {
                 Ok(CodeRepositoryStatus {
-                    content_integrity: super::diagnostics::content_integrity(
-                        connection,
-                        Some(row.get(3)?),
-                    )?,
+                    content_integrity: content_integrity(connection, Some(row.get(3)?))?,
                     repository_id: row.get(0)?,
                     alias: row.get(1)?,
                     root_path: row.get(2)?,
@@ -415,7 +406,7 @@ fn repository_status_by_column(
     let status = connection
         .query_row(column.query(), params![repository], |row| {
             Ok(CodeRepositoryStatus {
-                content_integrity: super::diagnostics::content_integrity(connection, row.get(5)?)?,
+                content_integrity: content_integrity(connection, row.get(5)?)?,
                 repository_id: row.get(0)?,
                 alias: row.get(1)?,
                 root_path: row.get(2)?,
@@ -656,4 +647,20 @@ fn value_filters_excluding_base(filters: &[String], base_filters: &[String]) -> 
         .into_iter()
         .filter(|filter| !base_filters.contains(filter))
         .collect()
+}
+
+fn content_integrity(
+    connection: &Connection,
+    scope: Option<String>,
+) -> rusqlite::Result<CodeContentIntegrity> {
+    let Some(scope) = scope else {
+        return Ok(CodeContentIntegrity::default());
+    };
+    let count = connection.query_row(
+        "SELECT (SELECT COUNT(DISTINCT path) FROM code_repository_file_diagnostics WHERE source_scope = ?1)
+         FROM code_repository_scopes WHERE source_scope = ?1 AND retiring = 0",
+        params![scope], |row| row.get::<_,usize>(0)).optional()?;
+    Ok(count
+        .map(|count| CodeContentIntegrity::measured(scope, count))
+        .unwrap_or_default())
 }

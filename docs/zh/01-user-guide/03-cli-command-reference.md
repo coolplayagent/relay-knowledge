@@ -313,6 +313,8 @@ HEAD 只读取已提交文件；即使重新索引 HEAD，也不会加载未提�
 
 ## 文件诊断与内容完整性（#393）
 
+查询能力故障仍保守处理：搜索读模型不可用时，保留下来的命中携带 `query_degraded=true`，即使源码回退补充了可用结果，响应仍为 `freshness.state=degraded`。该标记与文件解析警告独立；旧命中缺少该字段时默认为 `false`，但不能据此覆盖响应的新鲜度状态或推断内容覆盖完整。
+
 代码索引的版本新鲜度与内容完整性分别表达。`freshness.state=fresh` 表示请求版本已追上，不保证每个文件都完整解析。仓库状态、报告与查询 freshness 的 `content_integrity` 包含 `state`（`complete`、`partial`、`unknown`）、`degraded_file_count`（按路径去重）和 `source_scope`。旧响应缺少该字段时按 `unknown` 处理。`degraded_reason` 保留为兼容诊断，不能单独用于判断是否需要重新索引。
 
 ```powershell

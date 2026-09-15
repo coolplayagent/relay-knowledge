@@ -140,6 +140,7 @@ pub(in crate::storage::sqlite::code) fn hit_from_parts(
     parts: HitParts,
 ) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: status.repository_id.clone(),
         scope_id: status.last_indexed_scope_id.clone().unwrap_or_default(),
         resolved_commit_sha: status.last_indexed_commit.clone().unwrap_or_default(),
@@ -321,6 +322,7 @@ pub(in crate::storage::sqlite::code) fn mark_hits_degraded(
     reason: &str,
 ) {
     for hit in hits {
+        hit.query_degraded = true;
         if hit.degraded_reason.is_none() {
             hit.degraded_reason = Some(reason.to_owned());
         }
@@ -328,6 +330,7 @@ pub(in crate::storage::sqlite::code) fn mark_hits_degraded(
 }
 
 fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit) {
+    target.query_degraded |= source.query_degraded;
     target.stale |= source.stale
         || source
             .staleness_hint

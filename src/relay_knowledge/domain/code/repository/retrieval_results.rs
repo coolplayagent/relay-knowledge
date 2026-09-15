@@ -30,6 +30,9 @@ pub struct CodeRetrievalHit {
     pub stale: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub staleness_hint: Option<StalenessHint>,
+    /// A query layer was unavailable; independent of file parsing diagnostics.
+    #[serde(default)]
+    pub query_degraded: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

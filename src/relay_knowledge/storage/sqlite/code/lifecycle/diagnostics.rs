@@ -1,27 +1,9 @@
 //! Reads diagnostic pages from one published snapshot under a read transaction.
 use crate::{
-    domain::{
-        CodeContentIntegrity, CodeDiagnosticsPage, CodeDiagnosticsPageRequest, CodeFileDiagnostic,
-    },
+    domain::{CodeDiagnosticsPage, CodeDiagnosticsPageRequest, CodeFileDiagnostic},
     storage::StorageError,
 };
-use rusqlite::{Connection, OptionalExtension, params};
-
-pub(super) fn content_integrity(
-    connection: &Connection,
-    scope: Option<String>,
-) -> rusqlite::Result<CodeContentIntegrity> {
-    let Some(scope) = scope else {
-        return Ok(CodeContentIntegrity::default());
-    };
-    let count = connection.query_row(
-        "SELECT (SELECT COUNT(DISTINCT path) FROM code_repository_file_diagnostics WHERE source_scope = ?1)
-         FROM code_repository_scopes WHERE source_scope = ?1 AND retiring = 0",
-        params![scope], |row| row.get::<_,usize>(0)).optional()?;
-    Ok(count
-        .map(|count| CodeContentIntegrity::measured(scope, count))
-        .unwrap_or_default())
-}
+use rusqlite::{Connection, params};
 
 pub(in crate::storage::sqlite::code) fn page(
     connection: &mut Connection,
@@ -34,13 +16,32 @@ pub(in crate::storage::sqlite::code) fn page(
     }
     let transaction = connection.transaction()?;
     let exists: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM code_repository_scopes WHERE source_scope = ?1 AND repository_id = ?2 AND retiring = 0 AND stale = 0)",
-        params![request.source_scope,request.repository_id], |row| row.get(0))?;
+        "SELECT EXISTS(SELECT 1 FROM code_repository_scopes scope
+         WHERE scope.source_scope = ?1 AND scope.repository_id = ?2
+           AND scope.retiring = 0 AND scope.stale = 0
+           AND (scope.resolved_commit_sha = ?3 OR EXISTS (
+               SELECT 1 FROM code_repository_commit_scopes commits
+               WHERE commits.source_scope = scope.source_scope
+                 AND commits.repository_id = scope.repository_id
+                 AND commits.resolved_commit_sha = ?3)))",
+        params![
+            request.source_scope,
+            request.repository_id,
+            request.resolved_commit_sha
+        ],
+        |row| row.get(0),
+    )?;
     if !exists {
         return Err(StorageError::InvalidInput(
             "diagnostic snapshot is unavailable or no longer published".into(),
         ));
     }
+    let mut scope_status = super::status::repository_scope_status_by_source_scope(
+        &transaction,
+        &request.source_scope,
+    )?
+    .ok_or_else(|| StorageError::InvalidInput("diagnostic snapshot is unavailable".into()))?;
+    scope_status.last_indexed_commit = Some(request.resolved_commit_sha.clone());
     let filters = serde_json::to_string(&request.path_filters)
         .map_err(|e| StorageError::InvalidInput(e.to_string()))?;
     let predicate = "source_scope = ?1 AND (json_array_length(?2) = 0 OR EXISTS (
@@ -86,6 +87,7 @@ pub(in crate::storage::sqlite::code) fn page(
     let has_more = diagnostics.len() > request.limit;
     diagnostics.truncate(request.limit);
     Ok(CodeDiagnosticsPage {
+        scope_status,
         degraded_file_count: count,
         diagnostics,
         has_more,

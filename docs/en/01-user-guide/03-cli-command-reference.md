@@ -329,6 +329,8 @@ Diagnostics provide reason-specific `next_steps`: inspect routes and committed f
 
 Indexed-version freshness and content coverage are independent. `freshness.state=fresh` means the requested version is indexed, not that every file parsed completely. Repository status, reports and query freshness include `content_integrity`: `state` (`complete`, `partial`, `unknown`), `degraded_file_count` (distinct paths) and `source_scope`. Missing fields in older responses mean `unknown`. The legacy `degraded_reason` remains diagnostic text and must not alone trigger reindexing.
 
+Query capability failures remain conservative: if a search read model is unavailable, surviving hits carry `query_degraded=true` and the response remains `freshness.state=degraded`, even when source fallback supplies usable matches. This flag is separate from file parse warnings and defaults to `false` on older hits; it does not override the response freshness or establish complete content coverage.
+
 ```powershell
 relay-knowledge repo diagnostics demo --ref HEAD --limit 50 --format json
 relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor $nextCursor --format json

@@ -53,7 +53,7 @@ relay-knowledge repo diagnostics demo --ref HEAD --limit 50 --format json
 relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor $nextCursor --format json
 ```
 
-分页默认 50 条，最多 200 条；按路径、消息排序。重复使用同一 ref 与路径过滤条件，传入返回的 `next_cursor` 继续读取；HEAD 移动不会改变已开始分页的快照。快照被清理后明确报错。`repo report` 继续展示最多 20 条摘要，并通过 `degradation_summary_truncated` 和 `diagnostics_command` 提供完整诊断入口。内容不完整时，即使命中的文件正常，也不能推断查询覆盖完整；缺失事实可能影响未命中文件或跨文件关系。
+分页默认 50 条，最多 200 条；按路径、消息排序。重复使用同一 ref 与路径过滤条件，传入返回的 `next_cursor` 继续读取；HEAD 移动或发布更精确的 scope 都不会改变已开始分页的快照。续页在同一存储事务中读取 scope 元数据及诊断条目，并验证仓库及解析后的 commit。游标使用固定长度指纹绑定规范化路径过滤条件，避免合法的长过滤条件生成不可用的续页游标。快照被清理后明确报错。`repo report` 继续展示最多 20 条摘要，并通过 `degradation_summary_truncated` 和 `diagnostics_command` 提供完整诊断入口。内容不完整时，即使命中的文件正常，也不能推断查询覆盖完整；缺失事实可能影响未命中文件或跨文件关系。
 
 HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包括 `ref`、JSON 数组字符串 `path_filters`、`limit` 和 `cursor`；CLI 支持 `--remote`。MCP 工具为 `relay_code_diagnostics`，接受 `repository`、`ref_selector`、`path_filters`、`limit`、`cursor`，并遵守授权及上下文预算。
 

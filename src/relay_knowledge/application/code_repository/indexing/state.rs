@@ -121,6 +121,10 @@ pub(super) async fn degraded_file_count_for_fresh_index(
         .code_repository_diagnostics(crate::domain::CodeDiagnosticsPageRequest {
             repository_id: scoped_status.repository_id.clone(),
             source_scope,
+            resolved_commit_sha: scoped_status
+                .last_indexed_commit
+                .clone()
+                .ok_or_else(|| ApiError::invalid_argument("missing diagnostic commit"))?,
             path_filters: Vec::new(),
             limit: 1,
             after: None,

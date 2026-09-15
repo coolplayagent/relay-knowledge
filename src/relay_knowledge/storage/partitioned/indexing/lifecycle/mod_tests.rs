@@ -639,6 +639,7 @@ async fn partitioned_diagnostics_count_files_once_and_route_to_published_snapsho
     let request = CodeDiagnosticsPageRequest {
         repository_id: "repo".into(),
         source_scope: "diagnostics-scope".into(),
+        resolved_commit_sha: "commit".into(),
         path_filters: vec![],
         limit: 1,
         after: None,

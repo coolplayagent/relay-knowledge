@@ -267,10 +267,7 @@ impl CodeRepositoryFreshnessDiagnostics {
             direct_source_read_required,
             input.pending.active_matches_request,
             input.scope_stale,
-            input
-                .degraded_reason
-                .as_ref()
-                .filter(|_| input.query_degraded),
+            input.query_degraded,
         );
         let mut agent_instructions = source_read_instructions(
             direct_source_read_required,
@@ -396,13 +393,13 @@ fn freshness_state(
     direct_source_read_required: bool,
     active_matches_request: bool,
     scope_stale: bool,
-    degraded_reason: Option<&String>,
+    query_degraded: bool,
 ) -> CodeRepositoryFreshnessState {
     if direct_source_read_required && active_matches_request {
         CodeRepositoryFreshnessState::Pending
     } else if scope_stale || direct_source_read_required {
         CodeRepositoryFreshnessState::Stale
-    } else if degraded_reason.is_some() {
+    } else if query_degraded {
         CodeRepositoryFreshnessState::Degraded
     } else {
         CodeRepositoryFreshnessState::Fresh

@@ -387,6 +387,7 @@ fn request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
 
 fn reference_hit() -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: "scope".to_owned(),
         resolved_commit_sha: "commit".to_owned(),

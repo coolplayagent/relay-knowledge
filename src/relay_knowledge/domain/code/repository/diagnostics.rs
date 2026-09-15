@@ -1,7 +1,10 @@
 //! Snapshot-bound content integrity and bounded diagnostic paging contracts.
 
-use super::{CodeFileDiagnostic, CodeRepositorySelector};
+use super::{CodeFileDiagnostic, CodeRepositorySelector, CodeRepositoryStatus};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+const MAX_DIAGNOSTIC_CURSOR_BYTES: usize = 16384;
 
 /// Content coverage is independent of indexed-version freshness.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +71,16 @@ pub struct CodeDiagnosticsRequest {
 }
 
 impl CodeDiagnosticsRequest {
+    /// Binds the normalized filter set without copying large prefixes into every cursor.
+    pub fn path_filters_fingerprint(&self) -> String {
+        let mut digest = Sha256::new();
+        for path in &self.repository.path_filters {
+            digest.update((path.len() as u64).to_le_bytes());
+            digest.update(path.as_bytes());
+        }
+        format!("{:x}", digest.finalize())
+    }
+
     /// Canonicalizes bounded repository-relative prefixes before cursor binding.
     pub fn normalize_paths(&mut self) -> Result<(), String> {
         if self.repository.path_filters.len() > 64 {
@@ -109,7 +122,11 @@ impl CodeDiagnosticsRequest {
         if !(1..=200).contains(&self.limit) {
             return Err("diagnostic limit must be between 1 and 200".into());
         }
-        if self.cursor.as_ref().is_some_and(|c| c.len() > 16384) {
+        if self
+            .cursor
+            .as_ref()
+            .is_some_and(|c| c.len() > MAX_DIAGNOSTIC_CURSOR_BYTES)
+        {
             return Err("diagnostic cursor exceeds 16384 bytes".into());
         }
         if !self.repository.language_filters.is_empty() {
@@ -127,9 +144,20 @@ pub struct CodeDiagnosticsCursor {
     pub source_scope: String,
     pub resolved_commit_sha: String,
     pub requested_ref: String,
-    pub path_filters: Vec<String>,
+    pub path_filters_fingerprint: String,
     pub after_path: String,
     pub after_message: String,
+}
+
+impl CodeDiagnosticsCursor {
+    /// Never emits a continuation that the next request would reject as oversized.
+    pub fn encode(&self) -> Result<String, String> {
+        let token = serde_json::to_string(self).map_err(|error| error.to_string())?;
+        if token.len() > MAX_DIAGNOSTIC_CURSOR_BYTES {
+            return Err("diagnostic continuation exceeds the cursor byte budget".into());
+        }
+        Ok(token)
+    }
 }
 
 /// Storage request resolved and authorized by the application service.
@@ -137,6 +165,7 @@ pub struct CodeDiagnosticsCursor {
 pub struct CodeDiagnosticsPageRequest {
     pub repository_id: String,
     pub source_scope: String,
+    pub resolved_commit_sha: String,
     pub path_filters: Vec<String>,
     pub limit: usize,
     pub after: Option<(String, String)>,
@@ -145,6 +174,7 @@ pub struct CodeDiagnosticsPageRequest {
 /// Diagnostic rows with a distinct-file total and explicit continuation signal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeDiagnosticsPage {
+    pub scope_status: CodeRepositoryStatus,
     pub degraded_file_count: usize,
     pub diagnostics: Vec<CodeFileDiagnostic>,
     pub has_more: bool,

@@ -57,3 +57,39 @@ fn diagnostic_paths_are_normalized_without_allowing_parent_escape() {
     request.repository.path_filters = vec!["src".into(); 65];
     assert!(request.normalize_paths().is_err());
 }
+
+#[test]
+fn generated_cursors_bind_large_filters_within_the_accepted_byte_budget() {
+    let mut request = CodeDiagnosticsRequest {
+        repository: CodeRepositorySelector::new("repo", "HEAD", vec![], vec![]).unwrap(),
+        limit: 1,
+        cursor: None,
+    };
+    request.repository.path_filters = (0..64)
+        .map(|index| format!("{index:02}{}", "x".repeat(4094)))
+        .collect();
+    request.normalize_paths().unwrap();
+    let fingerprint = request.path_filters_fingerprint();
+    assert_eq!(fingerprint.len(), 64);
+    let mut cursor = CodeDiagnosticsCursor {
+        repository_id: "repo".into(),
+        source_scope: "scope".into(),
+        resolved_commit_sha: "commit".into(),
+        requested_ref: "HEAD".into(),
+        path_filters_fingerprint: fingerprint.clone(),
+        after_path: "src/a.py".into(),
+        after_message: "parse error".into(),
+    };
+    let token = cursor.encode().unwrap();
+    assert!(token.len() < 1024);
+    request.cursor = Some(token.clone());
+    request.validate().unwrap();
+    assert_eq!(
+        serde_json::from_str::<CodeDiagnosticsCursor>(&token).unwrap(),
+        cursor
+    );
+    request.repository.path_filters[0].push('y');
+    assert_ne!(request.path_filters_fingerprint(), fingerprint);
+    cursor.after_message = "x".repeat(MAX_DIAGNOSTIC_CURSOR_BYTES);
+    assert!(cursor.encode().is_err());
+}
