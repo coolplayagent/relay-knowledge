@@ -288,6 +288,6 @@ schema marker 9 同时增加类型归属检查点游标。打开旧数据库时�
 
 v56 portable-evidence 升级持久化可选的调用字节范围；旧 JSON 和 ATTACH 导入的旧 SQLite 快照默认保持未知。查询索引计划 v5 保留 v4 的前 19 个单元，在序号 19–22 追加配置身份/键及 caller/callee 身份索引。配置绑定身份采用事务内倒排表：插入、替换、更新、增量复制和附加数据库导入从有界元数据生成绑定，删除同步移除绑定。查询按索引身份定位，避免逐条扫描全部元数据 JSON；2 秒及 2,000,000 SQLite 步数预算保持不变。
 
-合并后的事实身份为 `config-registry-v56-portable-evidence-source-io-isolation-v1`。仅具有此前 portable evidence 或路径 I/O 隔离能力的作用域都必须重建。检查点同时保留类型归属游标和已处理路径计数；旧快照导入时缺失的调用字节范围与 I/O 诊断保持未知。
+合并后的事实身份为 `config-registry-v56-portable-evidence-source-io-isolation-v1`。仅具有此前 portable evidence 或路径 I/O 隔离能力的作用域都必须重建。检查点同时保留类型归属游标和已处理路径计数；旧快照导入时缺失的调用字节范围与 I/O 诊断保持未知。启动检查直接调用共享 SQLite schema 检视函数确认 marker 表是否存在，保持 marker 模块既有的行数预算。
 
 schema marker 10 和一次性 portable evidence 迁移将旧事实标记 stale，通过持久化任务重建。迁移后若绑定表、触发器或清理索引缺失或不兼容，启动明确报错，不会在已发布事实之上静默创建空投影，也不会修改 writer 的租约和检查点。应恢复匹配的运行时备份，或在新运行时目录重新索引获准仓库后切换服务配置。二进制回滚使用相应升级前备份，或由所选版本在干净目录重建索引。

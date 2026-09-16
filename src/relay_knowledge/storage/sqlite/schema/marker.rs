@@ -311,7 +311,7 @@ const CODE_SCOPE_GC_JOB_COLUMNS: &[&str] = &[
 pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     connection: &Connection,
 ) -> Result<bool, StorageError> {
-    if !schema_marker_table_exists(connection)? {
+    if !table_exists(connection, "relay_storage_schema_state")? {
         return Ok(false);
     }
     let version = connection
@@ -870,10 +870,6 @@ pub(in crate::storage::sqlite) fn mark_schema_initialization_current(
     )?;
 
     Ok(())
-}
-
-fn schema_marker_table_exists(connection: &Connection) -> Result<bool, StorageError> {
-    table_exists(connection, "relay_storage_schema_state")
 }
 
 fn workspace_package_mappings_current(connection: &Connection) -> Result<bool, StorageError> {
