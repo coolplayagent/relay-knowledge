@@ -28,6 +28,7 @@ export class CardComponent {
             language_id: "typescript",
             content: source,
             symbols: &[],
+            syntax_root: None,
         },
     )
     .unwrap();
@@ -73,6 +74,11 @@ const emit = defineEmits<{ change: [value: string] }>()
 </script>
 <template><CopyIcon v-for="item in items" :title="item.label" @click="emit('change', item.label)"/><slot name="footer"/></template>"#;
     let build = build();
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_html::LANGUAGE.into())
+        .unwrap();
+    let tree = parser.parse(source, None).unwrap();
     let facts = extract(
         &build,
         FrameworkFileInput {
@@ -81,6 +87,7 @@ const emit = defineEmits<{ change: [value: string] }>()
             language_id: "vue",
             content: source,
             symbols: &[],
+            syntax_root: Some(tree.root_node()),
         },
     )
     .unwrap();
@@ -135,6 +142,7 @@ export class ShellComponent {}
             language_id: "typescript",
             content: source,
             symbols: &[],
+            syntax_root: None,
         },
     )
     .unwrap();
@@ -167,4 +175,92 @@ fn build() -> SnapshotBuild {
         1,
         0,
     )
+}
+
+#[test]
+fn vue_nested_templates_are_one_region_and_declarations_have_distinct_edges() {
+    let source = format!(
+        "<!-- <script>ignored()</script> --><template>{}</template><script setup>const key = import.meta.env.BASE_URL;</script>",
+        "<template #row=\"{ value }\"><span v-for=\"item in items\">{{ item }}</span></template>"
+            .repeat(20)
+    );
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_html::LANGUAGE.into())
+        .unwrap();
+    let tree = parser.parse(&source, None).unwrap();
+    let facts = extract(
+        &build(),
+        FrameworkFileInput {
+            path: "src/List.vue",
+            file_id: "file",
+            language_id: "vue",
+            content: &source,
+            symbols: &[],
+            syntax_root: Some(tree.root_node()),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        facts
+            .nodes
+            .iter()
+            .filter(|node| node.kind == FrameworkNodeKind::Template)
+            .count(),
+        1
+    );
+    let ids: std::collections::BTreeSet<_> = facts.edges.iter().map(|edge| &edge.edge_id).collect();
+    assert_eq!(
+        ids.len(),
+        facts.edges.len(),
+        "distinct targets must not collide"
+    );
+    let (mask, _) = super::vue_script_mask(&source, tree.root_node()).unwrap();
+    assert_eq!(mask.len(), source.len());
+    assert!(!mask.contains("ignored"));
+    assert!(mask.contains("import.meta.env.BASE_URL"));
+}
+
+#[test]
+fn vue_regions_keep_real_budget_and_tolerate_recovered_tags() {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_html::LANGUAGE.into())
+        .unwrap();
+    for source in ["<template</template>", "<template 属性</template>"] {
+        let tree = parser.parse(source, None).unwrap();
+        assert!(super::vue_script_mask(source, tree.root_node()).is_none());
+        extract(
+            &build(),
+            FrameworkFileInput {
+                path: "Broken.vue",
+                file_id: "file",
+                language_id: "vue",
+                content: source,
+                symbols: &[],
+                syntax_root: Some(tree.root_node()),
+            },
+        )
+        .unwrap();
+    }
+    let source = "<template></template>".repeat(17);
+    let tree = parser.parse(&source, None).unwrap();
+    let result = extract(
+        &build(),
+        FrameworkFileInput {
+            path: "TooMany.vue",
+            file_id: "file",
+            language_id: "vue",
+            content: &source,
+            symbols: &[],
+            syntax_root: Some(tree.root_node()),
+        },
+    );
+    assert!(
+        result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("region budget exceeded")
+    );
 }

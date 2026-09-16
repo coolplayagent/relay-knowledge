@@ -1,5 +1,6 @@
 //! Bounded syntax-based configuration flow shared by non-Java code languages.
 mod conversions;
+mod expressions;
 mod imports;
 mod properties;
 mod scopes;
@@ -8,6 +9,7 @@ mod syntax;
 mod values;
 
 use super::*;
+use crate::domain::CodeConfigStringPart;
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use tree_sitter::Node;
@@ -21,6 +23,7 @@ struct Analysis<'a> {
     input: &'a FeatureFlagFileInput<'a>,
     nodes: Vec<Node<'a>>,
     imports: Vec<Node<'a>>,
+    rust_imports: BTreeMap<String, Vec<(Node<'a>, String)>>,
     evaluations: Cell<usize>,
     declarations: BTreeMap<String, Vec<Node<'a>>>,
     functions: BTreeMap<String, Vec<Node<'a>>>,
@@ -40,6 +43,7 @@ pub(super) fn extract(
         input,
         nodes: Vec::new(),
         imports: Vec::new(),
+        rust_imports: BTreeMap::new(),
         evaluations: Cell::new(0),
         declarations: BTreeMap::new(),
         functions: BTreeMap::new(),
@@ -85,8 +89,17 @@ pub(super) fn extract(
                 ));
             }
             analysis.imports.push(node);
+            if input.language_id == "rust" {
+                for (name, target) in imports::rust_bindings(node, input.content)? {
+                    analysis
+                        .rust_imports
+                        .entry(name)
+                        .or_default()
+                        .push((node, target));
+                }
+            }
         }
-        if scopes::is_type(node.kind()) {
+        if scopes::is_type(node.kind()) || node.kind() == "mod_item" {
             if let Some(name) = node.child_by_field_name("name") {
                 analysis
                     .declarations
@@ -281,19 +294,26 @@ impl Analysis<'_> {
             }
             if let Some((name, value)) = syntax::assignment(*node, self.input.content) {
                 if self.stable_constant(*node, &name)
-                    && let Some(Value::Literal(value)) =
-                        self.evaluate(value, 0, &mut BTreeSet::new())
-                    && value.kind == "string"
+                    && let Some(parts) = self.string_expression(value, 0, &mut BTreeSet::new())
                 {
+                    let literal = if let [CodeConfigStringPart::Literal(value)] = parts.as_slice() {
+                        Some(value)
+                    } else {
+                        None
+                    };
+                    let binding = self.binding(*node, &name);
                     let mut row = record(
                         self.input,
                         "config_key",
-                        &value.text,
+                        literal.unwrap_or(&binding),
                         "declares_string_constant",
                         node.start_byte(),
                         node.end_byte(),
                     )?;
-                    row.metadata.bindings.push(self.binding(*node, &name));
+                    row.metadata.bindings.push(binding);
+                    if literal.is_none() {
+                        row.metadata.string_parts = parts;
+                    }
                     check_fact_budget(rows.len())?;
                     rows.push(row);
                 }
@@ -326,9 +346,14 @@ impl Analysis<'_> {
         read: &values::Read,
         edge: &str,
     ) -> Result<CodeFeatureFlagRecord, DomainError> {
+        let expression_key = format!(
+            "expression:{}:{}:{}",
+            self.module, self.input.path, read.start
+        );
         let (kind, key, reference) = match &read.key {
             Atom::Literal(key) => (read.namespace.as_str(), key.as_str(), None),
             Atom::Reference(key) => ("config_symbol", key.as_str(), Some(key.clone())),
+            Atom::Expression(_) => ("config_symbol", expression_key.as_str(), None),
         };
         let mut row = record(
             self.input,
@@ -339,9 +364,14 @@ impl Analysis<'_> {
             node.end_byte(),
         )?;
         row.metadata.reference = reference;
+        if let Atom::Expression(parts) = &read.key {
+            row.metadata.string_parts = parts.clone();
+        }
         row.metadata.exact_reference =
             row.metadata.reference.is_some() && read.namespace.is_empty();
-        if row.metadata.reference.is_some() && !read.namespace.is_empty() {
+        if (row.metadata.reference.is_some() || !row.metadata.string_parts.is_empty())
+            && !read.namespace.is_empty()
+        {
             row.metadata.target_kind = Some(read.namespace.clone());
         }
         row.metadata.value_type.clone_from(&read.value_type);

@@ -1,11 +1,121 @@
 //! Explicit import bindings; unknown package layouts retain unresolved identities.
 use super::*;
 
+pub(super) fn rust_bindings(
+    node: Node<'_>,
+    source: &str,
+) -> Result<Vec<(String, String)>, DomainError> {
+    let mut pending = vec![(node, String::new())];
+    let mut bindings = Vec::new();
+    let mut visited = 0;
+    while let Some((node, prefix)) = pending.pop() {
+        visited += 1;
+        if visited > 1024 {
+            return Err(DomainError::invalid(
+                "configuration",
+                "Rust import binding budget exceeded",
+            ));
+        }
+        match node.kind() {
+            "use_declaration" => {
+                if let Some(argument) = node.child_by_field_name("argument") {
+                    pending.push((argument, prefix));
+                }
+            }
+            "use_list" => {
+                let mut cursor = node.walk();
+                for child in node
+                    .named_children(&mut cursor)
+                    .filter(|child| !child.is_extra())
+                {
+                    if pending.len() >= 1024 {
+                        return Err(DomainError::invalid(
+                            "configuration",
+                            "Rust import binding budget exceeded",
+                        ));
+                    }
+                    pending.push((child, prefix.clone()));
+                }
+            }
+            "scoped_use_list" => {
+                if let (Some(path), Some(list)) = (
+                    node.child_by_field_name("path")
+                        .and_then(|path| rust_use_path(path, source, 0)),
+                    node.child_by_field_name("list"),
+                ) {
+                    pending.push((list, format!("{prefix}{path}::")));
+                } else {
+                    bindings.push(("*".into(), "unresolved".into()));
+                }
+            }
+            "use_wildcard" => {
+                let path = node
+                    .named_child(0)
+                    .and_then(|path| rust_use_path(path, source, 0))
+                    .unwrap_or_default();
+                let path = format!("{prefix}{path}");
+                bindings.push(("*".into(), format!("{}::*", path.trim_end_matches("::"))));
+            }
+            _ => {
+                let (path, alias) = if node.kind() == "use_as_clause" {
+                    (
+                        node.child_by_field_name("path"),
+                        node.child_by_field_name("alias")
+                            .map(|n| syntax::text(n, source)),
+                    )
+                } else {
+                    (Some(node), None)
+                };
+                let Some(path) = path.and_then(|path| rust_use_path(path, source, 0)) else {
+                    bindings.push(("*".into(), "unresolved".into()));
+                    continue;
+                };
+                let target = if path == "self" {
+                    prefix.trim_end_matches("::").to_owned()
+                } else {
+                    format!("{prefix}{path}")
+                };
+                let alias = alias.unwrap_or_else(|| target.rsplit("::").next().unwrap_or_default());
+                bindings.push((alias.to_owned(), target));
+            }
+        }
+    }
+    Ok(bindings)
+}
+
+fn rust_use_path(node: Node<'_>, source: &str, depth: usize) -> Option<String> {
+    if depth >= MAX_DEPTH {
+        return None;
+    }
+    match node.kind() {
+        "identifier" | "self" | "super" | "crate" => Some(syntax::text(node, source).to_owned()),
+        "scoped_identifier" => {
+            let name = rust_use_path(node.child_by_field_name("name")?, source, depth + 1)?;
+            if let Some(path) = node.child_by_field_name("path") {
+                Some(format!(
+                    "{}::{name}",
+                    rust_use_path(path, source, depth + 1)?
+                ))
+            } else {
+                Some(format!("::{name}"))
+            }
+        }
+        _ => None,
+    }
+}
+
 impl Analysis<'_> {
     /// A familiar spelling is insufficient when an explicit import replaced
     /// the standard owner. Imports outside this lexical scope do not bind it.
     pub(super) fn reader_import_shadowed(&self, name: &str, use_site: Node<'_>) -> bool {
+        // `import.meta` is grammar syntax, not a lexical binding named import.
+        if name.starts_with("import.meta.") {
+            return false;
+        }
         let root = name.split('.').next().unwrap_or(name);
+        if self.input.language_id == "rust" {
+            return self.rust_reader_shadowed(root, use_site);
+        }
         self.imports.iter().any(|node| {
             if !syntax::visible_function(*node, use_site, "", self.input.content) {
                 return false;
@@ -42,10 +152,6 @@ impl Analysis<'_> {
                             .any(|word| word == root)
                     })
                 }
-                "rust" => {
-                    raw.trim_end_matches(';').rsplit([':', ' ']).next() == Some(root)
-                        && !raw.contains("std::")
-                }
                 "kotlin" | "scala" | "csharp" => {
                     if let Some((alias, target)) =
                         native_alias(*node, self.input.language_id, self.input.content)
@@ -64,6 +170,72 @@ impl Analysis<'_> {
                 _ => false,
             }
         })
+    }
+
+    fn rust_reader_shadowed(&self, root: &str, mut site: Node<'_>) -> bool {
+        for _ in 0..128 {
+            let declarations = self.declarations.get(root).into_iter().flatten();
+            if declarations
+                .filter(|n| n.kind() == "mod_item")
+                .any(|n| syntax::scope(*n) == site)
+            {
+                return true;
+            }
+            let named = self
+                .rust_imports
+                .get(root)
+                .into_iter()
+                .flatten()
+                .filter(|(n, _)| syntax::scope(*n) == site)
+                .collect::<Vec<_>>();
+            let bindings = if named.is_empty() {
+                self.rust_imports
+                    .get("*")
+                    .into_iter()
+                    .flatten()
+                    .filter(|(n, _)| syntax::scope(*n) == site)
+                    .collect::<Vec<_>>()
+            } else {
+                named
+            };
+            if !bindings.is_empty() {
+                return bindings.iter().any(|(node, target)| {
+                    let standard = target.trim_start_matches("::");
+                    let expected = if root == "std" {
+                        "std".into()
+                    } else {
+                        format!("std::{root}")
+                    };
+                    if standard != expected
+                        && !(standard == "std::*" && matches!(root, "env" | "std"))
+                    {
+                        return true;
+                    }
+                    // An absolute import names the external crate; a relative
+                    // std path can instead name a repository-local module.
+                    !target.starts_with("::")
+                        && self
+                            .declarations
+                            .get("std")
+                            .into_iter()
+                            .flatten()
+                            .any(|declaration| {
+                                declaration.kind() == "mod_item"
+                                    && syntax::visible_function(
+                                        *declaration,
+                                        *node,
+                                        "",
+                                        self.input.content,
+                                    )
+                            })
+                });
+            }
+            let Some(parent) = site.parent() else {
+                return false;
+            };
+            site = parent;
+        }
+        true
     }
 }
 

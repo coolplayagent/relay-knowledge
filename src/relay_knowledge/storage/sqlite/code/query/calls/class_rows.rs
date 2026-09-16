@@ -1,12 +1,9 @@
 //! Class call selection uses existing name indexes and a shared SQLite work budget.
 
 use rusqlite::{Connection, ErrorCode, params_from_iter, types::Value};
-use std::{
-    collections::BTreeSet,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use super::{
@@ -92,18 +89,9 @@ fn select_rows(
     if members.is_empty() {
         return Ok(Vec::new());
     }
-    let names = members
-        .iter()
-        .map(|member| member.name.as_str())
-        .collect::<BTreeSet<_>>();
-    let (name_column, snapshot_column, result_identity) = match request.code_query_kind {
-        CodeQueryKind::Callers => (
-            "c.callee_name",
-            "c.callee_symbol_snapshot_id",
-            "caller.canonical_symbol_id",
-        ),
+    let (snapshot_column, result_identity) = match request.code_query_kind {
+        CodeQueryKind::Callers => ("c.callee_symbol_snapshot_id", "caller.canonical_symbol_id"),
         _ => (
-            "c.caller_name",
             "c.caller_symbol_snapshot_id",
             "COALESCE(callee.canonical_symbol_id, c.target_hint, c.callee_name)",
         ),
@@ -129,13 +117,11 @@ fn select_rows(
         ""
     };
     let sql = call_rows_sql(&format!(
-        "AND {name_column} IN ({}) AND {snapshot_column} IN ({})
+        "AND {snapshot_column} IN ({})
          {path_filter} {language_filter} {inline_filter} {generated_filter}",
-        vec!["?"; names.len()].join(","),
         vec!["?"; members.len()].join(","),
     ));
     let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
-    values.extend(names.into_iter().map(|name| Value::Text(name.to_owned())));
     values.extend(
         members
             .into_iter()

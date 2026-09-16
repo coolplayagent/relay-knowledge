@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use crate::domain::{
     RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     code_call_targets::{
-        call_target_name_candidates, callable_definition_symbol, callable_target_symbol_kind,
+        CgoTarget, call_target_name_candidates, callable_definition_symbol,
+        callable_target_symbol_kind, go_source_path, java_source_path, java_static_target,
+        select_cgo_target,
     },
 };
 
@@ -15,16 +17,75 @@ pub(in crate::code) fn resolve_reference_targets(
 ) {
     let mut by_name = BTreeMap::<&str, Vec<&RepositoryCodeSymbolRecord>>::new();
     let mut by_name_and_path = BTreeMap::<(&str, &str), Vec<&RepositoryCodeSymbolRecord>>::new();
+    let mut java_targets = BTreeMap::<String, Vec<&RepositoryCodeSymbolRecord>>::new();
     for symbol in symbols {
+        if let Some(name) = java_static_target(
+            &symbol.language_id,
+            &symbol.name,
+            symbol.type_owner.as_ref(),
+        ) {
+            java_targets.entry(name).or_default().push(symbol);
+        }
         by_name.entry(&symbol.name).or_default().push(symbol);
         by_name_and_path
             .entry((symbol.name.as_str(), symbol.path.as_str()))
             .or_default()
             .push(symbol);
     }
+    let cgo_targets = by_name
+        .iter()
+        .map(|(name, symbols)| {
+            (
+                *name,
+                select_cgo_target(symbols.iter().map(|symbol| {
+                    (
+                        *symbol,
+                        symbol.language_id.as_str(),
+                        symbol.kind.as_str(),
+                        symbol.signature.as_str(),
+                        symbol.path.as_str(),
+                    )
+                })),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     for reference in references {
-        reference.target_hint = Some(reference.name.clone());
-        match resolve_reference(reference, &by_name, &by_name_and_path) {
+        if reference.kind == "call"
+            && matches!(reference.confidence_tier.as_str(), "extracted" | "exact")
+            && reference.target_hint.is_some()
+        {
+            continue;
+        }
+        if reference.target_hint.is_none()
+            || !java_source_path(&reference.path)
+            || !reference.name.contains('.')
+        {
+            reference.target_hint = Some(reference.name.clone());
+        }
+        let resolution = if reference.kind == "call"
+            && java_source_path(&reference.path)
+            && reference.name.contains('.')
+        {
+            match java_targets.get(&reference.name).map(Vec::as_slice) {
+                Some([symbol]) => Resolution::Resolved(symbol, reference.name.clone()),
+                Some([_, _, ..]) => Resolution::Ambiguous(reference.name.clone()),
+                _ => Resolution::Unresolved,
+            }
+        } else if reference.kind == "call"
+            && go_source_path(&reference.path)
+            && reference.name.starts_with("C.")
+        {
+            match cgo_targets.get(&reference.name[2..]) {
+                Some(CgoTarget::Unique(symbol)) => {
+                    Resolution::Resolved(symbol, reference.name.clone())
+                }
+                Some(CgoTarget::Ambiguous) => Resolution::Ambiguous(reference.name.clone()),
+                _ => Resolution::Unresolved,
+            }
+        } else {
+            resolve_reference(reference, &by_name, &by_name_and_path)
+        };
+        match resolution {
             Resolution::Resolved(symbol, target_hint) => {
                 reference.target_symbol_snapshot_id = Some(symbol.symbol_snapshot_id.clone());
                 reference.target_hint = Some(target_hint);

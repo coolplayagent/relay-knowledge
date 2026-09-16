@@ -13,6 +13,8 @@ pub enum CodeParseStatus {
     Parsed,
     Partial,
     TextOnly,
+    /// A processed path excluded by content-aware language selection; no facts.
+    Excluded,
     Failed,
 }
 
@@ -23,6 +25,7 @@ impl CodeParseStatus {
             Self::Parsed => "parsed",
             Self::Partial => "partial",
             Self::TextOnly => "text_only",
+            Self::Excluded => "excluded",
             Self::Failed => "failed",
         }
     }
@@ -483,6 +486,8 @@ pub struct CodeParseStatusCounts {
     pub parsed: usize,
     pub partial: usize,
     pub text_only: usize,
+    #[serde(default)]
+    pub excluded: usize,
     pub failed: usize,
 }
 
@@ -495,6 +500,19 @@ fn validate_parse_status(
 ) -> Result<(), DomainError> {
     match status {
         CodeParseStatus::Parsed => Ok(()),
+        CodeParseStatus::Excluded => {
+            if !symbols.is_empty()
+                || !references.is_empty()
+                || !chunks.is_empty()
+                || diagnostic.is_some()
+            {
+                return Err(DomainError::invalid(
+                    "parse_status",
+                    "excluded files cannot contain facts or degradation diagnostics",
+                ));
+            }
+            Ok(())
+        }
         CodeParseStatus::Partial => {
             if diagnostic.is_none() {
                 return Err(DomainError::invalid(

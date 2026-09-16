@@ -1,3 +1,8 @@
+mod language_scope;
+pub(crate) use language_scope::{
+    code_language_filter_atoms, code_language_filter_groups, code_language_scope_covers,
+    code_scope_language_filters, validate_code_language_filters,
+};
 pub(crate) mod call_targets;
 mod context;
 mod dependencies;
@@ -34,8 +39,8 @@ pub use graph_records::{
 };
 pub use repository::{
     CODE_CONFIG_SOURCE_FORMATS, CodeCallRecord, CodeConfigFilter, CodeConfigMetadata,
-    CodeContentIntegrity, CodeContentIntegrityState, CodeDiagnosticsCursor, CodeDiagnosticsPage,
-    CodeDiagnosticsPageRequest, CodeDiagnosticsRequest, CodeFeatureFlagGraph,
+    CodeConfigStringPart, CodeContentIntegrity, CodeContentIntegrityState, CodeDiagnosticsCursor,
+    CodeDiagnosticsPage, CodeDiagnosticsPageRequest, CodeDiagnosticsRequest, CodeFeatureFlagGraph,
     CodeFeatureFlagRecord, CodeFeatureFlagRequest, CodeFeatureFlagUsage, CodeFileDiagnostic,
     CodeFileFingerprint, CodeImpactPathGroups, CodeImpactRequest, CodeImportRecord, CodeIndexMode,
     CodeIndexRequest, CodePathTombstone, CodeQueryKind, CodeRepositoryExcludedPath,
@@ -96,3 +101,5 @@ pub use workspace::{
     CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeWorkspaceDetectionConfig,
     CodeWorkspaceMember, CodeWorkspacePackageMapping,
 };
+
+pub(crate) use repository::{deserialize_code_language_filters, normalize_code_filter_list};

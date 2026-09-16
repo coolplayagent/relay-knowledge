@@ -6,6 +6,11 @@ use crate::domain::{
 
 use crate::code::{SnapshotBuild, parse_indexed_file};
 
+#[path = "cgo.rs"]
+mod cgo;
+#[path = "java_calls.rs"]
+mod java_calls;
+
 #[test]
 fn java_import_resolution_distinguishes_local_and_external_modules() {
     let snapshot = parse_sources(&[

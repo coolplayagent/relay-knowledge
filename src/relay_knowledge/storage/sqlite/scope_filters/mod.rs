@@ -30,6 +30,10 @@ fn requested_languages_fit_indexed_scope(
     indexed_filters: &[String],
     selector_filters: &[String],
 ) -> bool {
+    if crate::domain::code_language_filter_groups(indexed_filters).len() > 1 {
+        return indexed_filters == selector_filters;
+    }
+
     selector_filters.is_empty()
         || indexed_filters.is_empty()
         || selector_filters
@@ -55,6 +59,9 @@ pub(super) fn path_filter_allows(path: &str, filters: &[String]) -> bool {
 }
 
 pub(super) fn language_filter_allows(language_id: &str, filters: &[String]) -> bool {
+    let atoms = crate::domain::code_language_filter_atoms(filters);
+    let filters = atoms.as_slice();
+
     filters.is_empty() || filters.iter().any(|filter| filter == language_id)
 }
 
@@ -63,6 +70,9 @@ pub(super) fn language_filter_allows_path(
     language_id: &str,
     filters: &[String],
 ) -> bool {
+    let atoms = crate::domain::code_language_filter_atoms(filters);
+    let filters = atoms.as_slice();
+
     filters.is_empty()
         || filters.iter().any(|filter| {
             filter == language_id || cxx_header_filter_allows(path, language_id, filter)

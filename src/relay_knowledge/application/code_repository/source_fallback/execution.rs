@@ -26,9 +26,39 @@ pub(in crate::application::code_repository) async fn apply_code_grep_fallback(
     request: &CodeRetrievalRequest,
     results: &mut Vec<CodeRetrievalHit>,
 ) -> Result<Option<String>, ApiError> {
-    let Some(plan) = plan_code_grep_fallback(scoped_status, request, results) else {
+    let Some(mut plan) = plan_code_grep_fallback(scoped_status, request, results) else {
         return Ok(None);
     };
+    let source_scope = scoped_status
+        .last_indexed_scope_id
+        .as_deref()
+        .ok_or_else(|| {
+            ApiError::invalid_argument(format!(
+                "code repository '{}' does not have an indexed source scope",
+                scoped_status.alias
+            ))
+        })?;
+    if !plan.needs_scope_paths() {
+        if plan.paths.len() > SOURCE_GREP_CANDIDATE_FILE_LIMIT {
+            return Ok(Some(
+                "source fallback candidate file budget exhausted".to_owned(),
+            ));
+        }
+        // Explicit paths need the same published-scope admission as discovered
+        // candidates. Excluded progress rows cannot authorize a source read.
+        let paths = store
+            .code_file_candidate_paths_for_scope(
+                source_scope.to_owned(),
+                plan.paths.clone(),
+                Vec::new(),
+                plan.exclude_generated,
+                SOURCE_GREP_CANDIDATE_FILE_LIMIT.saturating_add(1),
+            )
+            .await
+            .map_err(super::super::errors::storage_api_error)?;
+        let allowed = paths.into_iter().collect::<std::collections::BTreeSet<_>>();
+        plan.paths.retain(|path| allowed.contains(path));
+    }
     let plan = if plan.needs_scope_paths() {
         let source_scope = scoped_status
             .last_indexed_scope_id

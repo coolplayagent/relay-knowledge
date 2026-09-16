@@ -2,6 +2,52 @@
 
 use tree_sitter::Node;
 
+pub(super) fn static_declaration(node: Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor).take(64).any(|child| {
+        if child.kind() == "static" {
+            return true;
+        }
+        if !matches!(child.kind(), "modifiers" | "modifier") {
+            return false;
+        }
+        let mut cursor = child.walk();
+        child
+            .children(&mut cursor)
+            .take(64)
+            .any(|token| token.kind() == "static")
+    })
+}
+
+pub(super) fn java_static_dispatch(node: Node<'_>) -> bool {
+    if node.kind() != "method_declaration" || !static_declaration(node) {
+        return false;
+    }
+    let mut ancestor = node.parent();
+    for _ in 0..128 {
+        let Some(node) = ancestor else {
+            return false;
+        };
+        if matches!(node.kind(), "class_declaration" | "interface_declaration") {
+            let mut cursor = node.walk();
+            return !node.children(&mut cursor).take(64).any(|child| {
+                matches!(
+                    child.kind(),
+                    "superclass" | "super_interfaces" | "extends_interfaces"
+                )
+            });
+        }
+        if matches!(
+            node.kind(),
+            "enum_declaration" | "record_declaration" | "object_creation_expression"
+        ) {
+            return false;
+        }
+        ancestor = node.parent();
+    }
+    false
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct SyntaxRange {
     pub(super) byte_start: usize,

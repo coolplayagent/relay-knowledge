@@ -67,6 +67,8 @@ pub(super) fn is_callable(kind: &str) -> bool {
             | "arrow_function"
             | "anonymous_function"
             | "function_expression"
+            | "generator_function"
+            | "generator_function_declaration"
             | "function"
             | "protocol_function_declaration"
             | "init_declaration"

@@ -31,7 +31,7 @@ impl RelayKnowledgeService {
         let selector = request.repository.clone();
         let preview = worker::validate_scope(registration, selector).await?;
         let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
-        let language_filters = merged_filters(
+        let language_filters = crate::domain::code_scope_language_filters(
             &status.language_filters,
             &request.repository.language_filters,
         );

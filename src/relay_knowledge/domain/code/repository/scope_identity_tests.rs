@@ -160,8 +160,8 @@ fn workspace_scope_semantics_are_canonical_and_backward_compatible() {
 #[test]
 fn configuration_registry_version_invalidates_previous_completed_scope() {
     let previous = CODE_SNAPSHOT_FACT_VERSION.replace(
+        "-config-registry-v56-portable-evidence",
         "-config-registry-v55-type-ownership",
-        "-config-registry-v54",
     );
     assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
     let mut input = Vec::new();

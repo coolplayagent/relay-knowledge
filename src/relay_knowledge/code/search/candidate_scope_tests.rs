@@ -2,6 +2,28 @@ use super::*;
 use crate::code::search::{SourceGrepKind, SourceGrepRequest};
 
 #[test]
+fn rejected_candidates_still_consume_the_bounded_scan_budget() {
+    let filters = crate::domain::code_scope_language_filters(&["c".into()], &["cpp".into()]);
+    let request = SourceGrepRequest {
+        query: "target".into(),
+        paths: (0..257).map(|i| format!("src/a{i}.c")).collect(),
+        path_filters: vec![],
+        language_filters: filters,
+        limit: 10,
+        kind: SourceGrepKind::References,
+        exclude_generated: false,
+    };
+    let selected = selected_candidate_paths(&request);
+    assert!(selected.paths.is_empty());
+    assert!(
+        selected
+            .degraded_reason
+            .unwrap()
+            .contains("budget exhausted")
+    );
+}
+
+#[test]
 fn unknown_language_filter_allows_document_source_fallback_candidates() {
     assert!(language_filter_allows(
         "docs/operations.md",

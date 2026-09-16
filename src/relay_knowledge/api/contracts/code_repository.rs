@@ -40,7 +40,10 @@ impl CodeRepositoryScopeMetadata {
             resolved_commit_sha: status.last_indexed_commit.clone().unwrap_or_default(),
             tree_hash: status.tree_hash.clone().unwrap_or_default(),
             path_filters: merged_filters(&status.path_filters, &selector.path_filters),
-            language_filters: merged_filters(&status.language_filters, &selector.language_filters),
+            language_filters: crate::domain::code_scope_language_filters(
+                &status.language_filters,
+                &selector.language_filters,
+            ),
             indexed_file_count: status.indexed_file_count,
             index_versions: vec![format!(
                 "code:{}:{}",

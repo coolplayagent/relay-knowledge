@@ -10,7 +10,6 @@ const MAX_CLASSES: usize = 64;
 const MAX_MEMBERS: usize = 1024;
 
 pub(super) struct ClassMember {
-    pub(super) name: String,
     pub(super) snapshot: String,
 }
 
@@ -52,7 +51,7 @@ pub(super) fn resolve(
         }
         let mut statement = prepare_code_search_statement(
             connection,
-            "SELECT name, symbol_snapshot_id FROM code_repository_symbols
+            "SELECT symbol_snapshot_id FROM code_repository_symbols
              WHERE source_scope = ?1 AND type_owner_json IS NOT NULL
                AND type_owner_identity = ?2
                AND json_extract(type_owner_json, '$.relation') IN ('declaration', 'direct_member', 'trait_member')
@@ -69,8 +68,7 @@ pub(super) fn resolve(
                 return Err(capacity("more than 1024 class/member records"));
             }
             members.push(ClassMember {
-                name: member.get(0)?,
-                snapshot: member.get(1)?,
+                snapshot: member.get(0)?,
             });
         }
     }

@@ -31,8 +31,8 @@ from C# Boolean parsing. Do not generalize Java inheritance or package rules
 to another language.
 
 After this extraction upgrade, rebuild through `repo index` or `repo update`.
-Fact version `config-registry-v55-type-ownership` and deferred query-index
-plan v4 prevent old indexes from claiming the new capability. Retain normal
+Fact version `config-registry-v56-portable-evidence` and deferred query-index
+plan v5 prevent old indexes from claiming the new capability. Retain normal
 durable tasks, leases, checkpoints and status reporting during recovery.
 
 Cross-file evidence has language-specific limits. JS/TS imports require a
@@ -43,7 +43,7 @@ retain unknown working-directory evidence; later source/eval/unset can
 invalidate getters. Inspect unresolved metadata before suggesting a missing
 configuration definition. Kotlin companions have their own member set.
 
-Schema marker 9 adds the durable ownership cursor. A resumed writer preserves
+Schema marker 10 retains the durable ownership cursor. A resumed writer preserves
 its lease and publication barrier; a resource-limit error on an in-place
 update calls for a durable staged rebuild, not larger unbounded budgets.
 
@@ -61,3 +61,22 @@ subscripts use actual member ranges. Dockerfile evidence remains stage/import
 coverage, without evaluating arbitrary commands. A detached C++ implementation
 with a named concrete template argument remains unresolved when the argument's
 namespace binding cannot be proved.
+
+
+Type-call aggregation preserves actual call byte and line ranges; ordinary function queries retain their existing context line ranges. Anonymous callbacks keep their own call owner; a matching member name on an unknown receiver never proves a target. JS static and instance `this` are separate; Java permits instance-qualified static calls. Class headers and computed member names do not establish the new class's `this` binding.
+
+Ruby bracket reads and Rust `env::var_os` contribute environment evidence; pure writes and Python/JS method selectors do not become keys. Rust import provenance follows the nearest lexical scope and distinguishes local `std` modules from `::std`. Go package constants can compose keys across files using at most 32 string components, four snapshot resolution levels and 4,096 result bytes. Mutable values, non-string providers, getters used as constants and cycles remain unresolved; different unknown expressions retain separate identities.
+
+Extensionless scripts require a supported interpreter shebang within the first 256 bytes; watcher admission preserves their update/delete events. A leading Flow pragma selects the existing typed JSX grammar while preserving JS/JSX identity and ordinary partial diagnostics for unsupported syntax. This is limited syntax recovery, not complete Flow type analysis. Vue counts only top-level SFC regions against the 16-region budget and reuses its parsed HTML tree.
+
+Old snapshots have unknown call bytes. Reindex through the normal durable workflow for v56 evidence. If a migrated binding schema is missing, restore its runtime backup or rebuild in a new home; do not treat a new empty projection as current.
+
+Repository and request language rules both apply, including their shared manifest paths. Do not reuse checkpoints solely because language unions match. `excluded` file rows are progress records, not query evidence or degradation. An incomplete source-fallback result cannot establish absence. Public language options and `lang:` qualifiers accept language names, never internal scope encodings. cgo calls require import/binding evidence; private C targets and ambiguous candidates remain unresolved.
+
+Scope reuse also requires the requested evidence languages to be covered; shared manifest paths alone are insufficient. cgo keeps lossy or incomplete linkage signatures unresolved. C++ recovered decorated classes use their complete declaration identity; macro namespace wrappers remain opaque. Detached member ownership can use already resolved conditional angle-bracket includes, within the existing 64-target and writer budgets.
+
+Shared JVM manifests retain distinct Java/Kotlin/Scala evidence. POM dependency coordinates are read structurally even on one line; arbitrary plugin configuration is not a dependency declaration. XML event errors detected by the reader, ambiguous coordinates or bounded-reader exhaustion fail the index task explicitly, so an unsuccessful run must not be interpreted as no dependencies. This fragment reader does not validate the complete POM/XML document structure.
+
+Java static type receivers can resolve through package or explicit imports plus AST modifier/ownership proof. Shadowed, inherited or ambiguous bindings remain unresolved; repeated qualified targets are not disambiguated by file proximity. Display signatures alone cannot prove static dispatch.
+
+Java `this` calls involving Object names or enum/record members remain unresolved without overload proof; anonymous bodies, including enum-constant bodies, are excluded from the enclosing type’s direct members.

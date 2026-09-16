@@ -404,7 +404,7 @@ Shell 内置命令名先静态解码，引号、拼接和转义形式使用相�
 | C | 不适用；保留普通函数查询 | `getenv` |
 | C++ | 类及具有作用域信息的成员实现 | `getenv`、`std::getenv` |
 | C# | 类/结构体和直接方法 | `Environment.GetEnvironmentVariable`、`System.Environment.GetEnvironmentVariable` |
-| Rust | 类型及固有/trait `impl` 方法 | `std::env::var`、`std::env::var_os`、`env::var` |
+| Rust | 类型及固有/trait `impl` 方法 | `std::env::var`、`std::env::var_os`、`env::var`, `env::var_os` |
 | Go | 具名类型和 receiver 方法 | `os.Getenv`、`os.LookupEnv` |
 | Kotlin | 类和对象 | `System.getenv`、`System.getProperty` |
 | Scala | 类、trait 和对象 | `System.getenv`、`System.getProperty`、`sys.env.get`、`sys.env.getOrElse` |
@@ -412,13 +412,13 @@ Shell 内置命令名先静态解码，引号、拼接和转义形式使用相�
 | PHP | 类和直接方法 | `getenv`、`$_ENV[key]`、`$_SERVER[key]` |
 | Swift | 类型和扩展 | `ProcessInfo.processInfo.environment[key]` |
 | Bash（`--source shell`） | 不适用 | 参数展开、现有 export/默认值证据、直接输出 getter |
-| Starlark | 不适用 | 已记录的配置读取器；通过 `load` 提供显式绑定 |
+| Starlark | 不适用 | `ctx.getenv(key, default)` 及已记录的配置读取器；未证明接收者来源时保留不完整状态；`load` 提供显式绑定 |
 | Vue | 内嵌 JS/TS 归属 | 脚本复用对应 JS/TS 读取规则 |
 | SQL、构建脚本和模板 | 语法没有可调用类型时不适用 | 现有结构化定义、引用和条件证据；不构造类关系 |
 
 跨文件绑定限于同一授权仓库快照，并要求显式导入、类型或语言原生模块证据。环境变量和属性键保持独立命名空间，不能仅凭相同拼写连接不同代码语言的符号。动态键、外部提供方、重赋值、遮蔽、不支持的封装和解析深度耗尽必须作为未解析或不完整证据处理。`analysis_complete=false` 阻止不存在性结论。默认值描述已观察到的静态证据，不预测运行时值。例如，字符串 `"false"` 经 Python `bool` 或 JavaScript `Boolean` 转换为 `true`，经 C# `bool.Parse` 解析为 `false`。
 
-代码事实版本 `config-registry-v55-type-ownership` 要求通过持久化仓库索引任务重建旧索引。延迟查询索引计划升级为版本 4，追加类型归属查询索引，保持此前序号的含义不变；已有 v1–v3 检查点恢复时继续验证原有前缀。CLI、HTTP 和 MCP 继续复用同一服务合同和配置查询预算。
+代码事实版本 `config-registry-v56-portable-evidence` 要求通过持久化仓库索引任务重建旧索引。延迟查询索引计划升级为版本 5，保留 v4 的类型归属和语言/文件索引，追加配置身份、配置来源键及 caller/callee 身份索引（序号 19–22）；已有 v1–v4 检查点恢复时继续验证原有前缀。CLI、HTTP 和 MCP 继续复用同一服务合同和配置查询预算。
 
 ### 跨文件证据与限制
 
@@ -426,7 +426,7 @@ Shell 内置命令名先静态解码，引号、拼接和转义形式使用相�
 | --- | --- |
 | Python | 明确的模块导入或相对 `from` 导入；词法重新绑定会终止关联。 |
 | JS/JSX、TS/TSX、Vue 脚本 | 带源文件扩展名的明确相对导入，以及匹配的具名或默认导出。省略扩展名、包加载器和再导出链保留未解析状态。 |
-| C/C++ | 引号形式的仓库相对 include。C++ 归属保留限定作用域；头文件沿用检测到的语法（`.h` 为 C，`.hpp` 为 C++）。 |
+| C/C++ | 引号形式的仓库相对 include。C++ 归属保留限定作用域；头文件沿用检测到的语法（`.h` 默认使用 C，有 C++ 声明证据时使用 C++；`.hpp` 使用 C++）。 |
 | Rust | 用已索引的 `mod` 声明证明模块成员身份，包括静态 `#[path]` 重定向；导入别名保留原始目标名。缺少模块声明、条件模块和宏控制的成员关系保持未解析。 |
 | Go | 声明的 package 与所在目录连接 receiver 方法和包级配置提供者。 |
 | Kotlin、Scala、C# | 精确的原生 package、namespace 和类型身份；私有提供者不能满足跨文件导入。伴生对象保留独立的直接归属。 |
@@ -445,7 +445,7 @@ Swift typed import 必须在所有获准检查的 Swift 文件中具有唯一物
 getter 绑定重新赋值后撤销其导出证明，函数体的原始读取证据仍保留。
 C# 显式别名约束目标身份；不支持的其他 native 导入别名保留未解析。
 非空布尔/数值转换不会触发空值回退；未解析的跨文件 getter 外层回退保留不完整状态，
-不能在证明其返回语义前推测默认值。查询索引计划 v4 追加归属和语言/文件索引。
+不能在证明其返回语义前推测默认值。查询索引计划 v5 保留 v4 的归属和语言/文件索引，追加配置及调用身份查询索引。
 
 Java 零参数配置 getter 可以使用任意方法名，仍遵守现有可见性、继承和遮蔽检查。
 本地方法和属性展开复用提供者稳定性检查，包括已知的成员改写。
@@ -462,3 +462,12 @@ C++ 分离实现中的具体命名模板参数需要类型绑定证据；裸参�
 
 持久化类型调用回归矩阵同时验证 JavaScript 与 TypeScript 两种 Vue 脚本，
 包含 `vue` 语言过滤和调用位置的路径过滤。
+
+
+类型调用聚合保留真实调用点的字节和行范围；普通函数查询保留既有的上下文行范围。匿名回调具有独立调用归属；未知接收者不能仅凭成员同名证明目标。JS 静态与实例 `this` 分开处理，Java 允许实例限定的静态调用。类头和计算成员名不能建立新声明类的 `this` 绑定。
+
+Ruby 下标读取和 Rust `env::var_os` 提供环境变量证据；纯赋值及 Python/JS 方法选择器不会成为配置键。Rust 按最近词法作用域判断导入来源，区分本地 `std` 模块与 `::std`。Go 包常量可跨文件组合配置键，最多 32 个字符串组成部分、4 层快照解析和 4,096 字节结果。可变值、非字符串提供者、作为常量使用的 getter 和循环保持未解析；不同未知表达式保留独立身份。
+
+无扩展名脚本需要前 256 字节内受支持解释器的 shebang；watcher 保留其修改及删除事件。文件首个注释中的 Flow pragma 使用已有 typed JSX 语法，保留 JS/JSX 标识；不支持的语法继续报告 partial。这是有限语法恢复，不是完整 Flow 类型分析。Vue 只将顶层 SFC 区域计入 16 区域预算，并复用已解析的 HTML 树。
+
+语言选择必须同时满足仓库注册范围与当前请求；共享清单可能满足多种语言的路径规则。不同有效选择使用不同 scope 身份，不能互相复用检查点。shebang 候选在内容检查后被排除时保留 `excluded` 进度，不贡献代码或配置证据，也不会让仓库进入 degraded 状态。源码回退耗尽候选预算时报告不完整，不能把空结果视为不存在。

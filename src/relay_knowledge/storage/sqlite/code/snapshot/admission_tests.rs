@@ -18,6 +18,74 @@ use super::{
 };
 
 #[test]
+fn direct_framework_facts_budget_their_search_and_fts_writes_before_publication() {
+    use crate::domain::{
+        CodeFrameworkEdgeRecord, CodeFrameworkNodeRecord, FrameworkEdgeKind, FrameworkKind,
+        FrameworkNodeKind, RepositoryCodeRange,
+    };
+    let mut connection = Connection::open_in_memory().unwrap();
+    initialize_code_schema(&connection).unwrap();
+    register_repository(&mut connection);
+    let mut snapshot = snapshot_with_chunk("repo", "src/app.ts", "class App {}");
+    let mut baseline_connection = Connection::open_in_memory().unwrap();
+    initialize_code_schema(&baseline_connection).unwrap();
+    register_repository(&mut baseline_connection);
+    let baseline = apply_snapshot(&mut baseline_connection, snapshot.clone()).unwrap();
+    let base_budget = CodeIndexResourceBudget::new(1, 1_000_000, 1_000).unwrap();
+    let base_rows = super::measure_snapshot_insert_surface(&snapshot, base_budget)
+        .unwrap()
+        .rows;
+    let file = &snapshot.files[0];
+    snapshot.framework_nodes.push(CodeFrameworkNodeRecord {
+        repository_id: "repo".into(),
+        source_scope: snapshot.source_scope.clone(),
+        node_id: "component".into(),
+        file_id: file.file_id.clone(),
+        path: file.path.clone(),
+        framework: FrameworkKind::Angular,
+        kind: FrameworkNodeKind::Component,
+        name: "App".into(),
+        detail: None,
+        symbol_snapshot_id: None,
+        byte_range: RepositoryCodeRange { start: 0, end: 10 },
+        line_range: RepositoryCodeRange { start: 1, end: 1 },
+    });
+    snapshot.framework_edges.push(CodeFrameworkEdgeRecord {
+        repository_id: "repo".into(),
+        source_scope: snapshot.source_scope.clone(),
+        edge_id: "render".into(),
+        file_id: file.file_id.clone(),
+        path: file.path.clone(),
+        framework: FrameworkKind::Angular,
+        kind: FrameworkEdgeKind::Renders,
+        source_node_id: "component".into(),
+        target_node_id: None,
+        target_hint: Some("External".into()),
+        resolution_state: "unresolved".into(),
+        confidence_basis_points: 8000,
+        confidence_tier: "structured".into(),
+        byte_range: RepositoryCodeRange { start: 0, end: 10 },
+        line_range: RepositoryCodeRange { start: 1, end: 1 },
+    });
+    let transaction = connection.transaction().unwrap();
+    let too_small = CodeIndexResourceBudget::new(1, 1_000_000, base_rows + 5).unwrap();
+    assert!(matches!(
+        require_fresh_full_snapshot_within_budget(&transaction, &snapshot, too_small),
+        Err(StorageError::CapacityExceeded(_))
+    ));
+    let exact = CodeIndexResourceBudget::new(1, 1_000_000, base_rows + 6).unwrap();
+    assert!(require_fresh_full_snapshot_within_budget(&transaction, &snapshot, exact).is_ok());
+    transaction.rollback().unwrap();
+    let written: usize = connection.query_row("SELECT (SELECT COUNT(*) FROM code_repository_framework_nodes) + (SELECT COUNT(*) FROM code_repository_framework_edges) + (SELECT COUNT(*) FROM code_repository_search_metadata)", [], |row| row.get(0)).unwrap();
+    assert_eq!(written, 0);
+    let report = apply_snapshot(&mut connection, snapshot).unwrap();
+    assert_eq!(
+        report.progress.sqlite_write_count,
+        baseline.progress.sqlite_write_count + 2
+    );
+}
+
+#[test]
 fn zero_reference_snapshot_cannot_bypass_the_all_surface_row_budget() {
     let mut connection = Connection::open_in_memory().expect("database should open");
     initialize_code_schema(&connection).expect("schema should initialize");

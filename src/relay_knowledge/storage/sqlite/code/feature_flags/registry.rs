@@ -126,6 +126,12 @@ fn search_bounded(
                     .bindings
                     .iter()
                     .chain(row.metadata.reference.iter())
+                    .chain(
+                        row.metadata
+                            .string_parts
+                            .iter()
+                            .filter_map(crate::domain::CodeConfigStringPart::reference),
+                    )
                     .chain(row.metadata.lexical_getter_references.iter())
             })
             .filter(|key| !queried.contains(*key))
@@ -151,11 +157,10 @@ fn search_bounded(
             let filter = feature_flag_sql_filter(scope, status, &evidence_request, &[]);
             let list = vec!["?"; chunk.len()].join(",");
             let mut params = filter.params;
-            for _ in 0..5 {
-                params.extend(chunk.iter().map(|key| Value::Text((***key).to_owned())));
-            }
+            params.push(Value::Text(scope.to_owned()));
+            params.extend(chunk.iter().map(|key| Value::Text((***key).to_owned())));
             let sql = format!(
-                "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND (json_extract(flag.metadata_json,'$.reference') IN ({list}) OR json_extract(flag.metadata_json,'$.same_package_reference') IN ({list}) OR json_extract(flag.metadata_json,'$.lexical_field_reference') IN ({list}) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.lexical_getter_references') candidate WHERE candidate.value IN ({list})) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding WHERE binding.value IN ({list}))) LIMIT {}",
+                "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND flag.usage_id IN (SELECT usage_id FROM code_repository_config_bindings WHERE source_scope=? AND binding IN ({list})) LIMIT {}",
                 filter.where_clause,
                 MAX_ROWS + 1
             );
@@ -192,6 +197,12 @@ fn search_bounded(
                     .bindings
                     .iter()
                     .chain(row.metadata.reference.iter())
+                    .chain(
+                        row.metadata
+                            .string_parts
+                            .iter()
+                            .filter_map(crate::domain::CodeConfigStringPart::reference),
+                    )
                     .chain(row.metadata.lexical_getter_references.iter())
                     .any(|key| !queried.contains(key))
             })
@@ -263,7 +274,7 @@ fn search_bounded(
             resolved.edge_kind = "declares_config_key".into();
         }
         let targets = resolver.resolve(row, 0);
-        let complete = if row.metadata.reference.is_none() {
+        let complete = if row.metadata.reference.is_none() && row.metadata.string_parts.is_empty() {
             true
         } else if let Some((kind, key)) = targets {
             resolved.source_kind = row.metadata.target_kind.clone().unwrap_or(kind);
@@ -293,7 +304,10 @@ fn search_bounded(
         for kind in kinds {
             let mut resolved = resolved.clone();
             resolved.source_kind = kind;
-            if row.metadata.reference.is_some() || resolved.source_kind != row.source_kind {
+            if row.metadata.reference.is_some()
+                || !row.metadata.string_parts.is_empty()
+                || resolved.source_kind != row.source_kind
+            {
                 let mut hasher = crate::identity::StableHasher64::new();
                 for part in [
                     &status.repository_id,

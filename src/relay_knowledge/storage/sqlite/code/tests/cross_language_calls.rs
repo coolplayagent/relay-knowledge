@@ -533,7 +533,11 @@ fn symbol(
         name: name.to_owned(),
         qualified_name: format!("{}::{name}", path.replace('/', "::")),
         kind: kind.to_owned(),
-        signature: format!("{kind} {name}"),
+        signature: match (language_id, kind) {
+            ("c", "function") => format!("int {name}(void) {{"),
+            ("c", "function_declaration") => format!("int {name}(void);"),
+            _ => format!("{kind} {name}"),
+        },
         doc_comment: None,
         byte_range: range(0, 8),
         line_range,

@@ -212,6 +212,62 @@ const SEARCH_QUERY_INDEXES: &[SearchQueryIndexDescriptor] = &[
         required_table: Some("code_repository_files"),
         required_table_columns: &["source_scope", "language_id", "path"],
     },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_feature_flags_identity_lookup",
+        table: "code_repository_feature_flags",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_feature_flags_identity_lookup ON code_repository_feature_flags(source_scope, feature_flag_id)",
+        columns: &["source_scope", "feature_flag_id"],
+        mode: SearchQueryIndexMode::Required,
+        required_table: Some("code_repository_feature_flags"),
+        required_table_columns: &["source_scope", "feature_flag_id"],
+    },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_feature_flags_key_lookup",
+        table: "code_repository_feature_flags",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_feature_flags_key_lookup ON code_repository_feature_flags(source_scope, source_kind, source_key)",
+        columns: &["source_scope", "source_kind", "source_key"],
+        mode: SearchQueryIndexMode::Required,
+        required_table: Some("code_repository_feature_flags"),
+        required_table_columns: &["source_scope", "source_kind", "source_key"],
+    },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_calls_caller_identity_lookup",
+        table: "code_repository_calls",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_calls_caller_identity_lookup ON code_repository_calls(source_scope, caller_symbol_snapshot_id, path, line_start)",
+        columns: &[
+            "source_scope",
+            "caller_symbol_snapshot_id",
+            "path",
+            "line_start",
+        ],
+        mode: SearchQueryIndexMode::Required,
+        required_table: Some("code_repository_calls"),
+        required_table_columns: &[
+            "source_scope",
+            "caller_symbol_snapshot_id",
+            "path",
+            "line_start",
+        ],
+    },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_calls_callee_identity_lookup",
+        table: "code_repository_calls",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_calls_callee_identity_lookup ON code_repository_calls(source_scope, callee_symbol_snapshot_id, path, line_start)",
+        columns: &[
+            "source_scope",
+            "callee_symbol_snapshot_id",
+            "path",
+            "line_start",
+        ],
+        mode: SearchQueryIndexMode::Required,
+        required_table: Some("code_repository_calls"),
+        required_table_columns: &[
+            "source_scope",
+            "callee_symbol_snapshot_id",
+            "path",
+            "line_start",
+        ],
+    },
 ];
 
 const _: [(); crate::domain::CODE_QUERY_INDEX_PLAN_UNIT_COUNT] = [(); SEARCH_QUERY_INDEXES.len()];

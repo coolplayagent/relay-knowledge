@@ -149,6 +149,7 @@ fn advance_page(
         limits.document_limit.min(256)
     ])?;
     let mut symbols = Vec::new();
+    let mut cpp_imports = std::collections::BTreeMap::new();
     while let Some(row) = rows.next()? {
         let metadata_bytes: usize = row.get(4)?;
         if metadata_bytes > MAX_METADATA {
@@ -189,6 +190,7 @@ fn advance_page(
             &symbol,
             &mut admitted_bytes,
             limits.byte_limit,
+            &mut cpp_imports,
         );
         let update = match update {
             Err(StorageError::CapacityExceeded(_)) if !symbols.is_empty() => break,
@@ -222,6 +224,7 @@ fn resolve_record(
     symbol: &Symbol,
     bytes: &mut usize,
     limit: usize,
+    cpp_imports: &mut std::collections::BTreeMap<String, Vec<String>>,
 ) -> Result<Option<(String, String)>, StorageError> {
     let Some(metadata) = &symbol.metadata else {
         return Ok(None);
@@ -235,6 +238,21 @@ fn resolve_record(
         .is_none_or(|basis| matches!(basis, "lexical" | "rust_module" | "cpp_unresolved_template"))
     {
         return Ok(None);
+    }
+    if owner.basis.as_deref() == Some("cpp_qualified") {
+        if !cpp_imports.contains_key(&symbol.path) {
+            let paths = resolved_cpp_import_paths(
+                transaction,
+                &session.source_scope,
+                &symbol.path,
+                bytes,
+                limit,
+            )?;
+            cpp_imports.insert(symbol.path.clone(), paths);
+        }
+        // Rebuild derived evidence on replay. Previously resolved paths must
+        // not survive an import becoming ambiguous, removed or unresolved.
+        owner.target_paths.clone_from(&cpp_imports[&symbol.path]);
     }
     resolve(
         transaction,
@@ -386,6 +404,33 @@ fn resolve(
 
 fn capacity(reason: &str) -> StorageError {
     StorageError::CapacityExceeded(format!("type ownership finalization incomplete: {reason}"))
+}
+
+fn resolved_cpp_import_paths(
+    transaction: &Transaction<'_>,
+    scope: &str,
+    path: &str,
+    bytes: &mut usize,
+    byte_limit: usize,
+) -> Result<Vec<String>, StorageError> {
+    let mut statement = transaction.prepare(
+        "SELECT DISTINCT target_hint FROM code_repository_imports
+         WHERE source_scope=?1 AND path=?2 AND resolution_state='resolved'
+           AND target_hint IS NOT NULL LIMIT 65",
+    )?;
+    let mut rows = statement.query(params![scope, path])?;
+    let mut paths = Vec::new();
+    while let Some(row) = rows.next()? {
+        let target: String = row.get(0)?;
+        *bytes = bytes.saturating_add(target.len());
+        if *bytes > byte_limit || paths.len() == MAX_CANDIDATES {
+            return Err(capacity(
+                "resolved import evidence exceeds the writer budget",
+            ));
+        }
+        paths.push(target);
+    }
+    Ok(paths)
 }
 
 #[cfg(test)]

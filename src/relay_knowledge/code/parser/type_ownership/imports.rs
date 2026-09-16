@@ -107,6 +107,7 @@ pub(super) fn rust_module_declaration(
         }
     }
     Some(CodeTypeOwner {
+        static_dispatch: None,
         identity: format!("rust-module|{path}|{name}"),
         relation: "module_declaration".into(),
         target_hint: name,

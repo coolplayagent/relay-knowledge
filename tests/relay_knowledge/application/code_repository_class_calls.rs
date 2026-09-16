@@ -38,7 +38,11 @@ async fn java_class_call_queries_return_member_edges_without_reverse_text_matche
     );
     let callees = query(&service, "B", CodeQueryKind::Callees).await;
     assert_eq!(callees.results.len(), 1);
-    assert!(callees.results[0].excerpt.contains("process calls println"));
+    assert!(
+        callees.results[0]
+            .excerpt
+            .contains("process calls System.out.println")
+    );
     assert_eq!(
         callees.results[0].edge_resolution_state.as_deref(),
         Some("unresolved")
@@ -210,11 +214,16 @@ async fn persisted_type_calls_cover_supported_type_languages_with_same_named_mem
             .query_code_repository(request, context("query-portable-types"))
             .await
             .unwrap();
-        if !result
-            .results
-            .iter()
-            .any(|r| r.excerpt.contains("run calls target"))
-        {
+        let target = match language {
+            "python" | "rust" => "self.target",
+            "go" => "o.target",
+            "php" => "$this.target",
+            _ => "target",
+        };
+        if !result.results.iter().any(|r| {
+            r.excerpt.starts_with(&format!("run calls {target}:"))
+                && r.path == format!("src/{path}")
+        }) {
             failures.push(format!("{language}: {:?}", result.results));
         }
     }

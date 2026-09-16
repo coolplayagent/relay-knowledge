@@ -894,6 +894,7 @@ fn symbol(
 
 fn call(call_id: &str, file_id: &str, path: &str) -> CodeCallRecord {
     CodeCallRecord {
+        byte_range: None,
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
         call_id: call_id.to_owned(),

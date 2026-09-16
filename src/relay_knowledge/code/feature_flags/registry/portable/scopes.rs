@@ -232,7 +232,7 @@ impl Analysis<'_> {
     pub(super) fn stable_constant(&self, node: Node<'_>, name: &str) -> bool {
         syntax::constant_declaration(node, self.input.language_id, self.input.content)
             && enclosing_function(node).is_none()
-            && !self.side_effects.contains_key(name)
+            && (self.input.language_id == "go" || !self.side_effects.contains_key(name))
             && self.declarations.get(name).is_some_and(|nodes| {
                 nodes
                     .iter()

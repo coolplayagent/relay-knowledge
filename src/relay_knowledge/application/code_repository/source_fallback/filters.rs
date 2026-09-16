@@ -15,6 +15,10 @@ pub(super) fn query_language_filters(
     base_filters: Vec<String>,
     query_filters: &[String],
 ) -> Vec<String> {
+    if crate::domain::code_language_filter_groups(&base_filters).len() > 1 {
+        return crate::domain::code_scope_language_filters(&base_filters, query_filters);
+    }
+
     const NO_MATCHING_LANGUAGE_FILTER: &str = "__relay_no_matching_language__";
     const C_CPP_HEADER_LANGUAGE_FILTER: &str = "__relay_c_cpp_header_only__";
 

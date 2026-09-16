@@ -11,6 +11,9 @@ pub(in crate::code::parser) fn manual_definition_candidate(node_kind: &str) -> b
     matches!(
         node_kind,
         "assignment_expression"
+            | "arrow_function"
+            | "function_expression"
+            | "generator_function"
             | "pair"
             | "public_field_definition"
             | "field_definition"
@@ -22,6 +25,23 @@ pub(in crate::code::parser) fn manual_definition(
     content: &str,
     node: Node<'_>,
 ) -> Option<(String, &'static str, SyntaxRange)> {
+    if matches!(
+        node.kind(),
+        "arrow_function" | "function_expression" | "generator_function"
+    ) {
+        if node.parent().is_some_and(|parent| {
+            javascript_like_function_value_definition(content, parent).is_some()
+        }) {
+            return None;
+        }
+        // An unnamed closure still owns its body. A local symbol prevents its
+        // calls from being attributed to the enclosing type member.
+        let name = node
+            .child_by_field_name("name")
+            .map(|name| node_text(content, name))
+            .unwrap_or_else(|| format!("anonymous@{}", node.start_byte()));
+        return Some((name, "function", syntax_range(node)));
+    }
     javascript_like_function_value_definition(content, node)
         .or_else(|| javascript_like_exported_value_definition(content, node))
 }

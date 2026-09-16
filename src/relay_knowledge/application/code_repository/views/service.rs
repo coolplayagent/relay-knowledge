@@ -38,6 +38,10 @@ use super::{
 const SNAPSHOT_LIMIT_MULTIPLIER: usize = 20;
 const SNAPSHOT_LIMIT_MAX: usize = 2_000;
 
+#[cfg(test)]
+#[path = "service_tests.rs"]
+mod tests;
+
 impl RelayKnowledgeService {
     /// Builds a deterministic, evidence-backed repository understanding view.
     pub async fn codebase_view(

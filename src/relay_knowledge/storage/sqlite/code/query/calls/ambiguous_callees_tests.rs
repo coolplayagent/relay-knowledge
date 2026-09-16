@@ -190,6 +190,7 @@ fn context(path: &str, target_hint: Option<&str>) -> AmbiguousCalleeContext {
 
 fn call_row(callee_name: &str, target_hint: Option<&str>, line: u32) -> CallRow {
     CallRow {
+        byte_range: None,
         file_id: "file".to_owned(),
         path: "src/main/java/example/ServiceFactory.java".to_owned(),
         language_id: "java".to_owned(),

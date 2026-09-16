@@ -85,6 +85,23 @@ fn type_ownership_persisted_primary_templates_remain_separate_from_specializatio
 }
 
 #[test]
+fn type_ownership_recovered_cpp_templates_preserve_parameter_and_argument_identity() {
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[(
+        "owner.cpp",
+        "template<class T> class API_EXPORT Owner {public: void run();}; template<class U> void Owner<U>::run() {} template<> class API_EXPORT Owner<int> {public: void extra();}; void Owner<int>::extra() {}",
+    )]);
+    let (mut db, session) = database(&snapshot);
+    finish(&mut db, &session);
+    let primary = owner(&db, "owner.cpp", "run");
+    let specialized = owner(&db, "owner.cpp", "extra");
+    assert_eq!(primary.resolution_state.as_deref(), Some("resolved"));
+    assert_eq!(specialized.resolution_state.as_deref(), Some("resolved"));
+    assert_ne!(primary.identity, specialized.identity);
+    assert!(primary.target_hint.contains("<@0>"));
+    assert!(specialized.target_hint.contains("<int>"));
+}
+
+#[test]
 fn type_ownership_budget_charges_full_symbol_and_checkpoint_receipts() {
     let snapshot = crate::code::syntax_snapshot_for_tests(&[
         ("src/lib.rs", "mod model; mod actions;"),
@@ -343,11 +360,95 @@ fn database(snapshot: &CodeIndexSnapshot) -> (Connection, CodeIndexSession) {
     )
     .unwrap();
     crate::storage::sqlite::code::symbols::insert_records(&tx, &snapshot.symbols).unwrap();
+    for import in &snapshot.imports {
+        tx.execute(
+            "INSERT INTO code_repository_imports (repository_id,source_scope,import_id,file_id,path,module,target_hint,resolution_state,confidence_basis_points,confidence_tier,line_start,line_end)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![import.repository_id,import.source_scope,import.import_id,import.file_id,import.path,import.module,import.target_hint,import.resolution_state,import.confidence_basis_points,import.confidence_tier,import.line_range.start,import.line_range.end],
+        ).unwrap();
+    }
     for file in &snapshot.files {
         tx.execute("INSERT INTO code_repository_files (repository_id,source_scope,file_id,path,language_id,blob_hash,byte_len,line_count,parse_status,is_generated,degraded_reason) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![file.repository_id,file.source_scope,file.file_id,file.path,file.language_id,file.blob_hash,file.byte_len,file.line_count,file.parse_status.as_str(),file.is_generated,file.degraded_reason]).unwrap();
     }
     tx.commit().unwrap();
     (db, session)
+}
+
+#[test]
+fn type_ownership_cpp_recovered_containers_use_resolved_conditional_includes() {
+    for wrapper in ["API_BEGIN", "OTHER_BEGIN"] {
+        let implementation = format!(
+            "#ifndef HEADER_ONLY\n#include <pkg/owner.h>\n#endif\n{wrapper}\nnamespace detail {{\nAPI_INLINE bool Owner::ready() const {{ return flag.load(); }}\n}}\nAPI_END"
+        );
+        let snapshot = crate::code::syntax_snapshot_for_tests(&[
+            (
+                "include/pkg/owner.h",
+                "API_BEGIN\nnamespace detail {\nclass API_EXPORT Owner { public: bool ready() const; };\n}\nAPI_END",
+            ),
+            ("include/pkg/owner-inl.h", &implementation),
+        ]);
+        assert!(
+            !snapshot
+                .symbols
+                .iter()
+                .any(|symbol| symbol.kind == "class" && symbol.name == "API_EXPORT")
+        );
+        assert!(
+            snapshot
+                .imports
+                .iter()
+                .any(|import| import.resolution_state == "resolved"
+                    && import.target_hint.as_deref() == Some("include/pkg/owner.h"))
+        );
+        let (mut db, session) = database(&snapshot);
+        finish(&mut db, &session);
+        let declaration = owner(&db, "include/pkg/owner.h", "Owner");
+        let member = owner(&db, "include/pkg/owner-inl.h", "ready");
+        assert_eq!(
+            member.resolution_state.as_deref(),
+            Some(if wrapper == "API_BEGIN" {
+                "resolved"
+            } else {
+                "unresolved"
+            })
+        );
+        if wrapper == "API_BEGIN" {
+            assert_eq!(member.identity, declaration.identity);
+            assert_eq!(member.target_paths, ["include/pkg/owner.h"]);
+            db.execute(
+                "UPDATE code_repository_imports SET resolution_state='ambiguous',target_hint=NULL",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "UPDATE code_repository_index_checkpoints SET type_owner_cursor=NULL",
+                [],
+            )
+            .unwrap();
+            finish(&mut db, &session);
+            let replayed = owner(&db, "include/pkg/owner-inl.h", "ready");
+            assert_eq!(replayed.resolution_state.as_deref(), Some("unresolved"));
+            assert!(replayed.target_paths.is_empty());
+        }
+    }
+}
+
+#[test]
+fn type_ownership_cpp_duplicate_imported_types_remain_ambiguous() {
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[
+        ("include/a.h", "class Owner { public: void run(); };"),
+        ("include/b.h", "class Owner { public: void run(); };"),
+        (
+            "app.cpp",
+            "#if ENABLED\n#include <a.h>\n#include <b.h>\n#endif\nvoid Owner::run() {}",
+        ),
+    ]);
+    let (mut db, session) = database(&snapshot);
+    finish(&mut db, &session);
+    assert_eq!(
+        owner(&db, "app.cpp", "run").resolution_state.as_deref(),
+        Some("ambiguous")
+    );
 }
 
 fn finish(db: &mut Connection, session: &CodeIndexSession) -> usize {

@@ -22,7 +22,10 @@ impl<'a> ImportContext<'a> {
         let mut file_languages = BTreeMap::new();
         let mut module_paths = BTreeMap::<String, Vec<&RepositoryCodeFileRecord>>::new();
         let mut go_module_paths = BTreeMap::<String, Vec<&RepositoryCodeFileRecord>>::new();
-        for file in files {
+        for file in files
+            .iter()
+            .filter(|file| file.parse_status != crate::domain::CodeParseStatus::Excluded)
+        {
             file_languages.insert(file.path.as_str(), file.language_id.as_str());
             let candidates = if matches!(file.language_id.as_str(), "c" | "cpp") {
                 c_family_module_candidates(&file.path)

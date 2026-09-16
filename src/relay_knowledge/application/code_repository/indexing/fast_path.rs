@@ -75,7 +75,7 @@ pub(super) async fn fresh_full_index_response(
             scoped_status.repository_id.clone(),
             probe.resolved_commit_sha.clone(),
             scoped_status.path_filters.clone(),
-            scoped_status.language_filters.clone(),
+            Vec::new(),
         )
         .map_err(|error| ApiError::invalid_argument(error.to_string()))?,
         SoftwareGlobalKind::All,
@@ -171,7 +171,7 @@ pub(super) async fn published_task_response(
             lease.publication_fence.repository_id.clone(),
             lease.resolved_commit_sha.clone(),
             lease.path_filters.clone(),
-            lease.language_filters.clone(),
+            Vec::new(),
         )
         .await
         .map_err(storage_api_error)?
@@ -202,7 +202,7 @@ pub(super) async fn published_task_response(
             repository_status.alias.clone(),
             lease.resolved_commit_sha.clone(),
             lease.path_filters.clone(),
-            lease.language_filters.clone(),
+            Vec::new(),
         )
         .map_err(|error| ApiError::invalid_argument(error.to_string()))?,
         crate::domain::SoftwareGlobalKind::All,

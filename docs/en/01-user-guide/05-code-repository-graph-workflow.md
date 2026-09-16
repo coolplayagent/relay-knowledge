@@ -406,7 +406,7 @@ Configuration analysis reuses the indexing syntax tree. The following is the fin
 | C | Not applicable; ordinary function queries remain available | `getenv` |
 | C++ | Classes and scoped member implementations | `getenv`, `std::getenv` |
 | C# | Classes/structs and direct methods | `Environment.GetEnvironmentVariable`, `System.Environment.GetEnvironmentVariable` |
-| Rust | Types and inherent/trait `impl` methods | `std::env::var`, `std::env::var_os`, `env::var` |
+| Rust | Types and inherent/trait `impl` methods | `std::env::var`, `std::env::var_os`, `env::var`, `env::var_os` |
 | Go | Named types and receiver methods | `os.Getenv`, `os.LookupEnv` |
 | Kotlin | Classes and objects | `System.getenv`, `System.getProperty` |
 | Scala | Classes, traits and objects | `System.getenv`, `System.getProperty`, `sys.env.get`, `sys.env.getOrElse` |
@@ -414,13 +414,13 @@ Configuration analysis reuses the indexing syntax tree. The following is the fin
 | PHP | Classes and direct methods | `getenv`, `$_ENV[key]`, `$_SERVER[key]` |
 | Swift | Types and extensions | `ProcessInfo.processInfo.environment[key]` |
 | Bash (`--source shell`) | Not applicable | Parameter expansion, existing export/default evidence, direct output getters |
-| Starlark | Not applicable | Documented configuration readers; `load` provides explicit bindings |
+| Starlark | Not applicable | `ctx.getenv(key, default)` and documented configuration readers; unknown receiver provenance remains incomplete; `load` provides explicit bindings |
 | Vue | Embedded JS/TS ownership | The embedded script uses the matching JS/TS reader rules |
 | SQL, build scripts and templates | Not applicable where the grammar has no callable type | Existing structured definition, reference and condition evidence; no synthetic class relationships |
 
 Cross-file bindings are confined to the authorized repository snapshot and require explicit import, type or native module evidence. Environment variables and property keys have independent namespaces. A common spelling alone never joins symbols from different code languages. Dynamic keys, external providers, reassignment, shadowing, unsupported wrappers and exhausted resolution depth must be treated as unresolved or incomplete evidence. `analysis_complete=false` prevents absence conclusions. Defaults describe observed static evidence; they do not predict runtime values. For example, converting the string `"false"` with Python `bool` or JavaScript `Boolean` yields `true`, while C# `bool.Parse` yields `false`.
 
-Code fact version `config-registry-v55-type-ownership` requires rebuilding older indexes through the durable repository indexing task. The deferred query-index plan is version 4; it appends ownership and language/file lookups without changing earlier ordinal identities. Existing v1–v3 checkpoints retain their prefix checks during recovery. CLI, HTTP and MCP continue to use the same service contract and configuration budgets.
+Code fact version `config-registry-v56-portable-evidence` requires rebuilding older indexes through the durable repository indexing task. The deferred query-index plan is version 5; it preserves the v4 ownership and language/file indexes and appends configuration identity/source-key and caller/callee identity indexes (ordinals 19–22). Existing v1–v4 checkpoints retain their prefix checks during recovery. CLI, HTTP and MCP continue to use the same service contract and configuration budgets.
 
 ### Cross-file evidence and limits
 
@@ -428,7 +428,7 @@ Code fact version `config-registry-v55-type-ownership` requires rebuilding older
 | --- | --- |
 | Python | Explicit module import or relative `from` import; lexical rebinding terminates the connection. |
 | JS/JSX and TS/TSX; Vue scripts | Explicit relative import with the source extension and a matching named/default export. Extensionless resolution, package loaders and re-export chains remain unresolved. |
-| C/C++ | Quoted repository-relative includes. C++ ownership preserves qualified scope; headers retain their detected grammar (`.h` is C, `.hpp` is C++). |
+| C/C++ | Quoted repository-relative includes. C++ ownership preserves qualified scope; headers retain their detected grammar (`.h` defaults to C and uses C++ when declaration evidence proves that dialect; `.hpp` is C++). |
 | Rust | Indexed `mod` declarations prove module membership, including static `#[path]` redirection. Imports retain original names through aliases. Missing/conditional modules and macro-controlled membership remain unresolved. |
 | Go | The declared package and directory bind receiver methods and package configuration providers. |
 | Kotlin, Scala and C# | Exact native package/namespace/type identities; private providers cannot satisfy cross-file imports. Companion objects remain separate direct owners. |
@@ -473,3 +473,12 @@ types and proven literal arguments retain their bounded identity support.
 
 The persisted type-call regression matrix also exercises both JavaScript and
 TypeScript Vue scripts, including `vue` language and call-site path filters.
+
+
+Type-call aggregation preserves actual call byte and line ranges; ordinary function queries retain their existing context line ranges. Anonymous callbacks keep their own call owner; a matching member name on an unknown receiver never proves a target. JS static and instance `this` are separate; Java permits instance-qualified static calls. Class headers and computed member names do not establish the new class's `this` binding.
+
+Ruby bracket reads and Rust `env::var_os` contribute environment evidence; pure writes and Python/JS method selectors do not become keys. Rust import provenance follows the nearest lexical scope and distinguishes local `std` modules from `::std`. Go package constants can compose keys across files using at most 32 string components, four snapshot resolution levels and 4,096 result bytes. Mutable values, non-string providers, getters used as constants and cycles remain unresolved; different unknown expressions retain separate identities.
+
+Extensionless scripts require a supported interpreter shebang within the first 256 bytes; watcher admission preserves their update/delete events. A leading Flow pragma selects the existing typed JSX grammar while preserving JS/JSX identity and ordinary partial diagnostics for unsupported syntax. This is limited syntax recovery, not complete Flow type analysis. Vue counts only top-level SFC regions against the 16-region budget and reuses its parsed HTML tree.
+
+Language selection must satisfy both repository registration and the current request. Shared manifests can satisfy more than one language rule. Different effective selections have different scope identities and cannot reuse each other's checkpoint. A shebang candidate excluded after content inspection remains visible as `excluded` progress, contributes no code/configuration evidence, and does not make the repository degraded. Source-fallback candidate exhaustion is reported as incomplete rather than an authoritative empty result.

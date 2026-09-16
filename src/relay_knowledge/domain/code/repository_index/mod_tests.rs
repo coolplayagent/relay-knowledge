@@ -95,7 +95,7 @@ fn reference_resolution_query_index_repair_preserves_the_exact_page_token() {
         })
     );
     let legacy_plan = state.replacen(
-        "finalizing:query_index_repair:v4:",
+        "finalizing:query_index_repair:v5:",
         "finalizing:query_index_repair:v2:",
         1,
     );
@@ -158,7 +158,7 @@ fn reference_search_query_index_repair_tokens_preserve_canonical_page_boundaries
         })
     );
     let version_two_state = state.replacen(
-        "finalizing:query_index_repair:v4:",
+        "finalizing:query_index_repair:v5:",
         "finalizing:query_index_repair:v2:",
         1,
     );
@@ -189,7 +189,7 @@ fn reference_search_query_index_repair_tokens_preserve_canonical_page_boundaries
     );
     for state in [
         "finalizing:query_index_repair:v1:16:resume:reference_search:v2:build:0",
-        "finalizing:query_index_repair:v5:16:resume:reference_search:v2:build:0",
+        "finalizing:query_index_repair:v6:16:resume:reference_search:v2:build:0",
         "finalizing:query_index_repair:v2:17:resume:reference_search:v2:build:0",
         "finalizing:query_index_repair:v3:16:resume:reference_search:v0:build:0",
         "finalizing:query_index_repair:v3:16:resume:reference_search:v2:build:00",
@@ -252,7 +252,7 @@ fn reference_search_tokens_are_versioned_and_canonical() {
 fn query_index_subphase_tokens_are_versioned_bounded_and_canonical() {
     for unit in 0..CODE_QUERY_INDEX_PLAN_UNIT_COUNT {
         let state = code_query_index_subphase_state(unit).expect("bounded unit should format");
-        assert_eq!(state, format!("finalizing:build_query_indexes:v4:{unit}"));
+        assert_eq!(state, format!("finalizing:build_query_indexes:v5:{unit}"));
         assert_eq!(
             code_query_index_subphase(&state).map(|cursor| cursor.completed_unit),
             Some(unit)
@@ -278,7 +278,7 @@ fn query_index_subphase_tokens_are_versioned_bounded_and_canonical() {
     );
     assert_eq!(
         version_one.next_state(16).as_deref(),
-        Some("finalizing:build_query_indexes:v4:16")
+        Some("finalizing:build_query_indexes:v5:16")
     );
     let version_two = code_query_index_subphase("finalizing:build_query_indexes:v2:1")
         .expect("version-two cursor should parse");
@@ -316,7 +316,7 @@ fn query_index_subphase_tokens_are_versioned_bounded_and_canonical() {
             .requires_legacy_retired_prefix()
     );
     assert_eq!(
-        code_query_index_subphase("finalizing:build_query_indexes:v5:0")
+        code_query_index_subphase("finalizing:build_query_indexes:v6:0")
             .map(|cursor| cursor.completed_unit),
         None
     );
@@ -342,7 +342,7 @@ fn query_index_repair_tokens_preserve_every_stable_coarse_phase() {
     for resume_phase in CodeQueryIndexRepairResumePhase::ALL {
         let state = code_query_index_repair_state(16, resume_phase)
             .expect("bounded repair unit should format");
-        assert!(state.starts_with("finalizing:query_index_repair:v4:16:resume:"));
+        assert!(state.starts_with("finalizing:query_index_repair:v5:16:resume:"));
         assert_eq!(
             code_query_index_repair(&state),
             Some(CodeQueryIndexRepair {
@@ -383,7 +383,7 @@ fn query_index_repair_tokens_preserve_every_stable_coarse_phase() {
 fn query_index_repair_tokens_reject_noncanonical_or_unknown_fields() {
     for state in [
         "finalizing:query_index_repair:v1:15:resume:0",
-        "finalizing:query_index_repair:v5:0:resume:0",
+        "finalizing:query_index_repair:v6:0:resume:0",
         "finalizing:query_index_repair:v2:17:resume:0",
         "finalizing:query_index_repair:v3:00:resume:0",
         "finalizing:query_index_repair:v3:0:resume:00",
@@ -496,11 +496,25 @@ fn generated_summary_counts_default_when_deserializing_older_responses() {
 
 #[test]
 fn ownership_query_index_appends_without_reinterpreting_legacy_prefixes() {
+    let previous = code_query_index_subphase("finalizing:build_query_indexes:v4:18").unwrap();
+    assert_eq!(
+        previous.next_state(18).as_deref(),
+        Some("finalizing:build_query_indexes:v4:18")
+    );
+    assert_eq!(
+        previous.next_state(19).as_deref(),
+        Some("finalizing:build_query_indexes:v5:19")
+    );
+    let repair = code_query_index_repair("finalizing:query_index_repair:v4:18:resume:10").unwrap();
+    assert_eq!(
+        repair.next_state(19).as_deref(),
+        Some("finalizing:query_index_repair:v5:19:resume:10")
+    );
     let cursor = code_query_index_subphase("finalizing:build_query_indexes:v3:16").unwrap();
     assert!(!cursor.requires_legacy_retired_prefix());
     assert_eq!(
         cursor.next_state(17).as_deref(),
-        Some("finalizing:build_query_indexes:v4:17")
+        Some("finalizing:build_query_indexes:v5:17")
     );
     assert!(code_query_index_subphase("finalizing:build_query_indexes:v3:17").is_none());
     for version in [2, 3] {
@@ -509,7 +523,7 @@ fn ownership_query_index_appends_without_reinterpreting_legacy_prefixes() {
         assert_eq!(repair.requires_legacy_retired_prefix(), version == 2);
         assert_eq!(
             repair.next_state(17).as_deref(),
-            Some("finalizing:query_index_repair:v4:17:resume:10")
+            Some("finalizing:query_index_repair:v5:17:resume:10")
         );
     }
 }

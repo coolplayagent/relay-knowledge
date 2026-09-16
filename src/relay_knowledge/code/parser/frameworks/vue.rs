@@ -31,7 +31,10 @@ pub(super) fn extract(
     let component_id = component.node_id.clone();
     facts.nodes.push(component);
 
-    let regions = sfc_regions(input.content);
+    let root = input.syntax_root.ok_or_else(|| {
+        crate::code::CodeIndexError::InvalidInput("Vue syntax tree is unavailable".to_owned())
+    })?;
+    let regions = sfc_regions(input.content, root);
     if regions.len() > MAX_SFC_REGIONS {
         return Err(crate::code::CodeIndexError::InvalidInput(format!(
             "Vue SFC region budget exceeded: {} > {MAX_SFC_REGIONS}",
@@ -84,8 +87,8 @@ pub(super) fn extract(
     Ok(())
 }
 
-pub(super) fn script_mask(content: &str) -> Option<(String, bool)> {
-    let regions = sfc_regions(content);
+pub(super) fn script_mask(content: &str, root: tree_sitter::Node<'_>) -> Option<(String, bool)> {
+    let regions = sfc_regions(content, root);
     let mut mask = content
         .bytes()
         .map(|byte| if byte == b'\n' { b'\n' } else { b' ' })
@@ -212,47 +215,49 @@ struct SfcRegion<'a> {
     content_end: usize,
 }
 
-fn sfc_regions(content: &str) -> Vec<SfcRegion<'_>> {
+fn sfc_regions<'a>(content: &'a str, root: tree_sitter::Node<'_>) -> Vec<SfcRegion<'a>> {
     let mut regions = Vec::new();
-    let mut cursor = 0usize;
-    while regions.len() <= MAX_SFC_REGIONS {
-        let Some(open) = content
-            .get(cursor..)
-            .and_then(|tail| tail.find('<'))
-            .map(|value| cursor + value)
+    let mut cursor = root.walk();
+    for element in root.named_children(&mut cursor) {
+        let Some(open) = element
+            .named_child(0)
+            .filter(|node| node.kind() == "start_tag")
         else {
-            break;
+            continue;
         };
-        let Some(open_end) = content
-            .get(open..)
-            .and_then(|tail| tail.find('>'))
-            .map(|value| open + value)
+        let Some(tag) = open.named_child(0).filter(|node| node.kind() == "tag_name") else {
+            continue;
+        };
+        let Some(attributes) = open
+            .child(u32::try_from(open.child_count().saturating_sub(1)).unwrap_or(u32::MAX))
+            .filter(|end| end.kind() == ">" && !end.is_missing())
+            .and_then(|end| content.get(tag.end_byte()..end.start_byte()))
         else {
-            break;
+            continue;
         };
-        let header = content.get(open + 1..open_end).unwrap_or_default();
-        let name = header.split_whitespace().next().unwrap_or_default();
+        let name = &content[tag.byte_range()];
         if !matches!(name, "script" | "template" | "style") {
-            cursor = open_end + 1;
             continue;
         }
-        let close_marker = format!("</{name}>");
-        let content_start = open_end + 1;
-        let Some(relative_end) = content
-            .get(content_start..)
-            .and_then(|tail| tail.find(&close_marker))
+        let mut children = element.walk();
+        let Some(close) = element
+            .named_children(&mut children)
+            .find(|node| node.kind() == "end_tag")
         else {
-            break;
+            continue;
         };
-        let content_end = content_start + relative_end;
+        let content_start = open.end_byte();
+        let content_end = close.start_byte();
         regions.push(SfcRegion {
             name,
-            attributes: header.get(name.len()..).unwrap_or_default(),
+            attributes,
             content: content.get(content_start..content_end).unwrap_or_default(),
             content_start,
             content_end,
         });
-        cursor = content_end + close_marker.len();
+        if regions.len() > MAX_SFC_REGIONS {
+            break;
+        }
     }
     regions
 }

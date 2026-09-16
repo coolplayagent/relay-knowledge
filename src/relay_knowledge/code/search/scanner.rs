@@ -1,7 +1,10 @@
 use std::{fs, path::Path};
 
 use crate::{
-    code::{CodeIndexError, generated_detection, languages::language_id},
+    code::{
+        CodeIndexError, generated_detection,
+        languages::{detect_source_language, language_id},
+    },
     domain::RepositoryCodeRange,
 };
 
@@ -32,6 +35,17 @@ pub(super) fn internal_source_grep_matches(
             continue;
         };
         if source_bytes_are_binary(&bytes) {
+            continue;
+        }
+        if std::path::Path::new(path).extension().is_none()
+            && language_id(path).is_none()
+            && !request.language_filters.is_empty()
+            && detect_source_language(path, &bytes).is_none_or(|language| {
+                !crate::domain::code_language_filter_groups(&request.language_filters)
+                    .iter()
+                    .all(|group| group.contains(&language.id))
+            })
+        {
             continue;
         }
         let is_generated = generated_detection::is_generated_file(path, &bytes);
@@ -116,6 +130,8 @@ fn push_internal_file_matches(
 ) -> Result<(), CodeIndexError> {
     let path = input.path;
     let bytes = input.bytes;
+    let source_language =
+        detect_source_language(path, bytes).map_or("unknown", |language| language.id);
     let mut line_start = 0usize;
     let mut line_number = 1usize;
     let mut previous_line = None;
@@ -178,7 +194,7 @@ fn push_internal_file_matches(
             );
             let matched = SourceGrepMatch {
                 path: path.to_owned(),
-                language_id: language_id(path).unwrap_or("unknown").to_owned(),
+                language_id: source_language.to_owned(),
                 excerpt,
                 byte_range,
                 line_range,

@@ -42,7 +42,9 @@ fn call_resolution_prefers_implementation_over_header_declaration() {
 
 #[test]
 fn call_resolution_follows_cgo_and_ffi_aliases_to_c_symbols() {
-    let symbols = vec![symbol("c-definition", "src/c_entry.c", "rk_c_decode")];
+    let mut symbols = vec![symbol("c-definition", "src/c_entry.c", "rk_c_decode")];
+    symbols[0].language_id = "c".into();
+    symbols[0].signature = "void rk_c_decode() {}".into();
     let mut references = vec![
         reference("go-cgo-call", "bridge/go_bridge.go", "C.rk_c_decode"),
         reference(
@@ -259,4 +261,28 @@ fn reference(id: &str, path: &str, name: &str) -> RepositoryCodeReferenceRecord 
         byte_range: RepositoryCodeRange { start: 0, end: 8 },
         line_range: RepositoryCodeRange { start: 1, end: 1 },
     }
+}
+
+#[test]
+fn cgo_uppercase_paths_respect_inherited_internal_linkage() {
+    let mut symbols = vec![
+        symbol("private-decl", "private.c", "decode"),
+        symbol("private-def", "private.c", "decode"),
+        symbol("public-def", "public.c", "decode"),
+    ];
+    for symbol in &mut symbols {
+        symbol.language_id = "c".into();
+    }
+    symbols[0].kind = "function_declaration".into();
+    symbols[0].signature = "static int decode(void);".into();
+    symbols[1].signature = "int decode(void) {".into();
+    symbols[2].signature = "int decode(int a[static 1]) {".into();
+    let mut references = vec![reference("call", "bridge.GO", "C.decode")];
+    resolve_reference_targets(&symbols[..2], &mut references);
+    assert_eq!(references[0].resolution_state, "unresolved");
+    resolve_reference_targets(&symbols, &mut references);
+    assert_eq!(
+        references[0].target_symbol_snapshot_id.as_deref(),
+        Some("public-def")
+    );
 }

@@ -5,6 +5,8 @@ use std::path::Path;
 use tree_sitter::Language;
 
 use crate::code::config_files;
+mod source;
+pub(in crate::code) use source::detect_source_language;
 
 #[derive(Clone, Copy)]
 pub(in crate::code) struct LanguageSpec {

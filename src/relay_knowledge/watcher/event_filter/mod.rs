@@ -127,19 +127,9 @@ impl WatcherEventFilter {
         let ext = match relative.extension().and_then(|e| e.to_str()) {
             Some(e) => e.to_lowercase(),
             None => {
-                let name = relative.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                return matches!(
-                    name.to_lowercase().as_str(),
-                    "dockerfile"
-                        | "makefile"
-                        | "cmakelists.txt"
-                        | "cargo.toml"
-                        | "package.json"
-                        | "go.mod"
-                        | "requirements.txt"
-                        | "pipfile"
-                        | "gemfile"
-                );
+                // Removal events have no contents; defer shebang proof to
+                // the bounded indexing worker while preserving invalidation.
+                return true;
             }
         };
         INDEXABLE_EXTENSIONS.contains(&ext.as_str())
@@ -176,6 +166,7 @@ fn extension_matches_language(ext: &str, language: &str) -> bool {
         "c" => ext == "c" || ext == "h",
         "cpp" | "c++" => {
             ext == "cpp"
+                || ext == "h"
                 || ext == "hpp"
                 || ext == "cc"
                 || ext == "cxx"

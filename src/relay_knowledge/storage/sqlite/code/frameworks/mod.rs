@@ -220,6 +220,12 @@ fn node_query(source_scope: &str, request: &FrameworkGraphRequest) -> (String, V
     );
     let mut values = vec![Value::Text(source_scope.to_owned())];
     push_framework_filter(&mut sql, &mut values, request);
+    push_language_filter(
+        &mut sql,
+        &mut values,
+        request,
+        "code_repository_framework_nodes",
+    );
     if !request.kinds.is_empty() {
         push_in_filter(
             &mut sql,
@@ -249,6 +255,12 @@ fn edge_query(source_scope: &str, request: &FrameworkGraphRequest) -> (String, V
     );
     let mut values = vec![Value::Text(source_scope.to_owned())];
     push_framework_filter(&mut sql, &mut values, request);
+    push_language_filter(
+        &mut sql,
+        &mut values,
+        request,
+        "code_repository_framework_edges",
+    );
     push_path_filter(&mut sql, &mut values, request);
     for term in query_terms(request) {
         sql.push_str(
@@ -259,6 +271,29 @@ fn edge_query(source_scope: &str, request: &FrameworkGraphRequest) -> (String, V
     sql.push_str(" ORDER BY path, line_start, kind, edge_id LIMIT ?");
     values.push(Value::Integer(limit_probe(request.limit)));
     (sql, values)
+}
+
+fn push_language_filter(
+    sql: &mut String,
+    values: &mut Vec<Value>,
+    request: &FrameworkGraphRequest,
+    table: &str,
+) {
+    if request.repository.language_filters.is_empty() {
+        return;
+    }
+    // The framework label is not a source language: Angular facts can originate
+    // in either TypeScript or HTML. Use the indexed source file in this scope.
+    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM code_repository_files language_file WHERE language_file.source_scope = {table}.source_scope AND language_file.path = {table}.path"));
+    for group in crate::domain::code_language_filter_groups(&request.repository.language_filters) {
+        push_in_filter(
+            sql,
+            values,
+            "language_file.language_id",
+            group.iter().copied(),
+        );
+    }
+    sql.push(')');
 }
 
 fn push_framework_filter(

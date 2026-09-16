@@ -166,7 +166,9 @@ fn filesystem_default_directory_can_contribute(directory: &str) -> bool {
 }
 
 pub(in crate::code) fn source_path_has_indexable_content(path: &str) -> bool {
-    language_id(path).is_some() || dependency_manifest_language_ids(path).is_some()
+    language_id(path).is_some()
+        || dependency_manifest_language_ids(path).is_some()
+        || std::path::Path::new(path).extension().is_none()
 }
 
 pub(in crate::code) fn source_default_file_preset_excludes(path: &str) -> bool {

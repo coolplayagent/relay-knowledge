@@ -237,7 +237,7 @@ fn calls(
                call.caller_symbol_snapshot_id, call.caller_name,
                call.callee_symbol_snapshot_id, call.callee_name, call.target_hint,
                call.resolution_state, call.confidence_basis_points, call.confidence_tier,
-               call.line_start, call.line_end, callee.path
+               call.line_start, call.line_end, callee.path, call.byte_start, call.byte_end
         FROM code_repository_calls call
         LEFT JOIN code_repository_symbols callee
           ON callee.source_scope = call.source_scope
@@ -260,6 +260,10 @@ fn calls(
     let rows = statement.query_map(params_from_iter(values.iter()), |row| {
         Ok(CodebaseViewCall {
             call: CodeCallRecord {
+                byte_range: row
+                    .get::<_, Option<u32>>(16)?
+                    .zip(row.get::<_, Option<u32>>(17)?)
+                    .map(|(start, end)| RepositoryCodeRange { start, end }),
                 repository_id: row.get(0)?,
                 source_scope: row.get(1)?,
                 call_id: row.get(2)?,

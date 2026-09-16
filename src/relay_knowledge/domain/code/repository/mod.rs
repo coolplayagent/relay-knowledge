@@ -1,5 +1,7 @@
 mod config_registry;
-pub use config_registry::{CODE_CONFIG_SOURCE_FORMATS, CodeConfigFilter, CodeConfigMetadata};
+pub use config_registry::{
+    CODE_CONFIG_SOURCE_FORMATS, CodeConfigFilter, CodeConfigMetadata, CodeConfigStringPart,
+};
 
 mod diagnostics;
 pub use diagnostics::{
@@ -40,4 +42,9 @@ pub use scope_identity::{
     clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
     code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,
     code_snapshot_scope_matches_identity, code_snapshot_scope_workspace_semantic,
+};
+
+pub(crate) use validation::{
+    deserialize_language_filters as deserialize_code_language_filters,
+    normalize_filter_list as normalize_code_filter_list,
 };

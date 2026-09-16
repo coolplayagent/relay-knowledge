@@ -15,20 +15,25 @@ use super::SqliteGraphStore;
 async fn reopens_v8_database_with_portable_ownership_columns_and_reindex_marker() {
     let path = unique_database_path();
     let store = SqliteGraphStore::open(&path).unwrap();
-    store.run(|connection| {
-        connection.execute_batch("ALTER TABLE code_repository_symbols DROP COLUMN type_owner_json;
+    store
+        .run(|connection| {
+            connection.execute_batch(
+                "ALTER TABLE code_repository_symbols DROP COLUMN type_owner_json;
             ALTER TABLE code_repository_symbols DROP COLUMN type_owner_identity;
             ALTER TABLE code_repository_index_checkpoints DROP COLUMN type_owner_cursor;
-            DELETE FROM code_repository_schema_migrations WHERE name='portable-config-and-type-ownership-reindex-v1';
-            UPDATE relay_storage_schema_state SET version=8 WHERE key='sqlite_graph_store';")?;
-        Ok(())
-    }).await.unwrap();
+            DELETE FROM code_repository_schema_migrations WHERE name='portable-evidence-reindex-v2';
+            UPDATE relay_storage_schema_state SET version=8 WHERE key='sqlite_graph_store';",
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     drop(store);
     let store = SqliteGraphStore::open(&path).unwrap();
     store.run(|connection| {
         connection.prepare("SELECT type_owner_json,type_owner_identity FROM code_repository_symbols")?;
         connection.prepare("SELECT type_owner_cursor FROM code_repository_index_checkpoints")?;
-        let current: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM code_repository_schema_migrations WHERE name='portable-config-and-type-ownership-reindex-v1')", [], |r| r.get(0))?;
+        let current: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM code_repository_schema_migrations WHERE name='portable-evidence-reindex-v2')", [], |r| r.get(0))?;
         assert!(current);
         Ok(())
     }).await.unwrap();

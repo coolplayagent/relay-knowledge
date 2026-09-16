@@ -153,7 +153,7 @@ pub(super) fn call_rows_sql(predicate_sql: &str) -> String {
                             chunk.chunk_id ASC
                    LIMIT 1
                ) AS callee_excerpt,
-               f.is_generated
+               f.is_generated, c.byte_start, c.byte_end
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.source_scope = c.source_scope AND f.path = c.path
@@ -173,6 +173,10 @@ pub(super) fn call_rows_sql(predicate_sql: &str) -> String {
 
 pub(super) fn row_to_call(row: &Row<'_>) -> rusqlite::Result<CallRow> {
     Ok(CallRow {
+        byte_range: row
+            .get::<_, Option<u32>>(23)?
+            .zip(row.get::<_, Option<u32>>(24)?)
+            .map(|(start, end)| RepositoryCodeRange { start, end }),
         file_id: row.get(0)?,
         path: row.get(1)?,
         language_id: row.get(2)?,

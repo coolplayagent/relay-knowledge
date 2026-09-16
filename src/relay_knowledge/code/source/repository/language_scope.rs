@@ -3,7 +3,30 @@ use std::path::Path;
 use super::super::{languages::language_id, parser::dependency_manifest_language_ids};
 
 pub(in crate::code) fn source_language_filter_allows(path: &str, filters: &[String]) -> bool {
+    crate::domain::code_language_filter_groups(filters)
+        .iter()
+        .all(|group| {
+            source_language_group_allows(
+                path,
+                &group.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>(),
+            )
+        })
+}
+
+fn source_language_group_allows(path: &str, filters: &[String]) -> bool {
     if filters.is_empty() {
+        return true;
+    }
+    if language_id(path).is_none()
+        && Path::new(path).extension().is_none()
+        && filters.iter().any(|filter| {
+            matches!(
+                filter.as_str(),
+                "bash" | "python" | "ruby" | "javascript" | "php"
+            )
+        })
+    {
+        // The bounded worker checks the shebang after loading the blob.
         return true;
     }
     if language_id(path).is_some_and(|language| {

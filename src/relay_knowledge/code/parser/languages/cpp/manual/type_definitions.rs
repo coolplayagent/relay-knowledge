@@ -12,6 +12,11 @@ pub(super) fn decorated_cpp_declaration_type_symbol(
     node: Node<'_>,
 ) -> Option<(String, &'static str, SyntaxRange)> {
     let type_node = direct_definition_type_specifier(content, node)?;
+    if type_node.child_by_field_name("body").is_some() {
+        // The trailing instance initializer is outside the type's executable
+        // scope, even when the parser wraps both in one declaration.
+        return decorated_cpp_type_symbol(content, type_node);
+    }
     decorated_cpp_type_symbol(content, type_node)
         .or_else(|| decorated_cpp_type_symbol(content, node))
         .map(|(name, kind, _)| (name, kind, syntax_range(node)))

@@ -8,6 +8,8 @@ fn fixture() -> Connection {
     CREATE TABLE code_repository_files(source_scope TEXT,path TEXT,language_id TEXT);
     CREATE INDEX scope_flags ON code_repository_feature_flags(source_scope,feature_flag_id);
     CREATE TABLE code_repository_symbols(source_scope TEXT,path TEXT,line_start INTEGER,line_end INTEGER,symbol_snapshot_id TEXT,name TEXT,language_id TEXT,type_owner_json TEXT);").unwrap();
+    connection.execute_batch("CREATE INDEX flags_usage ON code_repository_feature_flags(source_scope,usage_id); CREATE INDEX flags_key ON code_repository_feature_flags(source_scope,source_kind,source_key);").unwrap();
+    crate::storage::sqlite::code::schema::initialize_config_bindings(&connection).unwrap();
     connection
 }
 fn status() -> CodeRepositoryStatus {

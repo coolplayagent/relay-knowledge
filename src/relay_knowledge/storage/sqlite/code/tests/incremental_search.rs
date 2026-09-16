@@ -366,6 +366,7 @@ fn call(
     callee_symbol_snapshot_id: Option<&str>,
 ) -> CodeCallRecord {
     CodeCallRecord {
+        byte_range: None,
         repository_id: "repo".to_owned(),
         source_scope: source_scope.to_owned(),
         call_id: call_id.to_owned(),

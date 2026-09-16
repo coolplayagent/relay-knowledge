@@ -2,7 +2,9 @@ use rusqlite::Connection;
 
 use crate::storage::StorageError;
 
+mod config_bindings;
 mod index_task_schema;
+pub(in crate::storage::sqlite::code) use config_bindings::initialize_config_bindings;
 mod migrations;
 mod repository_schema;
 mod repository_set_schema;
@@ -40,6 +42,14 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     let reference_search_owner_was_current =
         super::super::schema::marker::reference_search_group_schema_is_current(connection)?;
     initialize_repository_schema(connection)?;
+    for column in ["byte_start", "byte_end"] {
+        super::super::schema::columns::ensure_column(
+            connection,
+            "code_repository_calls",
+            column,
+            "INTEGER",
+        )?;
+    }
     super::super::schema::columns::ensure_column(
         connection,
         "code_repository_schema_migrations",
@@ -62,6 +72,15 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "TEXT NOT NULL DEFAULT '{}'",
     )?;
     initialize_retention_schema(connection)?;
+    // A missing projection after its migration is corruption, not an empty
+    // legacy index. Do not silently expose complete answers or invalidate an
+    // active writer's checkpoint while repairing schema at startup.
+    if code_schema_migration_applied(connection, "portable-evidence-reindex-v2")?
+        && !config_bindings::binding_schema_present(connection)?
+    {
+        return Err(StorageError::Invariant("configuration binding schema is missing or incompatible; restore the database backup or rebuild the repository index in a new runtime home".into()));
+    }
+    initialize_config_bindings(connection)?;
     super::super::schema::columns::ensure_column(
         connection,
         "code_repository_files",
@@ -124,7 +143,7 @@ fn mark_legacy_framework_graph_scopes_stale_once(
 }
 
 fn mark_legacy_semantic_scopes_stale_once(connection: &Connection) -> Result<(), StorageError> {
-    const MIGRATION: &str = "portable-config-and-type-ownership-reindex-v1";
+    const MIGRATION: &str = "portable-evidence-reindex-v2";
     if code_schema_migration_applied(connection, MIGRATION)? {
         return Ok(());
     }

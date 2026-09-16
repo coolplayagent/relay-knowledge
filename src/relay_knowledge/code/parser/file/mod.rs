@@ -11,8 +11,8 @@ use super::{
 };
 
 use crate::code::{
-    CodeIndexError, SnapshotBuild, config_files, generated_detection, languages::detect_language,
-    stable_content_hash, stable_id,
+    CodeIndexError, SnapshotBuild, config_files, generated_detection,
+    languages::detect_source_language, stable_content_hash, stable_id,
 };
 
 mod contracts;
@@ -31,12 +31,39 @@ pub(in crate::code) fn parse_indexed_file(
     path: &str,
     bytes: &[u8],
 ) -> Result<(), CodeIndexError> {
+    crate::domain::validate_code_language_filters(build.language_filters())
+        .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
     let blob_hash = stable_content_hash(bytes);
     let file_id = stable_id(
         "file",
         [&build.repository_id, &build.source_scope, path, &blob_hash],
     );
-    let language = detect_language(path);
+    let language = detect_source_language(path, bytes);
+    if std::path::Path::new(path).extension().is_none()
+        && crate::code::language_metadata::language_id(path).is_none()
+        && !build.language_filters().is_empty()
+        && language.is_none_or(|spec| {
+            !crate::domain::code_language_filter_groups(build.language_filters())
+                .iter()
+                .all(|group| group.contains(&spec.id))
+        })
+    {
+        parse_status::record_file_status(
+            build,
+            parse_status::FileStatusInput {
+                path,
+                file_id: &file_id,
+                language_id: language.map_or("unknown", |spec| spec.id),
+                blob_hash: &blob_hash,
+                byte_len: bytes.len(),
+                line_count: count_lines(bytes),
+                parse_status: CodeParseStatus::Excluded,
+                is_generated: generated_detection::is_generated_file(path, bytes),
+                degraded_reason: None,
+            },
+        );
+        return Ok(());
+    }
     let line_count = count_lines(bytes);
     let is_generated = generated_detection::is_generated_file(path, bytes);
     let (parse_status, degraded_reason, content) = validate_text_content(path, bytes, language)?;
@@ -169,6 +196,9 @@ pub(in crate::code::parser) fn parse_syntax_file(
         &config_references,
         &mut output,
     )?;
+    if input.language.id == "cpp" {
+        super::type_ownership::normalize_cpp_symbols(&mut output.symbols);
+    }
     super::type_ownership::extract(
         root,
         input.content,
@@ -177,10 +207,16 @@ pub(in crate::code::parser) fn parse_syntax_file(
         &mut output.symbols,
     )?;
     let mut embedded_imports = if input.language.id == "vue" {
-        collect_vue_script_facts(build, &input, &mut output)?
+        collect_vue_script_facts(build, &input, &mut output, root)?
     } else {
         Vec::new()
     };
+    super::records::bind_call_receivers(
+        root,
+        input.content,
+        &output.symbols,
+        &mut output.references,
+    )?;
     framework_projection::record_framework_graph(
         build,
         input.path,
@@ -188,6 +224,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
         input.language.id,
         input.content,
         &output.symbols,
+        root,
     )?;
     let mut imports = collect_imports(
         build,
@@ -257,8 +294,10 @@ fn collect_vue_script_facts(
     build: &mut SnapshotBuild,
     input: &SyntaxFileInput<'_>,
     output: &mut FileParseOutput,
+    syntax_root: tree_sitter::Node<'_>,
 ) -> Result<Vec<crate::domain::CodeImportRecord>, CodeIndexError> {
-    let Some((masked_content, typescript)) = super::frameworks::vue_script_mask(input.content)
+    let Some((masked_content, typescript)) =
+        super::frameworks::vue_script_mask(input.content, syntax_root)
     else {
         return Ok(Vec::new());
     };
@@ -293,6 +332,12 @@ fn collect_vue_script_facts(
     for symbol in &mut output.symbols[symbol_start..] {
         symbol.language_id = "vue".to_owned();
     }
+    super::records::bind_call_receivers(
+        root,
+        input.content,
+        &output.symbols,
+        &mut output.references,
+    )?;
     let imports = collect_imports(
         build,
         input.path,

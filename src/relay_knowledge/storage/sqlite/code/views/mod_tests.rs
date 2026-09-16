@@ -66,7 +66,7 @@ fn process_flow_calls_are_filtered_to_route_paths_before_limit() {
     connection
         .execute(
             "
-            INSERT INTO code_repository_calls VALUES
+            INSERT INTO code_repository_calls (repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end) VALUES
                 ('repo', 'scope', 'call:noise', 'file:noise', 'src/aaa/no_route.rs',
                  'symbol:noise', 'noise', NULL, 'ignored', NULL, 'unresolved',
                  5000, 'ambiguous', 1, 1)
@@ -105,7 +105,7 @@ fn process_flow_calls_include_resolved_handler_paths_before_limit() {
             UPDATE code_repository_routes
                SET handler_symbol_snapshot_id = 'symbol:controller'
              WHERE route_id = 'route:api';
-            INSERT INTO code_repository_calls VALUES
+            INSERT INTO code_repository_calls (repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end) VALUES
                 ('repo', 'scope', 'call:controller', 'file:controller',
                  'src/controllers/users.rs', 'symbol:controller', 'list_users',
                  'symbol:callee', 'load_users', 'src/domain/users.rs', 'resolved',
@@ -145,7 +145,7 @@ fn process_flow_calls_include_resolved_handler_paths_outside_request_path_filter
             UPDATE code_repository_routes
                SET handler_symbol_snapshot_id = 'symbol:controller'
              WHERE route_id = 'route:api';
-            INSERT INTO code_repository_calls VALUES
+            INSERT INTO code_repository_calls (repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end) VALUES
                 ('repo', 'scope', 'call:controller', 'file:controller',
                  'src/controllers/users.rs', 'symbol:controller', 'list_users',
                  'symbol:callee', 'load_users', 'src/domain/users.rs', 'resolved',
@@ -222,7 +222,7 @@ fn affected_scope_calls_match_changed_callee_paths_before_limit() {
     connection
         .execute(
             "
-            INSERT INTO code_repository_calls VALUES
+            INSERT INTO code_repository_calls (repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end) VALUES
                 ('repo', 'scope', 'call:noise', 'file:noise', 'src/aaa/no_route.rs',
                  'symbol:noise', 'noise', NULL, 'ignored', NULL, 'unresolved',
                  5000, 'ambiguous', 1, 1)
@@ -255,7 +255,7 @@ fn affected_scope_calls_match_changed_directory_prefixes_before_limit() {
     connection
         .execute(
             "
-            INSERT INTO code_repository_calls VALUES
+            INSERT INTO code_repository_calls (repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end) VALUES
                 ('repo', 'scope', 'call:noise', 'file:noise', 'src/aaa/no_route.rs',
                  'symbol:noise', 'noise', NULL, 'ignored', NULL, 'unresolved',
                  5000, 'ambiguous', 1, 1)
@@ -455,7 +455,7 @@ fn create_view_tables(connection: &Connection) {
                 line_start INTEGER NOT NULL,
                 line_end INTEGER NOT NULL
             );
-            CREATE TABLE code_repository_calls (
+            CREATE TABLE code_repository_calls (byte_start INTEGER, byte_end INTEGER,
                 repository_id TEXT NOT NULL,
                 source_scope TEXT NOT NULL,
                 call_id TEXT NOT NULL,
@@ -543,7 +543,7 @@ fn seed_view_rows(connection: &Connection) {
             INSERT INTO code_repository_imports VALUES
                 ('repo', 'scope', 'import:api', 'file:api', 'src/api/users.rs', 'crate::domain::users', 'src/domain/users.rs', 'resolved', 9000, 'extracted', 2, 2),
                 ('repo', 'scope', 'import:js', 'file:js', 'src/js/app.js', './boot', NULL, 'unresolved', 5000, 'ambiguous', 1, 1);
-            INSERT INTO code_repository_calls VALUES
+            INSERT INTO code_repository_calls (repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end) VALUES
                 ('repo', 'scope', 'call:api', 'file:api', 'src/api/users.rs', 'symbol:handler', 'index', 'symbol:callee', 'load_users', 'src/domain/users.rs', 'resolved', 9000, 'extracted', 6, 6),
                 ('repo', 'scope', 'call:js', 'file:js', 'src/js/app.js', NULL, NULL, NULL, 'boot', NULL, 'unresolved', 5000, 'ambiguous', 2, 2);
             INSERT INTO code_repository_routes VALUES

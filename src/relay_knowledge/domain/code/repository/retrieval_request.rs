@@ -110,6 +110,7 @@ pub struct CodeRetrievalRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub query_kind_filters: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(deserialize_with = "crate::domain::deserialize_code_language_filters")]
     pub query_language_filters: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub query_path_substrings: Vec<String>,
@@ -142,7 +143,10 @@ impl CodeRetrievalRequest {
             freshness_policy,
             exclude_generated: false,
             query_kind_filters: qualifiers.kind_filters,
-            query_language_filters: qualifiers.language_filters,
+            query_language_filters: crate::domain::normalize_code_filter_list(
+                "language_filter",
+                qualifiers.language_filters,
+            )?,
             query_path_substrings: qualifiers.path_substrings,
             query_name_substrings: qualifiers.name_substrings,
         })

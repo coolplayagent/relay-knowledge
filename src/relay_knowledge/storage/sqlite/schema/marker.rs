@@ -11,9 +11,8 @@ use super::introspection::{
 };
 
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
-// Version 9 installs durable type ownership and invalidates pre-portable
-// configuration facts before a new semantic snapshot can be published.
-pub(super) const SCHEMA_MARKER_VERSION: i64 = 9;
+// Version 10 preserves call-site bytes and invalidates prior portable facts.
+pub(super) const SCHEMA_MARKER_VERSION: i64 = 10;
 pub(in crate::storage::sqlite) const SEARCH_OWNER_V2_MIGRATION: &str =
     "search-owner-v2-writer-and-serving-gate";
 pub(in crate::storage::sqlite) const REFERENCE_SEARCH_GROUP_V2_MIGRATION: &str =
@@ -338,7 +337,11 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
         connection,
         "code_repository_index_checkpoints",
         &["type_owner_cursor"],
-    )? || !graph_bm25_schema_is_current(connection)?
+    )? || !table_has_columns(connection, "code_repository_calls", &["byte_start", "byte_end"])?
+        || !table_has_primary_key_columns(connection, "code_repository_config_bindings", &["source_scope", "binding", "usage_id"])?
+        || connection.query_row("SELECT COUNT(*) FROM sqlite_schema WHERE type='trigger' AND tbl_name='code_repository_feature_flags' AND name IN ('code_config_bindings_insert','code_config_bindings_update','code_config_bindings_delete')", [], |row| row.get::<_, i64>(0))? != 3
+        || !index_has_columns(connection, "code_repository_config_bindings_usage", &["source_scope", "usage_id"])?
+        || !graph_bm25_schema_is_current(connection)?
         || table_exists(connection, "graph_bm25_vocabulary")?
         || table_exists(connection, "graph_bm25_retired")?
         || !table_has_exact_columns(

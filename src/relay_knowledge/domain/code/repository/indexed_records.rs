@@ -56,6 +56,9 @@ pub struct RepositoryCodeSymbolRecord {
 /// Snapshot-local type identity shared by declarations and directly owned callables.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeTypeOwner {
+    /// AST proof that this direct Java static member has no unmodelled inherited overload set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_dispatch: Option<bool>,
     /// Language and lexical/module identity; does not depend on a display name search.
     pub identity: String,
     /// `declaration`, `direct_member`, or `trait_member`.
@@ -123,6 +126,9 @@ pub struct CodeImportRecord {
 /// Call relationship extracted from code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeCallRecord {
+    /// Exact call-site bytes; absent in snapshots exported before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byte_range: Option<RepositoryCodeRange>,
     pub repository_id: String,
     pub source_scope: String,
     pub call_id: String,

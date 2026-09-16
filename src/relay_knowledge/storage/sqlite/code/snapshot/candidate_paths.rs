@@ -32,6 +32,7 @@ pub(in crate::storage::sqlite) fn file_candidate_paths_for_scope(
         SELECT path
         FROM code_repository_files
         WHERE source_scope = ?
+          AND parse_status != 'excluded'
           {path_filter}
           {language_filter}
           {generated_filter}
@@ -188,6 +189,7 @@ fn file_candidate_paths_from_indexed_content(
           ON c.source_scope = f.source_scope
          AND c.path = f.path
         WHERE f.source_scope = ?
+          AND f.parse_status != 'excluded'
           {path_filter}
           {language_filter}
           {generated_filter}
@@ -343,6 +345,9 @@ fn language_filter_sql_for_columns(
     path_column: &str,
     filters: &[String],
 ) -> String {
+    let atoms = crate::domain::code_language_filter_atoms(filters);
+    let filters = atoms.as_slice();
+
     let clauses = filters
         .iter()
         .map(|filter| {
@@ -373,6 +378,9 @@ fn push_path_filter_values(values: &mut Vec<Value>, filters: &[String]) {
 }
 
 fn push_language_filter_values(values: &mut Vec<Value>, filters: &[String]) {
+    let atoms = crate::domain::code_language_filter_atoms(filters);
+    let filters = atoms.as_slice();
+
     values.extend(
         filters
             .iter()

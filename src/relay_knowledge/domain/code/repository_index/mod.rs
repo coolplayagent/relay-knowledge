@@ -193,21 +193,23 @@ impl CodeIndexBatch {
 /// Reordering, adding, or removing a storage descriptor requires a version
 /// bump plus an explicit recovery policy for checkpoints written by the old
 /// plan.
-pub(crate) const CODE_QUERY_INDEX_PLAN_VERSION: u32 = 4;
+pub(crate) const CODE_QUERY_INDEX_PLAN_VERSION: u32 = 5;
 
 /// Number of stable units in the current deferred query-index plan.
-pub(crate) const CODE_QUERY_INDEX_PLAN_UNIT_COUNT: usize = 19;
+pub(crate) const CODE_QUERY_INDEX_PLAN_UNIT_COUNT: usize = 23;
 
 const LEGACY_CODE_QUERY_INDEX_PLAN_V1: u32 = 1;
 const LEGACY_CODE_QUERY_INDEX_PLAN_V1_UNIT_COUNT: usize = 16;
 const LEGACY_CODE_QUERY_INDEX_PLAN_V2: u32 = 2;
 const LEGACY_CODE_QUERY_INDEX_PLAN_V2_UNIT_COUNT: usize = 17;
 const LEGACY_CODE_QUERY_INDEX_PLAN_V3: u32 = 3;
+const LEGACY_CODE_QUERY_INDEX_PLAN_V4: u32 = 4;
 
 /// Validates a persisted ordinal against the plan which created it.
 fn query_index_unit_count(version: u32) -> Option<usize> {
     match version {
         CODE_QUERY_INDEX_PLAN_VERSION => Some(CODE_QUERY_INDEX_PLAN_UNIT_COUNT),
+        LEGACY_CODE_QUERY_INDEX_PLAN_V4 => Some(19),
         LEGACY_CODE_QUERY_INDEX_PLAN_V2 | LEGACY_CODE_QUERY_INDEX_PLAN_V3 => {
             Some(LEGACY_CODE_QUERY_INDEX_PLAN_V2_UNIT_COUNT)
         }
@@ -367,7 +369,7 @@ fn code_reference_search_query_index_repair_state_for_version(
 ) -> Option<String> {
     (matches!(
         plan_version,
-        LEGACY_CODE_QUERY_INDEX_PLAN_V2 | LEGACY_CODE_QUERY_INDEX_PLAN_V3 | CODE_QUERY_INDEX_PLAN_VERSION
+        LEGACY_CODE_QUERY_INDEX_PLAN_V2 | LEGACY_CODE_QUERY_INDEX_PLAN_V3 | LEGACY_CODE_QUERY_INDEX_PLAN_V4 | CODE_QUERY_INDEX_PLAN_VERSION
     ) && query_index_unit_count(plan_version).is_some_and(|count| unit < count)
         && matches!(
             reference_search.protocol_version,
@@ -400,6 +402,7 @@ pub(crate) fn code_reference_search_query_index_repair(
         version,
         CODE_QUERY_INDEX_PLAN_VERSION
             | LEGACY_CODE_QUERY_INDEX_PLAN_V3
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V4
             | LEGACY_CODE_QUERY_INDEX_PLAN_V2
     ) || query_index_unit_count(version).is_none_or(|count| unit >= count)
         || !matches!(reference_version, 1 | CODE_REFERENCE_SEARCH_REBUILD_VERSION)
@@ -573,14 +576,7 @@ pub(crate) fn code_query_index_subphase_state(unit: usize) -> Option<String> {
 }
 
 fn code_query_index_subphase_state_for_version(plan_version: u32, unit: usize) -> Option<String> {
-    let unit_count = match plan_version {
-        CODE_QUERY_INDEX_PLAN_VERSION => CODE_QUERY_INDEX_PLAN_UNIT_COUNT,
-        LEGACY_CODE_QUERY_INDEX_PLAN_V2 | LEGACY_CODE_QUERY_INDEX_PLAN_V3 => {
-            LEGACY_CODE_QUERY_INDEX_PLAN_V2_UNIT_COUNT
-        }
-        LEGACY_CODE_QUERY_INDEX_PLAN_V1 => LEGACY_CODE_QUERY_INDEX_PLAN_V1_UNIT_COUNT,
-        _ => return None,
-    };
+    let unit_count = query_index_unit_count(plan_version)?;
     (unit < unit_count)
         .then(|| format!("{CODE_QUERY_INDEX_SUBPHASE_PREFIX}:v{plan_version}:{unit}"))
 }
@@ -595,14 +591,7 @@ pub(crate) fn code_query_index_subphase(state: &str) -> Option<CodeQueryIndexSub
     let (version, unit) = suffix.split_once(':')?;
     let version = version.parse::<u32>().ok()?;
     let unit = unit.parse::<usize>().ok()?;
-    let unit_count = match version {
-        CODE_QUERY_INDEX_PLAN_VERSION => CODE_QUERY_INDEX_PLAN_UNIT_COUNT,
-        LEGACY_CODE_QUERY_INDEX_PLAN_V2 | LEGACY_CODE_QUERY_INDEX_PLAN_V3 => {
-            LEGACY_CODE_QUERY_INDEX_PLAN_V2_UNIT_COUNT
-        }
-        LEGACY_CODE_QUERY_INDEX_PLAN_V1 => LEGACY_CODE_QUERY_INDEX_PLAN_V1_UNIT_COUNT,
-        _ => return None,
-    };
+    let unit_count = query_index_unit_count(version)?;
     if unit >= unit_count {
         return None;
     }
@@ -631,6 +620,7 @@ fn code_query_index_repair_state_for_version(
         plan_version,
         LEGACY_CODE_QUERY_INDEX_PLAN_V2
             | LEGACY_CODE_QUERY_INDEX_PLAN_V3
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V4
             | CODE_QUERY_INDEX_PLAN_VERSION
     ) && query_index_unit_count(plan_version).is_some_and(|count| unit < count))
     .then(|| {
@@ -653,6 +643,7 @@ pub(crate) fn code_query_index_repair(state: &str) -> Option<CodeQueryIndexRepai
         version,
         CODE_QUERY_INDEX_PLAN_VERSION
             | LEGACY_CODE_QUERY_INDEX_PLAN_V3
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V4
             | LEGACY_CODE_QUERY_INDEX_PLAN_V2
     ) || query_index_unit_count(version).is_none_or(|count| unit >= count)
     {

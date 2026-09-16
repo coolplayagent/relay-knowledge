@@ -1,6 +1,196 @@
 use super::*;
 
 #[test]
+fn portable_rust_readers_respect_nearest_import_and_local_standard_names() {
+    for (source, expected) in [
+        (
+            "mod std {pub mod env {}} use std::env; fn run(){env::var_os(\"KEY\");}",
+            false,
+        ),
+        (
+            "mod std {pub mod env {}} use ::std::env; fn run(){env::var_os(\"KEY\");}",
+            true,
+        ),
+        (
+            "use custom::env; fn run(){use std::env; env::var_os(\"KEY\");}",
+            true,
+        ),
+        (
+            "use std::env; fn run(){use custom::env; env::var_os(\"KEY\");}",
+            false,
+        ),
+    ] {
+        let (rows, syntax) = analyze("app.rs", source);
+        assert_eq!(
+            rows.iter()
+                .any(|r| r.source_key == "KEY" && r.edge_kind == "reads_config"),
+            expected,
+            "{source}: {syntax} {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn portable_readers_handle_grouped_imports_and_multiple_write_targets() {
+    for source in [
+        "use std::*; fn f(){ let x=std::env::var_os(\"KEY\"); }",
+        "use std as std; fn f(){ let x=std::env::var_os(\"KEY\"); }",
+        "use std::fmt; fn f(){ let x=std::env::var_os(\"KEY\"); }",
+        "use std::{env, path::Path}; fn f(){ let x=env::var_os(\"KEY\"); }",
+        "pub use std :: /* module */ env; fn f(){ let x=env::var_os(\"KEY\"); }",
+        "use std::env; mod unrelated {mod env {}} fn f(){let x=env::var_os(\"KEY\");}",
+    ] {
+        let (rows, ast) = analyze("reader.rs", source);
+        assert!(
+            rows.iter()
+                .any(|row| row.source_key == "KEY" && row.metadata.flow_incomplete.is_none()),
+            "{source}: {rows:?}\n{ast}"
+        );
+    }
+    let (rows, ast) = analyze(
+        "reader.rb",
+        "ENV['A'], ENV['B'] = 'a', 'b'\nENV[ENV['KEY']] = 'x'\n",
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| ["A", "B"].contains(&row.source_key.as_str())),
+        "{rows:?}\n{ast}"
+    );
+    assert!(
+        rows.iter().any(|row| row.source_key == "KEY"),
+        "{rows:?}\n{ast}"
+    );
+    let (rows, ast) = analyze(
+        "reader.py",
+        "import os\nreader = os.environ.get\nvalue = os.environ['KEY']\n",
+    );
+    assert!(
+        !rows.iter().any(|row| row.source_key == "get"),
+        "{rows:?}\n{ast}"
+    );
+    assert!(
+        rows.iter().any(|row| row.source_key == "KEY"),
+        "{rows:?}\n{ast}"
+    );
+}
+
+#[test]
+fn portable_reader_provenance_writes_and_parentheses_are_respected() {
+    for (path, source) in [
+        ("reader.rb", "ENV['ONLY_WRITE'] = # note\n '1'\n"),
+        ("reader.js", "process.env.ONLY_WRITE = /* note */ '1';"),
+    ] {
+        let (rows, ast) = analyze(path, source);
+        assert!(
+            !rows.iter().any(|row| row.source_key == "ONLY_WRITE"),
+            "{rows:?}\n{ast}"
+        );
+    }
+    let (rows, ast) = analyze(
+        "reader.rb",
+        "ENV['ONLY_WRITE'] = ENV['ACTUAL_READ']\nENV['READ_WRITE'] ||= '1'\n",
+    );
+    assert!(
+        !rows.iter().any(|row| row.source_key == "ONLY_WRITE"),
+        "{rows:?}\n{ast}"
+    );
+    for key in ["ACTUAL_READ", "READ_WRITE"] {
+        assert!(
+            rows.iter().any(|row| row.source_key == key),
+            "{rows:?}\n{ast}"
+        );
+    }
+    for source in [
+        "mod env {pub fn var_os(_: &str)->bool{false}} fn f(){let v=env::var_os(\"LOCAL_ONLY\");}",
+        "use custom::{env}; fn f(){let v=env::var_os(\"LOCAL_ONLY\");}",
+    ] {
+        let (rows, ast) = analyze("reader.rs", source);
+        assert!(
+            !rows.iter().any(|row| row.source_key == "LOCAL_ONLY"),
+            "{rows:?}\n{ast}"
+        );
+    }
+    let (rows, ast) = analyze(
+        "reader.py",
+        "import os\nvalue = (os.environ.get)('ENABLED')\n",
+    );
+    assert!(
+        rows.iter().any(|row| row.source_key == "ENABLED"),
+        "{rows:?}\n{ast}"
+    );
+    assert!(!rows.iter().any(|row| row.source_key == "get"), "{rows:?}");
+    let (rows, ast) = analyze(
+        "reader.ts",
+        "const exists = (process.env.hasOwnProperty)('ENABLED');",
+    );
+    assert!(
+        !rows.iter().any(|row| row.source_key == "hasOwnProperty"),
+        "{rows:?}\n{ast}"
+    );
+    let (rows, ast) = analyze(
+        "reader.bzl",
+        "def enabled(ctx):\n    return ctx.getenv('ENABLED', '0')\n",
+    );
+    assert!(
+        rows.iter().any(|row| row.source_key == "ENABLED"
+            && row.metadata.default_value.as_deref() == Some("0")
+            && row.metadata.flow_incomplete.as_deref() == Some("unproven_environment_receiver")),
+        "{rows:?}\n{ast}"
+    );
+}
+
+#[test]
+fn portable_environment_readers_preserve_keys_without_method_name_artifacts() {
+    for (path, source, key) in [
+        (
+            "reader.py",
+            "import os\nvalue = os.environ.get('ENABLED')\n",
+            "ENABLED",
+        ),
+        ("reader.rb", "return unless ENV[\"ENABLED\"]\n", "ENABLED"),
+        (
+            "reader.rs",
+            "use std::env; fn flag() { let v = env::var_os(\"ENABLED\"); }",
+            "ENABLED",
+        ),
+        (
+            "reader.ts",
+            "import { ref } from 'vue'; const url = import.meta.env.BASE_URL;",
+            "BASE_URL",
+        ),
+        (
+            "reader.bzl",
+            "KEY = 'ENABLED'\ndef enabled(ctx):\n    return ctx.getenv(KEY) == '1'\n",
+            "ENABLED",
+        ),
+    ] {
+        let (rows, ast) = analyze(path, source);
+        assert!(
+            rows.iter()
+                .any(|row| row.source_kind == "env_var" && row.source_key == key),
+            "{path}: {rows:?}\n{ast}"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.source_kind == "env_var" && row.source_key == "get"),
+            "{rows:?}"
+        );
+    }
+    let (rows, ast) = analyze(
+        "reader.ts",
+        "const exists = process.env.hasOwnProperty('ENABLED');",
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.source_kind == "env_var" && row.source_key == "hasOwnProperty"),
+        "{rows:?}\n{ast}"
+    );
+}
+
+#[test]
 fn portable_mutated_methods_and_properties_do_not_prove_local_guards() {
     for (path, source) in [
         (

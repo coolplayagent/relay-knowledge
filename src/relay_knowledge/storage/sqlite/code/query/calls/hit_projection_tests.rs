@@ -31,6 +31,7 @@ fn callees_project_the_resolved_callee_identity() {
     )
     .expect("request should validate");
     let rows = vec![CallRow {
+        byte_range: None,
         file_id: "file".to_owned(),
         path: "src/service.rs".to_owned(),
         language_id: "rust".to_owned(),
@@ -148,6 +149,7 @@ fn request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
 
 fn caller_row(caller_name: &str, canonical_id: &str, line: u32) -> CallRow {
     CallRow {
+        byte_range: None,
         file_id: "file".to_owned(),
         path: "src/auth.rs".to_owned(),
         language_id: "rust".to_owned(),

@@ -26,20 +26,20 @@ pub use code::{
     CODE_CONFIG_SOURCE_FORMATS, CODEGRAPH_CONTEXT_DEFAULT_LIMIT,
     CODEGRAPH_CONTEXT_DEFAULT_MAX_BYTES, CODEGRAPH_CONTEXT_MAX_BYTES, CODEGRAPH_CONTEXT_MAX_LIMIT,
     CODEGRAPH_CONTEXT_MIN_BYTES, CodeCallRecord, CodeChunkRecord, CodeConfigFilter,
-    CodeConfigMetadata, CodeContentIntegrity, CodeContentIntegrityState, CodeDependencyRecord,
-    CodeDiagnosticsCursor, CodeDiagnosticsPage, CodeDiagnosticsPageRequest, CodeDiagnosticsRequest,
-    CodeExtractionMetadata, CodeFeatureFlagGraph, CodeFeatureFlagRecord, CodeFeatureFlagRequest,
-    CodeFeatureFlagUsage, CodeFileDiagnostic, CodeFileFields, CodeFileFingerprint, CodeFileRecord,
-    CodeFrameworkEdgeRecord, CodeFrameworkNodeRecord, CodeGraphBatch, CodeGraphCodeExcerpt,
-    CodeGraphCommitReceipt, CodeGraphContextBudget, CodeGraphContextPack,
-    CodeGraphContextProvenance, CodeGraphContextRequest, CodeGraphImpactHint, CodeImpactPathGroups,
-    CodeImpactRequest, CodeImportRecord, CodeIncrementalSummaryReceipt, CodeIndexBatch,
-    CodeIndexCheckpoint, CodeIndexMode, CodeIndexProgressSummary, CodeIndexPublicationFence,
-    CodeIndexRequest, CodeIndexResourceBudget, CodeIndexSession, CodeIndexSnapshot,
-    CodeIndexSummary, CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeIndexTaskState,
-    CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeParseStatus, CodeParseStatusCounts,
-    CodePathTombstone, CodeQueryKind, CodeRange, CodeReferenceFields, CodeReferenceKind,
-    CodeReferenceRecord, CodeRepositoryCrossEdge, CodeRepositoryExcludedPath,
+    CodeConfigMetadata, CodeConfigStringPart, CodeContentIntegrity, CodeContentIntegrityState,
+    CodeDependencyRecord, CodeDiagnosticsCursor, CodeDiagnosticsPage, CodeDiagnosticsPageRequest,
+    CodeDiagnosticsRequest, CodeExtractionMetadata, CodeFeatureFlagGraph, CodeFeatureFlagRecord,
+    CodeFeatureFlagRequest, CodeFeatureFlagUsage, CodeFileDiagnostic, CodeFileFields,
+    CodeFileFingerprint, CodeFileRecord, CodeFrameworkEdgeRecord, CodeFrameworkNodeRecord,
+    CodeGraphBatch, CodeGraphCodeExcerpt, CodeGraphCommitReceipt, CodeGraphContextBudget,
+    CodeGraphContextPack, CodeGraphContextProvenance, CodeGraphContextRequest, CodeGraphImpactHint,
+    CodeImpactPathGroups, CodeImpactRequest, CodeImportRecord, CodeIncrementalSummaryReceipt,
+    CodeIndexBatch, CodeIndexCheckpoint, CodeIndexMode, CodeIndexProgressSummary,
+    CodeIndexPublicationFence, CodeIndexRequest, CodeIndexResourceBudget, CodeIndexSession,
+    CodeIndexSnapshot, CodeIndexSummary, CodeIndexTaskQueueStatus, CodeIndexTaskRecord,
+    CodeIndexTaskState, CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeParseStatus,
+    CodeParseStatusCounts, CodePathTombstone, CodeQueryKind, CodeRange, CodeReferenceFields,
+    CodeReferenceKind, CodeReferenceRecord, CodeRepositoryCrossEdge, CodeRepositoryExcludedPath,
     CodeRepositoryLanguagePreview, CodeRepositoryLargestFile, CodeRepositoryLatencySample,
     CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
     CodeRepositoryRetentionJobStatus, CodeRepositoryScopePreview, CodeRepositorySelector,
@@ -81,6 +81,10 @@ pub(crate) use code::{
     code_reference_search_query_index_repair, code_reference_search_query_index_repair_state,
     code_reference_search_rebuild, code_reference_search_rebuild_state,
     code_software_projection_phase,
+};
+pub(crate) use code::{
+    code_language_filter_atoms, code_language_filter_groups, code_language_scope_covers,
+    code_scope_language_filters, validate_code_language_filters,
 };
 pub use core::{
     DomainError, GraphVersion, IndexCursor, IndexKind, IndexLag, IndexModality,
@@ -135,3 +139,5 @@ pub use operations::{
     WorkerStatus, WorkerTaskRecord, WorkerTaskState, normalize_actor,
     reconcile_software_statements, software_authority_policy, validate_software_shapes,
 };
+
+pub(crate) use code::{deserialize_code_language_filters, normalize_code_filter_list};

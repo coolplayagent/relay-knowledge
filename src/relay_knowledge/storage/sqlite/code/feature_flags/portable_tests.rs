@@ -2,6 +2,94 @@
 use super::*;
 
 #[test]
+fn portable_go_package_string_compositions_resolve_only_constant_providers() {
+    for (declaration, expected) in [
+        ("const Prefix = \"SERVICE\"", true),
+        ("var Prefix = \"SERVICE\"", false),
+        ("const Prefix = 7", false),
+        ("const Prefix = Key", false),
+        (
+            "func Prefix() string { return config.GetString(\"SERVICE\") }",
+            false,
+        ),
+    ] {
+        let db = fixture();
+        add_source(
+            &db,
+            "config/prefix.go",
+            &format!("package settings\n{declaration}\nfunc consume() {{ opaque(Prefix) }}"),
+        );
+        add_source(
+            &db,
+            "config/reader.go",
+            "package settings\nimport \"os\"\nconst Key = Prefix + \"_\" + Suffix\nconst Suffix = \"ENABLED\"\nfunc run() { value := os.Getenv(Key); if value != \"\" {} }",
+        );
+        let groups = search(&db, &status(), &request(None, CodeConfigFilter::default())).unwrap();
+        assert_eq!(
+            groups.iter().any(|g| g.source_key == "SERVICE_ENABLED"
+                && g.source_kind == "env_var"
+                && g.analysis_complete),
+            expected,
+            "{declaration}: {groups:?}"
+        );
+        if !expected {
+            assert!(groups.iter().any(|g| !g.analysis_complete), "{groups:?}");
+        }
+    }
+}
+
+#[test]
+fn portable_string_expressions_preserve_distinct_unknown_keys() {
+    let db = fixture();
+    add_source(
+        &db,
+        "reader.js",
+        "import {A,B} from './missing.js'; const x=process.env[A+'_X']??'0'; const y=process.env[B+'_Y']??'1';",
+    );
+    let mut req = request(
+        None,
+        CodeConfigFilter {
+            consistency: true,
+            ..Default::default()
+        },
+    );
+    req.limit = 10;
+    let groups = search(&db, &status(), &req).unwrap();
+    assert_eq!(groups.len(), 2, "{groups:?}");
+    assert!(
+        groups.iter().all(|g| !g.analysis_complete
+            && !g
+                .consistency_diagnostics
+                .iter()
+                .any(|d| d.starts_with("conflicting_defaults:"))),
+        "{groups:?}"
+    );
+}
+
+#[test]
+fn portable_rust_constant_alias_chain_uses_indexed_module_membership() {
+    let db = fixture();
+    add_source(&db, "src/constants.rs", "pub const PREFIX: &str = \"APP\";");
+    add_source(
+        &db,
+        "src/settings.rs",
+        "use crate::constants::PREFIX; pub const KEY: &str = PREFIX;",
+    );
+    add_source(
+        &db,
+        "src/main.rs",
+        "mod constants; mod settings; use crate::settings::KEY; fn main(){ std::env::var(KEY); }",
+    );
+    let groups = search(&db, &status(), &request(None, CodeConfigFilter::default())).unwrap();
+    assert!(
+        groups
+            .iter()
+            .any(|g| g.source_key == "APP" && g.analysis_complete && g.source_kind == "env_var"),
+        "{groups:?}"
+    );
+}
+
+#[test]
 fn portable_imported_getter_fallback_keeps_unproved_return_semantics() {
     let db = fixture();
     add_source(

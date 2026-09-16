@@ -335,6 +335,8 @@ fn apply_snapshot_attempt(
                 .saturating_add(snapshot.calls.len())
                 .saturating_add(snapshot.feature_flags.len())
                 .saturating_add(snapshot.routes.len())
+                .saturating_add(snapshot.framework_nodes.len())
+                .saturating_add(snapshot.framework_edges.len())
                 .saturating_add(snapshot.chunks.len())
                 .saturating_add(snapshot.diagnostics.len()),
             skipped_file_count: snapshot.skipped_unchanged_count,
@@ -428,9 +430,9 @@ fn insert_imports_calls_chunks_diagnostics<'t>(
         INSERT INTO code_repository_calls (
             repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id,
             caller_name, callee_symbol_snapshot_id, callee_name, target_hint,
-            resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
+            resolution_state, confidence_basis_points, confidence_tier, line_start, line_end, byte_start, byte_end
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         ",
     )?;
     for call in &snapshot.calls {
@@ -462,6 +464,8 @@ fn insert_imports_calls_chunks_diagnostics<'t>(
             call.confidence_tier,
             call.line_range.start,
             call.line_range.end,
+            call.byte_range.as_ref().map(|range| range.start),
+            call.byte_range.as_ref().map(|range| range.end),
         ])?;
         search_inserter.insert(
             &call.source_scope,
@@ -484,6 +488,11 @@ fn insert_imports_calls_chunks_diagnostics<'t>(
     }
     super::batch::dependencies::insert_dependency_records(transaction, &snapshot.dependencies)?;
     super::routes::insert_records(transaction, &snapshot.routes)?;
+    super::frameworks::insert_records(
+        transaction,
+        &snapshot.framework_nodes,
+        &snapshot.framework_edges,
+    )?;
     let mut chunk_statement = transaction.prepare(
         "
         INSERT INTO code_repository_chunks (

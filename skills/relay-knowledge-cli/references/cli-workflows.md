@@ -258,6 +258,10 @@ case-sensitive; ownership is resolved within its language and module. An empty d
 does not justify broadening to text matches. Package-qualified class
 aggregation, inherited members and dynamic dispatch are not inferred.
 Path filters constrain call sites, so callers can lie outside the class file.
+Call-site byte ranges require current v56 facts; older imported records retain
+unknown ranges. Treat unresolved receiver hints as evidence gaps, not exact
+method targets. See [language capabilities](language-capabilities.md) for reader,
+Flow, shebang and cross-file constant boundaries.
 For `class call query incomplete`, narrow to a member such as `B.process`.
 
 ### `repo software --kind`

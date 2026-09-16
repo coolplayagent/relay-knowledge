@@ -1,8 +1,10 @@
 //! Explicit type ownership derived at indexing time from language syntax.
 
+mod cpp;
 mod imports;
 mod syntax;
 mod templates;
+pub(super) use cpp::normalize_cpp_symbols;
 
 use std::collections::BTreeMap;
 use tree_sitter::Node;
@@ -25,6 +27,11 @@ pub(super) fn extract(
     if !syntax::supports_types(language) {
         return Ok(());
     }
+    let cpp_types = if language == "cpp" {
+        cpp::indexed_types(root, content, symbols)
+    } else {
+        BTreeMap::new()
+    };
     let mut by_start = BTreeMap::<usize, Vec<usize>>::new();
     for (index, symbol) in symbols.iter().enumerate() {
         by_start
@@ -42,6 +49,7 @@ pub(super) fn extract(
         }
         let node = cursor.node();
         if syntax::is_type(language, node.kind())
+            || cpp_types.contains_key(&(node.start_byte(), node.end_byte()))
             || syntax::is_callable(node.kind())
             || syntax::is_callable_field(node, language)
             || (language == "rust" && node.kind() == "mod_item")
@@ -66,7 +74,7 @@ pub(super) fn extract(
                     let ownership = if language == "rust" && node.kind() == "mod_item" {
                         imports::rust_module_declaration(node, content, path)
                     } else {
-                        owner(node, content, &module, path, language)?
+                        owner(node, content, &module, path, language, &cpp_types)?
                     };
                     for index in indices {
                         if symbols[*index].byte_range.end as usize == range.end_byte()
@@ -144,7 +152,16 @@ fn owner(
     module: &str,
     path: &str,
     language: &str,
+    cpp_types: &BTreeMap<(usize, usize), String>,
 ) -> Result<Option<CodeTypeOwner>, CodeIndexError> {
+    if matches!(
+        node.kind(),
+        "arrow_function" | "function_expression" | "generator_function"
+    ) {
+        // Named callable fields have their own declaration symbol. An inline
+        // expression is a local call owner, including field initializer callbacks.
+        return Ok(None);
+    }
     if language == "swift"
         && node
             .child_by_field_name("declaration_kind")
@@ -160,7 +177,8 @@ fn owner(
     {
         return Ok(None);
     }
-    let declaration = syntax::is_type(language, node.kind());
+    let declaration = syntax::is_type(language, node.kind())
+        || cpp_types.contains_key(&(node.start_byte(), node.end_byte()));
     let mut current = if declaration {
         Some(node)
     } else {
@@ -199,6 +217,8 @@ fn owner(
             }
             let lookup = format!("{module}|{hint}");
             return Ok(Some(CodeTypeOwner {
+                static_dispatch: (language == "java")
+                    .then(|| super::nodes::java_static_dispatch(node)),
                 identity: if basis == "lexical" {
                     format!("{lookup}@{path}:{}", anchor.unwrap_or(node.start_byte()))
                 } else {
@@ -229,7 +249,23 @@ fn owner(
         {
             return Ok(None);
         }
-        if syntax::is_callable(ancestor.kind()) {
+        if let Some(name) = cpp_types.get(&(ancestor.start_byte(), ancestor.end_byte())) {
+            anchor.get_or_insert(ancestor.start_byte());
+            names.push(name.clone());
+        } else if language == "cpp"
+            && let Some(name) = cpp::namespace(ancestor, source)
+        {
+            names.push(name);
+        } else if syntax::is_callable(ancestor.kind())
+            || (language == "java"
+                && ancestor.kind() == "class_body"
+                && ancestor.parent().is_some_and(|parent| {
+                    matches!(
+                        parent.kind(),
+                        "object_creation_expression" | "enum_constant"
+                    )
+                }))
+        {
             // A local function is not a direct member; a local type has a lexical identity.
             if names.is_empty() {
                 return Ok(None);

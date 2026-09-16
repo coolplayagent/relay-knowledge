@@ -459,3 +459,15 @@ The fast `software_relationship_storage_cases` gate runs `cargo test --lib softw
 The fast/performance `code_index_persistence_performance_suite` also runs `type_ownership_uses_indexed_membership` and `portable_configuration_bounds_unrelated_evidence`. They measure SQLite VM work with 16,384 unrelated Rust member records and 8,192 unrelated TypeScript configuration records. Membership must stay below 5,000 steps; cross-file Python getter/guard resolution must stay within the existing 2,000,000-step configuration budget. Both assertions retain the actual returned ownership and configuration evidence.
 
 The portable semantic performance suite also verifies that Swift module-root proof ignores 16,384 unrelated Rust files through the covering language/file index, with fewer than 5,000 SQLite VM steps.
+
+The fast/performance suite also covers bounded receiver hints and a Shell export index with 1,100 unrelated function/command pairs. Configuration binding expansion now uses persisted inverted identities and retains the existing SQLite work budget.
+
+The same fast/performance test filter covers cgo target preselection with 2,000 same-name C definitions and 10,000 repeated lookups, including internal linkage, non-C targets and uppercase Go extensions. Import-backed C++ ownership retains bounded page-local evidence caches.
+
+Java qualified static-call regressions use exact ownership candidates and AST modifier proof. The regression suite rejects variable/pattern/static-import shadowing, inherited overload guesses, non-Java homonyms and same-file preference for duplicate types. Shell and cgo boundary tests are split into focused child modules to preserve the 1,000-line file limit.
+
+Java receiver regressions also cover implicit Object overloads, synthesized enum/record members and enum-constant anonymous ownership boundaries.
+
+Scope service unit regressions exercise multilingual context expansion and visibility, view/business provenance, historical-reuse payload validation, incremental/overlay base rejection, and explicit scope reads from published shards and legacy control. Unit-only coverage is measured separately from the existing all-target CI command; each final measurement clears workspace coverage objects, not just profiles.
+
+Framework scope regression checks also preserve direct-snapshot nodes/edges and inspect SQLite plans for indexed source-file language lookups before result limits. Routing tests seed distinct nonempty facts in control and shard stores, including configuration, framework and changed-file impact evidence. Direct-framework regression tests protect the full write budget and publication counters; language-limit tests place excluded records ahead of the matching record.

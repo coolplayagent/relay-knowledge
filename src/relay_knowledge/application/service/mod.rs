@@ -621,6 +621,7 @@ fn add_parse_status_counts(
         partial: left.partial.saturating_add(right.partial),
         text_only: left.text_only.saturating_add(right.text_only),
         failed: left.failed.saturating_add(right.failed),
+        excluded: left.excluded.saturating_add(right.excluded),
     }
 }
 

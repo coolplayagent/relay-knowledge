@@ -176,7 +176,7 @@ fn excludes_generated_call_sites_and_bounds_wide_class_results() {
     );
     query.exclude_generated = false;
     for i in 0..512 {
-        connection.execute("INSERT INTO code_repository_calls SELECT repository_id,source_scope,?1,file_id,path,caller_symbol_snapshot_id,caller_name,callee_symbol_snapshot_id,callee_name,target_hint,resolution_state,confidence_basis_points,confidence_tier,line_start,line_end FROM code_repository_calls WHERE call_id='incoming'", [format!("call-{i}")]).unwrap();
+        connection.execute("INSERT INTO code_repository_calls SELECT repository_id,source_scope,?1,file_id,path,caller_symbol_snapshot_id,caller_name,callee_symbol_snapshot_id,callee_name,target_hint,resolution_state,confidence_basis_points,confidence_tier,line_start,line_end,byte_start,byte_end FROM code_repository_calls WHERE call_id='incoming'", [format!("call-{i}")]).unwrap();
     }
     assert_eq!(
         search(&connection, &status(), &query)

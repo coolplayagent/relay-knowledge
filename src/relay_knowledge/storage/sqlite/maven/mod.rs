@@ -469,6 +469,9 @@ fn scope_jvm_languages(
 }
 
 fn jvm_languages_for_filters(filters: &[String]) -> Vec<&'static str> {
+    let atoms = crate::domain::code_language_filter_atoms(filters);
+    let filters = atoms.as_slice();
+
     if filters.is_empty() {
         return JVM_LANGUAGES.to_vec();
     }

@@ -2,6 +2,24 @@
 use crate::domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+/// A bounded string expression keeps literals separate from snapshot-local symbols.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeConfigStringPart {
+    Literal(String),
+    Reference(String),
+}
+
+impl CodeConfigStringPart {
+    /// Only symbolic components require additional indexed evidence.
+    pub fn reference(&self) -> Option<&String> {
+        match self {
+            Self::Reference(value) => Some(value),
+            Self::Literal(_) => None,
+        }
+    }
+}
+
 /// Canonical configuration evidence formats shared by CLI, HTTP and MCP.
 pub const CODE_CONFIG_SOURCE_FORMATS: &[&str] = &[
     "java",
@@ -121,6 +139,9 @@ pub struct CodeConfigMetadata {
     /// A symbolic key/getter dependency, resolved only in the served snapshot.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
+    /// Ordered constant string components; no runtime interpolation is evaluated.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub string_parts: Vec<CodeConfigStringPart>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_kind: Option<String>,
     /// Connects a guarded location to the concrete read that supplied its value.

@@ -46,16 +46,16 @@ pub(super) fn rebuild(
         INSERT INTO code_repository_calls (
             repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id,
             caller_name, callee_symbol_snapshot_id, callee_name, target_hint,
-            resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
+            resolution_state, confidence_basis_points, confidence_tier, line_start, line_end, byte_start, byte_end
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         ",
     )?;
     let mut select_references = transaction.prepare(
         "
         SELECT reference_id, file_id, path, name, line_start, line_end,
                target_symbol_snapshot_id, target_hint, resolution_state,
-               confidence_basis_points, confidence_tier, byte_start
+               confidence_basis_points, confidence_tier, byte_start, byte_end
         FROM code_repository_references
         WHERE source_scope = ?1 AND kind = 'call'
         ",
@@ -100,6 +100,8 @@ pub(super) fn rebuild(
             reference.confidence_tier.as_str(),
             reference.line_start,
             reference.line_end,
+            reference.byte_start,
+            reference.byte_end,
         ])?;
     }
 
@@ -133,6 +135,7 @@ struct ReferenceKey {
     confidence_basis_points: u16,
     confidence_tier: String,
     byte_start: u32,
+    byte_end: u32,
 }
 
 impl ReferenceKey {
@@ -150,6 +153,7 @@ impl ReferenceKey {
             confidence_basis_points: row.get(9)?,
             confidence_tier: row.get(10)?,
             byte_start: row.get(11)?,
+            byte_end: row.get(12)?,
         })
     }
 }

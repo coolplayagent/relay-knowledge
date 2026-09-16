@@ -5,6 +5,7 @@ use super::*;
 pub(super) enum Atom {
     Literal(String),
     Reference(String),
+    Expression(Vec<CodeConfigStringPart>),
 }
 #[derive(Clone)]
 pub(super) struct Literal {
@@ -170,7 +171,9 @@ impl Analysis<'_> {
                 .is_some_and(|(receiver, method)| {
                     crate::code::feature_flags::extractors::is_config_reader(receiver, method)
                 });
-            if shadowed && !object_reader {
+            let contextual_environment =
+                self.input.language_id == "starlark" && call.name.ends_with(".getenv");
+            if shadowed && !object_reader && !contextual_environment {
                 return None;
             }
             if call.arguments.len() > 2 {
@@ -190,6 +193,18 @@ impl Analysis<'_> {
                     Some(Value::Literal(value)) if value.kind == "string" => {
                         Atom::Literal(value.text)
                     }
+                    _ if self
+                        .string_expression(key_node, depth + 1, &mut BTreeSet::new())
+                        .is_some() =>
+                    {
+                        let parts =
+                            self.string_expression(key_node, depth + 1, &mut BTreeSet::new())?;
+                        if let [CodeConfigStringPart::Reference(reference)] = parts.as_slice() {
+                            Atom::Reference(reference.clone())
+                        } else {
+                            Atom::Expression(parts)
+                        }
+                    }
                     _ => Atom::Reference(imported.clone().unwrap_or_else(|| {
                         self.binding(key_node, syntax::text(key_node, self.input.content))
                     })),
@@ -205,9 +220,16 @@ impl Analysis<'_> {
                         None
                     }
                 });
-            let incomplete = if shadowed {
+            let incomplete = if contextual_environment {
+                Some("unproven_environment_receiver".into())
+            } else if shadowed {
                 Some("unproven_configuration_receiver".into())
-            } else if matches!(key, Atom::Reference(_)) && imported.is_none() {
+            } else if matches!(key, Atom::Reference(_))
+                && imported.is_none()
+                && self
+                    .string_expression(key_node, depth + 1, &mut BTreeSet::new())
+                    .is_none()
+            {
                 Some("unresolved_configuration_key".into())
             } else if default_node.is_some() && default.is_none() {
                 Some("unevaluated_explicit_default".into())

@@ -41,6 +41,7 @@ pub(super) fn is_read_candidate(kind: &str) -> bool {
             | "member_expression"
             | "subscript_expression"
             | "element_access_expression"
+            | "element_reference"
             | "attribute"
             | "subscript"
     )
@@ -146,7 +147,7 @@ pub(super) fn condition(node: Node<'_>) -> Option<Node<'_>> {
         .or_else(|| node.child_by_field_name("test"))
 }
 
-fn scope(mut node: Node<'_>) -> Node<'_> {
+pub(super) fn scope(mut node: Node<'_>) -> Node<'_> {
     for _ in 0..128 {
         let Some(parent) = node.parent() else {
             return node;
@@ -162,6 +163,7 @@ fn scope(mut node: Node<'_>) -> Node<'_> {
                     | "statement_block"
                     | "compound_statement"
                     | "body_statement"
+                    | "mod_item"
             )
         {
             return node;
@@ -361,8 +363,61 @@ pub(super) fn call<'a>(node: Node<'a>, source: &str) -> Option<Call<'a>> {
     if !is_read_candidate(node.kind()) {
         return None;
     }
+    let mut assignment_target = node;
+    for _ in 0..MAX_DEPTH {
+        match assignment_target.parent() {
+            Some(parent)
+                if matches!(
+                    parent.kind(),
+                    "left_assignment_list"
+                        | "pattern_list"
+                        | "tuple_pattern"
+                        | "parenthesized_expression"
+                ) =>
+            {
+                assignment_target = parent
+            }
+            _ => break,
+        }
+    }
+    if assignment_target.parent().is_some_and(|parent| {
+        matches!(parent.kind(), "assignment" | "assignment_expression")
+            && parent.child_by_field_name("left") == Some(assignment_target)
+            && {
+                let mut cursor = parent.walk();
+                parent
+                    .children(&mut cursor)
+                    .take(16)
+                    .any(|child| child.kind() == "=")
+            }
+    }) {
+        return None;
+    }
     if matches!(node.kind(), "member_expression" | "attribute") {
+        // A method selector is syntax belonging to a call, not a configuration
+        // property read (for example os.environ.get or process.env.hasOwnProperty).
+        let mut selector = node;
+        for _ in 0..MAX_DEPTH {
+            match selector.parent() {
+                Some(parent)
+                    if parent.kind() == "parenthesized_expression"
+                        && parent.named_child_count() == 1 =>
+                {
+                    selector = parent
+                }
+                _ => break,
+            }
+        }
+        if selector.parent().is_some_and(|parent| {
+            parent.child_by_field_name("function") == Some(selector)
+                || parent.child_by_field_name("method") == Some(selector)
+        }) {
+            return None;
+        }
         let object = node.child_by_field_name("object")?;
+        if node.kind() == "attribute" && text(object, source) == "os.environ" {
+            return None;
+        }
         let property = node
             .child_by_field_name("property")
             .or_else(|| node.child_by_field_name("attribute"))?;
@@ -374,7 +429,7 @@ pub(super) fn call<'a>(node: Node<'a>, source: &str) -> Option<Call<'a>> {
     }
     if matches!(
         node.kind(),
-        "subscript" | "subscript_expression" | "element_access_expression"
+        "subscript" | "subscript_expression" | "element_access_expression" | "element_reference"
     ) {
         let object = node
             .child_by_field_name("value")
@@ -384,17 +439,28 @@ pub(super) fn call<'a>(node: Node<'a>, source: &str) -> Option<Call<'a>> {
             .child_by_field_name("subscript")
             .or_else(|| node.child_by_field_name("index"))
             .or_else(|| node.named_child(1))?;
+        let key = if key.kind() == "argument_list" && key.named_child_count() == 1 {
+            key.named_child(0)?
+        } else {
+            key
+        };
         return Some(Call {
             name: text(object, source).replace("::", "."),
             arguments: vec![key],
             literal_key: None,
         });
     }
-    let function = node
+    let mut function = node
         .child_by_field_name("function")
         .or_else(|| node.child_by_field_name("method"))
         .or_else(|| node.child_by_field_name("name"))
         .or_else(|| node.named_child(0))?;
+    for _ in 0..MAX_DEPTH {
+        if function.kind() != "parenthesized_expression" || function.named_child_count() != 1 {
+            break;
+        }
+        function = function.named_child(0)?;
+    }
     let mut name = text(function, source).replace("::", ".").replace("->", ".");
     if let Some(receiver) = node
         .child_by_field_name("receiver")
@@ -451,7 +517,10 @@ pub(super) fn reader_namespace(language: &str, name: &str) -> Option<&'static st
             name,
             "process.env" | "Deno.env.get" | "Bun.env" | "import.meta.env"
         ),
-        "rust" => matches!(name, "std.env.var" | "std.env.var_os" | "env.var"),
+        "rust" => matches!(
+            name,
+            "std.env.var" | "std.env.var_os" | "env.var" | "env.var_os"
+        ),
         "c" | "cpp" => matches!(name, "getenv" | "std.getenv"),
         "go" => matches!(name, "os.Getenv" | "os.LookupEnv"),
         "csharp" => matches!(
@@ -462,6 +531,11 @@ pub(super) fn reader_namespace(language: &str, name: &str) -> Option<&'static st
         "ruby" => matches!(name, "ENV" | "ENV.fetch"),
         "php" => matches!(name, "getenv" | "$_ENV" | "$_SERVER"),
         "swift" => name == "ProcessInfo.processInfo.environment",
+        // Starlark has no receiver type annotations. Preserve a getenv
+        // candidate, with receiver uncertainty recorded by the evaluator.
+        "starlark" => name
+            .rsplit_once('.')
+            .is_some_and(|(_, method)| method == "getenv"),
         _ => false,
     };
     if environment {
@@ -479,6 +553,7 @@ pub(super) fn default_argument<'a, 'b>(language: &str, call: &'b Call<'a>) -> Op
     let supported = match language {
         "python" => matches!(call.name.as_str(), "os.getenv" | "os.environ.get"),
         "ruby" => call.name == "ENV.fetch",
+        "starlark" => call.name.ends_with(".getenv"),
         "scala" => matches!(
             call.name.as_str(),
             "sys.env.getOrElse" | "System.getProperty"

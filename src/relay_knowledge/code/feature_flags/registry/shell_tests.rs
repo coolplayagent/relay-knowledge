@@ -1,6 +1,9 @@
 use crate::code::feature_flags::registry::test_support::*;
 use crate::code::feature_flags::{FeatureFlagFileInput, registry::extract};
 
+#[path = "shell_boundary_tests.rs"]
+mod boundary;
+
 #[test]
 fn deferred_and_subshell_exports_do_not_define_parent_configuration() {
     for declaration in [

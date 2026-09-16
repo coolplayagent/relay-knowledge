@@ -130,6 +130,7 @@ async fn ownership_session() -> (
         declaration.kind = "struct".into();
         declaration.signature = format!("struct Owner{ordinal};");
         declaration.type_owner = Some(crate::domain::CodeTypeOwner {
+            static_dispatch: None,
             identity: format!("rust|{path}|Owner{ordinal}"),
             relation: "declaration".into(),
             target_hint: format!("Owner{ordinal}"),

@@ -232,6 +232,7 @@ fn parse_status_counts_from_rows(
             value if value == CodeParseStatus::Partial.as_str() => counts.partial = count,
             value if value == CodeParseStatus::TextOnly.as_str() => counts.text_only = count,
             value if value == CodeParseStatus::Failed.as_str() => counts.failed = count,
+            value if value == CodeParseStatus::Excluded.as_str() => counts.excluded = count,
             other => {
                 return Err(StorageError::InvalidInput(format!(
                     "unknown code repository parse status '{other}'"

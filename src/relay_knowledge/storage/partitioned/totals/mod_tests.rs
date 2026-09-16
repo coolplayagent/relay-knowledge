@@ -10,6 +10,7 @@ fn repository_totals_saturate_and_accumulate_parse_statuses() {
             parsed: 2,
             partial: 1,
             text_only: 0,
+            excluded: 2,
             failed: usize::MAX,
         },
         ..CodeRepositoryTotals::default()
@@ -21,6 +22,7 @@ fn repository_totals_saturate_and_accumulate_parse_statuses() {
             parsed: 5,
             partial: 2,
             text_only: 1,
+            excluded: 3,
             failed: 1,
         },
         ..CodeRepositoryTotals::default()
@@ -33,5 +35,6 @@ fn repository_totals_saturate_and_accumulate_parse_statuses() {
     assert_eq!(left.parse_status_counts.parsed, 7);
     assert_eq!(left.parse_status_counts.partial, 3);
     assert_eq!(left.parse_status_counts.text_only, 1);
+    assert_eq!(left.parse_status_counts.excluded, 5);
     assert_eq!(left.parse_status_counts.failed, usize::MAX);
 }

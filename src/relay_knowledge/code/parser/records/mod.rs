@@ -1,4 +1,8 @@
 //! Stable symbol and reference record materialization.
+mod call_receivers;
+mod cgo;
+mod java_receivers;
+pub(super) use call_receivers::bind_call_receivers;
 
 #[cfg(test)]
 #[path = "doc_comments_tests.rs"]

@@ -4,6 +4,335 @@ use crate::{
 };
 
 #[test]
+fn cpp_recovered_local_types_keep_the_real_enclosing_function_boundary() {
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[(
+        "local.cpp",
+        "void outer() { class API_EXPORT Local { public: void run() { target(); } }; }",
+    )]);
+    let local = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "Local")
+        .unwrap();
+    assert!(
+        local
+            .type_owner
+            .as_ref()
+            .unwrap()
+            .target_hint
+            .starts_with("local@")
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "class" && symbol.name == "API_EXPORT")
+    );
+}
+
+#[test]
+fn cpp_class_declarations_with_instances_keep_their_structured_type_owner() {
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[(
+        "owner.cpp",
+        "class Owner { public: int n; void run() { target(); } } instance{outside()};",
+    )]);
+    let run = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "run")
+        .unwrap();
+    let member = run.type_owner.as_ref().unwrap();
+    assert_eq!(member.target_hint, "Owner");
+    assert!(
+        snapshot
+            .calls
+            .iter()
+            .any(|call| call.callee_name == "target" && call.caller_name.as_deref() == Some("run"))
+    );
+    let outside: Vec<_> = snapshot
+        .calls
+        .iter()
+        .filter(|call| call.callee_name == "outside")
+        .collect();
+    assert!(!outside.is_empty(), "{:?}", snapshot.calls);
+    assert!(
+        outside
+            .iter()
+            .all(|call| call.caller_name.as_deref() != Some("Owner"))
+    );
+    assert!(
+        snapshot.symbols.iter().any(|symbol| symbol.name == "Owner"
+            && symbol.type_owner.as_ref().is_some_and(
+                |owner| owner.relation == "declaration" && owner.identity == member.identity
+            )),
+        "{:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
+fn cpp_recovered_declaration_types_have_ownership_and_large_namespace_heads_stay_unknown() {
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[(
+        "modes.cpp",
+        "API_EXPORT enum Mode { Fast, Slow }; API_EXPORT union Payload { int value; };",
+    )]);
+    for name in ["Mode", "Payload"] {
+        assert!(
+            snapshot.symbols.iter().any(|symbol| symbol.name == name
+                && symbol
+                    .type_owner
+                    .as_ref()
+                    .is_some_and(|owner| owner.relation == "declaration")),
+            "{:?}",
+            snapshot.symbols
+        );
+    }
+    let source = format!(
+        "API_BEGIN\nnamespace {} detail {{ class Owner {{}}; }}",
+        " ".repeat(4096)
+    );
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[("owner.cpp", &source)]);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .filter_map(|symbol| symbol.type_owner.as_ref())
+            .all(|owner| !owner.target_hint.contains("macro@API_BEGIN"))
+    );
+}
+
+#[test]
+fn flow_annotated_jsx_retains_class_calls_and_reports_syntax_errors() {
+    let source = "// @flow\ntype State = { value: ?number };\nexport default class Widget extends Base<Props, State> { run: () => void = () => { target(); }; }";
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[("widget.jsx", source)]);
+    assert!(
+        snapshot.symbols.iter().any(|s| s.name == "Widget"
+            && s.type_owner
+                .as_ref()
+                .is_some_and(|o| o.relation == "declaration")),
+        "{:?}",
+        snapshot.symbols
+    );
+    assert!(
+        snapshot
+            .calls
+            .iter()
+            .any(|c| c.callee_name == "target" && c.caller_name.as_deref() == Some("run")),
+        "{:?}",
+        snapshot.calls
+    );
+    let broken = format!("{source}\nconst broken = ;");
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[("widget.jsx", &broken)]);
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.parse_status == crate::domain::CodeParseStatus::Partial)
+    );
+}
+
+#[test]
+fn unknown_receivers_do_not_inherit_unrelated_method_targets() {
+    for (path, source, name, hint) in [
+        (
+            "app.js",
+            "class Headers { has() {} } function visit() { const keys = new Set(); return keys.has('x'); }",
+            "has",
+            "keys.has",
+        ),
+        (
+            "app.go",
+            "package app\nimport \"reflect\"\ntype Source struct{}\nfunc (s Source) Key() string {return \"\"}\nfunc visit(t reflect.Type) {t.Key()}\n",
+            "Key",
+            "t.Key",
+        ),
+        (
+            "app.py",
+            "class Headers:\n def has(self): pass\ndef visit(keys):\n return keys.has('x')\n",
+            "has",
+            "keys.has",
+        ),
+    ] {
+        let snapshot = crate::code::syntax_snapshot_for_tests(&[(path, source)]);
+        let calls: Vec<_> = snapshot
+            .references
+            .iter()
+            .filter(|r| r.kind == "call" && r.name == name)
+            .collect();
+        assert!(!calls.is_empty(), "{path}: {:?}", snapshot.references);
+        assert!(
+            calls.iter().all(|r| r.target_symbol_snapshot_id.is_none()
+                && r.resolution_state == "unresolved"
+                && r.target_hint.as_deref() == Some(hint)),
+            "{calls:?}"
+        );
+    }
+}
+
+#[test]
+fn nested_anonymous_bodies_have_local_call_owners() {
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[(
+        "app.jsx",
+        "class Buffer { proxy() { return (...args) => { this.items.push(args); }; } }",
+    )]);
+    let calls: Vec<_> = snapshot
+        .calls
+        .iter()
+        .filter(|call| call.callee_name.ends_with("push"))
+        .collect();
+    assert!(!calls.is_empty(), "{:?}", snapshot.calls);
+    assert!(
+        calls.iter().all(|call| call
+            .caller_name
+            .as_deref()
+            .is_some_and(|name| name.starts_with("anonymous@"))),
+        "{calls:?}"
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .filter(|s| s.name.starts_with("anonymous@"))
+            .all(|s| s.type_owner.is_none())
+    );
+}
+
+#[test]
+fn closure_owners_preserve_named_bindings_and_cover_initializer_callbacks() {
+    for (source, expected) in [
+        ("function outer(){const inner=()=>target();}", "inner"),
+        (
+            "function outer(){const inner=function(){target();};}",
+            "inner",
+        ),
+        (
+            "class C { values = items.map(() => target()); }",
+            "anonymous@",
+        ),
+        (
+            "class C { run(){return function*(){target();};} }",
+            "anonymous@",
+        ),
+    ] {
+        let snapshot = crate::code::syntax_snapshot_for_tests(&[("app.js", source)]);
+        assert!(
+            snapshot
+                .symbols
+                .iter()
+                .filter(|symbol| symbol.name.starts_with("anonymous@"))
+                .all(|symbol| symbol.type_owner.is_none()),
+            "{source}: {:?}",
+            snapshot.symbols
+        );
+        let calls: Vec<_> = snapshot
+            .calls
+            .iter()
+            .filter(|call| call.callee_name == "target")
+            .collect();
+        assert!(!calls.is_empty());
+        assert!(
+            calls.iter().all(|call| call
+                .caller_name
+                .as_deref()
+                .is_some_and(|name| name.starts_with(expected))),
+            "{source}: {calls:?}"
+        );
+    }
+}
+
+#[test]
+fn receiver_spelling_does_not_prove_this_or_self_binding() {
+    for (path, source) in [
+        (
+            "app.py",
+            "class C:\n def has(self): pass\n def run(self, foreign):\n  self = foreign\n  return self.has()\n",
+        ),
+        ("app.js", "class C {has() {} run(self){return self.has();}}"),
+    ] {
+        let snapshot = crate::code::syntax_snapshot_for_tests(&[(path, source)]);
+        assert!(
+            snapshot
+                .references
+                .iter()
+                .filter(|r| r.kind == "call" && r.name == "has")
+                .all(|r| r.target_symbol_snapshot_id.is_none()),
+            "{:?}",
+            snapshot.references
+        );
+    }
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[(
+        "app.js",
+        "class C {has() {} run(){return this.has();}}",
+    )]);
+    assert!(
+        snapshot
+            .references
+            .iter()
+            .any(|r| r.kind == "call" && r.name == "has" && r.target_symbol_snapshot_id.is_some()),
+        "{:?}",
+        snapshot.references
+    );
+}
+
+#[test]
+fn this_receiver_requires_matching_static_or_instance_members() {
+    for (source, resolved) in [
+        ("class C {static run(){this.has();} has(){}}", false),
+        ("class C {run(){this.has();} static has(){}}", false),
+        ("class C {static run(){this.has();} static has(){}}", true),
+        ("class C {run(){this.has();} has(){}}", true),
+        ("class C extends this.has() {has(){}}", false),
+        ("class C {has(){} [this.has()](){}}", false),
+        ("class C {static {this.has();} has(){}}", false),
+        ("class C {static value=this.has(); has(){}}", false),
+        ("class C {static {this.has();} static has(){}}", true),
+        ("class C {static value=this.has(); static has(){}}", true),
+    ] {
+        let snapshot = crate::code::syntax_snapshot_for_tests(&[("app.js", source)]);
+        let calls: Vec<_> = snapshot
+            .references
+            .iter()
+            .filter(|reference| reference.kind == "call" && reference.name == "has")
+            .collect();
+        assert!(!calls.is_empty());
+        assert!(
+            calls
+                .iter()
+                .all(|reference| reference.target_symbol_snapshot_id.is_some() == resolved),
+            "{source}: {calls:?}"
+        );
+    }
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[(
+        "C.java",
+        "class C {static void has(){} void run(){this.has();}}",
+    )]);
+    assert!(
+        snapshot
+            .references
+            .iter()
+            .any(|r| r.kind == "call" && r.name == "has" && r.target_symbol_snapshot_id.is_some())
+    );
+}
+
+#[test]
+fn code_index_persistence_performance_suite_receiver_hints_remain_bounded() {
+    let source = format!("function run(){{ builder{}; }}", ".step()".repeat(200));
+    let snapshot = crate::code::syntax_snapshot_for_tests(&[("app.js", &source)]);
+    let references: Vec<_> = snapshot
+        .references
+        .iter()
+        .filter(|r| r.kind == "call")
+        .collect();
+    assert!(references.len() >= 200);
+    assert!(references.iter().all(|reference| {
+        reference
+            .target_hint
+            .as_ref()
+            .is_none_or(|hint| hint.len() <= 513)
+    }));
+}
+
+#[test]
 fn swift_requirements_constructors_and_subscripts_have_member_ranges() {
     let source = "protocol Contract {func request()}\nclass Owner {\n init() {target()}\n subscript(i: Int) -> Int {return target()}\n func target() -> Int {0}\n}\n";
     let snapshot = crate::code::syntax_snapshot_for_tests(&[("owner.swift", source)]);

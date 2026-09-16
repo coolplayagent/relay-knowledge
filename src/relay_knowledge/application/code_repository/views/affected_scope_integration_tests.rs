@@ -275,6 +275,7 @@ fn call(
 ) -> CodebaseViewCall {
     CodebaseViewCall {
         call: CodeCallRecord {
+            byte_range: None,
             repository_id: "repo".to_owned(),
             source_scope: "scope".to_owned(),
             call_id: format!("call:{path}:{callee_name}"),
