@@ -356,7 +356,7 @@ fn language_for_extension(extension: &str) -> Option<LanguageSpec> {
         "swift" => Some(LanguageSpec {
             id: "swift",
             language: || tree_sitter_swift::LANGUAGE.into(),
-            tags_query: tree_sitter_swift::TAGS_QUERY,
+            tags_query: include_str!("swift_tags.scm"),
         }),
         "sql" => Some(LanguageSpec {
             id: "sql",

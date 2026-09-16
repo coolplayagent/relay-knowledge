@@ -2,6 +2,45 @@
 use crate::domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+/// Canonical configuration evidence formats shared by CLI, HTTP and MCP.
+pub const CODE_CONFIG_SOURCE_FORMATS: &[&str] = &[
+    "java",
+    "properties",
+    "ini",
+    "ctmpl",
+    "shell",
+    "dotenv",
+    "python",
+    "javascript",
+    "jsx",
+    "typescript",
+    "tsx",
+    "rust",
+    "c",
+    "cpp",
+    "go",
+    "csharp",
+    "kotlin",
+    "scala",
+    "ruby",
+    "php",
+    "swift",
+    "starlark",
+    "vue",
+    "sql",
+    "cmake",
+    "make",
+    "ninja",
+    "gomod",
+    "gotemplate",
+    "dockerfile",
+    "json",
+    "yaml",
+    "toml",
+    "xml",
+    "jinja2",
+];
+
 /// Metadata is source evidence; absent values are unknown, never runtime defaults.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -112,15 +151,14 @@ impl CodeConfigFilter {
                 }
             }
         }
-        if self.source.as_deref().is_some_and(|source| {
-            !matches!(
-                source,
-                "java" | "properties" | "ini" | "ctmpl" | "shell" | "dotenv"
-            )
-        }) {
+        if self
+            .source
+            .as_deref()
+            .is_some_and(|source| !CODE_CONFIG_SOURCE_FORMATS.contains(&source))
+        {
             return Err(DomainError::invalid(
                 "source",
-                "expected java, properties, ini, ctmpl, shell or dotenv",
+                "expected a supported configuration source format or code language",
             ));
         }
         Ok(self)

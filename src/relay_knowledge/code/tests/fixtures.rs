@@ -12,6 +12,7 @@ use crate::domain::{
 
 pub(super) fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: "git_snapshot:test".to_owned(),
         symbol_snapshot_id: id.to_owned(),

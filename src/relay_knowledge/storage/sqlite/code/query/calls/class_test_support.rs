@@ -11,6 +11,7 @@ pub(super) fn database() -> Connection {
     // These unit fixtures exercise read SQL directly; service integration tests
     // establish the catalog/scope through the normal durable publication path.
     connection.execute_batch("PRAGMA foreign_keys=OFF;
+        CREATE INDEX IF NOT EXISTS code_repository_symbols_type_owner_lookup ON code_repository_symbols(source_scope,type_owner_identity);
         CREATE INDEX IF NOT EXISTS code_repository_symbols_name_path_lookup ON code_repository_symbols(source_scope,name,path);
         CREATE INDEX IF NOT EXISTS code_repository_symbols_path_line_lookup ON code_repository_symbols(source_scope,path,line_end,line_start);
         CREATE INDEX IF NOT EXISTS code_repository_calls_lookup ON code_repository_calls(source_scope,callee_name,caller_name,path);
@@ -61,6 +62,19 @@ pub(super) fn database() -> Connection {
             (repository_id,source_scope,symbol_snapshot_id,canonical_symbol_id,file_id,path,language_id,name,qualified_name,kind,signature,byte_start,byte_end,line_start,line_end)
             VALUES ('repo','scope',?1,?2,'target-file','src/Target.java','java',?3,?2,?4,'',?5,?6,?5,?6)",
             params![id,owner,name,kind,start,end]).unwrap();
+    }
+    for (id, owner, relation) in [
+        ("target", "Target", "declaration"),
+        ("method", "Target", "direct_member"),
+        ("overload", "Target", "direct_member"),
+        ("constructor", "Target", "direct_member"),
+        ("nested", "Target.Nested", "declaration"),
+        ("nested-method", "Target.Nested", "direct_member"),
+        ("sibling", "Other", "declaration"),
+        ("sibling-method", "Other", "direct_member"),
+    ] {
+        let metadata = serde_json::json!({"identity": format!("java|demo|{owner}"), "relation": relation, "target_hint": owner});
+        connection.execute("UPDATE code_repository_symbols SET type_owner_json=?1, type_owner_identity=json_extract(?1, '$.identity') WHERE symbol_snapshot_id=?2", params![metadata.to_string(), id]).unwrap();
     }
     connection.execute_batch("INSERT INTO code_repository_symbols
         (repository_id,source_scope,symbol_snapshot_id,canonical_symbol_id,file_id,path,language_id,name,qualified_name,kind,signature,byte_start,byte_end,line_start,line_end)

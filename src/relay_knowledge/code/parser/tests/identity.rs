@@ -270,6 +270,7 @@ fn snapshot_build() -> SnapshotBuild {
 
 fn duplicate_identity_symbol(kind: &str) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         symbol_snapshot_id: "symbol:Session".to_owned(),

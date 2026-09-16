@@ -23,6 +23,7 @@ fn inherited_constants_stop_at_hidden_fields() {
         ] {
             for row in crate::code::feature_flags::extract_feature_flags(
                 crate::code::feature_flags::FeatureFlagFileInput {
+                    syntax_root: None,
                     repository_id: "repo",
                     source_scope: "scope",
                     file_id: "file",
@@ -127,6 +128,7 @@ fn dotenv_definition_satisfies_environment_read_consistency() {
     ] {
         for row in crate::code::feature_flags::extract_feature_flags(
             crate::code::feature_flags::FeatureFlagFileInput {
+                syntax_root: None,
                 repository_id: "repo",
                 source_scope: "scope",
                 file_id: "file",
@@ -225,6 +227,7 @@ fn java_files(db: &Connection, files: &[(&str, &str)]) {
     for (path, content) in files {
         for row in crate::code::feature_flags::extract_feature_flags(
             crate::code::feature_flags::FeatureFlagFileInput {
+                syntax_root: None,
                 repository_id: "repo",
                 source_scope: "scope",
                 file_id: "file",

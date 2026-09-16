@@ -12,11 +12,11 @@ use crate::{
 use super::SearchDocumentInserter;
 
 const SYMBOL_INSERT_BATCH_SIZE: usize = 1_024;
-const SYMBOL_INSERT_COLUMN_COUNT: usize = 17;
+const SYMBOL_INSERT_COLUMN_COUNT: usize = 19;
 const SYMBOL_INSERT_BIND_COUNT: usize = SYMBOL_INSERT_BATCH_SIZE * SYMBOL_INSERT_COLUMN_COUNT;
-const SYMBOL_INSERT_ROW: &str = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+const SYMBOL_INSERT_ROW: &str = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 static SYMBOL_INSERT_FULL_SQL: OnceLock<String> = OnceLock::new();
-const _: () = assert!(SYMBOL_INSERT_BIND_COUNT == 17_408);
+const _: () = assert!(SYMBOL_INSERT_BIND_COUNT == 19_456);
 
 pub(super) fn insert_records(
     transaction: &Transaction<'_>,
@@ -103,9 +103,29 @@ fn execute_symbol_insert(
         .iter()
         .map(|symbol| symbol_role_json(&symbol.symbol_role))
         .collect::<Result<Vec<_>, _>>()?;
+    let ownership_json = symbols
+        .iter()
+        .map(|symbol| {
+            symbol
+                .type_owner
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|e| StorageError::InvalidInput(e.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let ownership_keys: Vec<_> = symbols
+        .iter()
+        .map(|s| s.type_owner.as_ref().map(|o| o.identity.as_str()))
+        .collect();
     let mut values: Vec<&dyn ToSql> =
         Vec::with_capacity(symbols.len() * SYMBOL_INSERT_COLUMN_COUNT);
-    for (symbol, role_json) in symbols.iter().zip(&role_json) {
+    for (((symbol, role_json), ownership), owner_key) in symbols
+        .iter()
+        .zip(&role_json)
+        .zip(&ownership_json)
+        .zip(&ownership_keys)
+    {
         values.push(&symbol.repository_id);
         values.push(&symbol.source_scope);
         values.push(&symbol.symbol_snapshot_id);
@@ -123,6 +143,8 @@ fn execute_symbol_insert(
         values.push(&symbol.line_range.start);
         values.push(&symbol.line_range.end);
         values.push(role_json);
+        values.push(ownership);
+        values.push(owner_key);
     }
     statement.execute(params_from_iter(values))?;
 
@@ -139,7 +161,7 @@ fn symbol_insert_sql(row_count: usize) -> String {
             repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id,
             file_id, path, language_id, name,
             qualified_name, kind, signature, doc_comment, byte_start, byte_end,
-            line_start, line_end, symbol_role_json
+            line_start, line_end, symbol_role_json, type_owner_json, type_owner_identity
         )
         VALUES {placeholders}
         "

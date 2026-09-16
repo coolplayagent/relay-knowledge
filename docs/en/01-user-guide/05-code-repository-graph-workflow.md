@@ -100,9 +100,9 @@ Fresh full indexes still return a completed `summary` immediately. Freshness che
 
 ## 5.4 Query Symbols and Relationships
 
-Java class-name call queries use indexed class and direct-member ownership. `--query B --kind callers` aggregates incoming edges to B, its constructors and direct methods; `--kind callees` aggregates their outgoing edges. Results retain the actual caller/callee methods and call sites. For `A.main` calling `B.process()`, B callers returns `main calls process`; A callers does not incorrectly return that outgoing edge merely because its text mentions A. A matched class with no edges in the requested direction returns empty without full-text broadening.
+Short type-name call queries use indexed type and direct-member ownership across the languages in the capability matrix below. `--query B --kind callers` aggregates incoming edges to B, its constructors and direct methods; `--kind callees` aggregates their outgoing edges. Results retain the actual caller/callee methods and call sites. For `A.main` calling `B.process()`, B callers returns `main calls process`; A callers does not incorrectly return that outgoing edge merely because its text mentions A. A matched class with no edges in the requested direction returns empty without full-text broadening.
 
-This aggregation applies only to short Java class names with `callers` or `callees`; names match case-sensitively and same-named classes are aggregated. Hybrid and qualified-name queries keep their existing search behavior. Package-qualified class aggregation is not supported: existing Java qualified-name facts encode source paths, not package declarations. Same-file source ranges and direct qualified names exclude nested-type methods, sibling methods, fields and unresolved incoming edges supported only by name text. Inherited members and dynamic dispatch are not guessed. Unresolved outgoing edges retain their status. `--query B.process` continues to query a specific method. Path, language, generated-file and inline filters apply before call-candidate limits; paths constrain call sites, so callers may be outside the selected class file.
+This aggregation applies to short type names with `callers` or `callees`; names match case-sensitively. Hybrid and qualified-name queries retain their existing behavior. Persisted ownership separates language and module identities; nested types and local functions do not contribute to their enclosing type. Inherited members and dynamic dispatch are not guessed. Unresolved outgoing edges retain their status. `--query B.process` continues to query a specific method. Path, language, generated-file and inline filters apply before call-candidate limits; paths constrain call sites, so callers may be outside the selected type file.
 
 Selection admits at most 64 candidate classes and 1,024 class/member records, retaining the existing maximum of 200 call candidates and the requested result limit. Class resolution and call reads share approximately 4.1 million SQLite instructions. Exhausting identity or execution budgets explicitly returns a `class call query incomplete` capacity error instead of silently truncating identities. Query a member method to reduce expansion. This read-only change reuses existing facts, with no schema, fact-version or installation configuration change; completed older indexes can be queried directly.
 
@@ -309,6 +309,24 @@ Reports include repository id, root, indexed commit, tree hash, file/symbol/refe
 
 ## 5.9 Troubleshooting
 
+Version freshness and content integrity are separate. A query can be `fresh`
+with `content_integrity.state=partial`; `unknown` does not establish complete
+content. Legacy `degraded_reason` alone is not a reason to reindex a fresh scope.
+Read-model or query-capability failures can still make a query degraded.
+Reports summarize at most 20 file diagnostics and expose truncation plus a
+pinned diagnostics command. Follow that command for the report's snapshot:
+
+```bash
+relay-knowledge repo diagnostics repo --ref <pinned-ref> --limit 50 --format json
+relay-knowledge repo diagnostics repo --ref <pinned-ref> --limit 50 --cursor <next-cursor> --format json
+```
+
+Use the returned `next_cursor` until null, preserving ref and path filters.
+The cursor pins the served scope even if HEAD moves; removed snapshots fail
+explicitly. The page maximum is 200. Multiple diagnostics can describe one file;
+the integrity count is a distinct file count. Fix or explicitly scope out the
+relevant source before reindexing to change content completeness.
+
 When `repo query` returns no results, check in order:
 
 1. Whether `repo status <alias>` shows an indexed clean commit or worktree overlay.
@@ -372,3 +390,86 @@ Statically decoded Shell builtin names use the same export classification for qu
 Free-text configuration queries match persisted metadata as well as keys and located usages; final group matching and row scoring preserve the SQL metadata search contract. An explicitly supplied query containing no alphanumeric character or underscore is rejected before loading rows; omit the query for an unfiltered registry. Java try-with-resources declarations bind receivers in the try body and later resource initializers, not catch/finally blocks. Shell assignments preceding a recognized export builtin define configuration when that builtin exports the same variable; unrelated ordinary-command prefixes do not define the parent environment. Fact version: `config-registry-v53`.
 
 Proven getter conversions canonicalize explicit environment fallbacks as well as property fallbacks; property-specific nullable handling remains separate. Known platform wildcard imports contribute only supported members they actually expose, and final var keys require a proven String initializer. Named local Java types have lexical identities so unrelated methods or blocks cannot share getter providers. Asynchronous Shell commands cannot define or mutate the parent configuration/export state. Nameref alias tracking and command/builtin dispatch wrappers are outside the finite Shell extraction inventory; recognizing direct builtin names and quoted equivalents does not execute wrappers or indirect variable writes. Absence diagnostics describe observed static evidence within this inventory. Fact version: `config-registry-v54`.
+
+## 5.10 Language capability matrix
+
+Type queries use ownership facts stored during indexing. They aggregate the type and its direct callable members; inherited methods, unknown receivers and nested functions are excluded. The short-name entry point remains unchanged. A call-site path filter constrains the actual call location. Type selection admits at most 64 types and 1,024 type/member records, followed by at most 200 call candidates and the existing SQLite work budget. Exhaustion is an explicit incomplete-query error.
+
+Configuration analysis reuses the indexing syntax tree. The following is the finite reader inventory, together with the language structures that supply ownership. `config`/`settings` readers recognized by the existing configuration API inventory remain available. Literal keys, proven constant expressions, zero-argument read getters and local condition uses contribute evidence; runtime-dependent expressions retain unknown values.
+
+| Source | Type ownership | Environment/property reader inventory |
+| --- | --- | --- |
+| Java | Classes, constructors and direct methods | Existing `System` environment/property APIs and documented configuration readers |
+| Python | Classes and direct methods | `os.getenv`, `os.environ.get`, `os.environ[key]` |
+| JavaScript / JSX | Classes and direct methods | `process.env`, `Deno.env.get`, `Bun.env`, `import.meta.env` |
+| TypeScript / TSX | Classes, interfaces and direct methods | Same JS APIs with TypeScript syntax |
+| C | Not applicable; ordinary function queries remain available | `getenv` |
+| C++ | Classes and scoped member implementations | `getenv`, `std::getenv` |
+| C# | Classes/structs and direct methods | `Environment.GetEnvironmentVariable`, `System.Environment.GetEnvironmentVariable` |
+| Rust | Types and inherent/trait `impl` methods | `std::env::var`, `std::env::var_os`, `env::var` |
+| Go | Named types and receiver methods | `os.Getenv`, `os.LookupEnv` |
+| Kotlin | Classes and objects | `System.getenv`, `System.getProperty` |
+| Scala | Classes, traits and objects | `System.getenv`, `System.getProperty`, `sys.env.get`, `sys.env.getOrElse` |
+| Ruby | Classes/modules and direct methods | `ENV[key]`, `ENV.fetch` |
+| PHP | Classes and direct methods | `getenv`, `$_ENV[key]`, `$_SERVER[key]` |
+| Swift | Types and extensions | `ProcessInfo.processInfo.environment[key]` |
+| Bash (`--source shell`) | Not applicable | Parameter expansion, existing export/default evidence, direct output getters |
+| Starlark | Not applicable | Documented configuration readers; `load` provides explicit bindings |
+| Vue | Embedded JS/TS ownership | The embedded script uses the matching JS/TS reader rules |
+| SQL, build scripts and templates | Not applicable where the grammar has no callable type | Existing structured definition, reference and condition evidence; no synthetic class relationships |
+
+Cross-file bindings are confined to the authorized repository snapshot and require explicit import, type or native module evidence. Environment variables and property keys have independent namespaces. A common spelling alone never joins symbols from different code languages. Dynamic keys, external providers, reassignment, shadowing, unsupported wrappers and exhausted resolution depth must be treated as unresolved or incomplete evidence. `analysis_complete=false` prevents absence conclusions. Defaults describe observed static evidence; they do not predict runtime values. For example, converting the string `"false"` with Python `bool` or JavaScript `Boolean` yields `true`, while C# `bool.Parse` yields `false`.
+
+Code fact version `config-registry-v55-type-ownership` requires rebuilding older indexes through the durable repository indexing task. The deferred query-index plan is version 4; it appends ownership and language/file lookups without changing earlier ordinal identities. Existing v1–v3 checkpoints retain their prefix checks during recovery. CLI, HTTP and MCP continue to use the same service contract and configuration budgets.
+
+### Cross-file evidence and limits
+
+| Language group | Required evidence and retained limits |
+| --- | --- |
+| Python | Explicit module import or relative `from` import; lexical rebinding terminates the connection. |
+| JS/JSX and TS/TSX; Vue scripts | Explicit relative import with the source extension and a matching named/default export. Extensionless resolution, package loaders and re-export chains remain unresolved. |
+| C/C++ | Quoted repository-relative includes. C++ ownership preserves qualified scope; headers retain their detected grammar (`.h` is C, `.hpp` is C++). |
+| Rust | Indexed `mod` declarations prove module membership, including static `#[path]` redirection. Imports retain original names through aliases. Missing/conditional modules and macro-controlled membership remain unresolved. |
+| Go | The declared package and directory bind receiver methods and package configuration providers. |
+| Kotlin, Scala and C# | Exact native package/namespace/type identities; private providers cannot satisfy cross-file imports. Companion objects remain separate direct owners. |
+| Swift | Configuration providers share the indexed directory module; detached cross-file type extensions require an explicit typed import under the existing unique module-directory contract. Unknown targets remain unresolved. |
+| Ruby / PHP | Ruby `require_relative`; PHP `require`/`include` anchored at `__DIR__`. Namespace/name equality alone does not prove a PHP file was loaded. |
+| Bash / Starlark | Shell script-directory `source` using `dirname` of `BASH_SOURCE[0]`, or Starlark `load`. Plain relative Shell sources retain unknown working-directory evidence; `source`, `eval` and `unset` can invalidate an earlier function binding. |
+
+The analyzer records non-configuration getter declarations as internal blockers so an unrelated same-name getter cannot inherit another provider's configuration result. Native parameter syntax, local declarations and imports constrain scope. Explicit fallbacks and supported conversions carry their evidence; unevaluated defaults remain unknown. SQL/build/template rows retain the existing grammar's definition/reference coverage and do not imply general program-flow evaluation.
+
+Rust `crate` imports require a conventional Cargo root and indexed `mod`
+reachability from that root to the importing file. `src/bin`, `tests` and
+`examples` roots remain separate from `src/lib.rs`; shared roots, inline modules,
+conditional module declarations and custom manifest roots remain unresolved when
+membership cannot be proved. Swift typed imports require one physical module
+directory across all admitted Swift files; the language/file index excludes other
+languages from that check, with a 1,024-file evidence ceiling.
+
+Getter provider reassignment revokes its exported proof while preserving the
+original body read. C# explicit aliases constrain the provider identity; unsupported
+native import aliases stay unresolved. Non-nullable Boolean/numeric conversions
+do not activate nullish fallbacks. A fallback around an unresolved imported getter
+retains an incomplete state until its return semantics can be proved.
+
+Java zero-argument configuration getters may use any method name; the existing
+visibility, inheritance and shadowing checks still apply. Local method/property
+expansion shares the provider stability checks, including known member rewrites.
+C# file-scoped namespaces and relative namespace aliases retain their declaration
+scope; `global::` explicitly selects the global namespace. Unsupported Scala
+selector imports block an unproved package fallback.
+
+C++ primary class-template parameters use declaration slots, including the outer
+parameter layer of a member template, while concrete specializations keep distinct
+identities. Complex template arguments remain bounded by the extractor's grammar
+and static-identity limits. Swift constructor, protocol requirement and subscript
+definitions retain their own member ranges. Dockerfile coverage here is the
+existing stage/import graph; it does not evaluate arbitrary `RUN` commands.
+
+Detached C++ implementations with named concrete template arguments require
+type-binding evidence; a bare argument such as `V` remains unresolved because
+different namespaces can define different `V` types. Parameter slots, built-in
+types and proven literal arguments retain their bounded identity support.
+
+The persisted type-call regression matrix also exercises both JavaScript and
+TypeScript Vue scripts, including `vue` language and call-site path filters.

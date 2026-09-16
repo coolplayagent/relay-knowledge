@@ -12,6 +12,7 @@ pub(super) fn record_feature_flags(
     language_id: &str,
     content: &str,
     config_facts: Option<&[config_files::ConfigFact]>,
+    syntax_root: Option<tree_sitter::Node<'_>>,
 ) -> Result<(), CodeIndexError> {
     let owned_config_facts;
     let config_facts = match config_facts {
@@ -22,6 +23,7 @@ pub(super) fn record_feature_flags(
         }
     };
     let records = extract_feature_flags(FeatureFlagFileInput {
+        syntax_root,
         repository_id: &build.repository_id,
         source_scope: &build.source_scope,
         file_id,

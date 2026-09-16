@@ -4,12 +4,15 @@ mod connectivity;
 mod consistency;
 mod evidence;
 mod hierarchy;
+mod modules;
 mod resolution;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub(super) const MAX_ROWS: usize = 10_000;
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 const COLUMNS: &str = "flag.feature_flag_id,flag.usage_id,flag.file_id,flag.path,flag.language_id,flag.name,flag.source_kind,flag.source_key,flag.edge_kind,flag.confidence_basis_points,flag.confidence_tier,flag.byte_start,flag.byte_end,flag.line_start,flag.line_end,flag.excerpt,flag.metadata_json,(SELECT symbol_snapshot_id FROM code_repository_symbols symbol WHERE symbol.source_scope=flag.source_scope AND symbol.path=flag.path AND symbol.line_start<=flag.line_start AND symbol.line_end>=flag.line_start ORDER BY symbol.line_start DESC,symbol.line_end ASC LIMIT 1),(SELECT name FROM code_repository_symbols symbol WHERE symbol.source_scope=flag.source_scope AND symbol.path=flag.path AND symbol.line_start<=flag.line_start AND symbol.line_end>=flag.line_start ORDER BY symbol.line_start DESC,symbol.line_end ASC LIMIT 1)";
 struct QueryBudget<'a>(&'a Connection);
+#[cfg(test)]
+thread_local! { pub(super) static LAST_QUERY_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 impl Drop for QueryBudget<'_> {
     fn drop(&mut self) {
         self.0.progress_handler(0, None::<fn() -> bool>);
@@ -56,10 +59,14 @@ fn search_bounded(
         .ok_or_else(|| StorageError::InvalidInput("repository is not indexed".into()))?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     let mut steps = 0;
+    #[cfg(test)]
+    LAST_QUERY_STEPS.with(|counter| counter.set(0));
     connection.progress_handler(
         1000,
         Some(move || {
             steps += 1000;
+            #[cfg(test)]
+            LAST_QUERY_STEPS.with(|counter| counter.set(steps));
             steps > 2_000_000 || std::time::Instant::now() >= deadline
         }),
     );
@@ -102,7 +109,16 @@ fn search_bounded(
         hierarchy.filter_platform_reads(&mut rows);
     }
     let mut queried = BTreeSet::new();
+    let mut module_cache = HashMap::new();
+    let mut module_bytes = 0;
     for round in 0..4 {
+        modules::resolve(
+            connection,
+            scope,
+            &mut rows,
+            &mut module_cache,
+            &mut module_bytes,
+        )?;
         let keys = rows
             .iter()
             .flat_map(|row| {
@@ -183,6 +199,13 @@ fn search_bounded(
             return Err(incomplete("symbol binding depth exceeded"));
         }
     }
+    modules::resolve(
+        connection,
+        scope,
+        &mut rows,
+        &mut module_cache,
+        &mut module_bytes,
+    )?;
     let providers = resolution::providers(&rows);
     let formats = if request.filters.consistency {
         consistency::formats(connection, scope, status, &evidence_request)?

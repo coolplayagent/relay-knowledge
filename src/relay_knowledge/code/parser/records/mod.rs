@@ -427,6 +427,7 @@ fn symbol_record_with_doc_owner(
     );
 
     Ok(RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: context.build.repository_id.clone(),
         source_scope: context.build.source_scope.clone(),
         symbol_snapshot_id,

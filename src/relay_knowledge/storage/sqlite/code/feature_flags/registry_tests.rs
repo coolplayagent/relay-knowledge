@@ -7,7 +7,7 @@ fn fixture() -> Connection {
     connection.execute_batch("CREATE TABLE code_repository_feature_flags (feature_flag_id TEXT, usage_id TEXT, file_id TEXT, path TEXT, language_id TEXT, name TEXT, source_kind TEXT, source_key TEXT, edge_kind TEXT, confidence_basis_points INTEGER, confidence_tier TEXT, byte_start INTEGER, byte_end INTEGER, line_start INTEGER, line_end INTEGER, excerpt TEXT, metadata_json TEXT, source_scope TEXT);
     CREATE TABLE code_repository_files(source_scope TEXT,path TEXT,language_id TEXT);
     CREATE INDEX scope_flags ON code_repository_feature_flags(source_scope,feature_flag_id);
-    CREATE TABLE code_repository_symbols(source_scope TEXT,path TEXT,line_start INTEGER,line_end INTEGER,symbol_snapshot_id TEXT,name TEXT);").unwrap();
+    CREATE TABLE code_repository_symbols(source_scope TEXT,path TEXT,line_start INTEGER,line_end INTEGER,symbol_snapshot_id TEXT,name TEXT,language_id TEXT,type_owner_json TEXT);").unwrap();
     connection
 }
 fn status() -> CodeRepositoryStatus {
@@ -413,6 +413,9 @@ mod review_tests;
 
 #[path = "scope_evidence_tests.rs"]
 mod scope_evidence_tests;
+
+#[path = "portable_tests.rs"]
+mod portable_tests;
 
 #[test]
 fn interrupted_format_inventory_reports_incomplete_analysis() {

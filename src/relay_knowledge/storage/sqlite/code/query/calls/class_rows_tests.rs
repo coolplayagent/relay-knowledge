@@ -95,7 +95,8 @@ fn exhausted_work_is_an_explicit_error_and_does_not_poison_the_connection() {
         WITH RECURSIVE seq(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM seq WHERE n<999)
         SELECT 'scope' source_scope, printf('N%d',a.n+b.n+c.n) name,
                'class' kind, 'java' language_id, 'id' symbol_snapshot_id,
-               'owner' qualified_name, 'file' path, 0 byte_start, 1 byte_end
+               'owner' qualified_name, 'file' path, 0 byte_start, 1 byte_end,
+               'owner' type_owner_identity, '{\"relation\":\"declaration\"}' type_owner_json
         FROM seq a CROSS JOIN seq b CROSS JOIN seq c;",
         )
         .unwrap();

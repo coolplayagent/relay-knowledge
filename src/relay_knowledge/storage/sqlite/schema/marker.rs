@@ -11,10 +11,9 @@ use super::introspection::{
 };
 
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
-// Version 8 adds the software ontology occurrence, statement, validation, and
-// provenance-status surfaces. Existing databases must run the additive schema
-// initializer before a v6 software projection can be published.
-pub(super) const SCHEMA_MARKER_VERSION: i64 = 8;
+// Version 9 installs durable type ownership and invalidates pre-portable
+// configuration facts before a new semantic snapshot can be published.
+pub(super) const SCHEMA_MARKER_VERSION: i64 = 9;
 pub(in crate::storage::sqlite) const SEARCH_OWNER_V2_MIGRATION: &str =
     "search-owner-v2-writer-and-serving-gate";
 pub(in crate::storage::sqlite) const REFERENCE_SEARCH_GROUP_V2_MIGRATION: &str =
@@ -331,7 +330,15 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     if version != Some(SCHEMA_MARKER_VERSION) {
         return Ok(false);
     }
-    if !graph_bm25_schema_is_current(connection)?
+    if !table_has_columns(
+        connection,
+        "code_repository_symbols",
+        &["type_owner_json", "type_owner_identity"],
+    )? || !table_has_columns(
+        connection,
+        "code_repository_index_checkpoints",
+        &["type_owner_cursor"],
+    )? || !graph_bm25_schema_is_current(connection)?
         || table_exists(connection, "graph_bm25_vocabulary")?
         || table_exists(connection, "graph_bm25_retired")?
         || !table_has_exact_columns(

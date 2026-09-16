@@ -201,6 +201,7 @@ fn chunk(path: &str) -> RepositoryCodeChunkRecord {
 
 fn symbol(path: &str) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         symbol_snapshot_id: format!("symbol:{path}"),

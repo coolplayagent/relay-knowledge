@@ -10,7 +10,11 @@ const MAX_FUNCTION_FACTORY_CALL_DEPTH: usize = 4;
 pub(in crate::code::parser) fn manual_definition_candidate(node_kind: &str) -> bool {
     matches!(
         node_kind,
-        "assignment_expression" | "pair" | "public_field_definition" | "variable_declarator"
+        "assignment_expression"
+            | "pair"
+            | "public_field_definition"
+            | "field_definition"
+            | "variable_declarator"
     )
 }
 
@@ -248,8 +252,10 @@ fn javascript_like_function_value(owner: Node<'_>, value: Node<'_>) -> bool {
     if javascript_like_function_node(value) {
         return true;
     }
-    matches!(owner.kind(), "pair" | "public_field_definition")
-        && javascript_like_function_factory_call(value, 0)
+    matches!(
+        owner.kind(),
+        "pair" | "public_field_definition" | "field_definition"
+    ) && javascript_like_function_factory_call(value, 0)
 }
 
 fn javascript_like_function_factory_call(value: Node<'_>, depth: usize) -> bool {
@@ -388,7 +394,7 @@ fn export_statement_ancestor(mut node: Node<'_>) -> Option<Node<'_>> {
 fn function_value_node(node: Node<'_>) -> Option<Node<'_>> {
     match node.kind() {
         "assignment_expression" => node.child_by_field_name("right"),
-        "pair" | "public_field_definition" | "variable_declarator" => {
+        "pair" | "public_field_definition" | "field_definition" | "variable_declarator" => {
             node.child_by_field_name("value")
         }
         _ => None,
@@ -401,6 +407,7 @@ fn function_value_name(content: &str, node: Node<'_>) -> Option<String> {
             assignment_target_name(content, node.child_by_field_name("left")?)
         }
         "pair" => named_property_text(content, node.child_by_field_name("key")?),
+        "field_definition" => named_property_text(content, node.child_by_field_name("property")?),
         "public_field_definition" | "variable_declarator" => {
             named_property_text(content, node.child_by_field_name("name")?)
         }

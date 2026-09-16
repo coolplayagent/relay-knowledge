@@ -275,3 +275,7 @@ relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor 
 HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包括 `ref`、JSON 数组字符串 `path_filters`、`limit` 和 `cursor`；CLI 支持 `--remote`。MCP 工具为 `relay_code_diagnostics`，接受 `repository`、`ref_selector`、`path_filters`、`limit`、`cursor`，并遵守授权及上下文预算。
 
 此变更复用现有诊断表，无需迁移或重建索引。升级时应将 agent 的完整性判断改为读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。
+
+跨语言配置与类型归属升级会变更代码事实身份，并新增可空的符号归属列。已有仓库作用域一次性标记 stale，由现有持久化索引任务重建事实，并在发布前创建 v4 类型归属查询索引。无需安装编译器、语言服务、新服务或非托管后台进程。升级、取消和重试继续保留任务租约、检查点和单写者发布屏障。切换二进制版本前备份运行时状态；回滚使用匹配备份或由所选版本重新构建索引，不能把新事实直接标记为旧版本兼容。
+
+schema marker 9 同时增加类型归属检查点游标。打开旧数据库时迁移会校验所需列，启动阶段不会为已有大表立即构建归属查询索引。旧版已经完成的粗粒度检查点，不能作为新事实版本已经提取的证明。

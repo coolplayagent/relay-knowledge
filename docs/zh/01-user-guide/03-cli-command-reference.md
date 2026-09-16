@@ -6,7 +6,7 @@
 
 当请求 `--format json` 或 `--format streaming-json` 时，写入 stderr 的解析诊断和运行期 API 失败都会使用 JSON。运行期 API 失败沿用稳定 API 错误结构，包含 `error_kind`、`message` 和可选 `metadata`；text 和 markdown 格式继续输出便于人工阅读的 stderr 消息。
 
-需要从本地 CLI 访问已部署常驻服务时，使用全局 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`。远端模式覆盖 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo graph`、`repo context`、`repo framework`、`repo feature-flags`、`repo impact`、`repo report`、`repo software`（包括 `export`）和 `repo view`，用于访问服务端已经注册的仓库。`repo index --reset` 和 `repo index-worker` 在远端模式选中时会被拒绝，必须在服务端机器执行；仅设置环境变量时，`status`、`health` 等无关本地命令继续使用本机 runtime state。
+需要从本地 CLI 访问已部署常驻服务时，使用全局 `--remote <base-url>` 或 `RELAY_KNOWLEDGE_REMOTE_BASE_URL`。远端模式覆盖 `repo list`、`repo index`、`repo update`、`repo scope preview`、`repo status`、`repo query`、`repo graph`、`repo context`、`repo framework`、`repo feature-flags`、`repo impact`、`repo report`、`repo diagnostics`、`repo software`（包括 `export`）、`repo business` 和 `repo view`，用于访问服务端已经注册的仓库。`repo index --reset` 和 `repo index-worker` 在远端模式选中时会被拒绝，必须在服务端机器执行；仅设置环境变量时，`status`、`health` 等无关本地命令继续使用本机 runtime state。
 
 ## 3.1 常用状态命令
 
@@ -112,7 +112,7 @@ relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definiti
 relay-knowledge repo graph <alias> --focus <path> --path <root> [--ref <ref>] [--depth 1|2] [--node-limit <n>] [--edge-limit <n>]
 relay-knowledge repo context <alias> --query <text> [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--max-context-bytes <n>] [--no-code] [--exclude-generated]
 relay-knowledge repo framework <alias> [--query <text>] [--framework angular|vue] [--kind component|directive|pipe|template|input|output|prop|emit|model|slot|template-variable|control-flow] [--ref <ref>] [--path <filter>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
-relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>] [--domain <domain>] [--source <format>] [--hot-reload true|false] [--consistency]
+relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>] [--domain <domain>] [--source <format>] [--hot-reload true|false] [--consistency] [--freshness allow-stale|wait-until-fresh|graph-only]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
 relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|modules|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--path <prefix>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--cursor <token>]
@@ -151,7 +151,7 @@ Kind 取值按命令家族隔离：
   `input`、`output`、`prop`、`emit`、`model`、`slot`、`template-variable`、
   `control-flow`。
 - `repo software --kind`：`dependencies`、`sdks`、`files`、`topics`、
-  `relationships`、`build`、`iac`、`design`、`systems`、`apis`、
+  `relationships`、`build`、`modules`、`iac`、`design`、`systems`、`apis`、
   `resources`、`tests`、`deployments`、`releases`、`statements`、
   `conflicts`、`all`。
 - `repo business --kind`：`terms`、`mappings`、`all`。
@@ -163,7 +163,8 @@ Kind 取值按命令家族隔离：
 - `map source add|update --kind`：`repo`、`file`、`doc`、`config`、`db`、
   `ci`、`runtime`、`wiki`、`monitoring`。
 
-不要跨命令家族复用 kind 取值。影响分析使用 `repo impact`，Angular/Vue template 语义使用
+不要跨命令家族复用 kind 取值。影响分析使用 `repo impact`，Angular/Vue template 语义使用 `repo framework`，feature flag 使用 `repo feature-flags`；它们不是 `repo query --kind` 的取值。
+
 Java 继承字符串常量通过已索引父类型解析；子类声明同名字段（包括非常量字段）会阻断继承别名，并保留 private/package 访问边界。类型证据仅加载相关符号所属类型、平台遮蔽候选及受界的关联继承关系（1,000 个类型、64 轮、4 MiB），无关 Java 声明不会耗尽简单读取查询的预算。dotenv 布尔定义归入环境变量命名空间，使已索引定义可满足环境变量读取的一致性检查。Consul 抽取及模板存在性检查要求 `.ctmpl` 扩展名；Helm 清单与通用 Go 模板不会产生 Consul 配置分组。
 
 dotenv（.env）赋值均索引为环境变量定义，包括布尔、字符串、数字及未知值；--source dotenv 可筛选其证据。Consul 动态输出键计为定义，Java 键常量本身不计为定义。单一 owner 的静态通配键导入保留符号并在快照内解析，多 owner 保持歧义；存在通配歧义的父类型依据同包声明校正。静态平台导入会先检查已索引继承成员签名及 Java 可见性。已证明的 Boolean 转换为无默认值的 System.getProperty 读取保留 false 回退；转换类型被遮蔽时撤销该回退。无条件 Shell 大括号组中的 export 可查找外层赋值，并在 unset 或执行作用域边界停止。提取测试由 Java、names、types、files 和 Shell owner 直接挂载；registry facade 仅保留元数据及装配契约，fixture 放在 test_support。
@@ -172,9 +173,7 @@ dotenv（.env）赋值均索引为环境变量定义，包括布尔、字符串�
 
 已证明的 Boolean 转换按有效布尔值比较显式属性回退（例如 TRUE 转为 true）；转换被同包类型遮蔽时恢复原始回退值。Shell unset 参数按引号及转义语法解码。领域注释必须非空，且小写规范化前后均不超过 128 个 UTF-8 字节；非法领域元数据被忽略，不丢弃配置事实，也不阻断索引发布。
 
-`repo framework`，feature flag 使用 `repo feature-flags`；它们不是 `repo query --kind` 的取值。
-
-`--path` 是 CLI 中 path filter 的参数名。`repo register --path` 保存索引范围，`repo query --path`、`repo framework --path` 和 `repo feature-flags --path` 只在该已索引范围内收窄读取。`repo index` 不接受 `--path`，它使用注册范围和选定的 `--ref`。非 Git 源码目录的常规移动文件系统快照使用 `HEAD`，状态里会记录解析后的 `filesystem:<hash>` commit。`worktree` 是 Git worktree overlay selector，不是非 Git 目录的默认 ref。
+`--path` 是 CLI 中 path filter 的参数名。`repo register --path` 保存索引范围，`repo query --path`、`repo framework --path`、`repo software --path`、`repo diagnostics --path` 和 `repo feature-flags --path` 只在该已索引范围内收窄读取。`repo index` 不接受 `--path`，它使用注册范围和选定的 `--ref`。非 Git 源码目录的常规移动文件系统快照使用 `HEAD`，状态里会记录解析后的 `filesystem:<hash>` commit。`worktree` 是 Git worktree overlay selector，不是非 Git 目录的默认 ref。
 
 冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。对于显式提供 `--reuse-historical` 的 Git 仓库，目标 scope 尚未 fresh 时会沿目标 commit 的第一父链检查最近 10 个祖先；若其中最近的兼容 scope 已发布且仍是当前 fact version，服务会把这次 full 请求固定为真实的 `Incremental { base_ref, head_ref }` 任务。该选择会显示在 `task.mode` 和完成摘要的 `base_resolved_commit_sha` 中；没有兼容基线或 base→head diff 超过历史复用专用的 100 changed-path 上限时，自动回退 checkpointed full index。未提供 `--reuse-historical` 时，`repo index` 保持默认的 checkpointed full-index 行为。非交互式 agent 可以用 `repo index-worker --task-id <id> --format json` 显式单次消费 queued 或 retrying 任务；每次调用还会推进一次有界 scope-retention pass，并返回 `maintenance_active` 与可选 `maintenance_error`。maintenance error 非空表示该 retention pass 失败，它与 code-index task 结果分开报告，此时不能把 `maintenance_active=false` 当作 drain 完成；应查看 `repo status`、处理错误，再重试一次有界 pass。未运行 `service run` 时，应重复本地命令到它和 `repo status` 都不再报告 pending maintenance。`service worker run [--task-id <id>] --format json` 是 split-worker preview 入口，只 claim 一个 durable code-index task，并通过 task id、lease owner 和 attempt count 完成或失败该任务；它不暴露上述本地 retention 字段。`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。`repo index <alias> --reset --format json` 会清理该仓库未完成 task 的 stale lease，但不会删除已经完成的 indexed scope，也不会复活 terminal dead-letter 历史任务。每个仓库同时只有一个 live index writer；查询、报告、graph 读取、file query 和 health 诊断在 SQLite WAL 允许时走有界只读连接读取已提交快照。
 
@@ -202,7 +201,7 @@ dotenv（.env）赋值均索引为环境变量定义，包括布尔、字符串�
 
 `repo feature-flags --query` 最多接受 10,000 个 UTF-8 字节、64 个词，每个词在大小写规范化后最多 256 个 UTF-8 字节。超限会在构造 SQL 前返回明确的输入预算错误，不会静默截断查询词。
 
-配置注册表支持 `--domain <domain>`（显式注释中的领域值）、`--source java|properties|ini|ctmpl|shell|dotenv` 和 `--hot-reload true|false`。来源和领域值不区分大小写；未知领域或热加载元数据不匹配显式过滤条件。过滤条件选择配置分组，并保留其关联使用关系。`--query` 使用 Unicode 小写匹配。`--consistency` 增加读取未定义、缺少格式和默认值冲突诊断；`conflicting_default_sources` 给出每个默认值对应的路径、行号和 excerpt。关联绑定未解析或值流不受支持时，相应分组标记 `analysis_complete: false`，不推断缺失，但仍报告已加载默认值证明的冲突；数据过期或降级时不输出确定的一致性结论；无关分组仍可独立分析。使用关系、字节、符号、展开深度或 SQLite 查询超出预算时返回明确的分析不完整错误，需要收窄查询范围。Java 嵌套类型及带显式注释的常量字段参与绑定解析。配置行号范围不包含末尾换行符。 绑定结果和配置证据按引用及剩余深度缓存，避免接口使用关系重复扫描全部实现。Java getter 标记计入每文件 10,000 条事实预算，getter 收集也受限。局部变量守卫不匹配无关的同名方法或字段。Shell 定义要求主 shell 中无条件的赋值和导出；条件分支、延迟执行函数及子 shell 内的导出不能证明主 shell 配置已定义。
+配置注册表支持 `--domain <domain>`（显式注释中的领域值）、`--source <format>` 和 `--hot-reload true|false`。来源和领域值不区分大小写；未知领域或热加载元数据不匹配显式过滤条件。过滤条件选择配置分组，并保留其关联使用关系。`--query` 使用 Unicode 小写匹配。`--consistency` 增加读取未定义、缺少格式和默认值冲突诊断；`conflicting_default_sources` 给出每个默认值对应的路径、行号和 excerpt。关联绑定未解析或值流不受支持时，相应分组标记 `analysis_complete: false`，不推断缺失，但仍报告已加载默认值证明的冲突；数据过期或降级时不输出确定的一致性结论；无关分组仍可独立分析。使用关系、字节、符号、展开深度或 SQLite 查询超出预算时返回明确的分析不完整错误，需要收窄查询范围。Java 嵌套类型及带显式注释的常量字段参与绑定解析。配置行号范围不包含末尾换行符。 绑定结果和配置证据按引用及剩余深度缓存，避免接口使用关系重复扫描全部实现。Java getter 标记计入每文件 10,000 条事实预算，getter 收集也受限。局部变量守卫不匹配无关的同名方法或字段。Shell 定义要求主 shell 中无条件的赋值和导出；条件分支、延迟执行函数及子 shell 内的导出不能证明主 shell 配置已定义。
 
 配置注解只接受相应格式的注释语法，执行语句和字符串不能提供元数据。Java 无接收者的零参数 getter 调用仅绑定可见的已声明方法，字符串按有界 Java 转义规则解码。Shell 条件赋值后仍保留可能的继承环境变量读取。绑定或流分析不完整时不推断缺失，但保留已加载默认值能够证明的冲突及其来源位置。
 
@@ -305,7 +304,7 @@ relay-knowledge repo business demo --kind all --ref HEAD --format json
 
 HEAD 只读取已提交文件；即使重新索引 HEAD，也不会加载未提交的词表。
 
-响应移除含义混杂的 `resolution` 和顶层业务 `status`。`request.mode` 由是否存在 `query` 推导为 `list` 或 `search`，忽略调用方传入的 mode。`result.status` 为 `matched`、`no_match`、`ambiguous` 或 `unavailable`；仅搜索命中时返回 `result.match_type=exact|partial`。返回术语/映射计数表示输出切片的实际数量，`truncated` 标记分页。kind 准入、domain/文本匹配先于结果判定和 limit，避免无映射术语占据映射查询名额，也避免截断掩盖跨域精确匹配歧义。多个 domain ID 共用名称时，按该名称筛选仍可能有歧义，应指定唯一 ID。
+响应移除含义混杂的 `resolution` 和顶层业务 `status`。`request.mode` 由是否存在 `query` 推导为 `list` 或 `search`，忽略调用方传入的 mode。`result.status` 为 `matched`、`no_match`、`ambiguous` 或 `unavailable`；仅搜索命中时返回 `result.match_type=exact|partial`。返回术语/映射计数表示输出切片的实际数量，`truncated` 标记因 `--limit` 截断的结果，`repo business` 不提供续页游标。kind 准入、domain/文本匹配先于结果判定和 limit，避免无映射术语占据映射查询名额，也避免截断掩盖跨域精确匹配歧义。多个 domain ID 共用名称时，按该名称筛选仍可能有歧义，应指定唯一 ID。
 
 `knowledge.state` 由 scope 整体持久化计数推导为 `no_sources`、`empty_glossary`、`terms_only` 或 `mapped`，同一对象保留计数、repository/commit/scope 身份、图版本和 `stale`。`mapped` 仅表示至少一条声明映射，不保证全覆盖或目标已解析；各 mapping 的 `resolution_state` 不变。`graph-only` 返回 `unknown` 知识状态和 `unavailable` 结果，零计数仅是未读取投影的占位值。无业务源返回 `unavailable`，已索引空词表返回 `no_match`。`allow-stale` 可同时返回 `matched` 和 `knowledge.stale=true`；存储读取失败继续返回错误。
 
@@ -327,3 +326,5 @@ relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor 
 HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包括 `ref`、JSON 数组字符串 `path_filters`、`limit` 和 `cursor`；CLI 支持 `--remote`。MCP 工具为 `relay_code_diagnostics`，接受 `repository`、`ref_selector`、`path_filters`、`limit`、`cursor`，并遵守授权及上下文预算。
 
 此变更复用现有诊断表，无需迁移或重建索引。升级时应将 agent 的完整性判断改为读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。
+
+配置来源过滤也接受[语言能力矩阵](05-code-repository-graph-workflow.md#510-语言能力矩阵)中的规范代码语言标识；`shell`、`ctmpl` 和 `dotenv` 保持不变。CLI help 与 MCP schema 复用同一份经过校验的来源清单。

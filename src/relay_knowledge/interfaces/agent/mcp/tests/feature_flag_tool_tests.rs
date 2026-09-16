@@ -44,6 +44,7 @@ pub fn checkout_enabled() -> bool {
             arguments: json!({
                 "repository": "fixture",
                 "query": "CHECKOUT",
+                "source": "rust",
                 "limit": 5,
                 "freshness": "wait-until-fresh"
             }),
@@ -67,6 +68,13 @@ pub fn checkout_enabled() -> bool {
         outcome.result
     );
     assert_eq!(structured["flags"][0]["source_key"], "CHECKOUT_V2");
+    assert!(
+        structured["flags"][0]["usages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|usage| usage["metadata"]["source_format"] == "rust")
+    );
 
     let audit = server.audit_snapshot();
     let event = audit.last().expect("tool call should write audit event");

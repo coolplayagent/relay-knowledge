@@ -277,10 +277,16 @@ not use
 Use `--path` only where the CLI supports a path filter: `repo register` stores
 the indexed scope, while `repo query` and `repo feature-flags` narrow reads
 inside an already indexed scope. Do not pass `--path` to `repo index`,
-`repo scope preview`, `repo update`, `repo impact`, or `repo software`; those
+`repo scope preview`, `repo update`, or `repo impact`; those
 commands use the registered scope plus their ref arguments. For non-Git source
 directories, use `--ref HEAD` for the normal moving filesystem snapshot. The
 `worktree` selector is for Git worktree overlays only.
+
+`repo software --path` accepts module/file prefixes, and `repo diagnostics
+--path` filters persisted file diagnostics inside the indexed scope. For Maven
+pagination, parser-validated previews, and partial-content diagnosis, read
+[CLI workflows](references/cli-workflows.md). Check both version freshness and
+`content_integrity`; a fresh snapshot can still have partial content.
 
 ### Repository Knowledge Bootstrap
 
@@ -377,6 +383,8 @@ overview beyond one symbol-level code query:
 - `relationships`: cross-domain relationships between files, topics, configs,
   dependencies, SDK/API usages, build targets, IaC resources, and design facts.
 - `build`: build target and build-manifest facts.
+- `modules`: Maven reactor modules and declared dependency edges; use
+  `dependencies` when package components and source usages are also needed.
 - `iac`: infrastructure-as-code resource facts.
 - `design`: design documentation and design element facts.
 - `all`: all software graph slices for repository overviews or when the user
@@ -386,6 +394,8 @@ For prompts like "show graph relationships", "what relates these modules",
 "dependency paths", "software architecture map", or "代码图关系", prefer
 `--kind relationships` first. Use `--kind all` when the user asks for a broad
 inventory that should include relationship context and all supporting slices.
+For `dependencies` and `modules`, follow `next_cursor` with the same pinned ref,
+kind and filters until absent; a single page is not the complete inventory.
 
 ```bash
 relay-knowledge repo software core \
@@ -405,6 +415,11 @@ when both are required. Pin `--ref`; add `--domain` when homonyms exist. Treat
 an `ambiguous` response as a request for domain evidence, never as permission
 to guess. Preserve unresolved `target_hint` metadata and use it as a bounded
 `repo context` or `repo query` seed rather than declaring repository damage.
+Read `result.status` for the query outcome and `knowledge.state` for scope-wide
+glossary readiness; the old top-level business `status` and `resolution` are
+removed. `map init` creates an empty glossary, not inferred terms. Follow
+[business authoring and readiness](references/knowledge-map-workflows.md)
+when sources, terms, or mappings are missing.
 
 ```bash
 relay-knowledge map route business-knowledge --type knowledge --format json
@@ -420,7 +435,8 @@ relay-knowledge repo business core \
 
 ### Feature Flags
 
-For feature flag, config gate, environment-variable gate, settings gate,
+For configuration definitions, reads, consistency checks, feature flags,
+config gates, environment-variable gates, settings gates,
 gray-release switch, or guarded-code prompts, use the separate
 `repo feature-flags` command. Do not invent `repo query --kind feature_flag`;
 feature flags are indexed graph facts, not a normal query kind.
@@ -438,6 +454,12 @@ relay-knowledge repo feature-flags core \
 scope. It must not recursively scan source at query time. After adding or
 fixing feature flag extraction rules, run `repo index` or `repo update` before
 expecting new facts in this command.
+Use `--domain`, `--source`, and `--hot-reload true|false` for explicit registry
+metadata filters; use `--consistency` for missing definitions/formats and
+conflicting defaults. Follow [configuration workflows](references/cli-workflows.md)
+to distinguish static evidence, unresolved analysis, and live runtime values.
+Use the [language capability guide](references/language-capabilities.md) when
+selecting cross-language type queries or configuration source filters.
 
 ### Spec-Grounded Incremental Loop
 

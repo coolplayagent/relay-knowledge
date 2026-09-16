@@ -33,6 +33,14 @@ pub(super) fn rebuild(
             .push(symbol);
         by_symbol_id.insert(symbol.symbol_snapshot_id.as_str(), symbol);
     }
+    for symbols in by_path.values_mut() {
+        symbols.sort_by_key(|symbol| {
+            (
+                symbol.byte_range.start,
+                std::cmp::Reverse(symbol.byte_range.end),
+            )
+        });
+    }
     let mut insert_call = transaction.prepare(
         "
         INSERT INTO code_repository_calls (
@@ -47,7 +55,7 @@ pub(super) fn rebuild(
         "
         SELECT reference_id, file_id, path, name, line_start, line_end,
                target_symbol_snapshot_id, target_hint, resolution_state,
-               confidence_basis_points, confidence_tier
+               confidence_basis_points, confidence_tier, byte_start
         FROM code_repository_references
         WHERE source_scope = ?1 AND kind = 'call'
         ",
@@ -55,7 +63,8 @@ pub(super) fn rebuild(
     let mut references = select_references.query(params![source_scope])?;
     while let Some(row) = references.next()? {
         let reference = ReferenceKey::from_row(row)?;
-        let caller = caller_for_line(by_path.get(reference.path.as_str()), reference.line_start);
+        let caller =
+            caller_for_position(by_path.get(reference.path.as_str()), reference.byte_start);
         let callee = reference
             .target_symbol_snapshot_id
             .as_deref()
@@ -97,16 +106,16 @@ pub(super) fn rebuild(
     search_documents::rebuild_call_search_documents(transaction, source_scope)
 }
 
-pub(super) fn caller_for_line<'a>(
+pub(super) fn caller_for_position<'a>(
     symbols: Option<&Vec<&'a SymbolKey>>,
-    line: u32,
+    byte: u32,
 ) -> Option<&'a SymbolKey> {
     let symbols = symbols?;
-    let candidate_end = symbols.partition_point(|symbol| symbol.line_range.start <= line);
+    let candidate_end = symbols.partition_point(|symbol| symbol.byte_range.start <= byte);
     symbols[..candidate_end]
         .iter()
         .rev()
-        .find(|symbol| symbol.line_range.end >= line)
+        .find(|symbol| symbol.byte_range.end > byte)
         .copied()
 }
 
@@ -123,6 +132,7 @@ struct ReferenceKey {
     resolution_state: String,
     confidence_basis_points: u16,
     confidence_tier: String,
+    byte_start: u32,
 }
 
 impl ReferenceKey {
@@ -139,6 +149,7 @@ impl ReferenceKey {
             resolution_state: row.get(8)?,
             confidence_basis_points: row.get(9)?,
             confidence_tier: row.get(10)?,
+            byte_start: row.get(11)?,
         })
     }
 }

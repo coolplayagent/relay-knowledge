@@ -31,6 +31,9 @@ pub struct CodeFileFingerprint {
 /// Symbol definition extracted from tree-sitter syntax.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryCodeSymbolRecord {
+    /// Structured direct type ownership extracted from syntax, never inferred at query time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_owner: Option<CodeTypeOwner>,
     pub repository_id: String,
     pub source_scope: String,
     pub symbol_snapshot_id: String,
@@ -48,6 +51,35 @@ pub struct RepositoryCodeSymbolRecord {
     pub line_range: RepositoryCodeRange,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol_role: Option<SymbolRole>,
+}
+
+/// Snapshot-local type identity shared by declarations and directly owned callables.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeTypeOwner {
+    /// Language and lexical/module identity; does not depend on a display name search.
+    pub identity: String,
+    /// `declaration`, `direct_member`, or `trait_member`.
+    pub relation: String,
+    /// Source spelling retained for unresolved external or ambiguous owners.
+    pub target_hint: String,
+    /// Exact language/module/type lookup evidence for detached declarations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lookup_identity: Option<String>,
+    /// `lexical`, `rust_impl`, `go_receiver`, `cpp_qualified`, or `swift_extension`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub basis: Option<String>,
+    /// `resolved`, `unresolved`, or `ambiguous`; missing on legacy JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution_state: Option<String>,
+    /// Repository-relative targets proved by an explicit source import.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_paths: Vec<String>,
+    /// Original explicit module/type target, preserving import aliases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_target: Option<String>,
+    /// Visibility relevant to a detached implementation importing this declaration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<String>,
 }
 
 /// Reference extracted from tree-sitter syntax and optionally resolved.

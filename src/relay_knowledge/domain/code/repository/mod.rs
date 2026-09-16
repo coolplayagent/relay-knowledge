@@ -1,5 +1,5 @@
 mod config_registry;
-pub use config_registry::{CodeConfigFilter, CodeConfigMetadata};
+pub use config_registry::{CODE_CONFIG_SOURCE_FORMATS, CodeConfigFilter, CodeConfigMetadata};
 
 mod diagnostics;
 pub use diagnostics::{
@@ -16,7 +16,7 @@ mod validation;
 
 pub use indexed_records::{
     CodeCallRecord, CodeFeatureFlagRecord, CodeFileDiagnostic, CodeFileFingerprint,
-    CodeImportRecord, CodePathTombstone, CodeRouteRecord, RepositoryCodeChunkRecord,
+    CodeImportRecord, CodePathTombstone, CodeRouteRecord, CodeTypeOwner, RepositoryCodeChunkRecord,
     RepositoryCodeFileRecord, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
 };
 pub use registration::{

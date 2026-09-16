@@ -71,15 +71,15 @@ fn conversion<'a>(call: Node<'_>, content: &'a str) -> Option<&'a str> {
         && (owner.starts_with("java.lang.") || names::platform_visible(call, simple, content)))
     .then_some(owner)
 }
-pub(super) fn inside_getter(mut node: Node<'_>, content: &str) -> bool {
+pub(super) fn inside_getter(mut node: Node<'_>) -> bool {
     while let Some(parent) = node.parent() {
         if parent.kind() == "method_declaration" {
-            return parent.child_by_field_name("name").is_some_and(|n| {
-                let name = names::text(n, content);
-                name.starts_with("get") || name.starts_with("is")
-            }) && parent
+            return parent
                 .child_by_field_name("parameters")
-                .is_some_and(|p| p.named_child_count() == 0);
+                .is_some_and(|p| p.named_child_count() == 0)
+                && parent
+                    .child_by_field_name("type")
+                    .is_some_and(|t| t.kind() != "void_type");
         }
         if matches!(parent.kind(), "lambda_expression" | "class_declaration") {
             return false;

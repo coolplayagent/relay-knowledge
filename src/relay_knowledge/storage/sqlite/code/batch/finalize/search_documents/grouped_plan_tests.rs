@@ -804,7 +804,9 @@ fn grouped_database() -> Connection {
                  '[]', '[]', 1, 1, 1, 1, 2048, 0, 1, NULL,
                  '{\"max_files_per_batch\":1,\"max_bytes_per_batch\":1048576,\"max_rows_per_batch\":1538}',
                  1, NULL
-             );",
+             );
+             ALTER TABLE code_repository_index_checkpoints ADD COLUMN type_owner_cursor TEXT;
+             ALTER TABLE code_repository_index_checkpoints ADD COLUMN incremental_summary_json TEXT;",
         )
         .expect("grouped schema should initialize");
     connection

@@ -290,12 +290,17 @@ async fn reloaded_finalization_bound_covers_pages_added_after_zero_count_begin()
     queued_steps.push_back(CodeIndexFinalizationStep::Ready(Box::new(test_summary())));
     let steps = Arc::new(Mutex::new(queued_steps));
     let events = Arc::new(Mutex::new(Vec::new()));
-    let begin_max_steps =
-        code_index_finalization_max_steps(begin_checkpoint.committed_reference_count)
-            .expect("zero-reference begin checkpoint should retain a finite bound");
+    let begin_max_steps = code_index_finalization_max_steps(
+        begin_checkpoint.committed_reference_count,
+        begin_checkpoint.committed_symbol_count,
+    )
+    .expect("zero-reference begin checkpoint should retain a finite bound");
     assert!(pending_page_count + 1 > begin_max_steps);
-    let max_steps = code_index_finalization_max_steps(latest_checkpoint.committed_reference_count)
-        .expect("reference count should derive a bound above thirty pages");
+    let max_steps = code_index_finalization_max_steps(
+        latest_checkpoint.committed_reference_count,
+        latest_checkpoint.committed_symbol_count,
+    )
+    .expect("reference count should derive a bound above thirty pages");
 
     let summary = drive_code_index_finalization(
         "scope",
@@ -511,7 +516,7 @@ fn finalization_step_bound_covers_worst_case_preserve_resume_repair() {
 #[test]
 fn finalization_step_bound_derives_worst_case_byte_limited_reference_pages() {
     let reference_count = 17usize;
-    let derived = code_index_finalization_max_steps(reference_count)
+    let derived = code_index_finalization_max_steps(reference_count, 0)
         .expect("bounded reference count should derive a step cap");
 
     assert_eq!(

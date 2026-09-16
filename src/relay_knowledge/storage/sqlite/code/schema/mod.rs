@@ -47,6 +47,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "INTEGER NOT NULL DEFAULT 0",
     )?;
     initialize_index_task_schema(connection)?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_index_checkpoints",
+        "type_owner_cursor",
+        "TEXT",
+    )?;
     initialize_repository_set_schema(connection)?;
     initialize_search_schema(connection)?;
     super::super::schema::columns::ensure_column(
@@ -69,10 +75,23 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "TEXT",
     )?;
     super::generated::backfill_all_path_generated_flags(connection)?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_symbols",
+        "type_owner_json",
+        "TEXT",
+    )?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_symbols",
+        "type_owner_identity",
+        "TEXT",
+    )?;
     mark_legacy_generated_detection_scopes_stale_once(connection)?;
     mark_legacy_route_extraction_scopes_stale_once(connection)?;
     mark_legacy_markdown_scopes_stale_once(connection)?;
     mark_legacy_framework_graph_scopes_stale_once(connection)?;
+    mark_legacy_semantic_scopes_stale_once(connection)?;
     mark_legacy_search_owner_scopes_stale_once(connection)?;
     mark_legacy_reference_search_group_scopes_stale_once(
         connection,
@@ -101,6 +120,18 @@ fn mark_legacy_framework_graph_scopes_stale_once(
         [],
     )?;
     mark_code_schema_migration(&transaction, FRAMEWORK_GRAPH_REINDEX_MIGRATION)?;
+    transaction.commit().map_err(StorageError::from)
+}
+
+fn mark_legacy_semantic_scopes_stale_once(connection: &Connection) -> Result<(), StorageError> {
+    const MIGRATION: &str = "portable-config-and-type-ownership-reindex-v1";
+    if code_schema_migration_applied(connection, MIGRATION)? {
+        return Ok(());
+    }
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute("UPDATE code_repository_scopes SET stale = 1", [])?;
+    transaction.execute("UPDATE code_repositories SET stale = 1 WHERE last_indexed_scope_id IN (SELECT source_scope FROM code_repository_scopes WHERE stale != 0)", [])?;
+    mark_code_schema_migration(&transaction, MIGRATION)?;
     transaction.commit().map_err(StorageError::from)
 }
 

@@ -2,6 +2,21 @@ use super::*;
 use crate::code::feature_flags::registry::test_support::*;
 
 #[test]
+fn arbitrary_zero_argument_getter_names_keep_local_assignment_guards() {
+    let rows = facts(
+        "java",
+        "class Reader {String flag(){return System.getenv(\"FEATURE\");} void run(){String value=flag(); if(value!=null){}}}",
+    );
+    assert!(rows.iter().any(|r| r.source_key == "FEATURE"
+        && r.metadata.declared_getter.as_deref() == Some("Reader.flag")));
+    assert!(
+        rows.iter().any(|r| r.edge_kind == "guards_code"
+            && r.metadata.reference.as_deref() == Some("Reader.flag")),
+        "{rows:?}"
+    );
+}
+
+#[test]
 fn return_only_getters_ignore_comments_but_not_executable_statements() {
     let rows = facts(
         "java",
@@ -35,7 +50,9 @@ fn local_guard_reads_exclude_unrelated_method_and_field_names() {
     }}"#,
     );
     assert_eq!(
-        rows.iter().filter(|r| r.edge_kind == "guards_code").count(),
+        rows.iter()
+            .filter(|r| r.edge_kind == "guards_code" && r.source_key == "feature_x")
+            .count(),
         2
     );
 }
@@ -52,6 +69,7 @@ fn java_getter_markers_and_collection_obey_the_file_budget() {
         }
         source.push('}');
         let error = extract(&FeatureFlagFileInput {
+            syntax_root: None,
             repository_id: "repo",
             source_scope: "scope",
             file_id: "file",
@@ -222,6 +240,7 @@ fn java_guard_scan_exhaustion_is_explicit() {
         "work();".repeat(700)
     );
     let error = extract(&FeatureFlagFileInput {
+        syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
         file_id: "file",

@@ -45,8 +45,8 @@ pub(super) fn search(
     let Some(identity) = SymbolIdentityQuery::from_query(&request.query) else {
         return Ok(None);
     };
-    // Existing Java qualified names encode file paths, not declared packages.
-    // Only short class names can use this aggregation without new index facts.
+    // The public query contract uses short type names; qualified selectors
+    // continue through the existing symbol-identity path.
     if identity.is_scoped() {
         return Ok(None);
     }
@@ -56,12 +56,23 @@ pub(super) fn search(
         Some(move || counter.fetch_add(1, Ordering::Relaxed) >= MAX_WORK_CALLBACKS),
     );
     let _budget = WorkBudget(connection);
-    let result = class_members::resolve(connection, required_scope(status)?, identity.leaf_name())
-        .and_then(|members| {
-            members
-                .map(|members| select_rows(connection, status, request, members))
-                .transpose()
-        });
+    let language_sql = language_filter_sql_for_columns("language_id", "path", status, request);
+    let mut language_values = Vec::new();
+    push_language_filter_values(&mut language_values, &status.language_filters);
+    push_language_filter_values(&mut language_values, &request.repository.language_filters);
+    push_language_filter_values(&mut language_values, &request.query_language_filters);
+    let result = class_members::resolve(
+        connection,
+        required_scope(status)?,
+        identity.leaf_name(),
+        &language_sql,
+        &language_values,
+    )
+    .and_then(|members| {
+        members
+            .map(|members| select_rows(connection, status, request, members))
+            .transpose()
+    });
     match result {
         Err(StorageError::Sqlite(rusqlite::Error::SqliteFailure(error, _)))
             if error.code == ErrorCode::OperationInterrupted =>

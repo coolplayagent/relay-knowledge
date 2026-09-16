@@ -27,6 +27,7 @@ pub(super) fn symbol(
     kind: &str,
 ) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: "git_snapshot:test".to_owned(),
         symbol_snapshot_id: format!("snapshot:{qualified_name}"),

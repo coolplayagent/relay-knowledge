@@ -124,6 +124,12 @@ fn generic_manual_definition(
         return None;
     }
     let kind = languages::definition_kind(language_id, node.kind())?;
+    if language_id == "kotlin"
+        && node.kind() == "companion_object"
+        && node.child_by_field_name("name").is_none()
+    {
+        return Some(("Companion".into(), kind, syntax_range(node)));
+    }
     let name = node.child_by_field_name("name")?;
     let range = languages::language_exported_declaration_range(language_id, node)
         .unwrap_or_else(|| syntax_range(node));

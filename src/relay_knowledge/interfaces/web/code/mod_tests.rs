@@ -339,9 +339,10 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
             .contains("query: must not be empty")
     );
 
-    let feature_flags_request =
+    let mut feature_flags_request =
         CodeFeatureFlagRequest::new(None, selector.clone(), 10, FreshnessPolicy::AllowStale)
             .expect("feature flags request should validate");
+    feature_flags_request.filters.source = Some("rust".into());
     let feature_flags = request_json(
         router.clone(),
         "POST",

@@ -580,7 +580,7 @@ fn expanded_and_consistency_usages_keep_containing_symbols() {
             ..Default::default()
         },
     );
-    db.execute_batch("INSERT INTO code_repository_symbols SELECT 'scope',path,0,999,'symbol:method','getX' FROM code_repository_feature_flags GROUP BY path;").unwrap();
+    db.execute_batch("INSERT INTO code_repository_symbols(source_scope,path,line_start,line_end,symbol_snapshot_id,name) SELECT 'scope',path,0,999,'symbol:method','getX' FROM code_repository_feature_flags GROUP BY path;").unwrap();
     for consistency in [false, true] {
         let groups = search(
             &db,

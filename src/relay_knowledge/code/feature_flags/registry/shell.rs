@@ -1,20 +1,27 @@
 //! Bounded lexical export state for shell configuration facts.
 use super::*;
 use tree_sitter::Node;
+mod getters;
 mod guards;
 mod options;
 mod values;
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
-    let mut parser = tree_sitter::Parser::new();
-    parser
-        .set_language(&tree_sitter_bash::LANGUAGE.into())
-        .map_err(|e| DomainError::invalid("shell", e.to_string()))?;
-    let tree = parser
-        .parse(input.content, None)
-        .ok_or_else(|| DomainError::invalid("shell", "parse cancelled"))?;
-    let mut pending = vec![tree.root_node()];
+    let owned_tree;
+    let root = if let Some(root) = input.syntax_root {
+        root
+    } else {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_bash::LANGUAGE.into())
+            .map_err(|e| DomainError::invalid("shell", e.to_string()))?;
+        owned_tree = parser
+            .parse(input.content, None)
+            .ok_or_else(|| DomainError::invalid("shell", "parse cancelled"))?;
+        owned_tree.root_node()
+    };
+    let mut pending = vec![root];
     let mut rows = Vec::new();
     while let Some(node) = pending.pop() {
         if node.kind() == "variable_assignment" && export_scope(node).is_some() {
@@ -198,6 +205,7 @@ pub(super) fn extract(
             row.metadata.flow_incomplete = Some("conditional_reassignment".into());
         }
     }
+    getters::project(input, root, &mut rows)?;
     Ok(rows)
 }
 

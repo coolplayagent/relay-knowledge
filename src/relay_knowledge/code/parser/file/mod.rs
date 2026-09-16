@@ -80,7 +80,7 @@ pub(in crate::code) fn parse_indexed_file(
         add_file_chunk(build, path, &file_id, "unknown", &content)?;
         record_dependencies(build, path, &file_id, &content)?;
         feature_flag_projection::record_feature_flags(
-            build, path, &file_id, "unknown", &content, None,
+            build, path, &file_id, "unknown", &content, None, None,
         )?;
         return Ok(());
     };
@@ -108,6 +108,7 @@ pub(in crate::code) fn parse_indexed_file(
             &file_id,
             language.id,
             &content,
+            None,
             None,
         )?;
         route_projection::record_routes(build, path, &file_id, language.id, &content);
@@ -167,6 +168,13 @@ pub(in crate::code::parser) fn parse_syntax_file(
         &config_definitions,
         &config_references,
         &mut output,
+    )?;
+    super::type_ownership::extract(
+        root,
+        input.content,
+        input.path,
+        input.language.id,
+        &mut output.symbols,
     )?;
     let mut embedded_imports = if input.language.id == "vue" {
         collect_vue_script_facts(build, &input, &mut output)?
@@ -231,6 +239,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
         input.language.id,
         input.content,
         Some(&config_definitions),
+        Some(root),
     )?;
     build.chunks.extend(chunks);
     route_projection::record_routes(
@@ -245,7 +254,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
 }
 
 fn collect_vue_script_facts(
-    build: &SnapshotBuild,
+    build: &mut SnapshotBuild,
     input: &SyntaxFileInput<'_>,
     output: &mut FileParseOutput,
 ) -> Result<Vec<crate::domain::CodeImportRecord>, CodeIndexError> {
@@ -274,17 +283,39 @@ fn collect_vue_script_facts(
     let symbol_start = output.symbols.len();
     records_from_captures(&context, captures, output)?;
     collect_manual_nodes(&context, root, &[], &[], output)?;
+    super::type_ownership::extract(
+        root,
+        input.content,
+        input.path,
+        embedded_language.id,
+        &mut output.symbols[symbol_start..],
+    )?;
     for symbol in &mut output.symbols[symbol_start..] {
         symbol.language_id = "vue".to_owned();
     }
-    collect_imports(
+    let imports = collect_imports(
         build,
         input.path,
         input.file_id,
         embedded_language.id,
         input.content,
         root,
-    )
+    )?;
+    let start = build.feature_flags.len();
+    feature_flag_projection::record_feature_flags(
+        build,
+        input.path,
+        input.file_id,
+        embedded_language.id,
+        input.content,
+        Some(&[]),
+        Some(root),
+    )?;
+    for row in &mut build.feature_flags[start..] {
+        row.language_id = "vue".to_owned();
+        row.metadata.source_format = "vue".to_owned();
+    }
+    Ok(imports)
 }
 
 fn record_syntax_failure_fallback(
@@ -308,6 +339,7 @@ fn record_syntax_failure_fallback(
         input.file_id,
         input.language.id,
         input.content,
+        None,
         None,
     )?;
     route_projection::record_routes(

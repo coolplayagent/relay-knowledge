@@ -21,6 +21,8 @@ const LEASE_OWNER: &str = "publication-barrier-worker";
 
 #[path = "publication_barrier_business_tests.rs"]
 mod business_projection_tests;
+#[path = "ownership_publication_tests.rs"]
+mod ownership_publication_tests;
 
 #[tokio::test]
 async fn active_scope_reference_search_rebuild_rejects_nonempty_owner_without_mutation() {
@@ -238,7 +240,7 @@ async fn staged_reference_search_advances_set_based_pages_without_becoming_query
             "finalizing:rebuild_reference_search:v2:discover:3",
             "finalizing:rebuild_reference_search:v2:build:0",
             "finalizing:rebuild_reference_search:v2:build:1",
-            "finalizing:query_index_repair:v3:16:resume:reference_search:v2:build:1",
+            "finalizing:query_index_repair:v4:16:resume:reference_search:v2:build:1",
             "finalizing:rebuild_reference_search:v2:build:1",
             "finalizing:rebuild_reference_search:v2:build:2",
             "finalizing:rebuild_reference_search:v2:build:3",

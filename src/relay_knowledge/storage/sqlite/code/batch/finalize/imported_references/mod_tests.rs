@@ -27,9 +27,9 @@ fn imported_symbol_resolution_requires_one_name_and_target_path_match() {
 
 fn symbol(symbol_snapshot_id: &str, path: &str, name: &str) -> SymbolKey {
     SymbolKey {
+        byte_range: RepositoryCodeRange { start: 0, end: 1 },
         symbol_snapshot_id: symbol_snapshot_id.to_owned(),
         path: path.to_owned(),
         name: name.to_owned(),
-        line_range: RepositoryCodeRange { start: 1, end: 2 },
     }
 }

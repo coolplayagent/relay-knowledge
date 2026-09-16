@@ -7,6 +7,7 @@ mod repository;
 mod repository_graph;
 mod repository_index;
 mod repository_set;
+pub(crate) mod rust_modules;
 mod staleness;
 mod views;
 mod workspace;
@@ -32,8 +33,8 @@ pub use graph_records::{
     RouteHandlerRole, SymbolRole,
 };
 pub use repository::{
-    CodeCallRecord, CodeConfigFilter, CodeConfigMetadata, CodeContentIntegrity,
-    CodeContentIntegrityState, CodeDiagnosticsCursor, CodeDiagnosticsPage,
+    CODE_CONFIG_SOURCE_FORMATS, CodeCallRecord, CodeConfigFilter, CodeConfigMetadata,
+    CodeContentIntegrity, CodeContentIntegrityState, CodeDiagnosticsCursor, CodeDiagnosticsPage,
     CodeDiagnosticsPageRequest, CodeDiagnosticsRequest, CodeFeatureFlagGraph,
     CodeFeatureFlagRecord, CodeFeatureFlagRequest, CodeFeatureFlagUsage, CodeFileDiagnostic,
     CodeFileFingerprint, CodeImpactPathGroups, CodeImpactRequest, CodeImportRecord, CodeIndexMode,
@@ -42,7 +43,7 @@ pub use repository::{
     CodeRepositoryRegistration, CodeRepositoryRemovalSummary, CodeRepositoryReport,
     CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals,
     CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, CodeRouteRecord,
-    CodeSymbolGenerationCounts, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
+    CodeSymbolGenerationCounts, CodeTypeOwner, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
     RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
     code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,

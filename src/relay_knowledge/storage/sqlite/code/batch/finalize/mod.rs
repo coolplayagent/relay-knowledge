@@ -10,6 +10,7 @@ pub(in crate::storage::sqlite::code) mod phases;
 pub(in crate::storage::sqlite::code::batch) mod references;
 pub(super) mod search_documents;
 mod symbols;
+pub(in crate::storage::sqlite::code::batch) mod type_ownership;
 
 #[cfg(test)]
 #[path = "tests/typescript.rs"]

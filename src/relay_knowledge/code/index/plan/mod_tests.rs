@@ -153,7 +153,15 @@ fn durable_reference_resolution_direct_and_nested_reopen_without_parsing_a_blob(
     let nested = crate::domain::code_reference_resolution_query_index_repair_state(16, parsed)
         .expect("nested repair cursor should format");
 
-    for state in [direct, nested] {
+    let ownership =
+        crate::domain::CodeQueryIndexRepairResumePhase::ownership_checkpoint_state("symbol:31")
+            .unwrap();
+    for state in [
+        direct,
+        nested,
+        "finalizing:resolve_type_ownership".into(),
+        ownership,
+    ] {
         let checkpoint = checkpoint_for_plan(&plan, &state, 3, 3);
         let (resumed, batch) = plan
             .clone()
@@ -372,6 +380,7 @@ fn batch_row_count_includes_feature_flags() {
     );
     build.feature_flags = crate::code::feature_flags::extract_feature_flags(
         crate::code::feature_flags::FeatureFlagFileInput {
+            syntax_root: None,
             repository_id: &build.repository_id,
             source_scope: &build.source_scope,
             file_id: "file",

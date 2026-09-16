@@ -453,3 +453,7 @@ clone_pinned_repository https://github.com/Alamofire/Alamofire.git /opt/workspac
 所有 repository target 都必须使用 `scope=all`，评估器会拒绝其他值。普通 full-scope 注册不会把 repository `path_filters` 或 `language_filters` 传给 `repo register`，默认 guardrail 会验证产品注册拒绝 `--language`；case 级 filter 继续用于验证查询端过滤能力。两个官方 framework target 使用独立 `registration_path_filters` 字段，只授权锁定的 Angular layout 与 Vue SFC playground 源码范围，同时在这些 scope 内保留全部索引阶段。缺失外部 dependency source 不是 parser、index、file、scope 或 response degradation，应暴露为 unresolved edge metadata，例如 `resolution_state` 和 `target_hint`，不能用 source/text fallback 掩盖授权范围、依赖覆盖或 parser 恢复问题。
 
 Fast `software_relationship_storage_cases` 门禁执行 `cargo test --lib software_relationship_storage -- --nocapture`，覆盖 4,096 map topic、零持久边写入/新增页、Unicode 规范化后的配置边去重、稳定 ID/证据、limit 前 scope 过滤与有界计数/查询耗时；16,384 条 usage fixture 要求窗口前 path/language 过滤至少减半 VM 工作量，规范化字符集必须与每个 Rust Unicode scalar 一致。该门禁保护 schema 8 去除冗余兼容边存储且保留类型化 ontology statement 的合同。
+
+fast/performance 的 `code_index_persistence_performance_suite` 还执行 `type_ownership_uses_indexed_membership` 和 `portable_configuration_bounds_unrelated_evidence`。用例分别加入 16,384 条无关 Rust 成员记录及 8,192 条无关 TypeScript 配置记录，测量 SQLite VM 工作量：类型归属查询必须少于 5,000 步，Python 跨文件 getter/条件解析必须保持在现有 2,000,000 步配置预算内，并同时校验实际返回的归属和配置证据。
+
+跨语言语义性能用例还验证 Swift 模块根证明通过语言/文件覆盖索引跳过 16,384 个无关 Rust 文件，SQLite VM 步数必须少于 5,000。

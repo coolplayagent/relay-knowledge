@@ -37,7 +37,7 @@ fn symbol_role_search_fields_include_every_route_handler_binding() {
 #[test]
 fn code_index_persistence_performance_suite_symbol_insert_crosses_the_1024_row_boundary_in_input_order()
  {
-    assert_eq!(SYMBOL_INSERT_BIND_COUNT, 17_408);
+    assert_eq!(SYMBOL_INSERT_BIND_COUNT, 19_456);
     let mut connection = symbol_database();
     let records = (0..=SYMBOL_INSERT_BATCH_SIZE)
         .map(symbol)
@@ -195,7 +195,7 @@ fn second_group_failure_remains_rollback_safe() {
 #[test]
 fn insert_records_clamps_fact_groups_to_the_runtime_variable_limit() {
     let mut connection = symbol_database();
-    connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 34);
+    connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 38);
     let transaction = connection.transaction().expect("transaction should start");
 
     insert_records(&transaction, &(0..5).map(symbol).collect::<Vec<_>>())
@@ -208,7 +208,7 @@ fn insert_records_clamps_fact_groups_to_the_runtime_variable_limit() {
 #[test]
 fn one_symbol_row_may_use_the_exact_sqlite_variable_limit() {
     let mut exact_connection = symbol_database();
-    exact_connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 17);
+    exact_connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 19);
     let exact_transaction = exact_connection
         .transaction()
         .expect("transaction should start");
@@ -219,14 +219,14 @@ fn one_symbol_row_may_use_the_exact_sqlite_variable_limit() {
         .expect("transaction should commit");
 
     let mut short_connection = symbol_database();
-    short_connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 16);
+    short_connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 18);
     let short_transaction = short_connection
         .transaction()
         .expect("transaction should start");
     let error = insert_records(&short_transaction, &[symbol(1)])
         .expect_err("fewer variables than one row requires must fail closed");
     assert!(
-        matches!(error, StorageError::Invariant(message) if message.contains("17-column symbol row"))
+        matches!(error, StorageError::Invariant(message) if message.contains("19-column symbol row"))
     );
     assert_eq!(row_counts(&short_transaction), (0, 0, 0));
     short_transaction
@@ -237,6 +237,7 @@ fn one_symbol_row_may_use_the_exact_sqlite_variable_limit() {
 fn symbol(index: usize) -> RepositoryCodeSymbolRecord {
     let offset = u32::try_from(index).expect("fixture index should fit u32");
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         symbol_snapshot_id: format!("symbol-{index}"),
@@ -283,7 +284,7 @@ fn symbol_database() -> Connection {
                 byte_end INTEGER NOT NULL,
                 line_start INTEGER NOT NULL,
                 line_end INTEGER NOT NULL,
-                symbol_role_json TEXT,
+                symbol_role_json TEXT, type_owner_json TEXT, type_owner_identity TEXT,
                 PRIMARY KEY (source_scope, symbol_snapshot_id)
             );
             CREATE VIRTUAL TABLE code_repository_search USING fts5(

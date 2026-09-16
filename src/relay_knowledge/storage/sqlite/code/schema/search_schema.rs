@@ -194,6 +194,24 @@ const SEARCH_QUERY_INDEXES: &[SearchQueryIndexDescriptor] = &[
         required_table: None,
         required_table_columns: &[],
     },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_symbols_type_owner_lookup",
+        table: "code_repository_symbols",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_symbols_type_owner_lookup ON code_repository_symbols(source_scope, type_owner_identity)",
+        columns: &["source_scope", "type_owner_identity"],
+        mode: SearchQueryIndexMode::Required,
+        required_table: None,
+        required_table_columns: &[],
+    },
+    SearchQueryIndexDescriptor {
+        name: "code_repository_files_language_path_lookup",
+        table: "code_repository_files",
+        sql: "CREATE INDEX IF NOT EXISTS code_repository_files_language_path_lookup ON code_repository_files(source_scope, language_id, path)",
+        columns: &["source_scope", "language_id", "path"],
+        mode: SearchQueryIndexMode::Required,
+        required_table: Some("code_repository_files"),
+        required_table_columns: &["source_scope", "language_id", "path"],
+    },
 ];
 
 const _: [(); crate::domain::CODE_QUERY_INDEX_PLAN_UNIT_COUNT] = [(); SEARCH_QUERY_INDEXES.len()];

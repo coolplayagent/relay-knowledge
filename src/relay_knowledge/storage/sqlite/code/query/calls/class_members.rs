@@ -1,6 +1,7 @@
-//! Resolve Java class names to bounded, directly owned callable records.
+//! Resolve type names through persisted syntax ownership with bounded member reads.
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, params_from_iter, types::Value};
+use std::collections::BTreeSet;
 
 use super::super::prepare_code_search_statement;
 use crate::storage::StorageError;
@@ -17,18 +18,28 @@ pub(super) fn resolve(
     connection: &Connection,
     scope: &str,
     name: &str,
+    language_sql: &str,
+    language_values: &[Value],
 ) -> Result<Option<Vec<ClassMember>>, StorageError> {
     let mut statement = prepare_code_search_statement(
         connection,
-        "SELECT symbol_snapshot_id, qualified_name, path, byte_start, byte_end
+        &format!(
+            "SELECT symbol_snapshot_id, type_owner_identity
          FROM code_repository_symbols
-         WHERE source_scope = ?1 AND name = ?2 AND kind = 'class' AND language_id = 'java'
-         LIMIT ?3",
+         WHERE source_scope = ?1 AND name = ?2 AND type_owner_json IS NOT NULL
+           AND json_extract(type_owner_json, '$.relation') = 'declaration'
+           AND coalesce(json_extract(type_owner_json, '$.resolution_state'), 'resolved')='resolved'
+         {language_sql} LIMIT ?"
+        ),
     )?;
-    let mut rows = statement.query(params![scope, name, (MAX_CLASSES + 1) as i64,])?;
+    let mut values = vec![Value::Text(scope.to_owned()), Value::Text(name.to_owned())];
+    values.extend_from_slice(language_values);
+    values.push(Value::Integer((MAX_CLASSES + 1) as i64));
+    let mut rows = statement.query(params_from_iter(values))?;
     let mut members = Vec::new();
     let mut matched = false;
     let mut count = 0;
+    let mut owners = BTreeSet::new();
     while let Some(row) = rows.next()? {
         count += 1;
         if count > MAX_CLASSES {
@@ -36,23 +47,20 @@ pub(super) fn resolve(
         }
         let owner: String = row.get(1)?;
         matched = true;
+        if !owners.insert(owner.clone()) {
+            continue;
+        }
         let mut statement = prepare_code_search_statement(
             connection,
             "SELECT name, symbol_snapshot_id FROM code_repository_symbols
-             WHERE source_scope = ?1 AND path = ?2 AND language_id = 'java'
-               AND byte_start >= ?3 AND byte_end <= ?4
-               AND (symbol_snapshot_id = ?5 OR (
-                   kind IN ('method', 'constructor', 'function', 'function_declaration')
-                   AND substr(qualified_name, 1, length(?6) + 1) = ?6 || '.'
-                   AND instr(substr(qualified_name, length(?6) + 2), '.') = 0))
-             LIMIT ?7",
+             WHERE source_scope = ?1 AND type_owner_json IS NOT NULL
+               AND type_owner_identity = ?2
+               AND json_extract(type_owner_json, '$.relation') IN ('declaration', 'direct_member', 'trait_member')
+               AND coalesce(json_extract(type_owner_json, '$.resolution_state'), 'resolved')='resolved'
+             LIMIT ?3",
         )?;
         let mut member_rows = statement.query(params![
             scope,
-            row.get::<_, String>(2)?,
-            row.get::<_, i64>(3)?,
-            row.get::<_, i64>(4)?,
-            row.get::<_, String>(0)?,
             owner,
             (MAX_MEMBERS + 1 - members.len()) as i64,
         ])?;
@@ -65,6 +73,11 @@ pub(super) fn resolve(
                 snapshot: member.get(1)?,
             });
         }
+    }
+    if !matched && !language_sql.is_empty() {
+        // An excluded type still selects the directional type-query contract;
+        // it must not turn into a text/symbol fallback in another language.
+        matched=connection.query_row("SELECT EXISTS(SELECT 1 FROM code_repository_symbols WHERE source_scope=?1 AND name=?2 AND json_extract(type_owner_json,'$.relation')='declaration')",params![scope,name],|row|row.get(0))?;
     }
     Ok(matched.then_some(members))
 }

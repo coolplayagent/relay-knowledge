@@ -237,7 +237,7 @@ async fn code_index_task_v1_v2_and_v3_retired_prefix_policies_reach_the_finalize
 }
 
 #[tokio::test]
-async fn code_index_task_v3_query_index_ordinal_is_durable_across_reopen() {
+async fn code_index_task_v4_query_index_ordinal_is_durable_across_reopen() {
     let database_path = std::env::temp_dir().join(format!(
         "relay-knowledge-query-index-resume-{}-{}.sqlite",
         std::process::id(),
@@ -301,7 +301,7 @@ async fn code_index_task_v3_query_index_ordinal_is_durable_across_reopen() {
     else {
         panic!("one missing descriptor should leave finalization pending");
     };
-    assert_eq!(checkpoint_state, "finalizing:build_query_indexes:v3:2");
+    assert_eq!(checkpoint_state, "finalizing:build_query_indexes:v4:2");
     assert_eq!(
         code_query_index_subphase(&checkpoint_state).map(|cursor| cursor.completed_unit),
         Some(2)
@@ -345,7 +345,7 @@ async fn code_index_task_v3_query_index_ordinal_is_durable_across_reopen() {
     assert!(matches!(
         resumed,
         super::finalization::CodeIndexFinalizationAdvance::Pending { checkpoint_state }
-            if checkpoint_state == "finalizing:build_query_indexes:v3:3"
+            if checkpoint_state == "finalizing:build_query_indexes:v4:3"
     ));
     let second_index_rebuilt = store
         .run(|connection| {
@@ -424,10 +424,7 @@ async fn every_legacy_coarse_checkpoint_repairs_and_restores_across_reopen() {
         })
         .await
         .expect("legacy unit 15 should remain structurally inapplicable");
-    for (expected_code, phase) in super::finalize::phases::ORDERED_FINALIZATION_PHASES
-        .iter()
-        .enumerate()
-    {
+    for phase in &super::finalize::phases::ORDERED_FINALIZATION_PHASES {
         let source_scope_for_legacy = source_scope.to_owned();
         let coarse_state = (*phase).to_owned();
         store
@@ -457,7 +454,10 @@ async fn every_legacy_coarse_checkpoint_repairs_and_restores_across_reopen() {
         let repair = code_query_index_repair(&checkpoint_state)
             .expect("coarse repair should write a canonical durable token");
         assert_eq!(repair.completed_unit, 16);
-        assert_eq!(repair.resume_phase as usize, expected_code);
+        assert_eq!(
+            Some(repair.resume_phase),
+            CodeQueryIndexRepairResumePhase::from_checkpoint_state(phase)
+        );
         assert_eq!(repair.resume_phase.checkpoint_state(), *phase);
 
         let durable_checkpoint = store

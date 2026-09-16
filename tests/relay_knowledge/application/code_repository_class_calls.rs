@@ -83,3 +83,140 @@ async fn java_class_call_queries_return_member_edges_without_reverse_text_matche
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn persisted_type_calls_cover_supported_type_languages_with_same_named_members() {
+    let repo = FixtureRepo::create("portable-type-calls");
+    let cases = [
+        (
+            "Owner.java",
+            "java",
+            "class Owner { void run() { target(); } void target() {} }",
+        ),
+        (
+            "owner.py",
+            "python",
+            "class Owner:\n    def run(self):\n        self.target()\n    def target(self):\n        pass\n",
+        ),
+        (
+            "owner.js",
+            "javascript",
+            "class Owner { run() { this.target(); } target() {} }",
+        ),
+        (
+            "owner.jsx",
+            "jsx",
+            "class Owner { run() { this.target(); } target() {} }",
+        ),
+        (
+            "owner.ts",
+            "typescript",
+            "class Owner { run() { this.target(); } target() {} }",
+        ),
+        (
+            "owner.tsx",
+            "tsx",
+            "class Owner { run() { this.target(); } target() {} }",
+        ),
+        (
+            "owner.cpp",
+            "cpp",
+            "struct V {}; template<class T> class Owner { public: template<class U> void run(); void target() {} }; template<> class Owner<V> {public: void extra() { special_target(); }}; template<class V> template<class U> void Owner<V>::run() { target(); }",
+        ),
+        (
+            "Owner.cs",
+            "csharp",
+            "class Owner { void run() { target(); } void target() {} }",
+        ),
+        (
+            "owner.rs",
+            "rust",
+            "struct Owner; impl Owner { fn run(&self) { self.target(); } fn target(&self) {} }",
+        ),
+        (
+            "owner.go",
+            "go",
+            "package demo\ntype Owner struct {}\nfunc (o Owner) run() { o.target() }\nfunc (o Owner) target() {}",
+        ),
+        (
+            "Owner.kt",
+            "kotlin",
+            "class Owner { fun run() { target() }; fun target() {} }",
+        ),
+        (
+            "Owner.scala",
+            "scala",
+            "class Owner { def run(): Unit = { target() }; def target(): Unit = {} }",
+        ),
+        (
+            "owner.rb",
+            "ruby",
+            "class Owner\n def run\n  target()\n end\n def target\n end\nend\n",
+        ),
+        (
+            "owner.php",
+            "php",
+            "<?php class Owner { function run() { $this->target(); } function target() {} }",
+        ),
+        (
+            "owner.swift",
+            "swift",
+            "class Owner {\n func run() { target() }\n func target() {}\n}",
+        ),
+        (
+            "owner-js.vue",
+            "vue",
+            "<script>class Owner { run() { this.target(); } target() {} }</script><template><div /></template>",
+        ),
+        (
+            "owner-ts.vue",
+            "vue",
+            "<script lang=\"ts\">class Owner { run(): void { this.target(); } target(): void {} }</script><template><div /></template>",
+        ),
+    ];
+    for (path, _, source) in cases {
+        repo.write(&format!("src/{path}"), source);
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "portable types"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-portable-types").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                workspace_detection: Default::default(),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                reuse_historical: false,
+            },
+            context("index-portable-types"),
+        )
+        .await
+        .unwrap();
+    let mut failures = Vec::new();
+    for (path, language, _) in cases {
+        let mut request = CodeRetrievalRequest::new(
+            "Owner",
+            selector("fixture", "HEAD"),
+            CodeQueryKind::Callees,
+            20,
+            FreshnessPolicy::AllowStale,
+        )
+        .unwrap();
+        request.query_language_filters = vec![language.to_owned()];
+        request.query_path_substrings = vec![path.to_owned()];
+        let result = service
+            .query_code_repository(request, context("query-portable-types"))
+            .await
+            .unwrap();
+        if !result
+            .results
+            .iter()
+            .any(|r| r.excerpt.contains("run calls target"))
+        {
+            failures.push(format!("{language}: {:?}", result.results));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

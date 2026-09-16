@@ -25,6 +25,7 @@ fn derives_boolean_configuration_facts_before_projection() {
         "yaml",
         "checkout_v2: true\n",
         None,
+        None,
     )
     .expect("feature flags should project");
 

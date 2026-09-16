@@ -7,9 +7,9 @@ use crate::{domain::CodeIndexResourceBudget, storage::StorageError};
 pub(super) const FINALIZATION_PAGE_DOCUMENT_HARD_LIMIT: usize = 32_768;
 pub(super) const FINALIZATION_PAGE_BYTE_HARD_LIMIT: usize = 16 * 1024 * 1024;
 const FINALIZATION_PAGE_CONTROL_MUTATIONS: usize = 2;
-// Eight integer payloads plus their serial types, ten worst-case text serial
+// Nine integer payloads plus their serial types, twelve worst-case text serial
 // types, and the SQLite record-header length varint.
-const CHECKPOINT_RECORD_NON_TEXT_BYTES: usize = 8 * 9 + 10 * 9 + 9;
+const CHECKPOINT_RECORD_NON_TEXT_BYTES: usize = 9 * 9 + 12 * 9 + 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct FinalizationPageLimits {
@@ -92,6 +92,8 @@ pub(super) fn checkpoint_row_bytes(
                     + length(CAST(coalesce(last_path, '') AS BLOB))
                     + length(CAST(resource_budget_json AS BLOB))
                     + length(CAST(coalesce(error_message, '') AS BLOB))
+                    + length(CAST(coalesce(type_owner_cursor, '') AS BLOB))
+                    + length(CAST(coalesce(incremental_summary_json, '') AS BLOB))
                     + ?3
              FROM code_repository_index_checkpoints WHERE source_scope = ?1",
             params![source_scope, next_state, CHECKPOINT_RECORD_NON_TEXT_BYTES],
