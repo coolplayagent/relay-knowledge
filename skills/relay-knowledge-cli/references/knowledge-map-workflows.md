@@ -57,6 +57,19 @@ authored, version-controlled business surface; edit it directly and review it
 as source code. `map init` creates only a missing minimal valid glossary and
 must never overwrite an existing one.
 
+Initialization returns `business_bootstrap` with the glossary schema, a full
+example and authoring steps. The new file contains only a commented example;
+indexing does not infer business terms. For `knowledge.state=no_sources`, check
+the route and files present in the selected commit. For `empty_glossary`, author
+reviewed terms; for `terms_only`, add mappings only when supported by evidence.
+Commit the maps, referenced topic shards and glossary, then index that commit
+and query `repo business` at the same immutable ref. Reindexing HEAD cannot read
+uncommitted glossary edits. Follow diagnostic `next_steps` and `bootstrap`
+resources; legacy/additional routes may differ from the default path above.
+`result.status=no_match` with populated knowledge calls for filter/query review,
+while `ambiguous` calls for a unique domain ID. `knowledge.state=mapped` does not
+guarantee all terms are mapped or that mapping targets are resolved.
+
 The bundled Draft 2020-12 schema at `business-glossary.schema.json` describes
 the authored glossary v1 domains, terms, aliases, semantics, and technical
 mappings. It deliberately accepts unknown fields for Serde reader compatibility.

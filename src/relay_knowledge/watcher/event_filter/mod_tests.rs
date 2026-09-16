@@ -14,6 +14,15 @@ fn allows_rust_source_file() {
 }
 
 #[test]
+fn extensionless_scripts_and_ambiguous_headers_reach_the_worker() {
+    let filter = WatcherEventFilter::new(root(), vec!["libexec/".into()], vec!["bash".into()]);
+    assert!(filter.should_process_path(&root().join("libexec/task")));
+    assert!(!filter.should_process_path(&root().join("other/task")));
+    let filter = WatcherEventFilter::new(root(), vec![], vec!["cpp".into()]);
+    assert!(filter.should_process_path(&root().join("include/Widget.H")));
+}
+
+#[test]
 fn rejects_git_directory() {
     let filter = WatcherEventFilter::new(root(), vec![], vec![]);
     assert!(!filter.should_process_path(&root().join(".git/HEAD")));

@@ -208,15 +208,40 @@ impl CodeIndexBatch {
 /// Reordering, adding, or removing a storage descriptor requires a version
 /// bump plus an explicit recovery policy for checkpoints written by the old
 /// plan.
-pub(crate) const CODE_QUERY_INDEX_PLAN_VERSION: u32 = 3;
+pub(crate) const CODE_QUERY_INDEX_PLAN_VERSION: u32 = 5;
 
 /// Number of stable units in the current deferred query-index plan.
-pub(crate) const CODE_QUERY_INDEX_PLAN_UNIT_COUNT: usize = 17;
+pub(crate) const CODE_QUERY_INDEX_PLAN_UNIT_COUNT: usize = 23;
 
 const LEGACY_CODE_QUERY_INDEX_PLAN_V1: u32 = 1;
 const LEGACY_CODE_QUERY_INDEX_PLAN_V1_UNIT_COUNT: usize = 16;
 const LEGACY_CODE_QUERY_INDEX_PLAN_V2: u32 = 2;
 const LEGACY_CODE_QUERY_INDEX_PLAN_V2_UNIT_COUNT: usize = 17;
+const LEGACY_CODE_QUERY_INDEX_PLAN_V3: u32 = 3;
+const LEGACY_CODE_QUERY_INDEX_PLAN_V4: u32 = 4;
+
+/// Validates a persisted ordinal against the plan which created it.
+fn query_index_unit_count(version: u32) -> Option<usize> {
+    match version {
+        CODE_QUERY_INDEX_PLAN_VERSION => Some(CODE_QUERY_INDEX_PLAN_UNIT_COUNT),
+        LEGACY_CODE_QUERY_INDEX_PLAN_V4 => Some(19),
+        LEGACY_CODE_QUERY_INDEX_PLAN_V2 | LEGACY_CODE_QUERY_INDEX_PLAN_V3 => {
+            Some(LEGACY_CODE_QUERY_INDEX_PLAN_V2_UNIT_COUNT)
+        }
+        LEGACY_CODE_QUERY_INDEX_PLAN_V1 => Some(LEGACY_CODE_QUERY_INDEX_PLAN_V1_UNIT_COUNT),
+        _ => None,
+    }
+}
+
+/// Prefix validation happens before advancing. Switch protocol only when the
+/// newly committed ordinal lies outside that validated legacy plan.
+fn advanced_query_index_version(version: u32, unit: usize) -> u32 {
+    if query_index_unit_count(version).is_some_and(|count| unit < count) {
+        version
+    } else {
+        CODE_QUERY_INDEX_PLAN_VERSION
+    }
+}
 
 const CODE_QUERY_INDEX_SUBPHASE_PREFIX: &str = "finalizing:build_query_indexes";
 const CODE_QUERY_INDEX_REPAIR_PREFIX: &str = "finalizing:query_index_repair";
@@ -299,7 +324,7 @@ impl CodeReferenceSearchQueryIndexRepair {
     /// nested reference-search protocol carried by the durable cursor.
     pub(crate) fn next_state(self, completed_unit: usize) -> Option<String> {
         code_reference_search_query_index_repair_state_for_version(
-            self.plan_version,
+            advanced_query_index_version(self.plan_version, completed_unit),
             completed_unit,
             self.reference_search,
         )
@@ -359,8 +384,8 @@ fn code_reference_search_query_index_repair_state_for_version(
 ) -> Option<String> {
     (matches!(
         plan_version,
-        LEGACY_CODE_QUERY_INDEX_PLAN_V2 | CODE_QUERY_INDEX_PLAN_VERSION
-    ) && unit < CODE_QUERY_INDEX_PLAN_UNIT_COUNT
+        LEGACY_CODE_QUERY_INDEX_PLAN_V2 | LEGACY_CODE_QUERY_INDEX_PLAN_V3 | LEGACY_CODE_QUERY_INDEX_PLAN_V4 | CODE_QUERY_INDEX_PLAN_VERSION
+    ) && query_index_unit_count(plan_version).is_some_and(|count| unit < count)
         && matches!(
             reference_search.protocol_version,
             1 | CODE_REFERENCE_SEARCH_REBUILD_VERSION
@@ -390,8 +415,11 @@ pub(crate) fn code_reference_search_query_index_repair(
     let completed_page_ordinal = reference.next()?.parse::<usize>().ok()?;
     if !matches!(
         version,
-        CODE_QUERY_INDEX_PLAN_VERSION | LEGACY_CODE_QUERY_INDEX_PLAN_V2
-    ) || unit >= CODE_QUERY_INDEX_PLAN_UNIT_COUNT
+        CODE_QUERY_INDEX_PLAN_VERSION
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V3
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V4
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V2
+    ) || query_index_unit_count(version).is_none_or(|count| unit >= count)
         || !matches!(reference_version, 1 | CODE_REFERENCE_SEARCH_REBUILD_VERSION)
         || (reference_version == 1 && stage == CodeReferenceSearchRebuildStage::Discover)
         || reference.next().is_some()
@@ -434,10 +462,11 @@ pub(crate) enum CodeQueryIndexRepairResumePhase {
     ResolveWorkspaceImports = 8,
     SoftwareProjection = 9,
     PartitionedPublish = 10,
+    ResolveTypeOwnership = 11,
 }
 
 impl CodeQueryIndexRepairResumePhase {
-    pub(crate) const ALL: [Self; 11] = [
+    pub(crate) const ALL: [Self; 12] = [
         Self::BuildQueryIndexes,
         Self::ResolveReferences,
         Self::ResolveImports,
@@ -449,6 +478,7 @@ impl CodeQueryIndexRepairResumePhase {
         Self::ResolveWorkspaceImports,
         Self::SoftwareProjection,
         Self::PartitionedPublish,
+        Self::ResolveTypeOwnership,
     ];
 
     pub(crate) const fn checkpoint_state(self) -> &'static str {
@@ -464,13 +494,37 @@ impl CodeQueryIndexRepairResumePhase {
             Self::ResolveWorkspaceImports => "finalizing:resolve_workspace_imports",
             Self::SoftwareProjection => "finalizing:software_projection",
             Self::PartitionedPublish => "finalizing:partitioned_publish",
+            Self::ResolveTypeOwnership => "finalizing:resolve_type_ownership",
         }
     }
 
     pub(crate) fn from_checkpoint_state(state: &str) -> Option<Self> {
+        if let Some(cursor) = state.strip_prefix("finalizing:resolve_type_ownership:")
+            && !cursor.is_empty()
+            && cursor.len() <= 1024
+            && cursor.len() % 2 == 0
+            && cursor
+                .bytes()
+                .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
+        {
+            return Some(Self::ResolveTypeOwnership);
+        }
         Self::ALL
             .into_iter()
             .find(|phase| phase.checkpoint_state() == state)
+    }
+
+    /// Encode the exact durable cursor so each admitted ownership page exposes
+    /// observable progress while retaining the stable coarse resume phase.
+    pub(crate) fn ownership_checkpoint_state(cursor: &str) -> Option<String> {
+        if cursor.is_empty() || cursor.len() > 512 {
+            return None;
+        }
+        let encoded = cursor
+            .bytes()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        Some(format!("finalizing:resolve_type_ownership:{encoded}"))
     }
 
     const fn code(self) -> u8 {
@@ -499,7 +553,7 @@ impl CodeQueryIndexRepair {
     /// retired-prefix policy across every durable writer quantum.
     pub(crate) fn next_state(self, completed_unit: usize) -> Option<String> {
         code_query_index_repair_state_for_version(
-            self.plan_version,
+            advanced_query_index_version(self.plan_version, completed_unit),
             completed_unit,
             self.resume_phase,
         )
@@ -524,7 +578,10 @@ impl CodeQueryIndexSubphase {
     /// Advances a parsed cursor without reinterpreting a legacy completed
     /// prefix under the current retired-index policy.
     pub(crate) fn next_state(self, completed_unit: usize) -> Option<String> {
-        code_query_index_subphase_state_for_version(self.plan_version, completed_unit)
+        code_query_index_subphase_state_for_version(
+            advanced_query_index_version(self.plan_version, completed_unit),
+            completed_unit,
+        )
     }
 }
 
@@ -534,12 +591,7 @@ pub(crate) fn code_query_index_subphase_state(unit: usize) -> Option<String> {
 }
 
 fn code_query_index_subphase_state_for_version(plan_version: u32, unit: usize) -> Option<String> {
-    let unit_count = match plan_version {
-        CODE_QUERY_INDEX_PLAN_VERSION => CODE_QUERY_INDEX_PLAN_UNIT_COUNT,
-        LEGACY_CODE_QUERY_INDEX_PLAN_V2 => LEGACY_CODE_QUERY_INDEX_PLAN_V2_UNIT_COUNT,
-        LEGACY_CODE_QUERY_INDEX_PLAN_V1 => LEGACY_CODE_QUERY_INDEX_PLAN_V1_UNIT_COUNT,
-        _ => return None,
-    };
+    let unit_count = query_index_unit_count(plan_version)?;
     (unit < unit_count)
         .then(|| format!("{CODE_QUERY_INDEX_SUBPHASE_PREFIX}:v{plan_version}:{unit}"))
 }
@@ -554,12 +606,7 @@ pub(crate) fn code_query_index_subphase(state: &str) -> Option<CodeQueryIndexSub
     let (version, unit) = suffix.split_once(':')?;
     let version = version.parse::<u32>().ok()?;
     let unit = unit.parse::<usize>().ok()?;
-    let unit_count = match version {
-        CODE_QUERY_INDEX_PLAN_VERSION => CODE_QUERY_INDEX_PLAN_UNIT_COUNT,
-        LEGACY_CODE_QUERY_INDEX_PLAN_V2 => LEGACY_CODE_QUERY_INDEX_PLAN_V2_UNIT_COUNT,
-        LEGACY_CODE_QUERY_INDEX_PLAN_V1 => LEGACY_CODE_QUERY_INDEX_PLAN_V1_UNIT_COUNT,
-        _ => return None,
-    };
+    let unit_count = query_index_unit_count(version)?;
     if unit >= unit_count {
         return None;
     }
@@ -586,14 +633,17 @@ fn code_query_index_repair_state_for_version(
 ) -> Option<String> {
     (matches!(
         plan_version,
-        LEGACY_CODE_QUERY_INDEX_PLAN_V2 | CODE_QUERY_INDEX_PLAN_VERSION
-    ) && unit < CODE_QUERY_INDEX_PLAN_UNIT_COUNT)
-        .then(|| {
-            format!(
-                "{CODE_QUERY_INDEX_REPAIR_PREFIX}:v{plan_version}:{unit}:resume:{}",
-                resume_phase.code()
-            )
-        })
+        LEGACY_CODE_QUERY_INDEX_PLAN_V2
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V3
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V4
+            | CODE_QUERY_INDEX_PLAN_VERSION
+    ) && query_index_unit_count(plan_version).is_some_and(|count| unit < count))
+    .then(|| {
+        format!(
+            "{CODE_QUERY_INDEX_REPAIR_PREFIX}:v{plan_version}:{unit}:resume:{}",
+            resume_phase.code()
+        )
+    })
 }
 
 /// Parses canonical version-2 and current-plan query-index repair tokens.
@@ -606,12 +656,18 @@ pub(crate) fn code_query_index_repair(state: &str) -> Option<CodeQueryIndexRepai
     let resume_code = resume_code.parse::<u8>().ok()?;
     if !matches!(
         version,
-        CODE_QUERY_INDEX_PLAN_VERSION | LEGACY_CODE_QUERY_INDEX_PLAN_V2
-    ) || unit >= CODE_QUERY_INDEX_PLAN_UNIT_COUNT
+        CODE_QUERY_INDEX_PLAN_VERSION
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V3
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V4
+            | LEGACY_CODE_QUERY_INDEX_PLAN_V2
+    ) || query_index_unit_count(version).is_none_or(|count| unit >= count)
     {
         return None;
     }
     let resume_phase = CodeQueryIndexRepairResumePhase::from_code(resume_code)?;
+    if version < 4 && resume_phase == CodeQueryIndexRepairResumePhase::ResolveTypeOwnership {
+        return None;
+    }
     let canonical = format!(
         "{CODE_QUERY_INDEX_REPAIR_PREFIX}:v{version}:{unit}:resume:{}",
         resume_phase.code()

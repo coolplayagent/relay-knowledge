@@ -30,7 +30,10 @@ pub(in crate::storage::sqlite::code) fn required_repository(
         ))
     })?;
     let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
-    let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
+    let language_filters = crate::domain::code_scope_language_filters(
+        &status.language_filters,
+        &selector.language_filters,
+    );
     let scoped_status = match repository_scope_status(
         connection,
         &selector.repository,

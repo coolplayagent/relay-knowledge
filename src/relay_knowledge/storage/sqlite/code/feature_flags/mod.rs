@@ -154,7 +154,7 @@ fn feature_flag_sql_query(
     {
         let symbolic_scope = feature_flag_sql_filter(source_scope, status, request, &[]);
         where_clause = format!(
-            "(({where_clause}) OR (({}) AND flag.source_kind='config_symbol' AND json_extract(flag.metadata_json,'$.reference') IS NOT NULL))",
+            "(({where_clause}) OR (({}) AND flag.source_kind='config_symbol' AND (json_extract(flag.metadata_json,'$.reference') IS NOT NULL OR json_array_length(flag.metadata_json,'$.string_parts')>0)))",
             symbolic_scope.where_clause
         );
         filter_params.extend(symbolic_scope.params);
@@ -170,7 +170,7 @@ fn feature_flag_sql_query(
     {
         where_clause.push_str(" AND (flag.source_kind != 'config_symbol' OR json_extract(flag.metadata_json,'$.target_kind') IS NOT NULL)");
     }
-    where_clause.push_str(" AND (flag.edge_kind != 'declares_string_constant' OR EXISTS (SELECT 1 FROM code_repository_feature_flags evidence, json_each(flag.metadata_json,'$.bindings') binding WHERE evidence.source_scope=flag.source_scope AND json_extract(evidence.metadata_json,'$.target_kind') IS NOT NULL AND json_extract(evidence.metadata_json,'$.reference')=binding.value))");
+    where_clause.push_str(" AND (flag.edge_kind != 'declares_string_constant' OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding JOIN code_repository_config_bindings dependency ON dependency.source_scope=flag.source_scope AND dependency.binding=binding.value JOIN code_repository_feature_flags evidence ON evidence.source_scope=dependency.source_scope AND evidence.usage_id=dependency.usage_id WHERE json_extract(evidence.metadata_json,'$.target_kind') IS NOT NULL))");
     let usage_filter = feature_flag_sql_filter(source_scope, status, request, &[]);
     let usage_where = &usage_filter.where_clause;
     let query_bonus = if terms.is_empty() { "0.0" } else { "8.0" };
@@ -327,6 +327,9 @@ fn append_language_filter_clause(
     params: &mut Vec<Value>,
     filters: &[String],
 ) {
+    let atoms = crate::domain::code_language_filter_atoms(filters);
+    let filters = atoms.as_slice();
+
     if filters.is_empty() {
         return;
     }

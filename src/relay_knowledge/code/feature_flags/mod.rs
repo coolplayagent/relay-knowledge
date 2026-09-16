@@ -21,6 +21,7 @@ use extractors::{
 };
 
 pub(crate) struct FeatureFlagFileInput<'a> {
+    pub(crate) syntax_root: Option<tree_sitter::Node<'a>>,
     pub(crate) repository_id: &'a str,
     pub(crate) source_scope: &'a str,
     pub(crate) file_id: &'a str,
@@ -289,7 +290,11 @@ fn collect_line_records(
 
     let mut seen = Vec::<(String, String, &'static str)>::new();
     for (source_kind, source_key, edge_kind) in line_records {
-        if context.input.language_id == "java" && source_kind != "sdk_flag_key" {
+        if (context.input.language_id == "java" && source_kind != "sdk_flag_key")
+            || (registry::has_syntax_reader(context.input)
+                && matches!(source_kind, "env_var" | "config_key")
+                && edge_kind != "defines_config")
+        {
             continue;
         }
         if seen.iter().any(|(known_kind, known_key, known_edge)| {
@@ -373,7 +378,7 @@ fn feature_flag_record_from_range(
     );
 
     Ok(CodeFeatureFlagRecord {
-        metadata: crate::domain::CodeConfigMetadata::default(),
+        metadata: registry::metadata(input, range.byte_start),
         repository_id: input.repository_id.to_owned(),
         source_scope: input.source_scope.to_owned(),
         feature_flag_id,
@@ -431,3 +436,6 @@ fn confidence_tier_for_edge(edge_kind: &str) -> &'static str {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod mod_tests;
+
+#[cfg(test)]
+pub(crate) mod syntax_test_support;

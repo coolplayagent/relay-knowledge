@@ -7,6 +7,7 @@ use crate::domain::{
     CodeRetrievalRequest, CodeScopeRetentionSummary, CodebaseViewKind, CodebaseViewRequest,
     FreshnessPolicy, SoftwareGlobalKind, SoftwareGlobalRequest,
 };
+use crate::storage::StorageError;
 use crate::storage::StorageFuture;
 
 struct MinimalCodeRepositoryStore;

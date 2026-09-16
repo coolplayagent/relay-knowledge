@@ -16,7 +16,7 @@ use super::super::{
     full_snapshot::build_full_snapshot_as_worktree_overlay,
     git::{git_bytes, resolve_ref},
     parser::parse_indexed_file,
-    snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
+    snapshot::{SnapshotBuild, SnapshotScopeFilters},
     source::{RepositorySourceKind, source_commit_is_filesystem, source_kind},
 };
 use super::{
@@ -85,8 +85,10 @@ pub(in crate::code::index) fn build_worktree_overlay_snapshot(
         );
     }
     let (overlay_commit, tree_hash) = plan.identity();
-    let language_filters =
-        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let language_filters = crate::domain::code_scope_language_filters(
+        &registration.language_filters,
+        &selector.language_filters,
+    );
     let mut build = SnapshotBuild::new_with_scope_filters(
         registration,
         overlay_commit,

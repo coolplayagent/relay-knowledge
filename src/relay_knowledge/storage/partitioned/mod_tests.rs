@@ -26,6 +26,9 @@ use crate::{
 #[path = "indexing/retention/repository_tests.rs"]
 mod repository_retention_tests;
 
+#[path = "routing/scope_tests.rs"]
+mod scope_routing_tests;
+
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::test]

@@ -16,7 +16,7 @@ use super::{
         filesystem_policy_for_selector, scoped_source_snapshot_for_filters,
         selection_exclusion_reason_for_source,
     },
-    snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
+    snapshot::{SnapshotBuild, SnapshotScopeFilters},
     source::{
         RepositorySourceKind, ensure_filesystem_blobs_match_content_hashes,
         filesystem_source_snapshot, source_commit_is_filesystem, source_snapshot,
@@ -84,8 +84,10 @@ pub(super) fn build_filesystem_delta_snapshot(
         selector,
         &[&source_layout, &previous_source_layout],
     );
-    let language_filters =
-        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let language_filters = crate::domain::code_scope_language_filters(
+        &registration.language_filters,
+        &selector.language_filters,
+    );
     let mut selected_entries = snapshot
         .entries
         .into_iter()

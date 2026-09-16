@@ -3,6 +3,37 @@ use super::*;
 use crate::{code::source_line_defines_identity, domain::RepositoryCodeRange};
 
 #[test]
+fn extensionless_source_fallback_checks_shebang_and_retains_actual_language() {
+    let mut tree = TempSourceTree::create().unwrap();
+    tree.write("src/bash_task", b"#!/bin/bash\necho target\n")
+        .unwrap();
+    tree.write(
+        "src/python_task",
+        b"#!/usr/bin/env python3\nprint('target')\n",
+    )
+    .unwrap();
+    for language in ["bash", "python"] {
+        let request = SourceGrepRequest {
+            query: "target".into(),
+            paths: vec!["src/bash_task".into(), "src/python_task".into()],
+            path_filters: vec![],
+            language_filters: vec![language.into()],
+            limit: 10,
+            kind: SourceGrepKind::Hybrid,
+            exclude_generated: false,
+        };
+        let candidates = super::super::candidate_scope::selected_candidate_paths(&request);
+        assert_eq!(candidates.paths.len(), 2);
+        let matches =
+            internal_source_grep_matches(&tree.root, &candidates.paths, &request, |_| true)
+                .unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].language_id, language);
+        assert_eq!(matches[0].path, format!("src/{language}_task"));
+    }
+}
+
+#[test]
 fn internal_scanner_filters_definition_lines_before_enforcing_limit() {
     let mut tree = TempSourceTree::create().expect("temp tree should be created");
     tree.write("src/lib.c", b"return target();\nint target(void);\n")

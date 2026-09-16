@@ -13,24 +13,30 @@ pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
     let mut parser = tree_sitter::Parser::new();
-    parser
-        .set_language(&tree_sitter_java::LANGUAGE.into())
-        .map_err(|e| DomainError::invalid("java", e.to_string()))?;
-    let tree = parser
-        .parse(input.content, None)
-        .ok_or_else(|| DomainError::invalid("java", "parse cancelled"))?;
-    let hierarchy = types::Hierarchy::collect(tree.root_node(), input.content)?;
-    let mut cursor = tree.root_node().walk();
+    let tree;
+    let root = if let Some(root) = input.syntax_root {
+        root
+    } else {
+        // Standalone extractor tests and text-only recovery have no shared tree.
+        parser
+            .set_language(&tree_sitter_java::LANGUAGE.into())
+            .map_err(|e| DomainError::invalid("java", e.to_string()))?;
+        tree = parser
+            .parse(input.content, None)
+            .ok_or_else(|| DomainError::invalid("java", "parse cancelled"))?;
+        tree.root_node()
+    };
+    let hierarchy = types::Hierarchy::collect(root, input.content)?;
+    let mut cursor = root.walk();
     let mut rows = Vec::new();
     let mut methods = Vec::new();
     loop {
         let node = cursor.node();
         rows.extend(hierarchy.facts(input, node)?);
         if node.kind() == "method_declaration"
-            && node.child_by_field_name("name").is_some_and(|name| {
-                let name = text(name, input.content);
-                name.starts_with("get") || name.starts_with("is")
-            })
+            && node
+                .child_by_field_name("type")
+                .is_some_and(|t| t.kind() != "void_type")
             && node
                 .child_by_field_name("parameters")
                 .is_some_and(|p| p.named_child_count() == 0)
@@ -89,7 +95,7 @@ pub(super) fn extract(
                     row.metadata.conversion_platform_owners = shadows;
                     row.metadata.getter_overridable =
                         Some(types::overridable(method, input.content));
-                } else if flow::inside_getter(node, input.content) {
+                } else if flow::inside_getter(node) {
                     row.metadata.flow_incomplete = Some("unsupported_getter_value_flow".into());
                 }
                 let (guards, conditional) = guard_sites(node, input.content)?;
@@ -450,9 +456,7 @@ fn read(
         }
         return Ok(Some(row));
     }
-    if arguments.named_child_count() != 0
-        || !(method.starts_with("get") || method.starts_with("is"))
-    {
+    if arguments.named_child_count() != 0 {
         return Ok(None);
     }
     let owners = if let Some(object) = object {

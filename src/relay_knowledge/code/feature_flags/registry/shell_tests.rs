@@ -1,6 +1,9 @@
 use crate::code::feature_flags::registry::test_support::*;
 use crate::code::feature_flags::{FeatureFlagFileInput, registry::extract};
 
+#[path = "shell_boundary_tests.rs"]
+mod boundary;
+
 #[test]
 fn deferred_and_subshell_exports_do_not_define_parent_configuration() {
     for declaration in [
@@ -170,6 +173,7 @@ fn shell_scan_exhaustion_is_explicit_incomplete_analysis() {
         "echo ignored\n".repeat(1100)
     );
     let error = extract(&FeatureFlagFileInput {
+        syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
         file_id: "file",
@@ -304,6 +308,7 @@ fn shell_tilde_expansion_defaults_remain_unknown() {
 fn shell_prior_assignment_budget_exhaustion_is_explicit() {
     let source = format!("FLAG=value; {}export FLAG", "echo ignored; ".repeat(1100));
     let error = extract(&FeatureFlagFileInput {
+        syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
         file_id: "file",
@@ -649,6 +654,7 @@ fn quoted_set_option_matrix_preserves_allexport_state() {
 fn allexport_static_word_budget_errors_are_observable() {
     let source = format!("set -{}; FLAG=true", "\"a\"".repeat(1100));
     let error = extract(&FeatureFlagFileInput {
+        syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
         file_id: "file",
@@ -818,6 +824,7 @@ fn loop_bindings_replace_inherited_values_only_inside_the_body() {
 fn export_command_word_budget_errors_remain_observable() {
     let source = format!("{} FLAG=true", "\"ex\"".repeat(1100));
     let error = extract(&FeatureFlagFileInput {
+        syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
         file_id: "file",

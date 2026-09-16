@@ -100,9 +100,9 @@ relay-knowledge repo status repo --format json
 
 ## 5.4 符号与关系查询
 
-Java 类名调用查询使用已索引的结构化类和直接成员归属：`--query B --kind callers` 汇总指向 B 自身、构造函数和直接成员方法的调用边，`--kind callees` 汇总这些成员发出的调用边。结果保留具体调用方/被调用方法及调用位置。例如 `A.main` 调用 `B.process()` 后，查 B 的 callers 返回 `main calls process`；查 A 的 callers 不会因为 A 出现在调用文本中而误返回这条出边。已匹配的类没有对应方向的边时返回空，不通过全文搜索扩大结果。
+短类型名调用查询使用已索引的结构化类和直接成员归属：`--query B --kind callers` 汇总指向 B 自身、构造函数和直接成员方法的调用边，`--kind callees` 汇总这些成员发出的调用边。结果保留具体调用方/被调用方法及调用位置。例如 `A.main` 调用 `B.process()` 后，查 B 的 callers 返回 `main calls process`；查 A 的 callers 不会因为 A 出现在调用文本中而误返回这条出边。已匹配的类没有对应方向的边时返回空，不通过全文搜索扩大结果。
 
-此聚合仅适用于短 Java 类名的 `callers` / `callees` 查询，类名按大小写匹配，同名类共同参与汇总。Hybrid 和限定名称查询保持原有搜索行为。不支持按包名限定类进行聚合：现有 Java 限定名事实编码的是源码路径，而非 package 声明。成员归属基于同文件源码范围和直接限定名，嵌套类型的方法、其他类的同名方法、字段及只有名称文本的 unresolved 入边不会混入；不猜测继承成员或动态分派。已记录的 unresolved 出边仍保留其状态。`--query B.process` 继续查询具体方法。路径、语言、生成文件及内联过滤在调用候选上限前生效；路径约束调用发生的位置，callers 的调用方可以位于被查类文件之外。
+该聚合入口适用于下方能力矩阵中具有类型归属结构的语言，限短类型名和 `callers`/`callees`，名称区分大小写。持久化归属区分语言与模块身份，嵌套类型和成员内局部函数不归入外层类型。继承方法和动态分派不作猜测。未解析的出向调用保留原状态。路径过滤约束调用位置，因此调用者可以位于类型定义文件之外；限定名称查询保持原有行为。
 
 类查询最多准入 64 个候选类、1,024 条类/成员记录，沿用最多 200 条调用候选和请求结果上限；类解析及调用读取共享约 410 万条 SQLite 指令预算。类/成员或执行预算耗尽明确报告 `class call query incomplete` 容量错误，不静默截断身份集合；可改用成员方法名缩小展开范围。本次读取行为复用现有索引事实，无 schema、事实版本或安装配置变更，已完成的旧索引可直接查询。
 
@@ -307,6 +307,22 @@ relay-knowledge repo status repo --format json
 
 ## 5.9 排障顺序
 
+版本新鲜度与内容完整性独立：查询可以是 `fresh`，同时
+`content_integrity.state=partial`；`unknown` 不代表内容完整。不能仅因为兼容字段
+`degraded_reason` 存在就反复重建新鲜索引；读模型或查询能力故障仍可使查询降级。
+报告最多展示 20 条文件诊断，并提供截断标记和固定快照的诊断命令。应使用报告给出的
+命令查看同一快照，再读取全部分页：
+
+```bash
+relay-knowledge repo diagnostics repo --ref <pinned-ref> --limit 50 --format json
+relay-knowledge repo diagnostics repo --ref <pinned-ref> --limit 50 --cursor <next-cursor> --format json
+```
+
+将返回的 `next_cursor` 传给下一页，直到游标为 null，保持 ref 与路径过滤不变。
+游标固定已服务的 scope，HEAD 移动不会改变续页快照；快照已被清理时明确报错。
+单页最多 200 条，同一文件可能有多条诊断，完整性计数按文件去重。
+应先修复相关源码或明确调整授权索引范围，再重建索引以改变内容完整性。
+
 本地源文件 I/O 故障通过 `repo diagnostics` 的可选 `io` 对象提供诊断，包含 `action: skipped`、`path_kind`、`operation`、`error_kind` 和 `raw_os_error`。这些路径会被跳过，任务成功时仍可能出现 `content_integrity.state = partial`。`io_skipped_file_count` 与 `io_skipped_directory_count` 分别统计跳过文件和目录；不可枚举目录的文件数量未知。未选中路径不产生 I/O 诊断或死信任务。修复访问故障后重新执行正常索引/更新命令即可恢复，无须 reset；历史死信记录保留。
 
 
@@ -375,3 +391,86 @@ Shell 内置命令名先静态解码，引号、拼接和转义形式使用相�
 配置自由文本查询同时匹配持久化元数据、配置键和使用位置，最终分组匹配与行评分遵守 SQL 元数据搜索契约。显式查询不含任何字母、数字或下划线时，在加载数据前报错；省略查询参数才表示不筛选注册表。Java try-with-resources 声明在 try 体和后续资源初始化中绑定接收者，不在 catch/finally 中生效。Shell 已识别导出内置命令前的赋值，仅在该命令导出同名变量时形成配置定义；普通命令的临时环境赋值不定义父环境配置。 Fact version: `config-registry-v53`.
 
 已证明的 getter 转换同时规范化显式环境回退值与属性回退值，属性特有的可空默认处理保持独立。已知平台通配静态导入只贡献实际提供的受支持成员，final var 配置键须有已证明的 String 初始化值。具名 Java 局部类型使用词法身份，互不相关的方法或代码块不会共享 getter 提供者。异步 Shell 命令不能定义或修改父环境配置及导出状态。nameref 别名跟踪和 command/builtin 分派包装器不在有限 Shell 抽取清单内；直接内置命令名及引号等价形式的识别不执行包装器或间接变量写入。缺少定义诊断描述该清单内已观察的静态证据。 Fact version: `config-registry-v54`.
+
+## 5.10 语言能力矩阵
+
+类型查询使用索引阶段持久化的归属事实，聚合类型及其直接可调用成员；排除继承方法、未知接收者和成员内局部函数。短类型名入口保持不变。调用位置的路径过滤约束实际调用点。类型选择最多接受 64 个类型和 1,024 条类型/成员记录，随后最多读取 200 个调用候选，并保留现有 SQLite 工作预算；超限明确返回查询不完整错误。
+
+配置分析复用索引阶段语法树。下表列出有限的读取 API 清单及提供类型归属的语言结构。现有配置 API 清单中的 `config`/`settings` 读取器继续适用。字面量键、可证明的常量表达式、零参数读取 getter 和局部条件使用可提供证据；依赖运行时的表达式保留未知值。
+
+| 来源 | 类型归属 | 环境变量/属性读取 API 清单 |
+| --- | --- | --- |
+| Java | 类、构造函数和直接方法 | 现有 `System` 环境变量/属性 API 及已记录的配置读取器 |
+| Python | 类和直接方法 | `os.getenv`、`os.environ.get`、`os.environ[key]` |
+| JavaScript / JSX | 类和直接方法 | `process.env`、`Deno.env.get`、`Bun.env`、`import.meta.env` |
+| TypeScript / TSX | 类、接口和直接方法 | 同 JS API，并适配 TypeScript 语法 |
+| C | 不适用；保留普通函数查询 | `getenv` |
+| C++ | 类及具有作用域信息的成员实现 | `getenv`、`std::getenv` |
+| C# | 类/结构体和直接方法 | `Environment.GetEnvironmentVariable`、`System.Environment.GetEnvironmentVariable` |
+| Rust | 类型及固有/trait `impl` 方法 | `std::env::var`、`std::env::var_os`、`env::var`, `env::var_os` |
+| Go | 具名类型和 receiver 方法 | `os.Getenv`、`os.LookupEnv` |
+| Kotlin | 类和对象 | `System.getenv`、`System.getProperty` |
+| Scala | 类、trait 和对象 | `System.getenv`、`System.getProperty`、`sys.env.get`、`sys.env.getOrElse` |
+| Ruby | 类/模块和直接方法 | `ENV[key]`、`ENV.fetch` |
+| PHP | 类和直接方法 | `getenv`、`$_ENV[key]`、`$_SERVER[key]` |
+| Swift | 类型和扩展 | `ProcessInfo.processInfo.environment[key]` |
+| Bash（`--source shell`） | 不适用 | 参数展开、现有 export/默认值证据、直接输出 getter |
+| Starlark | 不适用 | `ctx.getenv(key, default)` 及已记录的配置读取器；未证明接收者来源时保留不完整状态；`load` 提供显式绑定 |
+| Vue | 内嵌 JS/TS 归属 | 脚本复用对应 JS/TS 读取规则 |
+| SQL、构建脚本和模板 | 语法没有可调用类型时不适用 | 现有结构化定义、引用和条件证据；不构造类关系 |
+
+跨文件绑定限于同一授权仓库快照，并要求显式导入、类型或语言原生模块证据。环境变量和属性键保持独立命名空间，不能仅凭相同拼写连接不同代码语言的符号。动态键、外部提供方、重赋值、遮蔽、不支持的封装和解析深度耗尽必须作为未解析或不完整证据处理。`analysis_complete=false` 阻止不存在性结论。默认值描述已观察到的静态证据，不预测运行时值。例如，字符串 `"false"` 经 Python `bool` 或 JavaScript `Boolean` 转换为 `true`，经 C# `bool.Parse` 解析为 `false`。
+
+代码事实版本 `config-registry-v56-portable-evidence-source-io-isolation-v1` 要求通过持久化仓库索引任务重建旧索引。延迟查询索引计划升级为版本 5，保留 v4 的类型归属和语言/文件索引，追加配置身份、配置来源键及 caller/callee 身份索引（序号 19–22）；已有 v1–v4 检查点恢复时继续验证原有前缀。CLI、HTTP 和 MCP 继续复用同一服务合同和配置查询预算。
+
+### 跨文件证据与限制
+
+| 语言组 | 必需证据与保留的限制 |
+| --- | --- |
+| Python | 明确的模块导入或相对 `from` 导入；词法重新绑定会终止关联。 |
+| JS/JSX、TS/TSX、Vue 脚本 | 带源文件扩展名的明确相对导入，以及匹配的具名或默认导出。省略扩展名、包加载器和再导出链保留未解析状态。 |
+| C/C++ | 引号形式的仓库相对 include。C++ 归属保留限定作用域；头文件沿用检测到的语法（`.h` 默认使用 C，有 C++ 声明证据时使用 C++；`.hpp` 使用 C++）。 |
+| Rust | 用已索引的 `mod` 声明证明模块成员身份，包括静态 `#[path]` 重定向；导入别名保留原始目标名。缺少模块声明、条件模块和宏控制的成员关系保持未解析。 |
+| Go | 声明的 package 与所在目录连接 receiver 方法和包级配置提供者。 |
+| Kotlin、Scala、C# | 精确的原生 package、namespace 和类型身份；私有提供者不能满足跨文件导入。伴生对象保留独立的直接归属。 |
+| Swift | 配置提供者使用已索引的目录模块；跨文件类型扩展要求明确的类型导入，并沿用现有唯一模块目录合同。未知目标保持未解析。 |
+| Ruby / PHP | Ruby 使用 `require_relative`；PHP 使用以 `__DIR__` 为锚点的 `require`/`include`。namespace 和名称相同不证明 PHP 文件已加载。 |
+| Bash / Starlark | Shell 支持通过 `dirname` 与 `BASH_SOURCE[0]` 定位脚本目录的 `source`；Starlark 使用 `load`。普通相对 Shell source 保留工作目录未知证据；`source`、`eval`、`unset` 可以使先前函数绑定失效。 |
+
+分析器将不返回配置的 getter 声明保存为内部阻断证据，防止无关同名 getter 继承另一个提供者的配置结果。原生参数语法、局部声明和导入共同约束作用域。显式默认值及受支持的转换保留证据；不能求值的默认值保持未知。SQL、构建脚本和模板沿用已有语法的定义及引用覆盖，不表示支持通用程序流求值。
+
+Rust 的 `crate` 导入必须通过常规 Cargo 根和索引中的 `mod` 关系证明导入文件归属。
+`src/bin`、`tests`、`examples` 根与 `src/lib.rs` 分开；多根共享文件、内联模块、
+条件模块声明和自定义 manifest 根在无法证明归属时保留未解析。
+Swift typed import 必须在所有获准检查的 Swift 文件中具有唯一物理模块目录；
+语言/文件索引排除其他语言的扫描，模块证据上限为 1,024 个文件。
+
+getter 绑定重新赋值后撤销其导出证明，函数体的原始读取证据仍保留。
+C# 显式别名约束目标身份；不支持的其他 native 导入别名保留未解析。
+非空布尔/数值转换不会触发空值回退；未解析的跨文件 getter 外层回退保留不完整状态，
+不能在证明其返回语义前推测默认值。查询索引计划 v5 保留 v4 的归属和语言/文件索引，追加配置及调用身份查询索引。
+
+Java 零参数配置 getter 可以使用任意方法名，仍遵守现有可见性、继承和遮蔽检查。
+本地方法和属性展开复用提供者稳定性检查，包括已知的成员改写。
+C# 文件级 namespace 和相对 namespace 别名保留声明作用域；`global::` 明确选择全局命名空间。
+尚不能证明的 Scala selector import 会阻止包级名称回退。
+
+C++ 主类模板以声明参数槽区分身份，成员模板使用外层的所属类型参数，具体特化保持独立身份。
+复杂模板参数仍受语法和静态身份解析限制。Swift 构造函数、protocol 要求和 subscript
+保留各自成员范围。此处 Dockerfile 能力沿用已有 stage/import 图，不求值任意 `RUN` 命令。
+
+C++ 分离实现中的具体命名模板参数需要类型绑定证据；裸参数 `V` 保持未解析，
+因为不同命名空间可以定义不同的 `V` 类型。声明参数槽、内建类型和可证明的字面量参数
+仍支持有界身份关联。
+
+持久化类型调用回归矩阵同时验证 JavaScript 与 TypeScript 两种 Vue 脚本，
+包含 `vue` 语言过滤和调用位置的路径过滤。
+
+
+类型调用聚合保留真实调用点的字节和行范围；普通函数查询保留既有的上下文行范围。匿名回调具有独立调用归属；未知接收者不能仅凭成员同名证明目标。JS 静态与实例 `this` 分开处理，Java 允许实例限定的静态调用。类头和计算成员名不能建立新声明类的 `this` 绑定。
+
+Ruby 下标读取和 Rust `env::var_os` 提供环境变量证据；纯赋值及 Python/JS 方法选择器不会成为配置键。Rust 按最近词法作用域判断导入来源，区分本地 `std` 模块与 `::std`。Go 包常量可跨文件组合配置键，最多 32 个字符串组成部分、4 层快照解析和 4,096 字节结果。可变值、非字符串提供者、作为常量使用的 getter 和循环保持未解析；不同未知表达式保留独立身份。
+
+无扩展名脚本需要前 256 字节内受支持解释器的 shebang；watcher 保留其修改及删除事件。文件首个注释中的 Flow pragma 使用已有 typed JSX 语法，保留 JS/JSX 标识；不支持的语法继续报告 partial。这是有限语法恢复，不是完整 Flow 类型分析。Vue 只将顶层 SFC 区域计入 16 区域预算，并复用已解析的 HTML 树。
+
+语言选择必须同时满足仓库注册范围与当前请求；共享清单可能满足多种语言的路径规则。不同有效选择使用不同 scope 身份，不能互相复用检查点。shebang 候选在内容检查后被排除时保留 `excluded` 进度，不贡献代码或配置证据，也不会让仓库进入 degraded 状态。源码回退耗尽候选预算时报告不完整，不能把空结果视为不存在。

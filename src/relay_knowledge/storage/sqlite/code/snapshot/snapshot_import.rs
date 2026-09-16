@@ -17,6 +17,8 @@ const OPTIONAL_LEGACY_IMPORT_TABLES: &[&str] = &[
     "code_repository_framework_edges",
 ];
 const LEGACY_IMPORT_COLUMN_DEFAULTS: &[(&str, &str, &str)] = &[
+    ("code_repository_calls", "byte_start", "NULL"),
+    ("code_repository_calls", "byte_end", "NULL"),
     ("code_repository_file_diagnostics", "io_json", "NULL"),
     (
         "code_repository_index_checkpoints",
@@ -26,6 +28,8 @@ const LEGACY_IMPORT_COLUMN_DEFAULTS: &[(&str, &str, &str)] = &[
     ("code_repository_files", "is_generated", "0"),
     ("code_repository_feature_flags", "metadata_json", "'{}'"),
     ("code_repository_symbols", "symbol_role_json", "NULL"),
+    ("code_repository_symbols", "type_owner_json", "NULL"),
+    ("code_repository_symbols", "type_owner_identity", "NULL"),
     (
         "code_repository_index_checkpoints",
         "committed_fact_row_count",

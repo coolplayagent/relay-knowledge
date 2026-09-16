@@ -19,7 +19,7 @@ pub(super) const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_symbols",
-        columns: "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end, symbol_role_json",
+        columns: "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end, symbol_role_json, type_owner_json, type_owner_identity",
         cursor: CodeScopeCursor::Key("symbol_snapshot_id"),
     },
     CodeScopeTable {
@@ -39,7 +39,7 @@ pub(super) const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_calls",
-        columns: "repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
+        columns: "repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end, byte_start, byte_end",
         cursor: CodeScopeCursor::Key("call_id"),
     },
     CodeScopeTable {

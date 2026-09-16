@@ -388,23 +388,13 @@ fn checkpoint_state_requires_complete_prefix(state: &str) -> Option<bool> {
         || code_reference_resolution_query_index_repair(state).is_some()
         || code_reference_search_query_index_repair(state).is_some()
         || code_reference_search_rebuild(state).is_some()
+        || crate::domain::CodeQueryIndexRepairResumePhase::from_checkpoint_state(state).is_some()
     {
         return Some(true);
     }
     match state {
         "indexing" => Some(false),
-        "finalizing:build_query_indexes"
-        | "finalizing:resolve_references"
-        | "finalizing:resolve_imports"
-        | "finalizing:resolve_call_targets"
-        | "finalizing:refresh_dependencies"
-        | "finalizing:rebuild_reference_search"
-        | "finalizing:rebuild_calls"
-        | "finalizing:publish_scope"
-        | "finalizing:resolve_workspace_imports"
-        | "finalizing:software_projection"
-        | "finalizing:partitioned_publish"
-        | "completed" => Some(true),
+        "completed" => Some(true),
         _ => None,
     }
 }

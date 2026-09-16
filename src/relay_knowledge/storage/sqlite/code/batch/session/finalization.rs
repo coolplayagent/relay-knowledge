@@ -22,7 +22,13 @@ mod publication;
 mod query_index;
 
 use phase::FinalizationCheckpointPhase;
-use publication::{complete_unfenced_publication, publish_repository_scope};
+use publication::{
+    complete_unfenced_publication, locally_queryable_finalization_target, publish_repository_scope,
+};
+pub(super) use publication::{
+    finalization_target_is_unpublished, require_unpublished_finalization_owner,
+    require_unpublished_finalization_target,
+};
 use query_index::{
     advance_query_index_phase, advance_query_index_repair,
     advance_reference_search_query_index_repair, repair_query_indexes_after_coarse_checkpoint,
@@ -79,6 +85,7 @@ fn advance_session_once(
         return Err(super::checkpoint_identity_error(session));
     }
     super::validate_checkpoint_resume_record(&persisted, session)?;
+    finalize::type_ownership::checkpoint_cursor(&transaction, &session.source_scope)?;
     if let Some(fence) = fence {
         fence.validate_target_scope(&transaction, &session.source_scope)?;
         fence.validate(&transaction)?;
@@ -319,6 +326,35 @@ fn advance_transaction(
         );
     }
     if finalization_phase_pending(checkpoint_state, finalize::phases::RESOLVE_CALL_TARGETS)? {
+        let unpublished = if let Some(fence) = fence {
+            if session.full_replace {
+                require_unpublished_finalization_owner(transaction, session, fence)?;
+                true
+            } else {
+                false
+            }
+        } else {
+            session.full_replace && !locally_queryable_finalization_target(transaction, session)?
+        };
+        let complete = if unpublished {
+            finalize::type_ownership::advance(transaction, session)?
+        } else {
+            finalize::type_ownership::advance_atomically(transaction, session)?
+        };
+        if let Some(fence) = fence.filter(|_| unpublished) {
+            require_unpublished_finalization_owner(transaction, session, fence)?;
+        }
+        if !complete {
+            let cursor: String = transaction.query_row("SELECT type_owner_cursor FROM code_repository_index_checkpoints WHERE source_scope=?1",[&session.source_scope],|r|r.get(0))?;
+            let state =
+                crate::domain::CodeQueryIndexRepairResumePhase::ownership_checkpoint_state(&cursor)
+                    .ok_or_else(|| {
+                        StorageError::Invariant(
+                            "type ownership page did not publish a valid cursor".into(),
+                        )
+                    })?;
+            return mark_phase_pending(transaction, session, checkpoint_state, &state);
+        }
         finalize::phases::resolve_call_targets(transaction, &session.source_scope)?;
         return mark_phase_pending(
             transaction,
@@ -447,72 +483,6 @@ fn mark_reference_search_advance(
         &next_state,
     )?;
     Ok(TransactionAdvance::Pending(next_state))
-}
-
-pub(super) fn finalization_target_is_unpublished(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    fence: &PublicationFenceGuard,
-) -> Result<bool, StorageError> {
-    if !session.full_replace {
-        return Ok(false);
-    }
-    fence.validate_repository(&session.repository_id)?;
-    fence.validate_target_scope(transaction, &session.source_scope)?;
-    fence.validate(transaction)?;
-    let locally_queryable = transaction.query_row(
-        "SELECT EXISTS (
-             SELECT 1 FROM code_repositories repository
-             WHERE repository.repository_id = ?1
-               AND repository.last_indexed_scope_id = ?2
-         ) OR EXISTS (
-             SELECT 1 FROM code_repository_scopes scope
-             WHERE scope.repository_id = ?1 AND scope.source_scope = ?2
-               AND (scope.stale = 0 OR scope.retiring <> 0)
-         ) OR EXISTS (
-             SELECT 1 FROM code_repository_commit_scopes commit_scope
-             WHERE commit_scope.repository_id = ?1 AND commit_scope.source_scope = ?2
-         ) OR EXISTS (
-             SELECT 1 FROM code_repository_scope_gc_jobs job
-             WHERE job.repository_id = ?1 AND job.source_scope = ?2
-         )",
-        params![session.repository_id, session.source_scope],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if locally_queryable {
-        return Ok(false);
-    }
-    if !fence.authority_is_local() {
-        fence.validate_partitioned_staged_scope(
-            transaction,
-            &session.repository_id,
-            &session.source_scope,
-        )?;
-    }
-    Ok(true)
-}
-
-pub(super) fn require_unpublished_finalization_target(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    fence: &PublicationFenceGuard,
-) -> Result<(), StorageError> {
-    require_unpublished_finalization_owner(transaction, session, fence)?;
-    super::super::super::schema::require_code_query_indexes_for_fact_publication(transaction)
-}
-
-pub(super) fn require_unpublished_finalization_owner(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    fence: &PublicationFenceGuard,
-) -> Result<(), StorageError> {
-    if !finalization_target_is_unpublished(transaction, session, fence)? {
-        return Err(StorageError::Invariant(format!(
-            "durable finalization pages cannot mutate queryable scope '{}'",
-            session.source_scope
-        )));
-    }
-    Ok(())
 }
 
 fn mark_phase_pending(

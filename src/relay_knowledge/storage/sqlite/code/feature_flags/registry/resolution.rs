@@ -21,6 +21,48 @@ pub(super) struct Resolver<'a> {
 }
 impl Resolver<'_> {
     pub(super) fn resolve(&mut self, row: &FeatureFlagRow, depth: usize) -> Target {
+        if !row.metadata.string_parts.is_empty() {
+            if depth >= 4 || row.metadata.string_parts.len() > 32 {
+                return None;
+            }
+            let mut value = String::new();
+            for part in &row.metadata.string_parts {
+                use crate::domain::CodeConfigStringPart;
+                let text = match part {
+                    CodeConfigStringPart::Literal(text) => text.clone(),
+                    CodeConfigStringPart::Reference(reference) => {
+                        let providers = self.providers.get(reference)?;
+                        let [provider] = providers.as_slice() else {
+                            return None;
+                        };
+                        if self.rows[*provider].edge_kind != "declares_string_constant" {
+                            return None;
+                        }
+                        let mut dependency = row.clone();
+                        dependency.metadata.string_parts.clear();
+                        dependency.metadata.reference = Some(reference.clone());
+                        dependency.metadata.target_kind = None;
+                        dependency.metadata.exact_reference = false;
+                        let (kind, key) = self.resolve(&dependency, depth)?;
+                        if kind != "config_key" {
+                            return None;
+                        }
+                        key
+                    }
+                };
+                if value.len() + text.len() > 4096 {
+                    return None;
+                }
+                value.push_str(&text);
+            }
+            return Some((
+                row.metadata
+                    .target_kind
+                    .clone()
+                    .unwrap_or_else(|| row.source_kind.clone()),
+                value,
+            ));
+        }
         let Some(reference) = &row.metadata.reference else {
             return Some((row.source_kind.clone(), row.source_key.clone()));
         };

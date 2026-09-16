@@ -5,6 +5,9 @@ use std::{
     time::Instant,
 };
 
+#[cfg(test)]
+mod scope_tests;
+
 use crate::{
     api::{
         ApiError, CodeGraphContextResponse, CodeRepositoryFreshnessDiagnostics,

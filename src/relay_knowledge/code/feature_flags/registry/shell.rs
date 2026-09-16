@@ -1,20 +1,29 @@
 //! Bounded lexical export state for shell configuration facts.
 use super::*;
 use tree_sitter::Node;
+mod bindings;
+mod getters;
 mod guards;
 mod options;
 mod values;
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
 ) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
-    let mut parser = tree_sitter::Parser::new();
-    parser
-        .set_language(&tree_sitter_bash::LANGUAGE.into())
-        .map_err(|e| DomainError::invalid("shell", e.to_string()))?;
-    let tree = parser
-        .parse(input.content, None)
-        .ok_or_else(|| DomainError::invalid("shell", "parse cancelled"))?;
-    let mut pending = vec![tree.root_node()];
+    let owned_tree;
+    let root = if let Some(root) = input.syntax_root {
+        root
+    } else {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_bash::LANGUAGE.into())
+            .map_err(|e| DomainError::invalid("shell", e.to_string()))?;
+        owned_tree = parser
+            .parse(input.content, None)
+            .ok_or_else(|| DomainError::invalid("shell", "parse cancelled"))?;
+        owned_tree.root_node()
+    };
+    let bindings = bindings::Bindings::build(root, input.content)?;
+    let mut pending = vec![root];
     let mut rows = Vec::new();
     while let Some(node) = pending.pop() {
         if node.kind() == "variable_assignment" && export_scope(node).is_some() {
@@ -32,6 +41,7 @@ pub(super) fn extract(
                             .unwrap_or(""),
                         input.content,
                         false,
+                        &bindings,
                     )?;
                     external
                 };
@@ -116,7 +126,16 @@ pub(super) fn extract(
                 .find(|child| child.kind() == "variable_name")
             {
                 let key = &input.content[name.byte_range()];
-                let (external, uncertain) = shell_external(node, key, input.content, true)?;
+                // Positional/special parameters are shell inputs, not environment names.
+                if !key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                    || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                {
+                    let mut cursor = node.walk();
+                    pending.extend(node.named_children(&mut cursor));
+                    continue;
+                }
+                let (external, uncertain) =
+                    shell_external(node, key, input.content, true, &bindings)?;
                 if external {
                     check_fact_budget(rows.len())?;
                     let mut row = record(
@@ -198,6 +217,7 @@ pub(super) fn extract(
             row.metadata.flow_incomplete = Some("conditional_reassignment".into());
         }
     }
+    getters::project(input, root, &mut rows)?;
     Ok(rows)
 }
 
@@ -299,6 +319,7 @@ fn shell_external(
     key: &str,
     content: &str,
     inherited_external: bool,
+    bindings: &bindings::Bindings<'_>,
 ) -> Result<(bool, bool), DomainError> {
     let mut budget = 1024_usize;
     let mut assigned = false;
@@ -352,8 +373,9 @@ fn shell_external(
         ) || (parent.kind() == "if_statement"
             && !matches!(node.kind(), "else_clause" | "elif_clause"))
         {
-            let mut previous = node.prev_named_sibling();
-            while let Some(statement) = previous {
+            let children = bindings.children(key, parent);
+            let end = children.partition_point(|child| child.start_byte() < node.start_byte());
+            for &statement in children[..end].iter().rev() {
                 let mut pending = vec![(statement, false)];
                 while let Some((candidate, conditional)) = pending.pop() {
                     if budget == 0 {
@@ -433,8 +455,7 @@ fn shell_external(
                         | "for_statement" | "do_group" | "case_statement" | "case_item" => true,
                         _ => continue,
                     };
-                    let mut cursor = candidate.walk();
-                    for child in candidate.named_children(&mut cursor) {
+                    for &child in bindings.children(key, candidate) {
                         if budget == 0 {
                             return Err(DomainError::invalid(
                                 "configuration",
@@ -450,7 +471,6 @@ fn shell_external(
                         ));
                     }
                 }
-                previous = statement.prev_named_sibling();
             }
         }
         node = parent;

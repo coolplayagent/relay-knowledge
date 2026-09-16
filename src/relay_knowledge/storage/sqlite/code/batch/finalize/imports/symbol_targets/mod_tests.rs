@@ -31,9 +31,9 @@ fn symbol_target_resolution_distinguishes_unique_and_ambiguous_matches() {
 
 fn symbol(path: &str, id: &str) -> SymbolKey {
     SymbolKey {
+        byte_range: RepositoryCodeRange { start: 0, end: 1 },
         symbol_snapshot_id: format!("symbol:{id}"),
         path: path.to_owned(),
         name: "Widget".to_owned(),
-        line_range: RepositoryCodeRange { start: 1, end: 2 },
     }
 }

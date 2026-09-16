@@ -19,6 +19,7 @@ mod repository_set_store;
 mod routes;
 pub(in crate::storage::sqlite) mod schema;
 mod search;
+mod semantic_modules;
 mod session_finalization;
 mod set;
 mod snapshot;

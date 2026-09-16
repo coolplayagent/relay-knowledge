@@ -8,6 +8,26 @@ use super::{
 use crate::storage::sqlite::schema::marker::SEARCH_OWNER_V2_MIGRATION;
 
 #[test]
+fn missing_configuration_binding_projection_fails_closed_after_migration() {
+    for damage in [
+        "DROP TABLE code_repository_config_bindings",
+        "DROP TRIGGER code_config_bindings_update",
+        "DROP INDEX code_repository_config_bindings_usage; CREATE INDEX code_repository_config_bindings_usage ON code_repository_config_bindings(usage_id,source_scope)",
+    ] {
+        let connection = Connection::open_in_memory().unwrap();
+        initialize_code_schema(&connection).unwrap();
+        connection.execute_batch(damage).unwrap();
+        let error = initialize_code_schema(&connection).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("configuration binding schema is missing"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn schema_open_does_not_backfill_legacy_call_search() {
     let connection = Connection::open_in_memory().expect("database should open");
     connection

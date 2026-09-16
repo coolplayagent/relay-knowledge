@@ -29,8 +29,8 @@ pub(super) struct CandidatePaths {
 pub(super) fn selected_candidate_paths(request: &SourceGrepRequest) -> CandidatePaths {
     let mut paths = Vec::new();
     let mut seen = BTreeSet::new();
-    let mut exhausted = false;
-    for path in &request.paths {
+    let mut exhausted = request.paths.len() > SOURCE_GREP_CANDIDATE_FILE_LIMIT;
+    for path in request.paths.iter().take(SOURCE_GREP_CANDIDATE_FILE_LIMIT) {
         if paths.len() >= SOURCE_GREP_CANDIDATE_FILE_LIMIT {
             exhausted = true;
             break;
@@ -65,6 +65,13 @@ fn path_filter_allows(path: &str, filters: &[String]) -> bool {
 }
 
 fn language_filter_allows(path: &str, language_id: &str, filters: &[String]) -> bool {
+    if crate::domain::code_language_filter_groups(filters).len() > 1
+        || (std::path::Path::new(path).extension().is_none()
+            && crate::code::languages::language_id(path).is_none())
+    {
+        return crate::code::source::source_language_filter_allows(path, filters);
+    }
+
     filters.is_empty()
         || filters.iter().any(|filter| {
             filter == language_id

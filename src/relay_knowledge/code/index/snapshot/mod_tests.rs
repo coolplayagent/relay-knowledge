@@ -15,11 +15,11 @@ fn caller_lookup_uses_matching_path_and_innermost_symbol() {
     ];
     let index = build_symbol_path_index(&symbols);
 
-    let caller = caller_for_line(&index, "src/hot.rs", 6).expect("caller should resolve");
+    let caller = caller_for_position(&index, "src/hot.rs", 6).expect("caller should resolve");
 
     assert_eq!(caller.name, "inner");
-    assert!(caller_for_line(&index, "src/other.rs", 5).is_none());
-    assert!(caller_for_line(&index, "src/missing.rs", 6).is_none());
+    assert!(caller_for_position(&index, "src/other.rs", 5).is_none());
+    assert!(caller_for_position(&index, "src/missing.rs", 6).is_none());
 }
 
 #[test]
@@ -92,6 +92,7 @@ fn symbol(
     line_end: u32,
 ) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         symbol_snapshot_id: symbol_snapshot_id.to_owned(),
@@ -104,7 +105,10 @@ fn symbol(
         kind: "function".to_owned(),
         signature: format!("fn {name}()"),
         doc_comment: None,
-        byte_range: RepositoryCodeRange { start: 0, end: 1 },
+        byte_range: RepositoryCodeRange {
+            start: line_start,
+            end: line_end + 1,
+        },
         line_range: RepositoryCodeRange {
             start: line_start,
             end: line_end,
@@ -138,4 +142,95 @@ fn reference(
             end: line,
         },
     }
+}
+#[tokio::test]
+async fn shared_manifest_scope_reuse_requires_all_requested_evidence_languages() {
+    use crate::domain::{CodeQueryKind, CodeRetrievalRequest, FreshnessPolicy};
+    use crate::storage::{
+        CodeIndexPublicationStore as _, CodeQueryReadStore as _, RepositoryCatalogStore as _,
+        SqliteGraphStore,
+    };
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "fixture",
+        "/tmp/repo",
+        vec![],
+        vec!["java".into()],
+    )
+    .unwrap();
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit", vec![], vec!["kotlin".into()]).unwrap();
+    let pom = br#"<project>
+<modelVersion>4.0.0</modelVersion>
+<groupId>sample</groupId>
+<artifactId>app</artifactId>
+<version>1</version>
+<dependencies>
+<dependency>
+<groupId>sample</groupId>
+<artifactId>engine</artifactId>
+<version>1</version>
+</dependency>
+</dependencies>
+</project>"#;
+    let mut java = SnapshotBuild::new(&registration, "commit".into(), "tree".into(), true, 1, 0);
+    crate::code::parse_indexed_file(&mut java, "pom.xml", pom).unwrap();
+    let java = java.finish();
+    assert!(
+        java.dependencies
+            .iter()
+            .any(|row| row.package_name == "sample:engine")
+    );
+    assert!(
+        java.dependencies
+            .iter()
+            .all(|row| row.language_id == "java")
+    );
+    let mut joint = SnapshotBuild::new_with_selector(
+        &registration,
+        &selector,
+        "commit".into(),
+        "tree".into(),
+        true,
+        1,
+        0,
+    );
+    crate::code::parse_indexed_file(&mut joint, "pom.xml", pom).unwrap();
+    let joint = joint.finish();
+    assert!(
+        joint
+            .dependencies
+            .iter()
+            .any(|row| row.language_id == "kotlin")
+    );
+    assert!(
+        joint
+            .dependencies
+            .iter()
+            .any(|row| row.language_id == "kotlin" && row.package_name == "sample:engine")
+    );
+    assert_ne!(java.source_scope, joint.source_scope);
+    let store = SqliteGraphStore::open_in_memory().unwrap();
+    store.upsert_code_repository(registration).await.unwrap();
+    store.apply_code_index_snapshot(java).await.unwrap();
+    let query = CodeRetrievalRequest::new(
+        "engine",
+        selector,
+        CodeQueryKind::Sbom,
+        10,
+        FreshnessPolicy::AllowStale,
+    )
+    .unwrap();
+    assert!(
+        store
+            .search_code(query.clone())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("requested filters")
+    );
+    store.apply_code_index_snapshot(joint).await.unwrap();
+    let hits = store.search_code(query).await.unwrap();
+    assert!(!hits.is_empty());
+    assert!(hits.iter().all(|hit| hit.language_id == "kotlin"));
 }

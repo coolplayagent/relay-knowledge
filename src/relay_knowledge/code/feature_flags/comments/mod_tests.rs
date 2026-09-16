@@ -4,6 +4,7 @@ use super::*;
 
 fn input(path: &'static str, language_id: &'static str) -> FeatureFlagFileInput<'static> {
     FeatureFlagFileInput {
+        syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
         file_id: "file",

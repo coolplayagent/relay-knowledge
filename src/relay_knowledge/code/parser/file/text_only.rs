@@ -180,6 +180,7 @@ fn record_symbol(
         ],
     );
     let symbol = RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: context.build.repository_id.clone(),
         source_scope: context.build.source_scope.clone(),
         symbol_snapshot_id,

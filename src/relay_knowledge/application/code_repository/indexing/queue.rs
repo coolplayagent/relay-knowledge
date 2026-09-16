@@ -58,7 +58,7 @@ pub(super) async fn queue_worktree_overlay_index_task(
         ))
     })?;
     let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
-    let language_filters = merged_filters(
+    let language_filters = crate::domain::code_scope_language_filters(
         &status.language_filters,
         &request.repository.language_filters,
     );

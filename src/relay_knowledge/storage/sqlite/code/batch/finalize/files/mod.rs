@@ -18,7 +18,7 @@ pub(super) fn load_file_languages(
         "
         SELECT path, language_id
         FROM code_repository_files
-        WHERE source_scope = ?1
+        WHERE source_scope = ?1 AND parse_status != 'excluded'
         ",
     )?;
     let rows = statement.query_map(params![source_scope], |row| {

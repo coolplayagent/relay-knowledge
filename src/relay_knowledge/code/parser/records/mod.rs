@@ -1,4 +1,8 @@
 //! Stable symbol and reference record materialization.
+mod call_receivers;
+mod cgo;
+mod java_receivers;
+pub(super) use call_receivers::bind_call_receivers;
 
 #[cfg(test)]
 #[path = "doc_comments_tests.rs"]
@@ -427,6 +431,7 @@ fn symbol_record_with_doc_owner(
     );
 
     Ok(RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: context.build.repository_id.clone(),
         source_scope: context.build.source_scope.clone(),
         symbol_snapshot_id,

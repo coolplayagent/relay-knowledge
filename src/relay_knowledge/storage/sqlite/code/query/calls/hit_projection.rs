@@ -212,7 +212,11 @@ pub(super) fn call_rows_to_hits(
                     query_has_test_intent,
                 );
             (score > 0.0).then(|| {
-                let line_range = call_result_line_range(request.code_query_kind, &row);
+                let line_range = if minimum_identity_score > 0.0 {
+                    row.line_range.clone()
+                } else {
+                    call_result_line_range(request.code_query_kind, &row)
+                };
                 let caller = call_display_name(
                     row.caller_name.as_deref(),
                     row.caller_canonical_symbol_id.as_deref(),
@@ -236,7 +240,9 @@ pub(super) fn call_rows_to_hits(
                     HitParts {
                         path: row.path,
                         language_id: row.language_id,
-                        byte_range: RepositoryCodeRange { start: 0, end: 0 },
+                        byte_range: row
+                            .byte_range
+                            .unwrap_or(RepositoryCodeRange { start: 0, end: 0 }),
                         line_range,
                         symbol_snapshot_id,
                         canonical_symbol_id,

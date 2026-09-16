@@ -81,6 +81,72 @@ pub(crate) async fn service_with_memory_store() -> RelayKnowledgeService {
     service_with_store(store).await
 }
 
+/// Publishes a small multilingual snapshot for scope-bound service unit tests.
+pub(in crate::application::code_repository) async fn indexed_language_fixture(
+    languages: &[&str],
+) -> (FixtureRepo, RelayKnowledgeService, Arc<SqliteGraphStore>) {
+    let repo = FixtureRepo::create("service-language-boundaries");
+    repo.write(
+        "src/Owner.java",
+        "class Owner {\n static void target() {}\n @GetMapping(\"/java-owner\")\n void run() { target(); }\n}\nclass Caller { void use() { Owner.target(); } }\n",
+    );
+    repo.write("src/owner.py", "class Owner:\n    @app.get('/python-owner')\n    def run(self):\n        return self.target()\n    def target(self):\n        return 1\n");
+    repo.git(["add", "src"]);
+    repo.git(["commit", "-m", "language scope fixture"]);
+    let store = Arc::new(SqliteGraphStore::open_in_memory().unwrap());
+    let service = service_with_store(Arc::clone(&store)).await;
+    register_fixture_repo(&service, &repo, "register-language-fixture").await;
+    let mut index = request("fixture", "HEAD");
+    index.repository.language_filters = languages.iter().map(|value| (*value).to_owned()).collect();
+    service
+        .index_code_repository(index, context("index-language-fixture"))
+        .await
+        .unwrap();
+    (repo, service, store)
+}
+
+/// Installs distinct authored evidence in an already published test scope.
+pub(in crate::application::code_repository) async fn seed_business_domain(
+    store: &SqliteGraphStore,
+    status: &crate::domain::CodeRepositoryStatus,
+    name: &str,
+) {
+    use crate::{domain::*, storage::BusinessKnowledgeStore as _};
+    store
+        .replace_business_knowledge_projection(BusinessKnowledgeProjectionInput {
+            repository_id: status.repository_id.clone(),
+            source_scope: status.last_indexed_scope_id.clone().unwrap(),
+            resolved_commit_sha: status.last_indexed_commit.clone().unwrap(),
+            sources: vec![BusinessKnowledgeSource {
+                source_id: name.into(),
+                source_path: "src/business.yaml".into(),
+                authority_rank: 0,
+                content_digest: "a".repeat(64),
+                glossary: BusinessGlossary {
+                    schema_version: 1,
+                    domains: vec![BusinessDomainDefinition {
+                        id: name.into(),
+                        name: name.into(),
+                        description: None,
+                    }],
+                    terms: vec![BusinessTermDefinition {
+                        id: "owner".into(),
+                        domain: name.into(),
+                        canonical_name: "Owner".into(),
+                        definition: format!("{name} owner"),
+                        language: "en".into(),
+                        status: BusinessTermStatus::Active,
+                        aliases: vec![],
+                        semantics: None,
+                        mappings: vec![],
+                    }],
+                },
+            }],
+        })
+        .await
+        .unwrap();
+}
+
 pub(super) async fn service_with_store(store: Arc<SqliteGraphStore>) -> RelayKnowledgeService {
     let runtime_root = std::env::temp_dir().join("relay-knowledge-code-repository-runtime");
     let home_dir = runtime_root.join("home");

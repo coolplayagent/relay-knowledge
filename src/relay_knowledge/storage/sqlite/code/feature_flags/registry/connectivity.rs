@@ -14,6 +14,12 @@ pub(super) fn incomplete_rows(
             .bindings
             .iter()
             .chain(row.metadata.reference.iter())
+            .chain(
+                row.metadata
+                    .string_parts
+                    .iter()
+                    .filter_map(crate::domain::CodeConfigStringPart::reference),
+            )
         {
             if let Some(previous) = symbols.insert(symbol, index) {
                 let left = root(&mut parents, previous);
@@ -35,7 +41,10 @@ pub(super) fn incomplete_rows(
             (row.metadata.target_kind.is_some() || resolver.has_config_evidence(reference, 0))
                 && resolver.resolve(row, 0).is_none()
         });
-        if unresolved || row.metadata.flow_incomplete.is_some() {
+        if unresolved
+            || (!row.metadata.string_parts.is_empty() && resolver.resolve(row, 0).is_none())
+            || row.metadata.flow_incomplete.is_some()
+        {
             bad.insert(root(&mut parents, index));
         }
     }

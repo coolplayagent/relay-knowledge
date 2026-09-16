@@ -63,8 +63,10 @@ impl RelayKnowledgeService {
                 ))
             })?;
         let path_filters = merged_filters(&repository.path_filters, &request.path_filters);
-        let language_filters =
-            merged_filters(&repository.language_filters, &request.language_filters);
+        let language_filters = crate::domain::code_scope_language_filters(
+            &repository.language_filters,
+            &request.language_filters,
+        );
         let selector = CodeRepositorySelector {
             repository: request.repository_alias.clone(),
             ref_selector: request.ref_selector.clone(),

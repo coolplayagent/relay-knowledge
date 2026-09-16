@@ -203,7 +203,7 @@ fn projection_request(
             target.repository_id.clone(),
             target.resolved_commit_sha.clone(),
             target.path_filters.clone(),
-            target.language_filters.clone(),
+            Vec::new(),
         )
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
         SoftwareGlobalKind::All,

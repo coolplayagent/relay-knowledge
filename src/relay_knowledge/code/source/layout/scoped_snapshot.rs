@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     code::{
-        CodeIndexError, snapshot,
+        CodeIndexError,
         source::{
             changes::GitTreeEntry,
             filesystem::FileSystemScanPolicy,
@@ -117,13 +117,21 @@ fn scoped_source_snapshot_inner(
     ref_selector: &str,
     allow_filesystem_ref: bool,
 ) -> Result<ScopedSourceSnapshot, CodeIndexError> {
+    for filters in [&registration.language_filters, &selector.language_filters] {
+        crate::domain::validate_code_language_filters(filters)
+            .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
+    }
     let filesystem_policy = filesystem_policy_for_selector(registration, selector);
     let snapshot =
         source_snapshot_for_scope(root, ref_selector, filesystem_policy, allow_filesystem_ref)?;
     let source_layout = discover_source_layout(&snapshot.entries);
     let path_filters = effective_index_path_filters(registration, selector, &source_layout);
-    let language_filters =
-        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let language_filters = crate::domain::code_scope_language_filters(
+        &registration.language_filters,
+        &selector.language_filters,
+    );
+    crate::domain::validate_code_language_filters(&language_filters)
+        .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
     let mut entries = snapshot
         .entries
         .into_iter()

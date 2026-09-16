@@ -5,6 +5,7 @@ use crate::domain::{CodeConfigMetadata, CodeFeatureFlagRecord, DomainError};
 mod dotenv;
 mod files;
 mod java;
+mod portable;
 mod shell;
 
 pub(super) fn extract(
@@ -20,8 +21,39 @@ pub(super) fn extract(
         }
         "properties" | "ini" => files::extract(input),
         "bash" => shell::extract(input),
+        "python" | "javascript" | "jsx" | "typescript" | "tsx" | "rust" | "c" | "cpp" | "go"
+        | "csharp" | "kotlin" | "scala" | "ruby" | "php" | "swift" | "starlark" => {
+            portable::extract(input)
+        }
         _ => Ok(Vec::new()),
     }
+}
+
+/// Syntax-authoritative formats suppress the older line-level reader heuristic.
+pub(super) fn has_syntax_reader(input: &FeatureFlagFileInput<'_>) -> bool {
+    input.syntax_root.is_some()
+        && matches!(
+            input.language_id,
+            "java"
+                | "bash"
+                | "python"
+                | "javascript"
+                | "jsx"
+                | "typescript"
+                | "tsx"
+                | "rust"
+                | "c"
+                | "cpp"
+                | "go"
+                | "csharp"
+                | "kotlin"
+                | "scala"
+                | "ruby"
+                | "php"
+                | "swift"
+                | "starlark"
+                | "vue"
+        )
 }
 
 pub(super) fn check_fact_budget(count: usize) -> Result<(), DomainError> {
@@ -52,16 +84,14 @@ fn record(
         line_start: line_number(&input.content[..start]),
         line_end: line_number(&input.content[..end]),
     };
-    let mut result = feature_flag_record_from_range(
+    feature_flag_record_from_range(
         input,
         kind,
         key,
         edge,
         range,
         input.content[start..end].trim(),
-    )?;
-    result.metadata = metadata(input, start);
-    Ok(result)
+    )
 }
 
 fn line_number(prefix: &str) -> usize {
@@ -78,7 +108,7 @@ pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeCo
         "dotenv"
     } else {
         match input.language_id {
-            "gotemplate" => "ctmpl",
+            "gotemplate" if input.path.to_ascii_lowercase().ends_with(".ctmpl") => "ctmpl",
             "bash" => "shell",
             other => other,
         }

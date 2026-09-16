@@ -211,10 +211,12 @@ impl Hierarchy {
                         continue;
                     };
                     let name = names::text(name, input.content);
-                    let zero_getter = (name.starts_with("get") || name.starts_with("is"))
+                    let zero_getter = method
+                        .child_by_field_name("parameters")
+                        .is_some_and(|p| p.named_child_count() == 0)
                         && method
-                            .child_by_field_name("parameters")
-                            .is_some_and(|p| p.named_child_count() == 0);
+                            .child_by_field_name("type")
+                            .is_some_and(|t| t.kind() != "void_type");
                     if !zero_getter
                         && !matches!(
                             name,

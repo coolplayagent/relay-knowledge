@@ -121,7 +121,7 @@ pub(in crate::storage::sqlite::code) fn repository_statuses(
                 alias: row.get(1)?,
                 root_path: row.get(2)?,
                 path_filters: parse_json_list(row.get::<_, String>(3)?)?,
-                language_filters: parse_json_list(row.get::<_, String>(4)?)?,
+                language_filters: parse_language_filters_json(row.get::<_, String>(4)?)?,
                 last_indexed_scope_id: row.get(5)?,
                 last_indexed_commit: row.get(6)?,
                 tree_hash: row.get(7)?,
@@ -206,7 +206,7 @@ pub(in crate::storage::sqlite::code) fn repository_scope_status(
         ],
         |row| {
             let stored_path_filters = parse_json_list(row.get::<_, String>(8)?)?;
-            let stored_language_filters = parse_json_list(row.get::<_, String>(9)?)?;
+            let stored_language_filters = parse_language_filters_json(row.get::<_, String>(9)?)?;
             Ok((
                 CodeRepositoryStatus {
                     content_integrity: content_integrity(connection, Some(row.get(0)?))?,
@@ -291,7 +291,7 @@ pub(in crate::storage::sqlite::code) fn latest_repository_scope_status(
     )?;
     let rows = statement.query_map(params![&base.repository_id], |row| {
         let stored_path_filters = parse_json_list(row.get::<_, String>(9)?)?;
-        let stored_language_filters = parse_json_list(row.get::<_, String>(10)?)?;
+        let stored_language_filters = parse_language_filters_json(row.get::<_, String>(10)?)?;
         Ok((
             CodeRepositoryStatus {
                 content_integrity: content_integrity(connection, Some(row.get(0)?))?,
@@ -380,7 +380,7 @@ pub(in crate::storage::sqlite::code) fn repository_scope_status_by_source_scope(
                     alias: row.get(1)?,
                     root_path: row.get(2)?,
                     path_filters: parse_json_list(row.get::<_, String>(12)?)?,
-                    language_filters: parse_json_list(row.get::<_, String>(13)?)?,
+                    language_filters: parse_language_filters_json(row.get::<_, String>(13)?)?,
                     last_indexed_scope_id: Some(row.get(3)?),
                     last_indexed_commit: Some(row.get(4)?),
                     tree_hash: Some(row.get(5)?),
@@ -411,7 +411,7 @@ fn repository_status_by_column(
                 alias: row.get(1)?,
                 root_path: row.get(2)?,
                 path_filters: parse_json_list(row.get::<_, String>(3)?)?,
-                language_filters: parse_json_list(row.get::<_, String>(4)?)?,
+                language_filters: parse_language_filters_json(row.get::<_, String>(4)?)?,
                 last_indexed_scope_id: row.get(5)?,
                 last_indexed_commit: row.get(6)?,
                 tree_hash: row.get(7)?,
@@ -503,6 +503,14 @@ pub(in crate::storage::sqlite::code) fn parse_json_list(
     })
 }
 
+fn parse_language_filters_json(value: String) -> rusqlite::Result<Vec<String>> {
+    let filters = parse_json_list(value)?;
+    crate::domain::validate_code_language_filters(&filters).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    Ok(filters)
+}
+
 fn scope_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
     let (Some(source_scope), Some(tree_hash)) = (
         status.last_indexed_scope_id.as_deref(),
@@ -586,11 +594,7 @@ fn path_filter_covers(stored_filter: &str, requested_filter: &str) -> bool {
 }
 
 fn value_filters_cover_request(stored_filters: &[String], requested_filters: &[String]) -> bool {
-    requested_filters.is_empty()
-        || stored_filters.is_empty()
-        || requested_filters
-            .iter()
-            .all(|requested_filter| stored_filters.contains(requested_filter))
+    crate::domain::code_language_scope_covers(stored_filters, requested_filters)
 }
 
 fn compatible_value_filters_cover_request(
@@ -631,22 +635,8 @@ fn value_scope_filters_cover_request(
     base_filters: &[String],
     requested_filters: &[String],
 ) -> bool {
-    let stored_extra = value_filters_excluding_base(stored_filters, base_filters);
-    if requested_filters.is_empty() {
-        return stored_extra.is_empty();
-    }
-    if stored_extra.is_empty() {
-        return value_filters_cover_request(base_filters, requested_filters);
-    }
-
-    value_filters_cover_request(&stored_extra, requested_filters)
-}
-
-fn value_filters_excluding_base(filters: &[String], base_filters: &[String]) -> Vec<String> {
-    canonical_filter_values(filters)
-        .into_iter()
-        .filter(|filter| !base_filters.contains(filter))
-        .collect()
+    let requested = crate::domain::code_scope_language_filters(base_filters, requested_filters);
+    crate::domain::code_language_scope_covers(stored_filters, &requested)
 }
 
 fn content_integrity(

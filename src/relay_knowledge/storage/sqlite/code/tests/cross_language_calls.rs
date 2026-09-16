@@ -522,6 +522,7 @@ fn symbol(
     line_range: RepositoryCodeRange,
 ) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: SOURCE_SCOPE.to_owned(),
         symbol_snapshot_id: symbol_snapshot_id.to_owned(),
@@ -532,7 +533,11 @@ fn symbol(
         name: name.to_owned(),
         qualified_name: format!("{}::{name}", path.replace('/', "::")),
         kind: kind.to_owned(),
-        signature: format!("{kind} {name}"),
+        signature: match (language_id, kind) {
+            ("c", "function") => format!("int {name}(void) {{"),
+            ("c", "function_declaration") => format!("int {name}(void);"),
+            _ => format!("{kind} {name}"),
+        },
         doc_comment: None,
         byte_range: range(0, 8),
         line_range,

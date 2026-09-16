@@ -2,7 +2,9 @@ use rusqlite::Connection;
 
 use crate::storage::StorageError;
 
+mod config_bindings;
 mod index_task_schema;
+pub(in crate::storage::sqlite::code) use config_bindings::initialize_config_bindings;
 mod migrations;
 mod repository_schema;
 mod repository_set_schema;
@@ -40,6 +42,14 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     let reference_search_owner_was_current =
         super::super::schema::marker::reference_search_group_schema_is_current(connection)?;
     initialize_repository_schema(connection)?;
+    for column in ["byte_start", "byte_end"] {
+        super::super::schema::columns::ensure_column(
+            connection,
+            "code_repository_calls",
+            column,
+            "INTEGER",
+        )?;
+    }
     super::super::schema::columns::ensure_column(
         connection,
         "code_repository_file_diagnostics",
@@ -56,6 +66,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     super::super::schema::columns::ensure_column(
         connection,
         "code_repository_index_checkpoints",
+        "type_owner_cursor",
+        "TEXT",
+    )?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_index_checkpoints",
         "processed_path_count",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
@@ -68,6 +84,15 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "TEXT NOT NULL DEFAULT '{}'",
     )?;
     initialize_retention_schema(connection)?;
+    // A missing projection after its migration is corruption, not an empty
+    // legacy index. Do not silently expose complete answers or invalidate an
+    // active writer's checkpoint while repairing schema at startup.
+    if code_schema_migration_applied(connection, "portable-evidence-reindex-v2")?
+        && !config_bindings::binding_schema_present(connection)?
+    {
+        return Err(StorageError::Invariant("configuration binding schema is missing or incompatible; restore the database backup or rebuild the repository index in a new runtime home".into()));
+    }
+    initialize_config_bindings(connection)?;
     super::super::schema::columns::ensure_column(
         connection,
         "code_repository_scope_gc_jobs",
@@ -87,10 +112,23 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "TEXT",
     )?;
     super::generated::backfill_all_path_generated_flags(connection)?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_symbols",
+        "type_owner_json",
+        "TEXT",
+    )?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_symbols",
+        "type_owner_identity",
+        "TEXT",
+    )?;
     mark_legacy_generated_detection_scopes_stale_once(connection)?;
     mark_legacy_route_extraction_scopes_stale_once(connection)?;
     mark_legacy_markdown_scopes_stale_once(connection)?;
     mark_legacy_framework_graph_scopes_stale_once(connection)?;
+    mark_legacy_semantic_scopes_stale_once(connection)?;
     mark_legacy_search_owner_scopes_stale_once(connection)?;
     mark_legacy_reference_search_group_scopes_stale_once(
         connection,
@@ -119,6 +157,18 @@ fn mark_legacy_framework_graph_scopes_stale_once(
         [],
     )?;
     mark_code_schema_migration(&transaction, FRAMEWORK_GRAPH_REINDEX_MIGRATION)?;
+    transaction.commit().map_err(StorageError::from)
+}
+
+fn mark_legacy_semantic_scopes_stale_once(connection: &Connection) -> Result<(), StorageError> {
+    const MIGRATION: &str = "portable-evidence-reindex-v2";
+    if code_schema_migration_applied(connection, MIGRATION)? {
+        return Ok(());
+    }
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute("UPDATE code_repository_scopes SET stale = 1", [])?;
+    transaction.execute("UPDATE code_repositories SET stale = 1 WHERE last_indexed_scope_id IN (SELECT source_scope FROM code_repository_scopes WHERE stale != 0)", [])?;
+    mark_code_schema_migration(&transaction, MIGRATION)?;
     transaction.commit().map_err(StorageError::from)
 }
 

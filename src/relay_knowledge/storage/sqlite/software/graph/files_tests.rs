@@ -45,6 +45,7 @@ fn file_page_assigns_owned_roles_before_domain_validation() {
             );
             INSERT INTO code_repository_files VALUES
                 ('repository', 'scope', 'Cargo.toml', 'toml', 'parsed'),
+                ('repository', 'scope', 'src/excluded', 'python', 'excluded'),
                 ('repository', 'other', 'src/lib.rs', 'rust', 'parsed');
             ",
         )
@@ -54,6 +55,17 @@ fn file_page_assigns_owned_roles_before_domain_validation() {
         .expect("software files should load");
 
     assert_eq!(files.len(), 1);
+    assert!(
+        software_file_page(
+            &connection,
+            "scope",
+            GraphVersion::new(3),
+            10,
+            Some("Cargo.toml")
+        )
+        .unwrap()
+        .is_empty()
+    );
     assert_eq!(files[0].file_role, "dependency_manifest");
     assert_eq!(files[0].created_graph_version, GraphVersion::new(3));
 }

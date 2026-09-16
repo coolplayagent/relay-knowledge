@@ -28,6 +28,7 @@ pub(in crate::storage::sqlite) fn parse_status_counts(
             CodeParseStatus::Partial => counts.partial = count,
             CodeParseStatus::TextOnly => counts.text_only = count,
             CodeParseStatus::Failed => counts.failed = count,
+            CodeParseStatus::Excluded => counts.excluded = count,
         }
     }
 
@@ -40,6 +41,7 @@ fn parse_status(value: &str) -> Result<CodeParseStatus, StorageError> {
         "partial" => Ok(CodeParseStatus::Partial),
         "text_only" => Ok(CodeParseStatus::TextOnly),
         "failed" => Ok(CodeParseStatus::Failed),
+        "excluded" => Ok(CodeParseStatus::Excluded),
         _ => Err(invalid_code_metadata(format!(
             "unknown code parse status '{value}'"
         ))),

@@ -28,6 +28,7 @@ fn earlier_sites_receive_a_larger_bounded_bonus() {
 
 fn call_row(line: u32, callee_name: &str) -> CallRow {
     CallRow {
+        byte_range: None,
         file_id: "file".to_owned(),
         path: "src/pipeline.rs".to_owned(),
         language_id: "rust".to_owned(),

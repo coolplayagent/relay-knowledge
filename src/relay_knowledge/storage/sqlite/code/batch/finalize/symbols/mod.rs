@@ -16,7 +16,7 @@ pub(super) struct SymbolKey {
     pub(super) symbol_snapshot_id: String,
     pub(super) path: String,
     pub(super) name: String,
-    pub(super) line_range: RepositoryCodeRange,
+    pub(super) byte_range: RepositoryCodeRange,
 }
 
 pub(super) fn load_once<'a>(
@@ -44,10 +44,10 @@ pub(super) fn path_matches_candidate(path: &str, candidate: &str) -> bool {
 fn load(transaction: &Transaction<'_>, source_scope: &str) -> Result<Vec<SymbolKey>, StorageError> {
     let mut statement = transaction.prepare(
         "
-        SELECT symbol_snapshot_id, path, name, line_start, line_end
+        SELECT symbol_snapshot_id, path, name, byte_start, byte_end
         FROM code_repository_symbols
         WHERE source_scope = ?1
-        ORDER BY path ASC, line_start ASC, line_end DESC, name ASC
+        ORDER BY path ASC, byte_start ASC, byte_end DESC, name ASC
         ",
     )?;
     let rows = statement.query_map(params![source_scope], |row| {
@@ -55,7 +55,7 @@ fn load(transaction: &Transaction<'_>, source_scope: &str) -> Result<Vec<SymbolK
             symbol_snapshot_id: row.get(0)?,
             path: row.get(1)?,
             name: row.get(2)?,
-            line_range: RepositoryCodeRange {
+            byte_range: RepositoryCodeRange {
                 start: row.get(3)?,
                 end: row.get(4)?,
             },

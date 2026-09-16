@@ -19,6 +19,7 @@ pub(super) struct FrameworkFileInput<'a> {
     pub(super) language_id: &'a str,
     pub(super) content: &'a str,
     pub(super) symbols: &'a [RepositoryCodeSymbolRecord],
+    pub(super) syntax_root: Option<tree_sitter::Node<'a>>,
 }
 
 #[derive(Default)]
@@ -62,8 +63,11 @@ pub(super) fn extract(
     Ok(facts)
 }
 
-pub(super) fn vue_script_mask(content: &str) -> Option<(String, bool)> {
-    vue::script_mask(content)
+pub(super) fn vue_script_mask(
+    content: &str,
+    root: tree_sitter::Node<'_>,
+) -> Option<(String, bool)> {
+    vue::script_mask(content, root)
 }
 
 #[cfg(test)]

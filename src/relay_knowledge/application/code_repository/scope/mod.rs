@@ -63,7 +63,10 @@ pub(super) async fn resolved_code_scope_status(
     selector: &CodeRepositorySelector,
 ) -> Result<CodeRepositoryStatus, ApiError> {
     let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
-    let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
+    let language_filters = crate::domain::code_scope_language_filters(
+        &status.language_filters,
+        &selector.language_filters,
+    );
     let exact_scope = store
         .code_repository_scope_status(
             selector.repository.clone(),
@@ -233,8 +236,10 @@ async fn active_non_git_index_matches_selector(
     let task_language_filters = task.language_filters.clone();
     let selector_resolved_commit = selector.ref_selector.clone();
     let selector_path_filters = merged_filters(&status.path_filters, &selector.path_filters);
-    let selector_language_filters =
-        merged_filters(&status.language_filters, &selector.language_filters);
+    let selector_language_filters = crate::domain::code_scope_language_filters(
+        &status.language_filters,
+        &selector.language_filters,
+    );
 
     run_blocking_code(move || {
         if !repository_uses_filesystem_source(&root)? {
@@ -301,16 +306,9 @@ fn active_languages_cover_requested_scope(
     task_filters: &[String],
     selector_filters: &[String],
 ) -> bool {
-    if !requested_languages_fit_indexed_scope(registration_filters, selector_filters) {
-        return false;
-    }
-    let task_selector_filters =
-        filters_without_registration_scope(task_filters, registration_filters);
-    if selector_filters.is_empty() {
-        return task_selector_filters.is_empty();
-    }
-    task_selector_filters.is_empty()
-        || requested_languages_fit_indexed_scope(&task_selector_filters, selector_filters)
+    let requested =
+        crate::domain::code_scope_language_filters(registration_filters, selector_filters);
+    crate::domain::code_language_scope_covers(task_filters, &requested)
 }
 
 fn filters_without_registration_scope(
@@ -394,7 +392,10 @@ pub(super) async fn resolve_code_ref_for_selector(
 ) -> Result<String, ApiError> {
     let root = PathBuf::from(status.root_path.clone());
     let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
-    let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
+    let language_filters = crate::domain::code_scope_language_filters(
+        &status.language_filters,
+        &selector.language_filters,
+    );
     let active_commit = status.last_indexed_commit.clone();
     let active_path_filters = status.path_filters.clone();
     let active_language_filters = status.language_filters.clone();

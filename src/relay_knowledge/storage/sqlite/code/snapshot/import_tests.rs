@@ -84,6 +84,12 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
             FROM code_repository_symbols;
             DROP TABLE code_repository_symbols;
             ALTER TABLE legacy_code_repository_symbols RENAME TO code_repository_symbols;
+            DROP TRIGGER code_config_bindings_insert;
+            DROP TRIGGER code_config_bindings_update;
+            DROP TRIGGER code_config_bindings_delete;
+            ALTER TABLE code_repository_calls DROP COLUMN byte_start;
+            ALTER TABLE code_repository_calls DROP COLUMN byte_end;
+            INSERT INTO code_repository_calls (repository_id,source_scope,call_id,file_id,path,caller_name,callee_name,resolution_state,confidence_basis_points,confidence_tier,line_start,line_end) VALUES ('repo','git_snapshot:test','legacy-call','file','src/routes.ts','listUsers','open','unresolved',2500,'extracted',1,1);
             ALTER TABLE code_repository_feature_flags DROP COLUMN metadata_json;
             INSERT INTO code_repository_feature_flags (
                 repository_id, source_scope, feature_flag_id, usage_id, file_id, path,
@@ -139,6 +145,14 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
         )
         .expect("legacy configuration usage should import with unknown metadata");
     assert_eq!(metadata, "{}");
+    let range: (Option<i64>, Option<i64>) = target
+        .query_row(
+            "SELECT byte_start,byte_end FROM code_repository_calls WHERE call_id='legacy-call'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(range, (None, None));
     let symbol_role: Option<String> = target
         .query_row(
             "

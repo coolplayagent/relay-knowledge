@@ -1,12 +1,9 @@
 //! Class call selection uses existing name indexes and a shared SQLite work budget.
 
 use rusqlite::{Connection, ErrorCode, params_from_iter, types::Value};
-use std::{
-    collections::BTreeSet,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use super::{
@@ -45,8 +42,8 @@ pub(super) fn search(
     let Some(identity) = SymbolIdentityQuery::from_query(&request.query) else {
         return Ok(None);
     };
-    // Existing Java qualified names encode file paths, not declared packages.
-    // Only short class names can use this aggregation without new index facts.
+    // The public query contract uses short type names; qualified selectors
+    // continue through the existing symbol-identity path.
     if identity.is_scoped() {
         return Ok(None);
     }
@@ -56,12 +53,23 @@ pub(super) fn search(
         Some(move || counter.fetch_add(1, Ordering::Relaxed) >= MAX_WORK_CALLBACKS),
     );
     let _budget = WorkBudget(connection);
-    let result = class_members::resolve(connection, required_scope(status)?, identity.leaf_name())
-        .and_then(|members| {
-            members
-                .map(|members| select_rows(connection, status, request, members))
-                .transpose()
-        });
+    let language_sql = language_filter_sql_for_columns("language_id", "path", status, request);
+    let mut language_values = Vec::new();
+    push_language_filter_values(&mut language_values, &status.language_filters);
+    push_language_filter_values(&mut language_values, &request.repository.language_filters);
+    push_language_filter_values(&mut language_values, &request.query_language_filters);
+    let result = class_members::resolve(
+        connection,
+        required_scope(status)?,
+        identity.leaf_name(),
+        &language_sql,
+        &language_values,
+    )
+    .and_then(|members| {
+        members
+            .map(|members| select_rows(connection, status, request, members))
+            .transpose()
+    });
     match result {
         Err(StorageError::Sqlite(rusqlite::Error::SqliteFailure(error, _)))
             if error.code == ErrorCode::OperationInterrupted =>
@@ -81,18 +89,9 @@ fn select_rows(
     if members.is_empty() {
         return Ok(Vec::new());
     }
-    let names = members
-        .iter()
-        .map(|member| member.name.as_str())
-        .collect::<BTreeSet<_>>();
-    let (name_column, snapshot_column, result_identity) = match request.code_query_kind {
-        CodeQueryKind::Callers => (
-            "c.callee_name",
-            "c.callee_symbol_snapshot_id",
-            "caller.canonical_symbol_id",
-        ),
+    let (snapshot_column, result_identity) = match request.code_query_kind {
+        CodeQueryKind::Callers => ("c.callee_symbol_snapshot_id", "caller.canonical_symbol_id"),
         _ => (
-            "c.caller_name",
             "c.caller_symbol_snapshot_id",
             "COALESCE(callee.canonical_symbol_id, c.target_hint, c.callee_name)",
         ),
@@ -118,13 +117,11 @@ fn select_rows(
         ""
     };
     let sql = call_rows_sql(&format!(
-        "AND {name_column} IN ({}) AND {snapshot_column} IN ({})
+        "AND {snapshot_column} IN ({})
          {path_filter} {language_filter} {inline_filter} {generated_filter}",
-        vec!["?"; names.len()].join(","),
         vec!["?"; members.len()].join(","),
     ));
     let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
-    values.extend(names.into_iter().map(|name| Value::Text(name.to_owned())));
     values.extend(
         members
             .into_iter()

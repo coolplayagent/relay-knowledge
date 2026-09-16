@@ -123,6 +123,7 @@ impl Hierarchy {
                 let filter = feature_flag_sql_filter(scope, status, request, &[]);
                 let list = vec!["?"; chunk.len()].join(",");
                 let mut params = filter.params;
+                params.push(Value::Text(scope.to_owned()));
                 params.extend(chunk.iter().cloned().map(Value::Text));
                 let related = chunk
                     .iter()
@@ -130,11 +131,15 @@ impl Hierarchy {
                     .cloned()
                     .collect::<Vec<_>>();
                 let related_list = vec!["?"; related.len()].join(",");
+                params.push(Value::Text(scope.to_owned()));
                 params.extend(related.iter().cloned().map(Value::Text));
-                params.extend(related.iter().cloned().map(Value::Text));
+                params.push(Value::Text(scope.to_owned()));
                 params.extend(related.iter().cloned().map(Value::Text));
                 let sql = format!(
-                    "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND ((flag.edge_kind='config_type_declaration' AND flag.source_key IN ({list})) OR (flag.edge_kind='config_type_hierarchy' AND (flag.source_key IN ({related_list}) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding WHERE binding.value IN ({related_list})) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.same_package_parents') candidate WHERE candidate.value IN ({related_list}))))) LIMIT {}",
+                    "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND flag.edge_kind IN ('config_type_declaration','config_type_hierarchy') AND flag.usage_id IN (
+                        SELECT usage_id FROM code_repository_feature_flags WHERE source_scope=? AND source_kind='config_symbol' AND source_key IN ({list}) AND edge_kind='config_type_declaration'
+                        UNION SELECT usage_id FROM code_repository_feature_flags WHERE source_scope=? AND source_kind='config_symbol' AND source_key IN ({related_list}) AND edge_kind='config_type_hierarchy'
+                        UNION SELECT usage_id FROM code_repository_config_bindings WHERE source_scope=? AND binding IN ({related_list})) LIMIT {}",
                     filter.where_clause,
                     MAX_ROWS + 1
                 );

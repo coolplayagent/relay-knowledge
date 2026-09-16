@@ -113,7 +113,7 @@ pub(in crate::interfaces::agent::mcp) fn code_feature_flags_tool_definition() ->
             "type": "object",
             "properties": {
                 "domain": {"type":"string","minLength":1,"maxLength":128},
-                "source": {"type":"string","enum":["java","properties","ini","ctmpl","shell","dotenv"]},
+                "source": {"type":"string","enum":crate::domain::CODE_CONFIG_SOURCE_FORMATS},
                 "hot_reload": {"type":"boolean"},
                 "consistency": {"type":"boolean"},
                 "repository": {"type": "string", "minLength": 1},

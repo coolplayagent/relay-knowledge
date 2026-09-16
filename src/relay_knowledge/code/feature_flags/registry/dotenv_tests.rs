@@ -3,6 +3,7 @@ use super::*;
 fn spaced_dotenv_assignments_preserve_values_comments_and_source_spans() {
     let source = "# @config domain=payments hot-reload=true\nFLAG = true\nexport\tTEXT = 'a # b'\nMULTI = \"line1\nline2\" # comment\nEMPTY =\nDYNAMIC = ${OTHER}\nnot valid = false\n";
     let rows = extract(&FeatureFlagFileInput {
+        syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
         file_id: "file",
@@ -30,6 +31,7 @@ fn spaced_dotenv_assignments_preserve_values_comments_and_source_spans() {
 fn oversized_dotenv_values_keep_definitions_without_blocking_following_keys() {
     let source = format!("CERT = '{}'\nSMALL = true\n", "x".repeat(70000));
     let rows = extract(&FeatureFlagFileInput {
+        syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
         file_id: "file",
@@ -58,6 +60,7 @@ fn dotenv_hashes_require_comment_boundaries_and_support_all_line_endings() {
         .join(newline)
             + newline;
         let rows = extract(&FeatureFlagFileInput {
+            syntax_root: None,
             repository_id: "repo",
             source_scope: "scope",
             file_id: "file",
@@ -88,6 +91,7 @@ fn dotenv_hashes_require_comment_boundaries_and_support_all_line_endings() {
 fn dotenv_bom_is_ignored_only_at_the_file_start() {
     let source = "\u{feff}export\tFIRST=true\n\u{feff}SECOND=false\nTHIRD=true\n";
     let rows = extract(&FeatureFlagFileInput {
+        syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
         file_id: "file",

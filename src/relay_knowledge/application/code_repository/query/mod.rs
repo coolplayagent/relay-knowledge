@@ -1,5 +1,9 @@
 //! Coordinates repository retrieval and feature-flag query workflows.
 
+#[cfg(test)]
+#[path = "scope_tests.rs"]
+mod scope_tests;
+
 use crate::{
     api::{
         ApiError, ApiMetadata, CodeRepositoryFeatureFlagsResponse,

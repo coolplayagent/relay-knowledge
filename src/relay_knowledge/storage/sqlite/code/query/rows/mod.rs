@@ -39,6 +39,7 @@ pub(super) struct ReferenceRow {
 }
 
 pub(super) struct CallRow {
+    pub(super) byte_range: Option<RepositoryCodeRange>,
     pub(super) file_id: String,
     pub(super) path: String,
     pub(super) language_id: String,

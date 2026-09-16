@@ -745,6 +745,7 @@ fn symbol(
     line_range: RepositoryCodeRange,
 ) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
         symbol_snapshot_id: symbol_snapshot_id.to_owned(),

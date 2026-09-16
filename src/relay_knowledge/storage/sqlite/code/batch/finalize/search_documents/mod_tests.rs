@@ -742,6 +742,8 @@ fn initialize_search_database(connection: Connection) -> Connection {
                 '{\"max_files_per_batch\":1,\"max_bytes_per_batch\":1048576,\"max_rows_per_batch\":5}',
                 1, NULL
             );
+            ALTER TABLE code_repository_index_checkpoints ADD COLUMN type_owner_cursor TEXT;
+            ALTER TABLE code_repository_index_checkpoints ADD COLUMN incremental_summary_json TEXT;
             CREATE TABLE code_repository_reference_search_groups (
                 source_scope TEXT NOT NULL,
                 group_id TEXT NOT NULL,

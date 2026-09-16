@@ -12,6 +12,7 @@ mod gradle_notation;
 mod jvm;
 mod npm;
 mod npm_lock;
+mod pom;
 mod python;
 mod python_requirements;
 mod rust;
@@ -43,7 +44,7 @@ pub(super) fn collect_dependencies(
         DependencyFileKind::PyprojectToml => python::parse_pyproject(content, &mut records),
         DependencyFileKind::UvLock => python::parse_uv_lock(content, &mut records),
         DependencyFileKind::RequirementsTxt => python::parse_requirements(content, &mut records),
-        DependencyFileKind::PomXml => jvm::parse_pom(content, &mut records),
+        DependencyFileKind::PomXml => pom::parse(content, &mut records)?,
         DependencyFileKind::Gradle => jvm::parse_gradle(content, &mut records),
         DependencyFileKind::ConanfileTxt => conan::parse_conanfile_txt(content, &mut records),
         DependencyFileKind::ConanfilePy => conan::parse_conanfile_py(content, &mut records),
@@ -151,17 +152,14 @@ fn dependency_record_language_ids(
     default_language_id: &'static str,
 ) -> Vec<&'static str> {
     let compatible = kind.language_ids();
+    let filters = crate::domain::code_language_filter_atoms(build.language_filters());
     if build.language_filters().is_empty() {
         return compatible.to_vec();
     }
 
     let mut selected = Vec::new();
     for language_id in compatible {
-        if build
-            .language_filters()
-            .iter()
-            .any(|filter| filter.as_str() == *language_id)
-        {
+        if filters.iter().any(|filter| filter.as_str() == *language_id) {
             selected.push(*language_id);
         }
     }
@@ -499,24 +497,6 @@ pub(in crate::code::parser::dependencies) fn quoted_values(value: &str) -> Vec<&
         }
     }
     values
-}
-
-pub(in crate::code::parser::dependencies) fn capture_xml_text(
-    line: &str,
-    tag: &str,
-    output: &mut Option<String>,
-) {
-    let open = format!("<{tag}>");
-    let close = format!("</{tag}>");
-    let Some(after_open) = line.split_once(&open).map(|(_, right)| right) else {
-        return;
-    };
-    let Some(value) = after_open.split_once(&close).map(|(left, _)| left.trim()) else {
-        return;
-    };
-    if !value.is_empty() {
-        *output = Some(value.to_owned());
-    }
 }
 
 pub(in crate::code::parser::dependencies) fn conan_reference(

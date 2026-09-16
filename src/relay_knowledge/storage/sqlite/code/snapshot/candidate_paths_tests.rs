@@ -18,6 +18,40 @@ use std::{
 const TEST_SOURCE_SCOPE: &str = "git_snapshot:test";
 
 #[tokio::test]
+async fn excluded_progress_rows_are_never_source_fallback_candidates() {
+    let mut snapshot =
+        snapshot_with_chunk_status("repo", "src/lib.rs", "body", CodeParseStatus::Parsed, None);
+    snapshot.files.push(file(
+        "excluded",
+        "src/foreign",
+        "python",
+        CodeParseStatus::Excluded,
+        None,
+    ));
+    let store = store_with_repository_snapshot(snapshot).await;
+    let paths = store
+        .code_file_candidate_paths_for_scope(
+            TEST_SOURCE_SCOPE.into(),
+            vec!["src/foreign".into()],
+            vec![],
+            false,
+            10,
+        )
+        .await
+        .unwrap();
+    assert!(paths.is_empty());
+    let fingerprints = store
+        .code_file_fingerprints_for_paths(TEST_SOURCE_SCOPE.into(), vec!["src/foreign".into()])
+        .await
+        .unwrap();
+    assert_eq!(
+        fingerprints.len(),
+        1,
+        "excluded paths still participate in recovery and incremental deletion"
+    );
+}
+
+#[tokio::test]
 async fn candidate_paths_for_scope_apply_filters_before_limit() {
     let mut snapshot =
         snapshot_with_chunk_status("repo", "src/lib.rs", "body", CodeParseStatus::Parsed, None);

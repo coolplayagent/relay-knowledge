@@ -1,5 +1,17 @@
 //! Owns cross-language call-target candidate and callable-definition policy.
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CgoTarget<T> {
+    Missing,
+    Unique(T),
+    Ambiguous,
+}
+
+mod cgo;
+pub(crate) use cgo::select_cgo_target;
+mod java;
+pub(crate) use java::{java_name_path, java_source_path, java_static_target};
+
 pub(crate) fn call_target_name_candidates(name: &str, path: &str) -> Vec<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -82,7 +94,7 @@ fn foreign_member_prefix(prefix: &str) -> bool {
             .is_some_and(|crate_name| !crate_name.is_empty())
 }
 
-fn go_source_path(path: &str) -> bool {
+pub(crate) fn go_source_path(path: &str) -> bool {
     path.rsplit_once('.')
         .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("go"))
 }

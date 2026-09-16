@@ -159,25 +159,33 @@ fn workspace_scope_semantics_are_canonical_and_backward_compatible() {
 
 #[test]
 fn configuration_registry_version_invalidates_previous_completed_scope() {
-    let previous =
-        CODE_SNAPSHOT_FACT_VERSION.replace("-config-registry-v54", "-config-registry-v53");
-    assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
-    let mut input = Vec::new();
-    for value in ["git_snapshot", "repo", "tree"] {
-        super::append_hash_part(&mut input, value);
+    for previous_suffix in [
+        "-config-registry-v55-type-ownership",
+        "-config-registry-v56-portable-evidence",
+        "-config-registry-v54-source-io-isolation-v1",
+    ] {
+        let previous = CODE_SNAPSHOT_FACT_VERSION.replace(
+            "-config-registry-v56-portable-evidence-source-io-isolation-v1",
+            previous_suffix,
+        );
+        assert_ne!(previous, CODE_SNAPSHOT_FACT_VERSION);
+        let mut input = Vec::new();
+        for value in ["git_snapshot", "repo", "tree"] {
+            super::append_hash_part(&mut input, value);
+        }
+        super::append_hash_list(&mut input, &[]);
+        super::append_hash_list(&mut input, &[]);
+        super::append_hash_part(&mut input, &previous);
+        let scope = format!(
+            "git_snapshot:{:016x}",
+            crate::identity::stable_hash64(&input)
+        );
+        assert!(!code_snapshot_scope_matches_identity(
+            "repo",
+            "tree",
+            &[],
+            &[],
+            &scope
+        ));
     }
-    super::append_hash_list(&mut input, &[]);
-    super::append_hash_list(&mut input, &[]);
-    super::append_hash_part(&mut input, &previous);
-    let scope = format!(
-        "git_snapshot:{:016x}",
-        crate::identity::stable_hash64(&input)
-    );
-    assert!(!code_snapshot_scope_matches_identity(
-        "repo",
-        "tree",
-        &[],
-        &[],
-        &scope
-    ));
 }

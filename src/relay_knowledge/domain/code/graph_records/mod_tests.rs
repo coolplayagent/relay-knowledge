@@ -3,6 +3,18 @@
 use super::*;
 
 #[test]
+fn excluded_progress_has_no_facts_or_degradation_and_old_counts_remain_readable() {
+    assert!(validate_parse_status(CodeParseStatus::Excluded, None, &[], &[], &[]).is_ok());
+    assert!(
+        validate_parse_status(CodeParseStatus::Excluded, Some("failure"), &[], &[], &[]).is_err()
+    );
+    let counts: CodeParseStatusCounts =
+        serde_json::from_str(r#"{"parsed":1,"partial":0,"text_only":0,"failed":0}"#).unwrap();
+    assert_eq!(counts.excluded, 0);
+    assert_eq!(CodeParseStatus::Excluded.as_str(), "excluded");
+}
+
+#[test]
 fn rejects_invalid_ranges_and_paths() {
     let range_error = CodeRange::new(10, 10, 1, 1).expect_err("empty range should fail");
     let path_error = CodeFileRecord::new(CodeFileFields {

@@ -87,8 +87,10 @@ pub(super) async fn fresh_full_index_probe(
         }
 
         let path_filters = merged_filters(&registration.path_filters, &selector.path_filters);
-        let language_filters =
-            merged_filters(&registration.language_filters, &selector.language_filters);
+        let language_filters = crate::domain::code_scope_language_filters(
+            &registration.language_filters,
+            &selector.language_filters,
+        );
         let (resolved_commit_sha, tree_hash) = resolve_repository_snapshot_with_filters(
             &root,
             &selector.ref_selector,
@@ -170,7 +172,7 @@ pub(super) async fn previous_index_state_for_index(
     let base_commit =
         resolve_code_ref_for_selector(status, &request.repository, base_ref.to_owned()).await?;
     let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
-    let language_filters = merged_filters(
+    let language_filters = crate::domain::code_scope_language_filters(
         &status.language_filters,
         &request.repository.language_filters,
     );
@@ -338,7 +340,9 @@ pub(super) async fn plan_full_index_reuse(
 
         let mut incremental = request.clone();
         incremental.repository.path_filters = path_filters.clone();
-        incremental.repository.language_filters = language_filters.clone();
+        // Effective language groups belong to the persisted session/scope. Keep
+        // the public selector here: durable task payloads must deserialize through
+        // the same public validation as the original request.
         incremental.mode = CodeIndexMode::incremental(ancestor, target_commit.clone())
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         return Ok(FullIndexReusePlan::Incremental(incremental));
@@ -449,3 +453,7 @@ pub(super) async fn active_full_index_task_for_request(
 #[cfg(test)]
 #[path = "state_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "state_scope_tests.rs"]
+mod scope_tests;

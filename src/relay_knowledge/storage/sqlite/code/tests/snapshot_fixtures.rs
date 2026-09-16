@@ -129,6 +129,7 @@ fn feature_flags(
     content: &str,
 ) -> Vec<crate::domain::CodeFeatureFlagRecord> {
     extract_feature_flags(FeatureFlagFileInput {
+        syntax_root: None,
         repository_id,
         source_scope: TEST_SOURCE_SCOPE,
         file_id,

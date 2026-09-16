@@ -454,4 +454,20 @@ clone_pinned_repository https://github.com/Alamofire/Alamofire.git /opt/workspac
 
 Fast `software_relationship_storage_cases` 门禁执行 `cargo test --lib software_relationship_storage -- --nocapture`，覆盖 4,096 map topic、零持久边写入/新增页、Unicode 规范化后的配置边去重、稳定 ID/证据、limit 前 scope 过滤与有界计数/查询耗时；16,384 条 usage fixture 要求窗口前 path/language 过滤至少减半 VM 工作量，规范化字符集必须与每个 Rust Unicode scalar 一致。该门禁保护 schema 8 去除冗余兼容边存储且保留类型化 ontology statement 的合同。
 
+fast/performance 的 `code_index_persistence_performance_suite` 还执行 `type_ownership_uses_indexed_membership` 和 `portable_configuration_bounds_unrelated_evidence`。用例分别加入 16,384 条无关 Rust 成员记录及 8,192 条无关 TypeScript 配置记录，测量 SQLite VM 工作量：类型归属查询必须少于 5,000 步，Python 跨文件 getter/条件解析必须保持在现有 2,000,000 步配置预算内，并同时校验实际返回的归属和配置证据。
+
+跨语言语义性能用例还验证 Swift 模块根证明通过语言/文件覆盖索引跳过 16,384 个无关 Rust 文件，SQLite VM 步数必须少于 5,000。
+
+fast/performance suite 新增有界接收者提示，以及含 1,100 组无关函数/命令的 Shell 导出索引用例。配置绑定展开使用持久化倒排身份，保留现有 SQLite 工作预算。
+
+同一 fast/performance 测试过滤器覆盖 cgo 目标预选：2,000 条同名 C 定义、10,000 次重复查询，同时检查内部链接、非 C 目标和大写 Go 扩展名。基于导入的 C++ 归属继续使用有界的页内证据缓存。
+
+Java 限定静态调用回归使用精确归属候选及 AST 修饰符证明，拒绝变量/模式/静态导入遮蔽、继承重载猜测、跨语言同名和重复类型的同文件优先选择。Shell 与 cgo 边界测试拆为聚焦的子模块，遵守单文件 1,000 行限制。
+
+Java 接收者回归还覆盖隐式 Object 重载、枚举/record 合成成员，以及枚举常量匿名类体的归属边界。
+
+范围服务单元回归覆盖多语言 context 扩展与代码可见性、视图/业务来源、历史复用任务请求校验、增量/overlay 基础范围拒绝，以及已发布分片和旧 control 的显式范围读取。仅单元测试覆盖率与现有全目标 CI 命令分开测量；每轮最终测量都清理工作区插桩对象，而不仅清理 profile。
+
+框架范围回归还保护直接快照的节点/边持久化，并检查 SQLite 查询计划在结果上限前通过索引查找源文件语言。路由测试在 control 与分片中放置不同的非空配置、框架及变更文件影响证据。直接框架写入回归保护完整写入预算及发布计数；语言上限测试将被排除的记录放在匹配记录之前。
+
 fast 中的 `code_index_source_io_isolation_cases` 门禁覆盖过滤前置、结构化局部错误、部分快照、checkpoint 重放、租约隔离和无须 reset 的恢复。`source_io_windows.py` 提供真实 Windows I/O 与可选大型 Java 项目的测量，步骤见[路径 I/O 基准说明](../../docs/zh/05-benchmarks/12-elastic-index-budgets.md)。真实文件锁/ACL 错误与确定性注入的 `os error 1` 分别记录。

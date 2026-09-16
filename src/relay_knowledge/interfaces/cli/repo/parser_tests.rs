@@ -1,5 +1,22 @@
 use super::*;
 #[test]
+fn feature_flags_accepts_every_canonical_source_format() {
+    for source in crate::domain::CODE_CONFIG_SOURCE_FORMATS {
+        let command = parse_repo(&[
+            "feature-flags".into(),
+            "fixture".into(),
+            "--source".into(),
+            (*source).into(),
+        ])
+        .unwrap();
+        let RepoCommand::FeatureFlags { filters, .. } = command else {
+            panic!("wrong command");
+        };
+        assert_eq!(filters.source.as_deref(), Some(*source));
+        filters.validate().unwrap();
+    }
+}
+#[test]
 fn feature_flags_rejects_missing_filter_values_before_following_options() {
     for option in ["--domain", "--source"] {
         let tokens = ["feature-flags", "repo", option, "--consistency"].map(str::to_owned);

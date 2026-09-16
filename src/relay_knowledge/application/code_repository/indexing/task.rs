@@ -219,8 +219,11 @@ pub(super) async fn finalize_code_index_session_with_task_lease(
         .map_err(storage_api_error)?;
     let checkpoint =
         require_leased_finalization_checkpoint(&session, checkpoint).map_err(storage_api_error)?;
-    let max_steps = code_index_finalization_max_steps(checkpoint.committed_reference_count)
-        .map_err(storage_api_error)?;
+    let max_steps = code_index_finalization_max_steps(
+        checkpoint.committed_reference_count,
+        checkpoint.committed_symbol_count,
+    )
+    .map_err(storage_api_error)?;
     drive_code_index_finalization(
         &source_scope,
         checkpoint.state,

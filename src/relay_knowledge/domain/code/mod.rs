@@ -1,3 +1,8 @@
+mod language_scope;
+pub(crate) use language_scope::{
+    code_language_filter_atoms, code_language_filter_groups, code_language_scope_covers,
+    code_scope_language_filters, validate_code_language_filters,
+};
 pub(crate) mod call_targets;
 mod context;
 mod dependencies;
@@ -7,6 +12,7 @@ mod repository;
 mod repository_graph;
 mod repository_index;
 mod repository_set;
+pub(crate) mod rust_modules;
 mod staleness;
 mod views;
 mod workspace;
@@ -32,9 +38,9 @@ pub use graph_records::{
     RouteHandlerRole, SymbolRole,
 };
 pub use repository::{
-    CodeCallRecord, CodeConfigFilter, CodeConfigMetadata, CodeContentIntegrity,
-    CodeContentIntegrityState, CodeDiagnosticsCursor, CodeDiagnosticsPage,
-    CodeDiagnosticsPageRequest, CodeDiagnosticsRequest, CodeFeatureFlagGraph,
+    CODE_CONFIG_SOURCE_FORMATS, CodeCallRecord, CodeConfigFilter, CodeConfigMetadata,
+    CodeConfigStringPart, CodeContentIntegrity, CodeContentIntegrityState, CodeDiagnosticsCursor,
+    CodeDiagnosticsPage, CodeDiagnosticsPageRequest, CodeDiagnosticsRequest, CodeFeatureFlagGraph,
     CodeFeatureFlagRecord, CodeFeatureFlagRequest, CodeFeatureFlagUsage, CodeFileDiagnostic,
     CodeFileFingerprint, CodeImpactPathGroups, CodeImpactRequest, CodeImportRecord, CodeIndexMode,
     CodeIndexRequest, CodePathIoAction, CodePathIoDiagnostic, CodePathIoErrorKind,
@@ -43,7 +49,7 @@ pub use repository::{
     CodeRepositoryLatencySample, CodeRepositoryRegistration, CodeRepositoryRemovalSummary,
     CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus,
     CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest,
-    CodeRouteRecord, CodeSymbolGenerationCounts, RepositoryCodeChunkRecord,
+    CodeRouteRecord, CodeSymbolGenerationCounts, CodeTypeOwner, RepositoryCodeChunkRecord,
     RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
     RepositoryCodeSymbolRecord, clean_git_commit_from_snapshot_identity, code_snapshot_scope_id,
     code_snapshot_scope_id_with_workspace_detection, code_snapshot_scope_is_fact_versioned,
@@ -96,3 +102,5 @@ pub use workspace::{
     CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeWorkspaceDetectionConfig,
     CodeWorkspaceMember, CodeWorkspacePackageMapping,
 };
+
+pub(crate) use repository::{deserialize_code_language_filters, normalize_code_filter_list};

@@ -4,12 +4,15 @@ mod connectivity;
 mod consistency;
 mod evidence;
 mod hierarchy;
+mod modules;
 mod resolution;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub(super) const MAX_ROWS: usize = 10_000;
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 const COLUMNS: &str = "flag.feature_flag_id,flag.usage_id,flag.file_id,flag.path,flag.language_id,flag.name,flag.source_kind,flag.source_key,flag.edge_kind,flag.confidence_basis_points,flag.confidence_tier,flag.byte_start,flag.byte_end,flag.line_start,flag.line_end,flag.excerpt,flag.metadata_json,(SELECT symbol_snapshot_id FROM code_repository_symbols symbol WHERE symbol.source_scope=flag.source_scope AND symbol.path=flag.path AND symbol.line_start<=flag.line_start AND symbol.line_end>=flag.line_start ORDER BY symbol.line_start DESC,symbol.line_end ASC LIMIT 1),(SELECT name FROM code_repository_symbols symbol WHERE symbol.source_scope=flag.source_scope AND symbol.path=flag.path AND symbol.line_start<=flag.line_start AND symbol.line_end>=flag.line_start ORDER BY symbol.line_start DESC,symbol.line_end ASC LIMIT 1)";
 struct QueryBudget<'a>(&'a Connection);
+#[cfg(test)]
+thread_local! { pub(super) static LAST_QUERY_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 impl Drop for QueryBudget<'_> {
     fn drop(&mut self) {
         self.0.progress_handler(0, None::<fn() -> bool>);
@@ -56,10 +59,14 @@ fn search_bounded(
         .ok_or_else(|| StorageError::InvalidInput("repository is not indexed".into()))?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     let mut steps = 0;
+    #[cfg(test)]
+    LAST_QUERY_STEPS.with(|counter| counter.set(0));
     connection.progress_handler(
         1000,
         Some(move || {
             steps += 1000;
+            #[cfg(test)]
+            LAST_QUERY_STEPS.with(|counter| counter.set(steps));
             steps > 2_000_000 || std::time::Instant::now() >= deadline
         }),
     );
@@ -102,7 +109,16 @@ fn search_bounded(
         hierarchy.filter_platform_reads(&mut rows);
     }
     let mut queried = BTreeSet::new();
+    let mut module_cache = HashMap::new();
+    let mut module_bytes = 0;
     for round in 0..4 {
+        modules::resolve(
+            connection,
+            scope,
+            &mut rows,
+            &mut module_cache,
+            &mut module_bytes,
+        )?;
         let keys = rows
             .iter()
             .flat_map(|row| {
@@ -110,6 +126,12 @@ fn search_bounded(
                     .bindings
                     .iter()
                     .chain(row.metadata.reference.iter())
+                    .chain(
+                        row.metadata
+                            .string_parts
+                            .iter()
+                            .filter_map(crate::domain::CodeConfigStringPart::reference),
+                    )
                     .chain(row.metadata.lexical_getter_references.iter())
             })
             .filter(|key| !queried.contains(*key))
@@ -135,11 +157,10 @@ fn search_bounded(
             let filter = feature_flag_sql_filter(scope, status, &evidence_request, &[]);
             let list = vec!["?"; chunk.len()].join(",");
             let mut params = filter.params;
-            for _ in 0..5 {
-                params.extend(chunk.iter().map(|key| Value::Text((***key).to_owned())));
-            }
+            params.push(Value::Text(scope.to_owned()));
+            params.extend(chunk.iter().map(|key| Value::Text((***key).to_owned())));
             let sql = format!(
-                "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND (json_extract(flag.metadata_json,'$.reference') IN ({list}) OR json_extract(flag.metadata_json,'$.same_package_reference') IN ({list}) OR json_extract(flag.metadata_json,'$.lexical_field_reference') IN ({list}) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.lexical_getter_references') candidate WHERE candidate.value IN ({list})) OR EXISTS (SELECT 1 FROM json_each(flag.metadata_json,'$.bindings') binding WHERE binding.value IN ({list}))) LIMIT {}",
+                "SELECT {COLUMNS} FROM code_repository_feature_flags flag WHERE ({}) AND flag.usage_id IN (SELECT usage_id FROM code_repository_config_bindings WHERE source_scope=? AND binding IN ({list})) LIMIT {}",
                 filter.where_clause,
                 MAX_ROWS + 1
             );
@@ -176,6 +197,12 @@ fn search_bounded(
                     .bindings
                     .iter()
                     .chain(row.metadata.reference.iter())
+                    .chain(
+                        row.metadata
+                            .string_parts
+                            .iter()
+                            .filter_map(crate::domain::CodeConfigStringPart::reference),
+                    )
                     .chain(row.metadata.lexical_getter_references.iter())
                     .any(|key| !queried.contains(key))
             })
@@ -183,6 +210,13 @@ fn search_bounded(
             return Err(incomplete("symbol binding depth exceeded"));
         }
     }
+    modules::resolve(
+        connection,
+        scope,
+        &mut rows,
+        &mut module_cache,
+        &mut module_bytes,
+    )?;
     let providers = resolution::providers(&rows);
     let formats = if request.filters.consistency {
         consistency::formats(connection, scope, status, &evidence_request)?
@@ -240,7 +274,7 @@ fn search_bounded(
             resolved.edge_kind = "declares_config_key".into();
         }
         let targets = resolver.resolve(row, 0);
-        let complete = if row.metadata.reference.is_none() {
+        let complete = if row.metadata.reference.is_none() && row.metadata.string_parts.is_empty() {
             true
         } else if let Some((kind, key)) = targets {
             resolved.source_kind = row.metadata.target_kind.clone().unwrap_or(kind);
@@ -270,7 +304,10 @@ fn search_bounded(
         for kind in kinds {
             let mut resolved = resolved.clone();
             resolved.source_kind = kind;
-            if row.metadata.reference.is_some() || resolved.source_kind != row.source_kind {
+            if row.metadata.reference.is_some()
+                || !row.metadata.string_parts.is_empty()
+                || resolved.source_kind != row.source_kind
+            {
                 let mut hasher = crate::identity::StableHasher64::new();
                 for part in [
                     &status.repository_id,

@@ -2,6 +2,82 @@ use super::*;
 use crate::domain::{CodeRepositorySelector, FreshnessPolicy};
 
 #[test]
+fn framework_language_filters_use_snapshot_files_before_limiting_nodes_and_edges() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    super::super::schema::initialize_code_schema(&connection).unwrap();
+    insert_repository(&connection);
+    for (scope, language) in [("scope", "typescript"), ("other", "python")] {
+        connection.execute("INSERT INTO code_repository_files (repository_id,source_scope,file_id,path,language_id,blob_hash,byte_len,line_count,parse_status,is_generated) VALUES ('repository',?1,?2,'src/app.ts',?3,'hash',10,1,'parsed',0)", params![scope, format!("file-{scope}"), language]).unwrap();
+    }
+    let mut nodes = vec![node("component", FrameworkNodeKind::Component, "App")];
+    let mut edges = vec![edge("render", FrameworkEdgeKind::Renders, "external")];
+    for index in 0..2 {
+        let path = format!("src/a-{index}.html");
+        let file_id = format!("html-{index}");
+        connection.execute("INSERT INTO code_repository_files (repository_id,source_scope,file_id,path,language_id,blob_hash,byte_len,line_count,parse_status,is_generated) VALUES ('repository','scope',?1,?2,'html','hash',10,1,'parsed',0)", params![file_id, path]).unwrap();
+        let mut html_node = node(
+            &format!("html-{index}"),
+            FrameworkNodeKind::Template,
+            "HTML",
+        );
+        html_node.path = path.clone();
+        html_node.file_id = file_id.clone();
+        nodes.push(html_node);
+        let mut html_edge = edge(
+            &format!("html-edge-{index}"),
+            FrameworkEdgeKind::Renders,
+            "external",
+        );
+        html_edge.path = path;
+        html_edge.file_id = file_id;
+        edges.push(html_edge);
+    }
+    let transaction = connection.transaction().unwrap();
+    insert_records(&transaction, &nodes, &edges).unwrap();
+    transaction.commit().unwrap();
+    for language in ["typescript", "html", "python"] {
+        let request = FrameworkGraphRequest::new(
+            None,
+            CodeRepositorySelector::new("fixture", "commit", vec![], vec![language.into()])
+                .unwrap(),
+            vec![],
+            vec![],
+            1,
+            FreshnessPolicy::WaitUntilFresh,
+        )
+        .unwrap();
+        let graph = search_scope(&mut connection, "scope", request.clone()).unwrap();
+        assert_eq!(graph.nodes.len(), usize::from(language != "python"));
+        assert_eq!(graph.edges.len(), usize::from(language != "python"));
+        assert_eq!(graph.truncated, language == "html");
+        if language == "typescript" {
+            assert_eq!(graph.nodes[0].node_id, "component");
+            assert_eq!(graph.edges[0].edge_id, "render");
+        }
+        for (sql, values) in [node_query("scope", &request), edge_query("scope", &request)] {
+            let mut statement = connection
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap();
+            let steps = statement
+                .query_map(params_from_iter(values), |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| step.contains("SEARCH language_file")),
+                "{steps:?}"
+            );
+            assert!(
+                !steps.iter().any(|step| step.contains("SCAN language_file")),
+                "{steps:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn framework_records_round_trip_with_bounded_filters() {
     let mut connection = Connection::open_in_memory().expect("database should open");
     super::super::schema::initialize_code_schema(&connection).expect("schema should initialize");

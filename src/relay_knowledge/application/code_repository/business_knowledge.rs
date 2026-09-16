@@ -19,6 +19,10 @@ use super::{
     },
 };
 
+#[cfg(test)]
+#[path = "business_knowledge_tests.rs"]
+mod tests;
+
 impl RelayKnowledgeService {
     /// Reads business terms and declared technical mappings from the indexed graph only.
     pub async fn business_knowledge_query(

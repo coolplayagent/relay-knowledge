@@ -365,71 +365,9 @@ int declared(void);
 }
 
 #[test]
-fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
-    let snapshot = parse_source_snapshot(
-        "db/db_impl.h",
-        br#"
-	/*
-	class CommentedExample {
-	 public:
-	  void CommentedApi();
-	};
-	*/
-	class DBImpl
-	    : public DB {
- public:
-  struct CompactionStats {
-    int64_t bytes_read;
-  };
-
-  // Recover the descriptor from persistent storage.  May do a significant
-  // amount of work to recover recently logged updates.  Any changes to
-  // be made to the descriptor are added to *edit.
-  Status Recover(VersionEdit* edit, bool* save_manifest)
-      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
-  Status RecoverLogFile(uint64_t log_number, bool last_log, bool* save_manifest,
-                        VersionEdit* edit, SequenceNumber* max_sequence)
-      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
-  ~DBImpl();
-
-	#if defined(ENABLE_RECOVERY)
-	  Status GuardedRecover(VersionEdit* edit);
-	#endif
-
-	  int (*log_filter)(void*);
-	  VersionEdit edit_;
-	};
-
-			struct Options {
-			 public:
-			  Status Validate() const;
-			  void SetUrl(const char* url = "http://localhost");
-			  void SetJson(const char* json = "{}");
-			  Status OpenDefault(const Options& opts = default_options());
-			  Status ModeDefault(int mode = default_mode);
-			  operator bool() const;
-			};
-
-			class Compact { public: void Bar(); void Baz(); };
-			class CommentedCompact { public: /* doc */ void AfterComment(); };
-			class NestedDB { public: struct Iterator { Status Seek(); }; };
-			class Q_CORE_EXPORT DB { public: Status Save(); };
-			class __attribute__((visibility("default"))) AttributeDB {
-			 public:
-			  Status Connect();
-			};
-
-			LEVELDB_EXPORT class ExportedDB {
-			 public:
-			  __attribute__((warn_unused_result)) Status Open();
-			  __declspec(dllexport) Status Close();
-		};
-
-		RK_API struct ExportedOptions { public: Status Load(); };
-		"#,
-    );
+fn c_grammar_recovers_cpp_class_member_declarations_after_nested_types() {
+    let snapshot =
+        parse_source_snapshot("db/db_impl.c", include_bytes!("fixtures/member_headers.h"));
 
     let recover = snapshot
         .symbols
@@ -575,7 +513,7 @@ fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
         "function pointer members should not become function declaration symbols"
     );
     assert!(snapshot.chunks.iter().any(|chunk| {
-        chunk.path == "db/db_impl.h"
+        chunk.path == "db/db_impl.c"
             && chunk.content.contains("Recover the descriptor")
             && chunk.content.contains("VersionEdit* edit")
             && chunk.content.contains("save_manifest")

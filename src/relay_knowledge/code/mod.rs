@@ -119,6 +119,28 @@ use language_metadata as languages;
 #[cfg(test)]
 use parser::parse_indexed_file;
 
+/// Exercises the real parser without a Git process or developer-local state.
+#[cfg(test)]
+pub(crate) fn syntax_snapshot_for_tests(
+    sources: &[(&str, &str)],
+) -> crate::domain::CodeIndexSnapshot {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+            .unwrap();
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".into(),
+        "tree".into(),
+        true,
+        sources.len(),
+        0,
+    );
+    for (path, source) in sources {
+        parse_indexed_file(&mut build, path, source.as_bytes()).unwrap();
+    }
+    build.finish()
+}
+
 #[cfg(test)]
 use {
     crate::domain::{
