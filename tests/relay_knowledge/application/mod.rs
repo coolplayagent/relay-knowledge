@@ -14,3 +14,5 @@ mod graphrag_evaluation;
 mod knowledge_development_loop;
 mod local_files;
 mod unified_api;
+
+mod code_repository_source_io;

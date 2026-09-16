@@ -1,6 +1,6 @@
 //! Routes bounded worktree changes into parse and deletion queues.
 
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, path::Path};
 
 use crate::code::{CodeIndexError, source::changes};
 
@@ -34,6 +34,7 @@ pub(super) fn record_worktree_change(
     if let Some(deleted_path) = &change.deleted_source {
         let deleted_gitlink = if context.overlay_scope.overlaps(deleted_path) {
             let mut recorder = WorktreeOverlayRecorder {
+                skipped_paths: &mut *outputs.skipped_paths,
                 scope: context.overlay_scope,
                 previous_hashes: context.previous_hashes,
                 overlay_hash_input: &mut *outputs.overlay_hash_input,
@@ -67,6 +68,7 @@ pub(super) fn record_worktree_change(
     }
     {
         let mut recorder = WorktreeOverlayRecorder {
+            skipped_paths: &mut *outputs.skipped_paths,
             scope: context.overlay_scope,
             previous_hashes: context.previous_hashes,
             overlay_hash_input: &mut *outputs.overlay_hash_input,
@@ -78,6 +80,17 @@ pub(super) fn record_worktree_change(
             return Ok(());
         }
     }
+    // Known indexed descendants require directory handling; excluded ordinary files do not.
+    if !context.overlay_scope.selected(path)
+        && !context
+            .previous_hashes
+            .keys()
+            .any(|child| child.starts_with(&format!("{path}/")))
+        && crate::code::source::gitlink::gitlink_commit_at_tree(context.root, context.commit, path)?
+            .is_none()
+    {
+        return Ok(());
+    }
     record_worktree_path(context, change, outputs)
 }
 
@@ -88,10 +101,11 @@ fn record_worktree_path(
 ) -> Result<(), CodeIndexError> {
     let path = &change.path;
     let full_path = context.root.join(path);
-    let metadata = match fs::symlink_metadata(&full_path) {
+    let metadata = match crate::code::source::local_io::symlink_metadata(&full_path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             let mut recorder = WorktreeOverlayRecorder {
+                skipped_paths: &mut *outputs.skipped_paths,
                 scope: context.overlay_scope,
                 previous_hashes: context.previous_hashes,
                 overlay_hash_input: &mut *outputs.overlay_hash_input,
@@ -110,29 +124,54 @@ fn record_worktree_path(
             }
             return Ok(());
         }
-        Err(error) => return Err(error.into()),
+        Err(error) => {
+            let kind = if context
+                .previous_hashes
+                .keys()
+                .any(|child| child.starts_with(&format!("{path}/")))
+            {
+                crate::domain::CodePathKind::Directory
+            } else {
+                crate::domain::CodePathKind::File
+            };
+            let skipped = crate::code::source::path_io::SkippedSourcePath::from_error(
+                path,
+                kind,
+                crate::domain::CodePathIoOperation::Metadata,
+                error,
+            )?;
+            outputs.record_skipped(skipped, context.previous_hashes);
+            return Ok(());
+        }
     };
     let file_type = metadata.file_type();
-    if file_type.is_symlink() {
-        if context.overlay_scope.selected(path) {
-            record_unparseable_path(
-                path,
-                &mut *outputs.overlay_hash_input,
-                &mut *outputs.deleted_paths,
-            );
-        }
-        return Ok(());
-    }
     if file_type.is_dir() {
-        return record_worktree_directory(context, change, outputs);
+        return match record_worktree_directory(context, change, outputs) {
+            Err(CodeIndexError::Io(error)) => {
+                let skipped = crate::code::source::path_io::SkippedSourcePath::from_error(
+                    path,
+                    crate::domain::CodePathKind::Directory,
+                    crate::domain::CodePathIoOperation::ReadDirectory,
+                    error,
+                )?;
+                outputs.record_skipped(skipped, context.previous_hashes);
+                Ok(())
+            }
+            result => result,
+        };
     }
     if !file_type.is_file() {
         if context.overlay_scope.selected(path) {
-            record_unparseable_path(
+            let skipped = crate::code::source::path_io::SkippedSourcePath::from_error(
                 path,
-                &mut *outputs.overlay_hash_input,
-                &mut *outputs.deleted_paths,
-            );
+                crate::domain::CodePathKind::File,
+                crate::domain::CodePathIoOperation::Metadata,
+                std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "source is not a regular file",
+                ),
+            )?;
+            outputs.record_skipped(skipped, context.previous_hashes);
         }
         return Ok(());
     }
@@ -151,6 +190,7 @@ fn record_worktree_directory(
     let path = &change.path;
     if contains_git_metadata(context.root, Path::new(path))? {
         let mut recorder = WorktreeOverlayRecorder {
+            skipped_paths: &mut *outputs.skipped_paths,
             scope: context.overlay_scope,
             previous_hashes: context.previous_hashes,
             overlay_hash_input: &mut *outputs.overlay_hash_input,
@@ -171,7 +211,18 @@ fn record_worktree_directory(
         }
         return Ok(());
     }
-    for nested_path in worktree_directory_files(context.root, path)? {
+    let mut skipped = Vec::new();
+    let files = worktree_directory_files(context.root, path, &mut skipped, &|path, directory| {
+        if directory {
+            context.overlay_scope.overlaps(path)
+        } else {
+            context.overlay_scope.untracked_selected(path)
+        }
+    })?;
+    for failure in skipped {
+        outputs.record_skipped(failure, context.previous_hashes);
+    }
+    for nested_path in files {
         if context.overlay_scope.untracked_selected(&nested_path) {
             record_file_as(
                 context.root,

@@ -22,4 +22,6 @@ pub struct WatchedRepository {
     pub source_scope: String,
     /// Last successfully published snapshot identity used as the durable base.
     pub last_indexed_commit: String,
+    /// A published local I/O gap requires periodic reobservation even without a Git change.
+    pub requires_source_io_recheck: bool,
 }

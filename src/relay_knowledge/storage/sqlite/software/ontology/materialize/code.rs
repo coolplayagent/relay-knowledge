@@ -145,7 +145,9 @@ pub(super) fn collect_configurations(
         attributes.insert("language_id".to_owned(), row.language_id);
         attributes.insert("source_key".to_owned(), row.source_key.clone());
         attributes.insert("edge_kind".to_owned(), row.edge_kind);
-        attributes.insert("display_name".to_owned(), row.name);
+        if !row.name.trim().is_empty() {
+            attributes.insert("display_name".to_owned(), row.name);
+        }
         let configuration_key = builder.add_entity(OntologyEntityCandidate {
             projection_id: Some(&row.projection_id),
             kind: SoftwareEntityKind::Configuration,
@@ -192,3 +194,7 @@ struct ConfigurationRow {
     line_start: u32,
     line_end: u32,
 }
+
+#[cfg(test)]
+#[path = "code_tests.rs"]
+mod tests;

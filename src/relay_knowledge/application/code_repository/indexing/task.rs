@@ -79,7 +79,9 @@ pub(super) async fn restore_rebound_worktree_task_lease(
     let Some(lease) = lease else {
         return Ok(None);
     };
-    if !matches!(mode, CodeIndexMode::WorktreeOverlay) {
+    if !matches!(mode, CodeIndexMode::WorktreeOverlay)
+        && !crate::code::source_commit_is_filesystem(&lease.resolved_commit_sha)
+    {
         return Ok(Some(lease));
     }
     let task = store
@@ -97,7 +99,7 @@ pub(super) async fn restore_rebound_worktree_task_lease(
         && lease.publication_fence.lease_owner == lease.lease_owner
         && lease.publication_fence.attempt_count == lease.attempt_count
         && task.repository_id == lease.publication_fence.repository_id
-        && task.mode == CodeIndexMode::WorktreeOverlay
+        && &task.mode == mode
         && task.state == CodeIndexTaskState::Running
         && task.lease_owner.as_deref() == Some(lease.lease_owner.as_str())
         && task.attempt_count == lease.attempt_count
@@ -273,13 +275,13 @@ fn require_leased_finalization_checkpoint(
             session.source_scope
         )));
     }
-    if checkpoint.committed_file_count != checkpoint.total_path_count {
+    if checkpoint.processed_path_count() != checkpoint.total_path_count {
         return Err(StorageError::Invariant(format!(
             "code index checkpoint for scope '{}' has an incomplete committed file prefix before leased finalization",
             session.source_scope
         )));
     }
-    if checkpoint.committed_file_count == 0 {
+    if checkpoint.processed_path_count() == 0 {
         if checkpoint.batch_count != 0 || checkpoint.last_path.is_some() {
             return Err(StorageError::Invariant(format!(
                 "empty code index checkpoint prefix for scope '{}' has batch or path progress before leased finalization",
@@ -287,7 +289,7 @@ fn require_leased_finalization_checkpoint(
             )));
         }
     } else if checkpoint.batch_count == 0
-        || checkpoint.batch_count > checkpoint.committed_file_count
+        || checkpoint.batch_count > checkpoint.processed_path_count()
         || checkpoint
             .last_path
             .as_deref()

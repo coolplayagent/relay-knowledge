@@ -69,7 +69,7 @@ pub(super) const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_file_diagnostics",
-        columns: "repository_id, source_scope, path, parse_status, message",
+        columns: "repository_id, source_scope, path, parse_status, message, io_json",
         cursor: CodeScopeCursor::Pair("path", "message"),
     },
 ];
@@ -105,7 +105,7 @@ pub(super) const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_index_checkpoints",
-        columns: "source_scope, repository_id, state, resolved_commit_sha, tree_hash, path_filters_json, language_filters_json, total_path_count, parsed_file_count, committed_file_count, committed_symbol_count, committed_reference_count, committed_chunk_count, committed_fact_row_count, incremental_summary_json, batch_count, last_path, resource_budget_json, updated_at_ms, error_message",
+        columns: "source_scope, repository_id, state, resolved_commit_sha, tree_hash, path_filters_json, language_filters_json, total_path_count, parsed_file_count, committed_file_count, committed_symbol_count, committed_reference_count, committed_chunk_count, committed_fact_row_count, incremental_summary_json, batch_count, last_path, resource_budget_json, updated_at_ms, error_message, processed_path_count",
         cursor: CodeScopeCursor::Singleton,
     },
     CodeScopeTable {
@@ -174,3 +174,14 @@ pub(super) const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
         cursor: CodeScopeCursor::Key("diagnostic_id"),
     },
 ];
+
+impl CodeScopeTable {
+    /// Local I/O outcomes must be observed again, never inherited into a new snapshot.
+    pub(super) fn local_io_exclusion_predicate(&self) -> &'static str {
+        if self.table == "code_repository_file_diagnostics" {
+            "io_json IS NOT NULL"
+        } else {
+            "0"
+        }
+    }
+}

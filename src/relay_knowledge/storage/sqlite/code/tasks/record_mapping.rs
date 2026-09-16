@@ -84,6 +84,7 @@ pub(super) fn checkpoint_from_row(row: &Row<'_>) -> rusqlite::Result<CodeIndexCh
         resource_budget,
     )?;
     Ok(CodeIndexCheckpoint {
+        processed_path_count: row.get(19)?,
         repository_id: row.get(0)?,
         source_scope: row.get(1)?,
         resolved_commit_sha: row.get(2)?,

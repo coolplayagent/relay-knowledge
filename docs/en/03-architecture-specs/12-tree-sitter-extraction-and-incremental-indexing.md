@@ -139,6 +139,15 @@ Query-time source fallback follows the same blocking-worker boundary as Git blob
 
 ## 7. Degradation Strategy
 
+Local source isolation applies to Git worktree files, submodule worktrees, and non-Git full/incremental indexing. Scope and preset exclusion precede unnecessary source I/O. Selected path-local permission, sharing, unsupported-operation and invalid-path errors produce typed diagnostics; a directory iterator failure discards its entire partial listing. Root access, Git/object-database, index storage, resource exhaustion, cancellation, and invariant errors remain task failures.
+
+Skipped files and directory subtrees contribute no inherited facts, chunks or search documents to the new snapshot. Their stable typed outcomes participate in the immutable local snapshot identity; localized error messages do not. Checkpoints count `processed_path_count` separately from parsed and committed files, including diagnostic-only batches. Leases, bounded queues, replay and publication fences remain mandatory. A new failure during a filesystem parse invalidates that batch's publication identity: the worker finishes observing the bounded plan, then replays under the partial identity without rereading already failed paths. At most two such replans are allowed per attempt; ongoing source churn beyond that bound fails the attempt. Successful reads must still match planned hashes.
+
+Before changing a task's filesystem identity after a read race, the worker retires its own unpublished parser session under the attempt fence. Cleanup uses the existing bounded GC steps, keeps durable task ownership until completion, and resumes before planning after interruption. Published scopes cannot be retired through this path. In partitioned storage, shard cleanup finishes before the task's staged catalog route is removed. This prevents abandoned checkpoints from blocking an immediate index of repaired or newly changed sources.
+
+Content integrity is independent of version freshness. A finished partial snapshot may be version-current. Subsequent explicit indexing or existing worktree reconciliation reobserves source access and clears current-snapshot diagnostics when paths recover; historical snapshots and dead letters follow the existing retention policy. Source I/O isolation never overwrites a historical snapshot in place or automatically restarts a historical dead-letter task.
+
+
 Unrecoverable parse errors, grammar panics, capture mismatches, and unsupported languages produce parse-status diagnostics and fall back to text chunks. C/C++ files with error nodes limited to macro expansion, bounded preprocessor directives, or decorator-like export macros may be recorded as parsed when symbol, reference, or import extraction succeeds. Degradation appears in repo status, health, and context pack metadata. Missing external dependency source remains unresolved edge metadata rather than `degraded_reason`. Query-time exact-text source fallback candidate-path or budget degradation appears in code query response metadata, not index state. Manual `rg`/`grep` fallback for agent inspection is documented operational behavior and must not be reported as product index health.
 
 ## 8. Acceptance Criteria
@@ -161,3 +170,7 @@ Unrecoverable parse errors, grammar panics, capture mismatches, and unsupported 
 ---
 
 Navigation: Previous: [11. Code Knowledge Graph Model](11-code-knowledge-graph-model.md) | Next: [13. Code Retrieval Ranking and Impact Analysis](13-code-retrieval-ranking-and-impact-analysis.md)
+
+Managed Git reconciliation rechecks published scopes with source I/O gaps even when the worktree observation has not changed. The same source observation reuses its unfinished durable task, preserving retry backoff, attempts and leases. A successful partial recheck becomes eligible again after 60 seconds; dead-letter tasks are not restarted automatically. Successful repair clears the recheck condition. Existing reconciliation cadence and repository single-writer rules remain authoritative.
+
+Explicit `filesystem:<hash>` selectors remain fixed across discovery and parsing. A later read failure that changes the observed identity fails that pinned request; moving `HEAD` requests can publish the partial identity. If a directory entry's type cannot be determined, discard the current directory's accumulated enumeration and diagnose that known directory boundary instead of guessing file versus directory from selection filters. Dirty submodule files use Git type evidence to apply file filters before filesystem metadata access; directories and gitlinks still undergo their boundary checks. Diagnostic path filters include ancestor directory failures that cover the requested child path.

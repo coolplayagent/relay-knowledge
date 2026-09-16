@@ -52,6 +52,7 @@ pub use code::{
     CodeIndexRequest, CodeIndexResourceBudget, CodeIndexSession, CodeIndexSnapshot,
     CodeIndexSummary, CodeIndexTaskQueueStatus, CodeIndexTaskRecord, CodeIndexTaskState,
     CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeParseStatus, CodeParseStatusCounts,
+    CodePathIoAction, CodePathIoDiagnostic, CodePathIoErrorKind, CodePathIoOperation, CodePathKind,
     CodePathTombstone, CodeQueryKind, CodeRange, CodeReferenceFields, CodeReferenceKind,
     CodeReferenceRecord, CodeRepositoryCrossEdge, CodeRepositoryExcludedPath,
     CodeRepositoryLanguagePreview, CodeRepositoryLargestFile, CodeRepositoryLatencySample,

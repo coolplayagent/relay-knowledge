@@ -27,6 +27,22 @@ impl RelayKnowledgeService {
         task_lease: Option<CodeIndexTaskLeaseContext>,
     ) -> Result<crate::domain::CodeIndexSummary, ApiError> {
         let session = plan.session();
+        if let Some(lease) = task_lease.as_ref()
+            && lease.source_scope != session.source_scope
+            && crate::code::source_commit_is_filesystem(&lease.resolved_commit_sha)
+            && store
+                .code_index_checkpoint(lease.source_scope.clone())
+                .await
+                .map_err(storage_api_error)?
+                .is_some_and(|checkpoint| {
+                    matches!(
+                        checkpoint.state.as_str(),
+                        "indexing" | "abandoning_source_io"
+                    )
+                })
+        {
+            super::source_replan::drain(store, lease, false).await?;
+        }
         let preflight_checkpoint = store
             .code_index_checkpoint(session.source_scope.clone())
             .await
@@ -61,6 +77,17 @@ impl RelayKnowledgeService {
             }
         }
         .map_err(storage_api_error)?;
+        let task_lease = task_lease
+            .map(|lease| {
+                super::task::code_index_task_lease_for_target(
+                    &lease,
+                    &session.repository_id,
+                    session.source_scope.clone(),
+                    session.resolved_commit_sha.clone(),
+                    session.tree_hash.clone(),
+                )
+            })
+            .transpose()?;
         let plan = match preflight_checkpoint {
             Some(preflight) => {
                 if content_equivalent_restart {
@@ -90,13 +117,20 @@ impl RelayKnowledgeService {
             let parser = tokio::spawn(run_blocking_code(move || {
                 let mut plan = plan;
                 loop {
+                    if batch_sender.is_closed() {
+                        return Ok(None);
+                    }
                     let (next_plan, batch) = plan.parse_next_batch()?;
                     plan = next_plan;
                     let Some(batch) = batch else {
-                        return Ok(());
+                        return plan.replan_after_source_failures();
                     };
+                    // An unbound failure must never advance the old identity's checkpoint.
+                    if plan.needs_source_replan {
+                        continue;
+                    }
                     if batch_sender.blocking_send(batch).is_err() {
-                        return Ok(());
+                        return Ok(None);
                     }
                 }
             }));
@@ -126,9 +160,23 @@ impl RelayKnowledgeService {
                 .await
                 .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
             writer_result?;
-            parser_result?;
+            if let Some(next_plan) = parser_result? {
+                return Box::pin(self.apply_code_index_from_plan(store, next_plan, task_lease))
+                    .await;
+            }
         }
 
+        let task_lease = task_lease
+            .map(|lease| {
+                super::task::code_index_task_lease_for_target(
+                    &lease,
+                    &session.repository_id,
+                    session.source_scope.clone(),
+                    session.resolved_commit_sha.clone(),
+                    session.tree_hash.clone(),
+                )
+            })
+            .transpose()?;
         let summary = match task_lease.as_ref() {
             Some(lease) => {
                 finalize_code_index_session_with_task_lease(store, lease, session).await?

@@ -123,7 +123,7 @@ async fn prepared_worktree_rebind_survives_reopen_and_publishes_direct_snapshot(
 
     store
         .catalog
-        .prepare_snapshot_target(&snapshot, publication_fence.clone())
+        .prepare_publication_target(crate::storage::sqlite::code::lifecycle::publication_fence::PartitionedPublicationTarget::from(&snapshot), publication_fence.clone())
         .await
         .expect("control WAL should durably prepare the real target");
     let prepared = store
@@ -201,7 +201,7 @@ async fn stale_generation_cannot_prepare_partitioned_worktree_rebind() {
 
     let error = store
         .catalog
-        .prepare_snapshot_target(&snapshot, fence(&old, "worker-old"))
+        .prepare_publication_target(crate::storage::sqlite::code::lifecycle::publication_fence::PartitionedPublicationTarget::from(&snapshot), fence(&old, "worker-old"))
         .await
         .expect_err("stale generation must not prepare the control handoff");
     assert!(
@@ -216,7 +216,7 @@ async fn stale_generation_cannot_prepare_partitioned_worktree_rebind() {
 
     store
         .catalog
-        .prepare_snapshot_target(&snapshot, fence(&current, "worker-current"))
+        .prepare_publication_target(crate::storage::sqlite::code::lifecycle::publication_fence::PartitionedPublicationTarget::from(&snapshot), fence(&current, "worker-current"))
         .await
         .expect("current generation should prepare the handoff");
     let prepared = store
@@ -617,6 +617,7 @@ async fn partitioned_diagnostics_count_files_once_and_route_to_published_snapsho
     let mut snapshot = super::publication_barrier_tests::snapshot("diagnostics-scope");
     for message in ["first issue", "second issue"] {
         snapshot.diagnostics.push(CodeFileDiagnostic {
+            io: None,
             repository_id: "repo".into(),
             source_scope: "diagnostics-scope".into(),
             path: "src/lib.rs".into(),

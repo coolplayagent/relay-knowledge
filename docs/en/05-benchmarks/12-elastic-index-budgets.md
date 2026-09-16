@@ -257,6 +257,22 @@ jq --arg repository "$repository" -e '
 ' "$report_path"
 ```
 
+
+### Source I/O isolation regression
+
+The `source_io` test targets are compiled in a separate bounded stage before their execution is timed. The execution metric is a required 60-second budget; a 300-second process timeout is an additional bound. Regression cases also cover stable retry identity across clock ticks, explicit filesystem pins, ancestor-directory diagnostic filtering and localized Windows account names. Submodule selection obtains Git type evidence in one status observation rather than launching a Git process for each dirty file.
+
+The self-iteration `fast` quality gate includes `code_index_source_io_isolation_cases`: deterministic directory/read failures, bounded diagnostic-only batches, checkpoint replay, and Windows lock recovery. No fault injection is compiled into production. The Windows harness records per-step time, validates real sharing/ACL errors (32/5), successful first-attempt tasks, partial scope diagnostics and recovery without reset. A local Spring Framework checkout can be supplied with `--source`; it is cloned into a new output directory. Existing source and runtime state remain isolated. Error 1 is tested only through a deterministic unit-test read boundary, not presented as an operating-system reproduction.
+
+```powershell
+cargo rustc --all-features --bin relay-knowledge -- -C link-arg=/STACK:8388608
+python tools/self_iteration/source_io_windows.py --binary target/debug/relay-knowledge.exe --output target/source-io-run --source D:/fixtures/spring-framework
+```
+
+The command above uses an 8 MiB stack for this Windows debug validation binary. The default debug CLI stack overflow was also observed on the committed baseline; this command does not change product defaults. Debug timings are validation evidence, not release-performance measurements.
+
+The large Java case also checks configuration entries (including properties keys) whose normalized display name is empty: retain the entity, source key and evidence, and omit only the absent optional display-name attribute.
+
 ---
 
 Navigation: [Benchmark and Evaluation Records](README.md) | Previous: [11. Coding-Agent E2E Evaluation Gate](11-coding-agent-e2e-evaluation.md)

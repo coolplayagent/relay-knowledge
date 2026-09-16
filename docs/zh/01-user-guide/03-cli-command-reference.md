@@ -10,6 +10,11 @@
 
 ## 3.1 常用状态命令
 
+本地源文件 I/O 故障通过 `repo diagnostics` 的可选 `io` 对象提供诊断，包含 `action: skipped`、`path_kind`、`operation`、`error_kind` 和 `raw_os_error`。这些路径会被跳过，任务成功时仍可能出现 `content_integrity.state = partial`。`io_skipped_file_count` 与 `io_skipped_directory_count` 分别统计跳过文件和目录；不可枚举目录的文件数量未知。未选中路径不产生 I/O 诊断或死信任务。修复访问故障后重新执行正常索引/更新命令即可恢复，无须 reset；历史死信记录保留。
+
+
+目录被跳过时，`repo diagnostics --path <子路径>` 也会返回解释该子路径缺失原因的祖先目录诊断。显式 `filesystem:<hash>` 保持固定版本：索引过程中访问状态改变内容身份时命令失败；要索引当前文件系统状态，请使用 `HEAD`。
+
 项目状态:
 
 ```bash
@@ -326,4 +331,4 @@ relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor 
 
 HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包括 `ref`、JSON 数组字符串 `path_filters`、`limit` 和 `cursor`；CLI 支持 `--remote`。MCP 工具为 `relay_code_diagnostics`，接受 `repository`、`ref_selector`、`path_filters`、`limit`、`cursor`，并遵守授权及上下文预算。
 
-此变更复用现有诊断表，无需迁移或重建索引。升级时应将 agent 的完整性判断改为读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。
+原有内容完整性字段复用现有诊断表。路径 I/O 隔离进一步增加兼容的诊断/checkpoint 列及新的事实身份；升级后使用正常索引命令重建旧快照。agent 的完整性判断应读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。

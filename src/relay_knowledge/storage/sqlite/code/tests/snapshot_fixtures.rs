@@ -109,6 +109,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_chunk_status(
         workspaces: Vec::new(),
         diagnostics: degraded_reason
             .map(|message| CodeFileDiagnostic {
+                io: None,
                 repository_id: repository_id.to_owned(),
                 source_scope: TEST_SOURCE_SCOPE.to_owned(),
                 path: path.to_owned(),
@@ -204,6 +205,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_degraded_files(
             Some(message.clone()),
         ));
         diagnostics.push(CodeFileDiagnostic {
+            io: None,
             repository_id: "repo".to_owned(),
             source_scope: TEST_SOURCE_SCOPE.to_owned(),
             path,

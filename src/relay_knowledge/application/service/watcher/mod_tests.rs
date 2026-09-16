@@ -85,3 +85,32 @@ fn task_record(state: CodeIndexTaskState) -> CodeIndexTaskRecord {
         updated_at_ms: 2,
     }
 }
+
+#[test]
+fn source_io_watch_registration_tracks_only_current_io_gaps() {
+    let mut current = status(Some("scope"), false);
+    assert!(
+        !watched_repository_from_status(&current)
+            .unwrap()
+            .requires_source_io_recheck
+    );
+    current.content_integrity.io_skipped_directory_count = Some(1);
+    assert!(
+        watched_repository_from_status(&current)
+            .unwrap()
+            .requires_source_io_recheck
+    );
+    current.content_integrity.io_skipped_directory_count = Some(0);
+    current.content_integrity.io_skipped_file_count = Some(2);
+    assert!(
+        watched_repository_from_status(&current)
+            .unwrap()
+            .requires_source_io_recheck
+    );
+    current.content_integrity.io_skipped_file_count = Some(0);
+    assert!(
+        !watched_repository_from_status(&current)
+            .unwrap()
+            .requires_source_io_recheck
+    );
+}

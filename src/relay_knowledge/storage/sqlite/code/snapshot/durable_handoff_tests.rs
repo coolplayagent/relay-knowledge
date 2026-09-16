@@ -165,6 +165,7 @@ fn handoff_connection() -> Connection {
                  total_path_count INTEGER,
                  parsed_file_count INTEGER,
                  committed_file_count INTEGER,
+                 processed_path_count INTEGER NOT NULL DEFAULT 0,
                  committed_symbol_count INTEGER,
                  committed_reference_count INTEGER,
                  committed_chunk_count INTEGER,

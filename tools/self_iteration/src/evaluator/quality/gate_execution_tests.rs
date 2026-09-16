@@ -52,6 +52,32 @@ fn code_index_persistence_measurement_is_reported_as_a_key_budgeted_metric() {
     assert!(metrics[0].key);
 }
 
+#[test]
+fn source_io_measurement_over_sixty_seconds_is_a_hard_budget_failure() {
+    for (duration_ms, failed) in [(60_000, false), (60_001, true)] {
+        let stages = vec![QualityGateStage::Parallel(vec![gate(
+            "code_index_source_io_isolation_cases",
+        )])];
+        let mut commands = Vec::new();
+        let mut gates = Vec::new();
+        let mut metrics = Vec::new();
+        assert!(run_quality_gate_plan(
+            stages,
+            |stage| {
+                let mut results = stage_results(stage, 0);
+                results[0].duration_ms = duration_ms;
+                results
+            },
+            &mut commands,
+            &mut gates,
+            &mut metrics
+        ));
+        assert_eq!(metrics.len(), 1);
+        assert!(metrics[0].key);
+        assert_eq!(metrics[0].key_budget_failed(), failed);
+    }
+}
+
 fn stage_results(stage: QualityGateStage, exit_code: i32) -> Vec<CommandResult> {
     match stage {
         QualityGateStage::Parallel(gates) => gates,

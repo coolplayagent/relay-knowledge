@@ -475,6 +475,8 @@ async fn same_tree_commit_adoption_clears_the_previous_shard_incremental_receipt
         .expect("published shard should exist");
     let initial_task_id = initial_task.task_id.clone();
     let previous_receipt = CodeIncrementalSummaryReceipt {
+        io_skipped_file_count: 0,
+        io_skipped_directory_count: 0,
         task_id: initial_task_id.clone(),
         base_resolved_commit_sha: "base".to_owned(),
         changed_path_count: 1,

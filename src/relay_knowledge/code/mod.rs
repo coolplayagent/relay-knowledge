@@ -130,3 +130,5 @@ use {
     scope::{path_is_selected, path_scope_allows, path_scope_overlaps},
     source::{RepositorySourceKind, source_snapshot_batch_bytes},
 };
+
+pub(crate) use source::source_commit_is_filesystem;

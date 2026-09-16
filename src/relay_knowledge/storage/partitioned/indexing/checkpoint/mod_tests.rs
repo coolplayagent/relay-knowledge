@@ -71,6 +71,7 @@ fn active_catalog_never_projects_raw_reference_search_progress_as_completed() {
 
 fn checkpoint_with_state(state: String) -> CodeIndexCheckpoint {
     CodeIndexCheckpoint {
+        processed_path_count: 0,
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         resolved_commit_sha: "commit".to_owned(),

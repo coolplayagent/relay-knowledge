@@ -139,6 +139,15 @@ Query-time source fallback 与 Git blob 读取一样必须进入 blocking-worker
 
 ## 7. 降级策略
 
+本地源路径隔离覆盖 Git worktree 文件、子模块 worktree，以及非 Git 全量/增量索引。范围和 preset 排除应先于不必要的源文件 I/O。选中路径的局部权限、共享锁、不支持操作和无效路径错误生成类型化诊断；目录迭代中途失败时丢弃该目录的整个不完整枚举结果。根目录访问、Git/对象库、索引存储、资源耗尽、取消和不变量错误仍作为任务失败处理。
+
+新快照不继承跳过文件或子树的事实、文本块及搜索文档。稳定的类型化跳过结果参与本地不可变快照身份，本地化错误消息不参与。checkpoint 使用独立的 `processed_path_count`，与已解析/已写入文件数区分，支持仅有诊断的批次；租约、有界队列、重放和发布隔离仍须生效。非 Git 解析阶段出现新 I/O 故障时，该批次不得推进旧身份的 checkpoint；worker 完成有界计划的故障观测后，使用部分快照身份重放，且本次尝试不再次读取已经失败的路径。每次尝试最多重规划两次，持续变化超过边界则任务失败；成功读取的内容仍必须通过计划哈希校验。
+
+读取竞态导致任务需要切换 filesystem 身份前，worker 必须在 attempt fence 下清理自己尚未发布的解析 session。清理复用现有有界 GC 步骤，持久保留任务归属直到完成；中断后在重新规划前续跑。该流程禁止清理已发布 scope。分片存储先完成 shard 清理，再删除该任务暂存的 catalog route，避免遗留 checkpoint 阻塞修复后或源码再次变更后的立即索引。
+
+内容完整性与版本新鲜度分别表达：完成的部分快照可以版本最新。后续显式索引或现有 worktree 对账重新观测访问状态，恢复后清除当前快照的诊断；历史快照及死信记录继续遵循现有保留策略。路径 I/O 隔离不会就地覆盖历史快照，也不会自动重启历史死信任务。
+
+
 不可恢复 parse error、grammar panic、capture mismatch 或 unsupported language 生成 parse status 诊断，并回退到 text chunk。C/C++ 文件如果 error node 局限在 macro expansion、有界 preprocessor directive 或 decorator-like export macro，且 symbol、reference 或 import 抽取成功，可以记录为 parsed。降级结果必须出现在 repo status、health 和 context pack metadata 中。外部依赖源码缺失保持 unresolved edge metadata，不写成 `degraded_reason`。查询时 exact-text source fallback 的候选路径或预算降级应出现在 code query 响应 metadata 中，而不是写入索引状态。人工 `rg`/`grep` fallback 是 agent 检查源码的操作说明，不应作为产品 index health 上报。
 
 ## 8. 验收标准
@@ -161,3 +170,7 @@ Query-time source fallback 与 Git blob 读取一样必须进入 blocking-worker
 ---
 
 导航: 上一章: [11. 代码知识图谱模型](11-code-knowledge-graph-model.md) | 下一章: [13. 代码检索排序与影响分析](13-code-retrieval-ranking-and-impact-analysis.md)
+
+托管 Git 对账发现已发布快照仍有 I/O 缺口时，即使工作区观察未变化，也通过现有任务队列重新检查。同一源状态复用未完成的持久任务，保留退避、尝试次数和租约；成功发布部分快照后，间隔 60 秒才允许再次检查，死信任务不自动重启。恢复成功后清除此条件，继续遵守已有对账周期和单仓库单写者约束。
+
+显式 `filesystem:<hash>` 在发现和解析阶段都保持固定身份。后续读取故障如果改变快照身份，该固定版本请求必须失败；使用动态 `HEAD` 的请求可以发布部分快照。无法确定目录项类型时，丢弃当前目录已累积的枚举结果，并诊断这个已知目录边界，不能根据过滤结果猜测文件或目录类型。子模块脏文件利用 Git 类型证据在访问文件系统元数据前执行文件过滤，目录和 gitlink 继续执行边界检查。诊断路径过滤应包含覆盖目标子路径的祖先目录故障。

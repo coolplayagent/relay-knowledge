@@ -26,15 +26,19 @@ pub(in crate::code) use blobs::{
 #[cfg(test)]
 pub(in crate::code) use filesystem_hashes::filesystem_tree_hash_for_paths;
 pub(in crate::code) use filesystem_hashes::{
-    ensure_filesystem_blobs_match_content_hashes, ensure_filesystem_paths_match_content_hashes,
-    filesystem_content_hashes_for_paths, filesystem_tree_hash_from_path_hashes,
-    source_commit_is_filesystem,
+    ensure_filesystem_blobs_match_content_hashes, ensure_filesystem_snapshot_matches_ref,
+    tree_hash_with_skipped,
 };
 pub(in crate::code) use identity::{
     RepositorySourceKind, filesystem_registration_identity, registration_source, source_kind,
 };
 pub(in crate::code) use language_scope::source_language_filter_allows;
 pub(in crate::code) use snapshot::{
-    RepositorySourceSnapshot, filesystem_source_snapshot, git_tree_hash_with_submodules,
-    source_snapshot,
+    RepositorySourceSnapshot, complete_selected_filesystem_entries, filesystem_source_snapshot,
+    git_tree_hash_with_submodules, source_snapshot,
 };
+
+pub(crate) use filesystem_hashes::source_commit_is_filesystem;
+
+#[cfg(test)]
+pub(in crate::code) use filesystem_hashes::filesystem_content_hashes_for_paths;

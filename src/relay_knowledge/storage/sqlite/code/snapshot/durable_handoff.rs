@@ -41,28 +41,36 @@ pub(super) fn encoded_summary(
         .and_then(|count| count.checked_add(snapshot.chunks.len()))
         .and_then(|count| count.checked_add(snapshot.diagnostics.len()))
         .ok_or_else(|| handoff_capacity_error(&snapshot.source_scope))?;
+    let integrity = crate::domain::CodeContentIntegrity::from_diagnostics(
+        snapshot.source_scope.clone(),
+        &snapshot.diagnostics,
+    );
     let receipt = CodeIncrementalSummaryReceipt {
+        io_skipped_file_count: integrity.io_skipped_file_count.unwrap_or(0),
+        io_skipped_directory_count: integrity.io_skipped_directory_count.unwrap_or(0),
         task_id: task_id.to_owned(),
         base_resolved_commit_sha,
         changed_path_count: snapshot.changed_path_count,
         skipped_unchanged_count: snapshot.skipped_unchanged_count,
-        deleted_path_count: snapshot.deleted_paths.len(),
+        deleted_path_count: snapshot.confirmed_deleted_paths().count(),
         affected_path_count: snapshot
             .files
             .iter()
             .map(|file| file.path.as_str())
-            .chain(snapshot.deleted_paths.iter().map(String::as_str))
+            .chain(snapshot.confirmed_deleted_paths())
+            .chain(
+                snapshot
+                    .diagnostics
+                    .iter()
+                    .filter(|d| d.io.is_some())
+                    .map(|d| d.path.as_str()),
+            )
             .collect::<BTreeSet<_>>()
             .len(),
         blob_read_count: snapshot.files.len(),
         parsed_file_count: snapshot.files.len(),
         sqlite_write_count,
-        degraded_file_count: snapshot
-            .diagnostics
-            .iter()
-            .map(|diagnostic| &diagnostic.path)
-            .collect::<std::collections::BTreeSet<_>>()
-            .len(),
+        degraded_file_count: integrity.degraded_file_count.unwrap_or(0),
         batch_count,
     };
     let encoded = super::super::checkpoint_receipt::encode(&receipt)?;
@@ -76,7 +84,14 @@ pub(super) fn begin_batched_delta(
 ) -> Result<usize, StorageError> {
     let file_count = completion
         .cloned_file_count
-        .checked_add(snapshot.files.len())
+        .checked_add(
+            snapshot.files.len()
+                + snapshot
+                    .diagnostics
+                    .iter()
+                    .filter(|d| d.io.is_some())
+                    .count(),
+        )
         .ok_or_else(|| handoff_capacity_error(&snapshot.source_scope))?;
     let base_batch_count = usize::from(completion.cloned_file_count > 0);
     let last_path = transaction
@@ -101,7 +116,7 @@ pub(super) fn begin_batched_delta(
     let changed = transaction.execute(
         "UPDATE code_repository_index_checkpoints
          SET state = ?3, total_path_count = ?4,
-             parsed_file_count = ?5, committed_file_count = ?5,
+             parsed_file_count = ?5, committed_file_count = ?5, processed_path_count = ?5,
              committed_symbol_count = ?6, committed_reference_count = ?7,
              committed_chunk_count = ?8, committed_fact_row_count = ?9,
              incremental_summary_json = NULL, batch_count = ?10,
@@ -222,7 +237,23 @@ pub(super) fn mark_batched_delta_ready_for_finalization(
             |row| row.get::<_, String>(0),
         )
         .optional()?;
-    if last_path.is_some() != (expected_files > 0) {
+    let last_path = last_path.or_else(|| {
+        snapshot
+            .diagnostics
+            .iter()
+            .filter(|d| d.io.is_some())
+            .map(|d| d.path.clone())
+            .max()
+    });
+    if last_path.is_some()
+        != (expected_files
+            + snapshot
+                .diagnostics
+                .iter()
+                .filter(|d| d.io.is_some())
+                .count()
+            > 0)
+    {
         return Err(StorageError::Invariant(format!(
             "incremental clone final file prefix for scope '{}' is inconsistent",
             snapshot.source_scope

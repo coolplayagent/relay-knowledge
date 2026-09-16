@@ -216,3 +216,19 @@ jq --arg repository "$repository" -e '
         $cold.scope.language_filters == $cold.status.language_filters)))
 ' "$report_path"
 ```
+
+
+### 路径 I/O 隔离回归
+
+`source_io` 测试目标先在独立的有界阶段编译，再统计执行耗时。执行指标采用必须满足的 60 秒预算，另有 300 秒进程超时边界。回归还覆盖跨时钟周期的稳定重试身份、固定文件系统版本、祖先目录诊断过滤和本地化 Windows 用户名。子模块过滤通过一次 status 观察获取 Git 类型证据，避免为每个脏文件启动 Git 进程。
+
+self-iteration 的 `fast` 门禁增加 `code_index_source_io_isolation_cases`，检查确定性目录/读取故障、有界纯诊断批次、checkpoint 重放与 Windows 文件锁恢复。故障注入仅编译进单元测试。Windows harness 记录各步骤耗时，验证真实共享锁/ACL 错误（32/5）、任务首次尝试成功、partial 诊断及无需 reset 的恢复。通过 `--source` 提供本地 Spring Framework 仓库时，脚本复制到新输出目录，源码和运行数据均隔离。错误 1 只由确定性测试读取边界覆盖，不宣称等同于真实操作系统复现。
+
+```powershell
+cargo rustc --all-features --bin relay-knowledge -- -C link-arg=/STACK:8388608
+python tools/self_iteration/source_io_windows.py --binary target/debug/relay-knowledge.exe --output target/source-io-run --source D:/fixtures/spring-framework
+```
+
+大型 Java 场景同时检查规范化显示名为空的配置项（包括 properties 配置键）：保留实体、来源键和证据，仅省略缺失的可选显示名属性。
+
+上述命令为 Windows 调试验证二进制设置 8 MiB 栈。默认调试 CLI 的栈溢出在已提交基线上也可复现；该命令不修改产品默认设置。调试构建耗时仅作为验证记录，不作为发布构建性能指标。

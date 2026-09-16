@@ -64,6 +64,7 @@ fn run_quality_gate_plan(
                     "cargo_build_release"
                         | "cargo_build_debug"
                         | "code_index_persistence_performance_suite"
+                        | "code_index_source_io_isolation_cases"
                 ),
             });
             gates.push(GateObservation::from_command(&result));

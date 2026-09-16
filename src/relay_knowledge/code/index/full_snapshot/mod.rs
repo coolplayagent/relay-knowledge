@@ -1,6 +1,6 @@
 //! Builds verified full snapshots and clean worktree-overlay identities.
 
-use std::{collections::BTreeMap, path::Path};
+use std::path::Path;
 
 #[cfg(test)]
 use std::{fs, path::PathBuf, sync::Mutex};
@@ -16,10 +16,7 @@ use super::{
     parser::parse_indexed_file,
     scope::{ScopedSourceSnapshot, scoped_source_snapshot},
     snapshot::{SnapshotBuild, SnapshotScopeFilters},
-    source::{
-        ensure_filesystem_blobs_match_content_hashes, filesystem_content_hashes_for_paths,
-        filesystem_tree_hash_from_path_hashes, source_snapshot_bytes,
-    },
+    source::{ensure_filesystem_blobs_match_content_hashes, source_snapshot_bytes},
 };
 
 struct PersistedSnapshotIdentity {
@@ -118,7 +115,15 @@ fn build_full_snapshot_from_scoped_source(
     identity: PersistedSnapshotIdentity,
     workspace_detection: &CodeWorkspaceDetectionConfig,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
-    let filesystem_path_hashes = filesystem_full_snapshot_path_hashes(&snapshot)?;
+    if snapshot.kind.is_filesystem() {
+        return local::build(
+            registration,
+            snapshot,
+            identity.base_resolved_commit_sha,
+            workspace_detection,
+        );
+    }
+    let filesystem_path_hashes = snapshot.content_hashes.clone();
     let source_commit = snapshot.resolved_commit_sha.clone();
     let mut build = SnapshotBuild::new_with_scope_filters(
         registration,
@@ -160,28 +165,7 @@ fn build_full_snapshot_from_scoped_source(
     Ok(build.finish())
 }
 
-fn filesystem_full_snapshot_path_hashes(
-    snapshot: &ScopedSourceSnapshot,
-) -> Result<BTreeMap<String, String>, CodeIndexError> {
-    if !snapshot.kind.is_filesystem() {
-        return Ok(BTreeMap::new());
-    }
-    let paths = snapshot
-        .entries
-        .iter()
-        .map(|entry| entry.path.clone())
-        .collect::<Vec<_>>();
-    let path_hashes = filesystem_content_hashes_for_paths(&snapshot.root, &paths)?;
-    let tree_hash = filesystem_tree_hash_from_path_hashes(&path_hashes);
-    if tree_hash != snapshot.tree_hash {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "filesystem source snapshot {} no longer matches planned filesystem content {tree_hash}",
-            snapshot.resolved_commit_sha
-        )));
-    }
-
-    Ok(path_hashes)
-}
+mod local;
 
 #[cfg(test)]
 fn apply_filesystem_full_snapshot_read_mutation(

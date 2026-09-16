@@ -23,6 +23,7 @@ const PUBLISHED_STATE: &str = "published";
 
 pub(super) struct DeltaBatchPlan<'a> {
     snapshot: &'a CodeIndexSnapshot,
+    paths: Vec<&'a str>,
     ranges: Vec<Range<usize>>,
 }
 
@@ -32,17 +33,18 @@ impl<'a> DeltaBatchPlan<'a> {
         budget: CodeIndexResourceBudget,
     ) -> Result<Self, StorageError> {
         let surfaces = file_surfaces(snapshot)?;
+        let paths = surfaces.keys().copied().collect::<Vec<_>>();
         let control_bytes = batch_control_bytes(snapshot)?;
         let mut ranges = Vec::new();
         let mut start = 0usize;
         let mut files = 0usize;
         let mut bytes = control_bytes;
         let mut rows = DURABLE_BATCH_CONTROL_ROW_COUNT;
-        for (index, file) in snapshot.files.iter().enumerate() {
-            let surface = surfaces.get(file.path.as_str()).ok_or_else(|| {
+        for (index, path) in paths.iter().enumerate() {
+            let surface = surfaces.get(path).ok_or_else(|| {
                 StorageError::Invariant(format!(
                     "durable delta file '{}' lost its owned-fact surface",
-                    file.path
+                    path
                 ))
             })?;
             let file_bytes = surface.bytes;
@@ -58,7 +60,7 @@ impl<'a> DeltaBatchPlan<'a> {
             {
                 return Err(StorageError::CapacityExceeded(format!(
                     "durable delta file '{}' owned fact surface cannot fit one frozen writer quantum for scope '{}'",
-                    file.path, snapshot.source_scope
+                    path, snapshot.source_scope
                 )));
             }
             let next_files = files.checked_add(1).ok_or_else(|| capacity(snapshot))?;
@@ -88,10 +90,14 @@ impl<'a> DeltaBatchPlan<'a> {
                 rows = next_rows;
             }
         }
-        if start < snapshot.files.len() {
-            ranges.push(start..snapshot.files.len());
+        if start < paths.len() {
+            ranges.push(start..paths.len());
         }
-        Ok(Self { snapshot, ranges })
+        Ok(Self {
+            snapshot,
+            paths,
+            ranges,
+        })
     }
 
     pub(super) fn len(&self) -> usize {
@@ -109,11 +115,17 @@ impl<'a> DeltaBatchPlan<'a> {
                 self.ranges.len()
             ))
         })?;
-        let files = self.snapshot.files[range].to_vec();
-        let selected = files
+        let selected = self.paths[range]
             .iter()
-            .map(|file| file.path.clone())
+            .copied()
             .collect::<std::collections::BTreeSet<_>>();
+        let files = self
+            .snapshot
+            .files
+            .iter()
+            .filter(|file| selected.contains(file.path.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
         let owns = |path: &str| selected.contains(path);
         let parsed_byte_count = files.iter().try_fold(0usize, |total, file| {
             total
@@ -307,6 +319,13 @@ fn file_surfaces(
         SEARCH_DOCUMENT_ROW_COUNT,
         snapshot,
     )?;
+    for diagnostic in snapshot
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.io.is_some())
+    {
+        surfaces.entry(diagnostic.path.as_str()).or_default();
+    }
     add_records(
         &mut surfaces,
         snapshot

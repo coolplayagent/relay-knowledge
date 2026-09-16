@@ -369,7 +369,7 @@ fn candidate_query(
     Ok((
         format!(
             "SELECT source.rowid, ({length_sql}),
-                    EXISTS (
+                    ({local_io}) OR EXISTS (
                         SELECT 1
                         FROM code_repository_incremental_clone_affected_paths affected
                         WHERE affected.source_scope = ?2
@@ -381,6 +381,7 @@ fn candidate_query(
              ORDER BY {order}
              LIMIT ?{limit_parameter}",
             table_name = table.table,
+            local_io = table.local_io_exclusion_predicate(),
             reference_occurrences = if table.table == "code_repository_reference_search_groups" {
                 "source.occurrence_count"
             } else {
@@ -446,6 +447,7 @@ fn copy_prefix(
                  SELECT {selected_columns}
                  FROM {table_name} source
                  WHERE source.source_scope = ?1 {range}
+                   AND NOT ({local_io})
                    AND NOT EXISTS (
                        SELECT 1
                        FROM code_repository_incremental_clone_affected_paths affected
@@ -454,6 +456,7 @@ fn copy_prefix(
                    )",
                 table_name = table.table,
                 columns = table.columns,
+                local_io = table.local_io_exclusion_predicate(),
             ),
             params_from_iter(values),
         )

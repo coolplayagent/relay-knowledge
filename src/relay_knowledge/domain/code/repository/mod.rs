@@ -1,3 +1,7 @@
+mod path_io;
+pub use path_io::{
+    CodePathIoAction, CodePathIoDiagnostic, CodePathIoErrorKind, CodePathIoOperation, CodePathKind,
+};
 mod config_registry;
 pub use config_registry::{CodeConfigFilter, CodeConfigMetadata};
 

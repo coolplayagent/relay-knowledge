@@ -436,7 +436,7 @@ fn create_minimal_schema(connection: &Connection) {
                 CREATE TABLE code_repository_calls (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_routes (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_chunks (source_scope TEXT NOT NULL);
-                CREATE TABLE code_repository_file_diagnostics (source_scope TEXT NOT NULL, path TEXT NOT NULL DEFAULT 'fixture');
+                CREATE TABLE code_repository_file_diagnostics (source_scope TEXT NOT NULL, path TEXT NOT NULL DEFAULT 'fixture', io_json TEXT);
                 CREATE TABLE code_repository_path_tombstones (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_index_checkpoints (source_scope TEXT PRIMARY KEY, repository_id TEXT NOT NULL);
                 CREATE TABLE code_repository_index_tasks (
