@@ -154,6 +154,11 @@ A rollback target that does not recognize query-plan v3 must first let the curre
 
 ## 5. Upgrade and Rollback
 
+The source I/O isolation update adds nullable `io_json` to persisted file diagnostics, `processed_path_count` (default zero) to checkpoints, and nullable `source_replan_task_id` ownership to scope GC jobs. Existing diagnostic rows remain readable; legacy checkpoints retain their file-count interpretation. Interrupted cleanup of an unpublished filesystem session resumes under the owning task's current lease before its snapshot identity changes. Backups must keep this cleanup state with the task, checkpoint and, in partitioned mode, catalog and shard databases. The `source-io-isolation-v1` fact identity prevents incompatible old scopes/checkpoints from being reused as current indexes; rebuild with the normal index command. Preserve the pre-upgrade runtime backup for binary/database rollback. This change does not reset dead letters or change installation directories.
+
+The database fast-open check verifies all three new columns even when the existing schema marker is current. A missing column runs the additive initializer before serving queries or indexing; reopening an upgraded database preserves existing diagnostic, checkpoint and GC rows with their compatible defaults.
+
+
 Upgrade flow:
 
 ```text
@@ -318,7 +323,7 @@ Pages default to 50 diagnostics, capped at 200, ordered by path and message. Reu
 
 HTTP: `GET /api/v1/code/repositories/{alias}/diagnostics`, with `ref`, JSON-array-string `path_filters`, `limit` and `cursor`. CLI supports `--remote`. MCP: `relay_code_diagnostics`, with `repository`, `ref_selector`, `path_filters`, `limit`, `cursor`, subject to authorization and context budgets.
 
-Existing diagnostic tables are reused; no migration or reindex is required. Update agents to inspect `content_integrity` when upgrading; older versions can still report overall `degraded` for partial content. Stale versions, unfinished tasks and graph-only responses retain conservative handling. Out-of-scope external dependencies remain unresolved edge metadata rather than file parse degradation.
+The original content-integrity fields reuse existing diagnostic tables. Source I/O isolation additionally adds compatible diagnostic/checkpoint columns and a new fact identity; rebuild older scopes with the normal index command after upgrading. Update agents to inspect `content_integrity`; older versions can still report overall `degraded` for partial content. Stale versions, unfinished tasks and graph-only responses retain conservative handling. Out-of-scope external dependencies remain unresolved edge metadata rather than file parse degradation.
 
 The portable configuration/type-ownership upgrade changes the code-fact identity and adds nullable symbol ownership columns. Existing repository scopes become stale once, and the existing durable repository index task rebuilds facts and creates the v4 ownership lookup before publication. No compiler, language server, new service or unmanaged background process is required. Upgrading, cancelling and retrying retain task leases, checkpoints and the single-writer publication fence. Back up runtime state before switching binary versions; rollback must use the matching backup or rebuild indexes with the selected binary rather than relabel newer facts as compatible.
 
@@ -326,5 +331,7 @@ Schema marker 9 also adds the checkpoint ownership cursor. The migration validat
 
 
 The v56 portable-evidence update persists optional call byte ranges (legacy JSON and attached SQLite snapshots default to unknown). Query-index plan v5 preserves v4's first 19 units and appends configuration identity/key and caller/callee identity indexes at ordinals 19–22. Configuration binding identities use a transactional inverted table: insert, replacement, update, incremental cloning and attached imports rebuild bindings from the bounded metadata; deletes remove them. Queries select indexed identities instead of scanning every metadata JSON object. The existing 2-second/2,000,000-step query budget is unchanged.
+
+The combined fact identity is `config-registry-v56-portable-evidence-source-io-isolation-v1`. Scopes produced with either earlier portable evidence or source I/O isolation alone must be rebuilt. Checkpoints retain both the ownership cursor and the processed-path count; legacy snapshot imports default absent call byte ranges and I/O diagnostics to unknown.
 
 Schema marker 10 and the one-time portable evidence migration mark older facts stale for durable reindexing. After this migration, missing or incompatible binding tables, triggers or cleanup indexes cause an explicit startup error; startup does not silently create an empty projection over published facts or alter a writer's lease/checkpoint. Restore a matching runtime backup or index the authorized repositories in a new runtime home before switching service configuration. Binary rollback uses the corresponding pre-upgrade backup or a clean index rebuilt by the selected binary.

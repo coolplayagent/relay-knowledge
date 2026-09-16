@@ -17,6 +17,7 @@ use super::{
 mod incremental_clone;
 mod reference_resolution;
 mod software_projection;
+mod source_outcomes;
 
 pub(crate) use self::incremental_clone::{
     CodeIncrementalClonePhase, code_incremental_clone, code_incremental_clone_state,
@@ -172,6 +173,20 @@ pub struct CodeIndexBatch {
 }
 
 impl CodeIndexBatch {
+    /// Each skipped source path advances the durable prefix without a fabricated file row.
+    pub fn processed_paths(&self) -> std::collections::BTreeSet<&str> {
+        self.files
+            .iter()
+            .map(|file| file.path.as_str())
+            .chain(
+                self.diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic.io.is_some())
+                    .map(|diagnostic| diagnostic.path.as_str()),
+            )
+            .collect()
+    }
+
     pub fn row_count(&self) -> usize {
         self.files
             .len()
@@ -667,6 +682,10 @@ pub(crate) fn code_query_index_repair(state: &str) -> Option<CodeQueryIndexRepai
 /// Bounded incremental-work metrics retained across post-delta finalization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeIncrementalSummaryReceipt {
+    #[serde(default)]
+    pub io_skipped_file_count: usize,
+    #[serde(default)]
+    pub io_skipped_directory_count: usize,
     pub task_id: String,
     pub base_resolved_commit_sha: String,
     pub changed_path_count: usize,
@@ -685,6 +704,8 @@ impl CodeIncrementalSummaryReceipt {
         let affected_surface = self
             .parsed_file_count
             .checked_add(self.deleted_path_count)
+            .and_then(|n| n.checked_add(self.io_skipped_file_count))
+            .and_then(|n| n.checked_add(self.io_skipped_directory_count))
             .ok_or_else(|| {
                 DomainError::invalid(
                     "incremental_summary",
@@ -708,10 +729,18 @@ impl CodeIncrementalSummaryReceipt {
             || self.parsed_file_count > self.affected_path_count
             || self.deleted_path_count > self.affected_path_count
             || self.affected_path_count > affected_surface
-            || self.degraded_file_count > self.parsed_file_count
+            || self.degraded_file_count
+                > self
+                    .parsed_file_count
+                    .saturating_add(self.io_skipped_file_count)
             || self.sqlite_write_count < minimum_sqlite_writes
             || self.batch_count == 0
-            || self.batch_count > self.parsed_file_count.max(1)
+            || self.batch_count
+                > self
+                    .parsed_file_count
+                    .saturating_add(self.io_skipped_file_count)
+                    .saturating_add(self.io_skipped_directory_count)
+                    .max(1)
         {
             return Err(DomainError::invalid(
                 "incremental_summary",
@@ -725,6 +754,9 @@ impl CodeIncrementalSummaryReceipt {
 /// Durable progress checkpoint for a repository indexing session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeIndexCheckpoint {
+    /// Durable handled paths, including diagnostic-only file and directory outcomes.
+    #[serde(default)]
+    pub processed_path_count: usize,
     pub repository_id: String,
     pub source_scope: String,
     #[serde(default)]
@@ -751,6 +783,13 @@ pub struct CodeIndexCheckpoint {
     pub last_path: Option<String>,
     pub resource_budget: CodeIndexResourceBudget,
     pub updated_at_ms: u64,
+}
+
+impl CodeIndexCheckpoint {
+    /// Legacy checkpoints counted only parsed files; current checkpoints include skipped paths.
+    pub fn processed_path_count(&self) -> usize {
+        self.processed_path_count.max(self.committed_file_count)
+    }
 }
 
 /// Persistent lifecycle for background code repository index tasks.
@@ -911,6 +950,10 @@ pub struct CodeScopeRetirementJobStatus {
 /// Coarse phase timing and counts reported by repository indexing.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeIndexProgressSummary {
+    #[serde(default)]
+    pub io_skipped_file_count: usize,
+    #[serde(default)]
+    pub io_skipped_directory_count: usize,
     pub git_file_count: usize,
     pub blob_read_count: usize,
     pub parsed_file_count: usize,

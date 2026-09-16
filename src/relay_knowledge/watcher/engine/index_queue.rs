@@ -107,6 +107,8 @@ async fn reconcile_commit_heads(
             let language_filters = repository.language_filters.clone();
             let comparison_base = base_commit.clone();
             let active_is_worktree = repository.last_indexed_commit.starts_with("worktree:");
+            let source_io_recheck = repository.requires_source_io_recheck;
+            let source_scope = repository.source_scope.clone();
             move || -> Result<Option<(String, String, Option<u64>)>, CommitReconciliationError> {
                 let head_commit = crate::code::resolve_repository_ref(&root, "HEAD")
                     .map_err(|error| CommitReconciliationError::new("resolve_head", error))?;
@@ -115,6 +117,11 @@ async fn reconcile_commit_heads(
                         .map_err(|error| {
                         CommitReconciliationError::new("observe_worktree", error)
                     })?;
+                    let observation = source_io_recheck_observation(
+                        observation,
+                        source_io_recheck,
+                        &source_scope,
+                    );
                     if active_is_worktree && observation.is_none() {
                         return Ok(None);
                     }
@@ -384,3 +391,22 @@ fn repository_has_git_ref_event(repository: &WatchedRepository, path: &Path) -> 
         ".git/HEAD" | ".git/packed-refs" | ".git/logs/HEAD"
     ) || label.starts_with(".git/refs/")
 }
+
+// Time is not a source change: queue admission must preserve the unfinished task's
+// leases and retry history, and reopen successful partial observations only after a delay.
+fn source_io_recheck_observation(
+    observed: Option<u64>,
+    required: bool,
+    source_scope: &str,
+) -> Option<u64> {
+    if !required {
+        return observed;
+    }
+    Some(content_hash64(
+        format!("source-io-recheck:{source_scope}:{observed:?}").as_bytes(),
+    ))
+}
+
+#[cfg(test)]
+#[path = "source_io_tests.rs"]
+mod source_io_tests;

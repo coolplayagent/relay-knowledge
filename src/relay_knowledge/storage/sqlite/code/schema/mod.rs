@@ -52,6 +52,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     }
     super::super::schema::columns::ensure_column(
         connection,
+        "code_repository_file_diagnostics",
+        "io_json",
+        "TEXT",
+    )?;
+    super::super::schema::columns::ensure_column(
+        connection,
         "code_repository_schema_migrations",
         "applied_at_ms",
         "INTEGER NOT NULL DEFAULT 0",
@@ -62,6 +68,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "code_repository_index_checkpoints",
         "type_owner_cursor",
         "TEXT",
+    )?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_index_checkpoints",
+        "processed_path_count",
+        "INTEGER NOT NULL DEFAULT 0",
     )?;
     initialize_repository_set_schema(connection)?;
     initialize_search_schema(connection)?;
@@ -81,6 +93,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         return Err(StorageError::Invariant("configuration binding schema is missing or incompatible; restore the database backup or rebuild the repository index in a new runtime home".into()));
     }
     initialize_config_bindings(connection)?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_scope_gc_jobs",
+        "source_replan_task_id",
+        "TEXT",
+    )?;
     super::super::schema::columns::ensure_column(
         connection,
         "code_repository_files",

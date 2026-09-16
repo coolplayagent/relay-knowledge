@@ -8,6 +8,26 @@ use super::CodeIndexFinalizationStep;
 
 /// Checkpointed snapshot, batch, workspace, and final publication capability.
 pub trait CodeIndexPublicationStore: Send + Sync {
+    /// Retires one unpublished filesystem session under its current task lease.
+    /// Each call advances at most one bounded GC quantum. Resume-only calls are
+    /// a no-op unless that same task durably initiated source-replan cleanup.
+    fn cleanup_source_replan_with_fence(
+        &self,
+        source_scope: String,
+        fence: CodeIndexPublicationFence,
+        resume_only: bool,
+    ) -> StorageFuture<'_, bool> {
+        Box::pin(async move {
+            if resume_only {
+                return Ok(true);
+            }
+            Err(StorageError::InvalidInput(format!(
+                "source-replan cleanup for task '{}' scope '{}' is unavailable",
+                fence.task_id, source_scope
+            )))
+        })
+    }
+
     fn code_index_checkpoint(
         &self,
         source_scope: String,

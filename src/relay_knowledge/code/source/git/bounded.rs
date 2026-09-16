@@ -74,6 +74,7 @@ pub(in crate::code) fn git_name_status_z_bounded(
     command.arg("-C").arg(root).args(args);
 
     run_name_status_command(command, error_args, budget)
+        .map_err(|error| super::git_process_error(args, error))
 }
 
 /// Collects stdout for a Git identity command without allowing output growth.
@@ -91,6 +92,7 @@ pub(in crate::code) fn git_small_output_bounded(
     command.arg("-C").arg(root).args(args);
 
     run_small_output_command(command, error_args, budget, operation)
+        .map_err(|error| super::git_process_error(args, error))
 }
 
 /// Streams NUL-framed stdout until a record matches or the bounded command ends.
@@ -110,6 +112,7 @@ pub(in crate::code) fn git_nul_records_match_bounded(
     command.arg("-C").arg(root).args(args);
 
     run_nul_record_match_command(command, error_args, budget, record_matches, operation)
+        .map_err(|error| super::git_process_error(args, error))
 }
 
 fn validate_command_budget(budget: GitCommandBudget) -> Result<(), CodeIndexError> {

@@ -20,40 +20,49 @@ use super::{
     task::{CodeIndexTaskLeaseContext, restore_rebound_worktree_task_lease},
 };
 
-pub(super) async fn run(
-    service: &RelayKnowledgeService,
-    request: CodeIndexRequest,
-    context: RequestContext,
-    task_lease: Option<CodeIndexTaskLeaseContext>,
-) -> Result<CodeRepositoryIndexResponse, ApiError> {
-    let store = service.store().await.map_err(storage_api_error)?;
-    let task_lease = restore_rebound_worktree_task_lease(&store, &request.mode, task_lease).await?;
-    let status = super::super::repository::required_code_repository(
-        store.as_ref(),
-        &request.repository.repository,
-    )
-    .await?;
-    let workflow = IndexWorkflowContext {
-        service,
-        store,
-        registration: registration_from_status(&status),
-        status,
-        requested_ref: requested_index_ref_for_response(&request),
-        request,
-        context,
-        task_lease,
-    };
+impl RelayKnowledgeService {
+    pub(in crate::application::code_repository::indexing) async fn index_code_repository_inner(
+        &self,
+        request: CodeIndexRequest,
+        context: RequestContext,
+        task_lease: Option<CodeIndexTaskLeaseContext>,
+    ) -> Result<CodeRepositoryIndexResponse, ApiError> {
+        let service = self;
+        let store = service.store().await.map_err(storage_api_error)?;
+        let task_lease =
+            restore_rebound_worktree_task_lease(&store, &request.mode, task_lease).await?;
+        if let Some(lease) = task_lease.as_ref()
+            && crate::code::source_commit_is_filesystem(&lease.resolved_commit_sha)
+        {
+            super::source_replan::drain(&store, lease, true).await?;
+        }
+        let status = super::super::repository::required_code_repository(
+            store.as_ref(),
+            &request.repository.repository,
+        )
+        .await?;
+        let workflow = IndexWorkflowContext {
+            service,
+            store,
+            registration: registration_from_status(&status),
+            status,
+            requested_ref: requested_index_ref_for_response(&request),
+            request,
+            context,
+            task_lease,
+        };
 
-    let recovery = match recovery::recover_and_reconcile(&workflow).await? {
-        recovery::RecoveryOutcome::Published(response) => return Ok(*response),
-        recovery::RecoveryOutcome::Continue(state) => *state,
-    };
-    let generated = snapshot::generate(&workflow, recovery).await?;
-    let summary = match publication::publish(&workflow, generated).await? {
-        publication::PublicationOutcome::Published(response) => return Ok(*response),
-        publication::PublicationOutcome::Summary(summary) => *summary,
-    };
-    projection::refresh(&workflow, summary).await
+        let recovery = match recovery::recover_and_reconcile(&workflow).await? {
+            recovery::RecoveryOutcome::Published(response) => return Ok(*response),
+            recovery::RecoveryOutcome::Continue(state) => *state,
+        };
+        let generated = snapshot::generate(&workflow, recovery).await?;
+        let summary = match publication::publish(&workflow, generated).await? {
+            publication::PublicationOutcome::Published(response) => return Ok(*response),
+            publication::PublicationOutcome::Summary(summary) => *summary,
+        };
+        projection::refresh(&workflow, summary).await
+    }
 }
 
 pub(super) struct IndexWorkflowContext<'a> {

@@ -23,10 +23,11 @@ use super::{
     snapshot::{SnapshotBuild, SnapshotScopeFilters, detect_workspaces_for_source_snapshot},
     source::{
         RepositorySourceKind, ensure_filesystem_blobs_match_content_hashes,
-        ensure_filesystem_paths_match_content_hashes, filesystem_content_hashes_for_paths,
-        filesystem_tree_hash_from_path_hashes, source_snapshot_batch_bytes,
+        source_snapshot_batch_bytes,
     },
 };
+
+mod local_source;
 
 const GIT_BLOB_FETCH_GROUP: usize = CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH;
 const MIN_PARALLEL_PARSE_FILES: usize = 12;
@@ -52,6 +53,11 @@ pub struct CodeIndexPlan {
     language_filters: Vec<String>,
     source_kind: RepositorySourceKind,
     filesystem_path_hashes: BTreeMap<String, String>,
+    filesystem_ref_pin: Option<String>,
+    skipped_paths: BTreeMap<String, crate::code::source::path_io::SkippedSourcePath>,
+    pub(crate) needs_source_replan: bool,
+    source_replan_count: usize,
+    workspace_detection: CodeWorkspaceDetectionConfig,
     paths: Vec<GitTreeEntry>,
     workspaces: Vec<CodeMonorepoWorkspace>,
     cursor: usize,
@@ -121,7 +127,7 @@ impl CodeIndexPlan {
             ));
         }
 
-        self.cursor = checkpoint.committed_file_count;
+        self.cursor = checkpoint.processed_path_count();
         self.next_batch_index = checkpoint.batch_count.checked_add(1).ok_or_else(|| {
             invalid_checkpoint("batch count cannot advance to the next batch index")
         })?;
@@ -200,7 +206,18 @@ impl CodeIndexPlan {
                 "parsed and committed file counts must be equal",
             ));
         }
-        let committed = checkpoint.committed_file_count;
+        let committed = checkpoint.processed_path_count();
+        let parsed_prefix = self
+            .paths
+            .iter()
+            .take(committed)
+            .filter(|entry| !self.skipped_paths.contains_key(&entry.path))
+            .count();
+        if parsed_prefix != checkpoint.committed_file_count {
+            return Err(invalid_checkpoint(
+                "processed prefix does not match parsed files and skipped paths",
+            ));
+        }
         if committed > self.paths.len() {
             return Err(invalid_checkpoint(
                 "committed file count exceeds the planned path count",
@@ -260,7 +277,7 @@ impl CodeIndexPlan {
             if batch_budget_reached(&build, parsed_bytes, self.resource_budget) {
                 break;
             }
-            if !self.fetch_and_parse_next_group(build.files.len(), parsed_bytes)? {
+            if !self.fetch_and_parse_next_group(handled_path_count(&build), parsed_bytes)? {
                 break;
             }
         }
@@ -311,16 +328,16 @@ impl CodeIndexPlan {
         if fetch_end == self.cursor {
             return Ok(false);
         }
+        if self.source_kind.is_filesystem() {
+            let pending = self.parse_local_group(self.cursor..fetch_end)?;
+            self.parsed_overflow.extend(pending);
+            self.cursor = fetch_end;
+            return Ok(true);
+        }
         let fetched_paths = self.paths[self.cursor..fetch_end]
             .iter()
             .map(|entry| entry.path.clone())
             .collect::<Vec<_>>();
-        ensure_filesystem_paths_match_content_hashes(
-            &self.root,
-            &self.commit,
-            &fetched_paths,
-            &self.filesystem_path_hashes,
-        )?;
         let blobs = source_snapshot_batch_bytes(
             &self.root,
             self.source_kind,
@@ -515,7 +532,7 @@ pub fn prepare_full_index_plan_with_workspace_detection(
 ) -> Result<CodeIndexPlan, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
     let snapshot = scoped_source_snapshot(&registration, &selector, &root, &selector.ref_selector)?;
-    let filesystem_path_hashes = filesystem_plan_path_hashes(&snapshot)?;
+    let filesystem_path_hashes = snapshot.content_hashes.clone();
     let source_scope = crate::domain::code_snapshot_scope_id_with_workspace_detection(
         &registration.repository_id,
         &snapshot.tree_hash,
@@ -532,7 +549,23 @@ pub fn prepare_full_index_plan_with_workspace_detection(
         workspace_detection,
     );
 
+    let skipped_paths = snapshot
+        .skipped_paths
+        .into_iter()
+        .map(|path| (path.path.clone(), path))
+        .collect::<BTreeMap<_, _>>();
+    let mut paths = snapshot.entries;
+    paths.extend(skipped_paths.keys().map(|path| GitTreeEntry {
+        path: path.clone(),
+        byte_count: 0,
+    }));
+    paths.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(CodeIndexPlan {
+        filesystem_ref_pin: snapshot.filesystem_ref_pin,
+        needs_source_replan: false,
+        source_replan_count: 0,
+        workspace_detection: workspace_detection.clone(),
+        skipped_paths,
         registration,
         root: snapshot.root,
         commit: snapshot.resolved_commit_sha,
@@ -542,36 +575,13 @@ pub fn prepare_full_index_plan_with_workspace_detection(
         language_filters: snapshot.language_filters,
         source_kind: snapshot.kind,
         filesystem_path_hashes,
-        paths: snapshot.entries,
+        paths,
         workspaces,
         cursor: 0,
         parsed_overflow: VecDeque::new(),
         next_batch_index: 1,
         resource_budget,
     })
-}
-
-fn filesystem_plan_path_hashes(
-    snapshot: &super::scope::ScopedSourceSnapshot,
-) -> Result<BTreeMap<String, String>, CodeIndexError> {
-    if !snapshot.kind.is_filesystem() {
-        return Ok(BTreeMap::new());
-    }
-    let paths = snapshot
-        .entries
-        .iter()
-        .map(|entry| entry.path.clone())
-        .collect::<Vec<_>>();
-    let path_hashes = filesystem_content_hashes_for_paths(&snapshot.root, &paths)?;
-    let tree_hash = filesystem_tree_hash_from_path_hashes(&path_hashes);
-    if tree_hash != snapshot.tree_hash {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "filesystem source snapshot {} no longer matches planned filesystem content {tree_hash}",
-            snapshot.tree_hash
-        )));
-    }
-
-    Ok(path_hashes)
 }
 
 fn next_fetch_end(plan: &CodeIndexPlan, batch_file_count: usize, parsed_bytes: usize) -> usize {
@@ -620,13 +630,22 @@ fn batch_row_count(build: &SnapshotBuild) -> usize {
         .saturating_add(build.diagnostics.len())
 }
 
+fn handled_path_count(build: &SnapshotBuild) -> usize {
+    build.files.len()
+        + build
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.io.is_some())
+            .count()
+}
+
 fn batch_budget_reached(
     build: &SnapshotBuild,
     parsed_bytes: usize,
     resource_budget: CodeIndexResourceBudget,
 ) -> bool {
-    !build.files.is_empty()
-        && (build.files.len() >= resource_budget.max_files_per_batch
+    handled_path_count(build) > 0
+        && (handled_path_count(build) >= resource_budget.max_files_per_batch
             || parsed_bytes >= resource_budget.max_bytes_per_batch
             || batch_row_count(build) >= resource_budget.max_rows_per_batch)
 }

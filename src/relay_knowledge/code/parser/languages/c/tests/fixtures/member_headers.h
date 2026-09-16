@@ -58,4 +58,3 @@
 		};
 
 		RK_API struct ExportedOptions { public: Status Load(); };
-		

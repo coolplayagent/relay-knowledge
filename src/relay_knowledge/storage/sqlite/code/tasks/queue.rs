@@ -17,6 +17,8 @@ use super::scope_capacity::MAX_SCOPE_SLOTS_PER_REPOSITORY;
 const MAX_UNFINISHED_TASKS_PER_REPOSITORY: usize = 32;
 /// Maximum durable unfinished code-index work across the control database.
 const MAX_UNFINISHED_TASKS_GLOBAL: usize = 256;
+/// Reobserve a successfully published local I/O gap at most once per minute.
+const SOURCE_IO_RECHECK_DELAY_MS: u64 = 60_000;
 
 pub(in crate::storage::sqlite::code) fn queue_task(
     connection: &mut Connection,
@@ -63,7 +65,7 @@ fn queue_task_in_transaction(
         }
         if existing.state == CodeIndexTaskState::Succeeded
             && existing.payload_json == task.payload_json
-            && periodic_worktree_reconcile_payload(&task.payload_json)
+            && retain_completed_periodic_observation(&existing, task)
         {
             return Ok(existing);
         }
@@ -160,17 +162,28 @@ fn queue_task_in_transaction(
         .ok_or_else(|| StorageError::InvalidInput("code index task was not persisted".to_owned()))
 }
 
-fn periodic_worktree_reconcile_payload(payload: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()
-        .and_then(|value| {
-            value
-                .pointer("/watcher/kind")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-        })
-        .as_deref()
-        == Some("periodic_worktree_reconcile")
+fn retain_completed_periodic_observation(
+    existing: &CodeIndexTaskRecord,
+    task: &CodeIndexTaskSeed,
+) -> bool {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(&task.payload_json) else {
+        return false;
+    };
+    if payload
+        .pointer("/watcher/kind")
+        .and_then(serde_json::Value::as_str)
+        != Some("periodic_worktree_reconcile")
+    {
+        return false;
+    }
+    payload
+        .pointer("/watcher/source_io_recheck")
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+        || task.now_ms
+            < existing
+                .updated_at_ms
+                .saturating_add(SOURCE_IO_RECHECK_DELAY_MS)
 }
 
 fn reject_worktree_behind_unfinished_commit(

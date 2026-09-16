@@ -455,6 +455,7 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
             CODE_SCOPE_GC_JOB_COLUMNS,
         )?
         || !code_schema_capability_markers_are_current(connection)?
+        || !super::source_io_marker::schema_is_current(connection)?
         || !table_has_columns(connection, "file_index_roots", FILE_INDEX_ROOT_COLUMNS)?
         || !table_has_columns(
             connection,

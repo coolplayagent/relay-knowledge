@@ -248,6 +248,8 @@ pub struct BusinessKnowledgeQueryResponse {
 /// One bounded page of diagnostics tied to an immutable published code scope.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CodeRepositoryDiagnosticsResponse {
+    #[serde(default)]
+    pub content_integrity: crate::domain::CodeContentIntegrity,
     pub metadata: crate::api::ApiMetadata,
     pub scope: crate::api::CodeRepositoryScopeMetadata,
     pub degraded_file_count: usize,

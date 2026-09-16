@@ -373,3 +373,22 @@ impl Drop for TestRepo {
         let _ = fs::remove_dir_all(&self.root);
     }
 }
+
+#[test]
+fn source_io_git_process_failures_are_never_local_path_diagnostics() {
+    for kind in [
+        std::io::ErrorKind::PermissionDenied,
+        std::io::ErrorKind::NotFound,
+        std::io::ErrorKind::Unsupported,
+    ] {
+        let error = git_process_error(&["status"], std::io::Error::from(kind).into());
+        assert!(matches!(error, CodeIndexError::Git { .. }));
+    }
+    assert!(matches!(
+        git_process_error(
+            &["status"],
+            CodeIndexError::Invariant("lease failed".into())
+        ),
+        CodeIndexError::Invariant(_)
+    ));
+}

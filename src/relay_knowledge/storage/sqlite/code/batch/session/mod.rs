@@ -239,6 +239,7 @@ fn begin_session_once(
     validate_checkpoint_expectation(&transaction, session, checkpoint_expectation)?;
     let resume = checkpoint_resume(&transaction, session)?;
     if let Some(fence) = fence {
+        fence.bind_local_source_session(&transaction, session)?;
         fence.validate_target_scope(&transaction, &session.source_scope)?;
         fence.validate(&transaction)?;
         if matches!(
@@ -330,6 +331,7 @@ enum CheckpointResume {
 }
 
 struct CheckpointResumeRecord {
+    processed_path_count: usize,
     state: String,
     total_path_count: usize,
     parsed_file_count: usize,
@@ -398,7 +400,7 @@ fn load_checkpoint_resume_record(
                    path_filters_json, language_filters_json, total_path_count,
                    parsed_file_count, committed_file_count, committed_reference_count,
                    batch_count, last_path,
-                   resource_budget_json, incremental_summary_json
+                   resource_budget_json, incremental_summary_json, processed_path_count
             FROM code_repository_index_checkpoints
             WHERE source_scope = ?1
             ",
@@ -419,6 +421,7 @@ fn load_checkpoint_resume_record(
                     row.get::<_, Option<String>>(11)?,
                     row.get::<_, String>(12)?,
                     row.get::<_, Option<String>>(13)?,
+                    row.get::<_, usize>(14)?,
                 ))
             },
         )
@@ -438,6 +441,7 @@ fn load_checkpoint_resume_record(
         last_path,
         resource_budget_json,
         incremental_summary_json,
+        processed_path_count,
     )) = persisted
     else {
         return Ok(None);
@@ -463,6 +467,7 @@ fn load_checkpoint_resume_record(
         && total == session.total_path_count;
     let identity_matches = content_identity_matches && commit == session.resolved_commit_sha;
     Ok(Some(CheckpointResumeRecord {
+        processed_path_count,
         state,
         total_path_count: total,
         parsed_file_count: parsed,
@@ -508,7 +513,9 @@ fn validate_checkpoint_resume_record(
             "parsed and committed file counts differ",
         ));
     }
-    let committed = checkpoint.committed_file_count;
+    let committed = checkpoint
+        .processed_path_count
+        .max(checkpoint.committed_file_count);
     if committed > checkpoint.total_path_count {
         return Err(checkpoint_invariant_error(
             session,

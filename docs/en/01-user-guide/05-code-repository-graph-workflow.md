@@ -327,6 +327,9 @@ explicitly. The page maximum is 200. Multiple diagnostics can describe one file;
 the integrity count is a distinct file count. Fix or explicitly scope out the
 relevant source before reindexing to change content completeness.
 
+Local source I/O failures are reported by `repo diagnostics` with an optional `io` object containing `action: skipped`, `path_kind`, `operation`, `error_kind`, and `raw_os_error`. These paths are skipped; successful task completion can have `content_integrity.state = partial`. `io_skipped_file_count` and `io_skipped_directory_count` are separate counters. A skipped directory has an unknown file count. Unselected paths do not create I/O diagnostics or dead-letter tasks. After repairing access, rerun the normal index/update command; reset is not required. Historical dead-letter records are retained.
+
+
 When `repo query` returns no results, check in order:
 
 1. Whether `repo status <alias>` shows an indexed clean commit or worktree overlay.
@@ -420,7 +423,7 @@ Configuration analysis reuses the indexing syntax tree. The following is the fin
 
 Cross-file bindings are confined to the authorized repository snapshot and require explicit import, type or native module evidence. Environment variables and property keys have independent namespaces. A common spelling alone never joins symbols from different code languages. Dynamic keys, external providers, reassignment, shadowing, unsupported wrappers and exhausted resolution depth must be treated as unresolved or incomplete evidence. `analysis_complete=false` prevents absence conclusions. Defaults describe observed static evidence; they do not predict runtime values. For example, converting the string `"false"` with Python `bool` or JavaScript `Boolean` yields `true`, while C# `bool.Parse` yields `false`.
 
-Code fact version `config-registry-v56-portable-evidence` requires rebuilding older indexes through the durable repository indexing task. The deferred query-index plan is version 5; it preserves the v4 ownership and language/file indexes and appends configuration identity/source-key and caller/callee identity indexes (ordinals 19–22). Existing v1–v4 checkpoints retain their prefix checks during recovery. CLI, HTTP and MCP continue to use the same service contract and configuration budgets.
+Code fact version `config-registry-v56-portable-evidence-source-io-isolation-v1` requires rebuilding older indexes through the durable repository indexing task. The deferred query-index plan is version 5; it preserves the v4 ownership and language/file indexes and appends configuration identity/source-key and caller/callee identity indexes (ordinals 19–22). Existing v1–v4 checkpoints retain their prefix checks during recovery. CLI, HTTP and MCP continue to use the same service contract and configuration budgets.
 
 ### Cross-file evidence and limits
 

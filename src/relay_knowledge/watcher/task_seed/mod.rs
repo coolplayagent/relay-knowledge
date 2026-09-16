@@ -182,13 +182,14 @@ pub fn build_worktree_reconcile_task_seed(
     };
     let mut payload = serde_json::to_value(&request).ok()?;
     if let Some(object) = payload.as_object_mut() {
-        object.insert(
-            "watcher".to_owned(),
-            serde_json::json!({
-                "kind": "periodic_worktree_reconcile",
-                "observation_fingerprint": format!("{observation_fingerprint:016x}"),
-            }),
-        );
+        let mut watcher = serde_json::json!({
+            "kind": "periodic_worktree_reconcile",
+            "observation_fingerprint": format!("{observation_fingerprint:016x}"),
+        });
+        if repository.requires_source_io_recheck {
+            watcher["source_io_recheck"] = serde_json::Value::Bool(true);
+        }
+        object.insert("watcher".to_owned(), watcher);
     }
     Some(crate::storage::CodeIndexTaskSeed {
         repository_id: repository.repository_id.clone(),

@@ -11,7 +11,7 @@ const CHECKPOINT_COLUMNS: &str = "
     path_filters_json, language_filters_json, state, total_path_count, parsed_file_count,
     committed_file_count, committed_symbol_count, committed_reference_count,
     committed_chunk_count, committed_fact_row_count, incremental_summary_json, batch_count,
-    last_path, resource_budget_json, updated_at_ms
+    last_path, resource_budget_json, updated_at_ms, processed_path_count
 ";
 
 pub(in crate::storage::sqlite::code) fn checkpoint(

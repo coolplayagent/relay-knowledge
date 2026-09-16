@@ -646,11 +646,12 @@ fn content_integrity(
     let Some(scope) = scope else {
         return Ok(CodeContentIntegrity::default());
     };
-    let count = connection.query_row(
-        "SELECT (SELECT COUNT(DISTINCT path) FROM code_repository_file_diagnostics WHERE source_scope = ?1)
-         FROM code_repository_scopes WHERE source_scope = ?1 AND retiring = 0",
-        params![scope], |row| row.get::<_,usize>(0)).optional()?;
-    Ok(count
-        .map(|count| CodeContentIntegrity::measured(scope, count))
-        .unwrap_or_default())
+    let exists = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM code_repository_scopes WHERE source_scope = ?1 AND retiring = 0)",
+        [&scope], |row| row.get::<_, bool>(0))?;
+    if exists {
+        super::super::diagnostic_counts::measure(connection, &scope)
+    } else {
+        Ok(CodeContentIntegrity::default())
+    }
 }

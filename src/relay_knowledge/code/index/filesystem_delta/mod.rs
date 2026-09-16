@@ -19,9 +19,8 @@ use super::{
     snapshot::{SnapshotBuild, SnapshotScopeFilters},
     source::{
         RepositorySourceKind, ensure_filesystem_blobs_match_content_hashes,
-        filesystem_content_hashes_for_paths, filesystem_source_snapshot,
-        filesystem_tree_hash_from_path_hashes, source_commit_is_filesystem, source_snapshot,
-        source_snapshot_bytes,
+        filesystem_source_snapshot, source_commit_is_filesystem, source_snapshot,
+        source_snapshot_bytes, tree_hash_with_skipped,
     },
 };
 
@@ -89,7 +88,7 @@ pub(super) fn build_filesystem_delta_snapshot(
         &registration.language_filters,
         &selector.language_filters,
     );
-    let selected_entries = snapshot
+    let mut selected_entries = snapshot
         .entries
         .into_iter()
         .filter(|entry| {
@@ -131,63 +130,126 @@ pub(super) fn build_filesystem_delta_snapshot(
         .cloned()
         .collect::<Vec<_>>();
     let changed_path_count = selected_entries.len().saturating_add(deleted_paths.len());
-    let selected_path_list = selected_paths.iter().cloned().collect::<Vec<_>>();
-    let planned_hashes = filesystem_content_hashes_for_paths(&snapshot.root, &selected_path_list)?;
-    let tree_hash = filesystem_tree_hash_from_path_hashes(&planned_hashes);
-    if source_commit_is_filesystem(ref_selector) && ref_selector != tree_hash {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "filesystem source snapshot {ref_selector} no longer matches live indexed scope {tree_hash}"
-        )));
-    }
-    let mut build = SnapshotBuild::new_with_scope_filters(
-        registration,
-        tree_hash.clone(),
-        tree_hash,
-        SnapshotScopeFilters {
-            path_filters,
-            language_filters,
-        },
-        false,
-        changed_path_count,
-        0,
-    );
-    build.base_resolved_commit_sha = Some(base_commit.to_owned());
-    build.deleted_paths = deleted_paths;
-
-    build.detect_and_fill_workspaces(
-        root,
-        RepositorySourceKind::FileSystem,
-        &selected_entries,
-        workspace_detection,
-    );
-
-    for entry in selected_entries {
-        let bytes = source_snapshot_bytes(
-            &snapshot.root,
+    let mut planned_hashes = snapshot.content_hashes;
+    planned_hashes.retain(|path, _| selected_paths.contains(path));
+    let mut skipped = snapshot
+        .skipped_paths
+        .into_iter()
+        .filter(|failure| {
+            if failure.io.path_kind == crate::domain::CodePathKind::Directory {
+                crate::code::source::layout::path_overlaps_any_filter(&failure.path, &path_filters)
+            } else {
+                [&source_layout, &previous_source_layout]
+                    .iter()
+                    .any(|layout| {
+                        selection_exclusion_reason_for_source(
+                            &failure.path,
+                            registration,
+                            selector,
+                            layout,
+                            RepositorySourceKind::FileSystem,
+                        )
+                        .is_none()
+                    })
+            }
+        })
+        .collect::<Vec<_>>();
+    crate::code::source::complete_selected_filesystem_entries(
+        &snapshot.root,
+        &mut selected_entries,
+        &mut planned_hashes,
+        &mut skipped,
+    )?;
+    let initial_tree = tree_hash_with_skipped(&planned_hashes, &skipped);
+    crate::code::source::ensure_filesystem_snapshot_matches_ref(ref_selector, &initial_tree)?;
+    for _ in 0..=2 {
+        std::fs::read_dir(&snapshot.root)?;
+        let observed_skips = skipped.len();
+        planned_hashes.retain(|path, _| !skipped.iter().any(|failure| failure.covers(path)));
+        let tree_hash = tree_hash_with_skipped(&planned_hashes, &skipped);
+        crate::code::source::ensure_filesystem_snapshot_matches_ref(ref_selector, &tree_hash)?;
+        let mut build = SnapshotBuild::new_with_scope_filters(
+            registration,
+            tree_hash.clone(),
+            tree_hash,
+            SnapshotScopeFilters {
+                path_filters: path_filters.clone(),
+                language_filters: language_filters.clone(),
+            },
+            false,
+            changed_path_count,
+            0,
+        );
+        build.base_resolved_commit_sha = Some(base_commit.to_owned());
+        build.deleted_paths = deleted_paths.clone();
+        build.deleted_paths.extend(
+            previous_hashes
+                .keys()
+                .filter(|path| skipped.iter().any(|failure| failure.covers(path)))
+                .cloned(),
+        );
+        build.deleted_paths.sort();
+        build.deleted_paths.dedup();
+        let readable_entries = selected_entries
+            .iter()
+            .filter(|entry| !skipped.iter().any(|failure| failure.covers(&entry.path)))
+            .cloned()
+            .collect::<Vec<_>>();
+        build.detect_and_fill_workspaces(
+            root,
             RepositorySourceKind::FileSystem,
-            &build.commit,
-            &entry.path,
-        )?;
-        ensure_filesystem_blobs_match_content_hashes(
-            &build.commit,
-            std::slice::from_ref(&entry.path),
-            std::slice::from_ref(&bytes),
-            &planned_hashes,
-        )?;
-        let blob_hash = planned_hashes.get(&entry.path).ok_or_else(|| {
-            CodeIndexError::InvalidInput(format!(
-                "filesystem source snapshot {} is missing planned content hash for {}",
-                build.commit, entry.path
-            ))
-        })?;
-        if previous_hashes.get(&entry.path) == Some(blob_hash) {
-            build.skipped_unchanged_count += 1;
-            continue;
+            &readable_entries,
+            workspace_detection,
+        );
+        for entry in readable_entries {
+            let bytes = match source_snapshot_bytes(
+                &snapshot.root,
+                RepositorySourceKind::FileSystem,
+                &build.commit,
+                &entry.path,
+            ) {
+                Ok(bytes) => bytes,
+                Err(CodeIndexError::Io(error)) => {
+                    skipped.push(crate::code::source::path_io::SkippedSourcePath::from_error(
+                        &entry.path,
+                        crate::domain::CodePathKind::File,
+                        crate::domain::CodePathIoOperation::Read,
+                        error,
+                    )?);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            ensure_filesystem_blobs_match_content_hashes(
+                &build.commit,
+                std::slice::from_ref(&entry.path),
+                std::slice::from_ref(&bytes),
+                &planned_hashes,
+            )?;
+            let blob_hash = planned_hashes.get(&entry.path).ok_or_else(|| {
+                CodeIndexError::Invariant(format!(
+                    "filesystem plan is missing hash for {}",
+                    entry.path
+                ))
+            })?;
+            if previous_hashes.get(&entry.path) == Some(blob_hash) {
+                build.skipped_unchanged_count += 1;
+            } else {
+                parse_indexed_file(&mut build, &entry.path, &bytes)?;
+            }
         }
-        parse_indexed_file(&mut build, &entry.path, &bytes)?;
+        if observed_skips == skipped.len() {
+            build.diagnostics.extend(
+                skipped
+                    .iter()
+                    .map(|path| path.diagnostic(&build.repository_id, &build.source_scope)),
+            );
+            return Ok(build.finish());
+        }
     }
-
-    Ok(build.finish())
+    Err(CodeIndexError::InvalidInput(
+        "local source keeps changing beyond the bounded snapshot replan budget".into(),
+    ))
 }
 
 #[cfg(test)]

@@ -323,6 +323,9 @@ relay-knowledge repo diagnostics repo --ref <pinned-ref> --limit 50 --cursor <ne
 单页最多 200 条，同一文件可能有多条诊断，完整性计数按文件去重。
 应先修复相关源码或明确调整授权索引范围，再重建索引以改变内容完整性。
 
+本地源文件 I/O 故障通过 `repo diagnostics` 的可选 `io` 对象提供诊断，包含 `action: skipped`、`path_kind`、`operation`、`error_kind` 和 `raw_os_error`。这些路径会被跳过，任务成功时仍可能出现 `content_integrity.state = partial`。`io_skipped_file_count` 与 `io_skipped_directory_count` 分别统计跳过文件和目录；不可枚举目录的文件数量未知。未选中路径不产生 I/O 诊断或死信任务。修复访问故障后重新执行正常索引/更新命令即可恢复，无须 reset；历史死信记录保留。
+
+
 `repo query` 结果为空时，按顺序确认:
 
 1. `repo status <alias>` 是否显示已索引的 clean commit 或 worktree overlay。
@@ -418,7 +421,7 @@ Shell 内置命令名先静态解码，引号、拼接和转义形式使用相�
 
 跨文件绑定限于同一授权仓库快照，并要求显式导入、类型或语言原生模块证据。环境变量和属性键保持独立命名空间，不能仅凭相同拼写连接不同代码语言的符号。动态键、外部提供方、重赋值、遮蔽、不支持的封装和解析深度耗尽必须作为未解析或不完整证据处理。`analysis_complete=false` 阻止不存在性结论。默认值描述已观察到的静态证据，不预测运行时值。例如，字符串 `"false"` 经 Python `bool` 或 JavaScript `Boolean` 转换为 `true`，经 C# `bool.Parse` 解析为 `false`。
 
-代码事实版本 `config-registry-v56-portable-evidence` 要求通过持久化仓库索引任务重建旧索引。延迟查询索引计划升级为版本 5，保留 v4 的类型归属和语言/文件索引，追加配置身份、配置来源键及 caller/callee 身份索引（序号 19–22）；已有 v1–v4 检查点恢复时继续验证原有前缀。CLI、HTTP 和 MCP 继续复用同一服务合同和配置查询预算。
+代码事实版本 `config-registry-v56-portable-evidence-source-io-isolation-v1` 要求通过持久化仓库索引任务重建旧索引。延迟查询索引计划升级为版本 5，保留 v4 的类型归属和语言/文件索引，追加配置身份、配置来源键及 caller/callee 身份索引（序号 19–22）；已有 v1–v4 检查点恢复时继续验证原有前缀。CLI、HTTP 和 MCP 继续复用同一服务合同和配置查询预算。
 
 ### 跨文件证据与限制
 

@@ -609,8 +609,8 @@ fn insert_diagnostics(
     let mut statement = transaction.prepare(
         "
         INSERT OR REPLACE INTO code_repository_file_diagnostics
-            (repository_id, source_scope, path, parse_status, message)
-        VALUES (?1, ?2, ?3, ?4, ?5)
+            (repository_id, source_scope, path, parse_status, message, io_json)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
         ",
     )?;
     for diagnostic in &batch.diagnostics {
@@ -620,6 +620,12 @@ fn insert_diagnostics(
             diagnostic.path,
             diagnostic.parse_status.as_str(),
             diagnostic.message,
+            diagnostic
+                .io
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|e| StorageError::InvalidInput(e.to_string()))?,
         ])?;
     }
 
@@ -655,7 +661,8 @@ fn update_checkpoint_after_batch(
     let changed = transaction.execute(
         "
         UPDATE code_repository_index_checkpoints
-        SET parsed_file_count = parsed_file_count + ?2,
+        SET processed_path_count = MAX(processed_path_count, committed_file_count) + ?12,
+            parsed_file_count = parsed_file_count + ?2,
             committed_file_count = committed_file_count + ?3,
             committed_symbol_count = committed_symbol_count + ?4,
             committed_reference_count = committed_reference_count + ?5,
@@ -682,9 +689,10 @@ fn update_checkpoint_after_batch(
             batch.chunks.len(),
             staged_fact_row_count,
             1_usize,
-            batch.files.last().map(|file| file.path.as_str()),
+            batch.processed_paths().last().copied(),
             checkpoint::now_millis(),
             previous_batch_count,
+            batch.processed_paths().len(),
         ],
     )?;
     if changed != 1 {

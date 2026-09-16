@@ -10,10 +10,9 @@ use crate::{
             changes::GitTreeEntry,
             filesystem::FileSystemScanPolicy,
             repository::{
-                RepositorySourceKind, RepositorySourceSnapshot,
-                filesystem_content_hashes_for_paths, filesystem_registration_identity,
-                filesystem_source_snapshot, filesystem_tree_hash_from_path_hashes,
-                source_commit_is_filesystem, source_kind, source_snapshot,
+                RepositorySourceKind, RepositorySourceSnapshot, filesystem_registration_identity,
+                filesystem_source_snapshot, source_commit_is_filesystem, source_kind,
+                source_snapshot,
             },
         },
     },
@@ -27,6 +26,8 @@ use super::{
 
 #[derive(Debug, Clone)]
 pub(in crate::code) struct ScopedSourceSnapshot {
+    pub(in crate::code) filesystem_ref_pin: Option<String>,
+    pub(in crate::code) skipped_paths: Vec<crate::code::source::path_io::SkippedSourcePath>,
     pub(in crate::code) kind: RepositorySourceKind,
     pub(in crate::code) root: PathBuf,
     pub(in crate::code) resolved_commit_sha: String,
@@ -131,7 +132,7 @@ fn scoped_source_snapshot_inner(
     );
     crate::domain::validate_code_language_filters(&language_filters)
         .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
-    let entries = snapshot
+    let mut entries = snapshot
         .entries
         .into_iter()
         .filter(|entry| {
@@ -145,8 +146,40 @@ fn scoped_source_snapshot_inner(
             .is_none()
         })
         .collect::<Vec<_>>();
+    let mut skipped_paths = snapshot
+        .skipped_paths
+        .into_iter()
+        .filter(|skipped| {
+            if skipped.io.path_kind == crate::domain::CodePathKind::Directory {
+                super::path_overlaps_any_filter(&skipped.path, &path_filters)
+            } else {
+                selection_exclusion_reason_for_source(
+                    &skipped.path,
+                    registration,
+                    selector,
+                    &source_layout,
+                    snapshot.kind,
+                )
+                .is_none()
+            }
+        })
+        .collect::<Vec<_>>();
     let (resolved_commit_sha, tree_hash, content_hashes) = if snapshot.kind.is_filesystem() {
-        scoped_filesystem_tree_hash(&snapshot.root, &entries, ref_selector)?
+        let mut hashes = snapshot.content_hashes;
+        crate::code::source::complete_selected_filesystem_entries(
+            &snapshot.root,
+            &mut entries,
+            &mut hashes,
+            &mut skipped_paths,
+        )?;
+        let selected = entries
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        hashes.retain(|path, _| selected.contains(path.as_str()));
+        let tree = crate::code::source::tree_hash_with_skipped(&hashes, &skipped_paths);
+        crate::code::source::ensure_filesystem_snapshot_matches_ref(ref_selector, &tree)?;
+        (tree.clone(), tree, hashes)
     } else {
         (
             snapshot.resolved_commit_sha,
@@ -156,6 +189,9 @@ fn scoped_source_snapshot_inner(
     };
 
     Ok(ScopedSourceSnapshot {
+        filesystem_ref_pin: source_commit_is_filesystem(ref_selector)
+            .then(|| ref_selector.to_owned()),
+        skipped_paths,
         kind: snapshot.kind,
         root: snapshot.root,
         resolved_commit_sha,
@@ -210,26 +246,6 @@ pub(super) fn registration_allows_filesystem_ref(
     }
 
     Ok(source_kind(root)?.is_filesystem())
-}
-
-pub(super) fn scoped_filesystem_tree_hash(
-    root: &Path,
-    entries: &[GitTreeEntry],
-    ref_selector: &str,
-) -> Result<(String, String, BTreeMap<String, String>), CodeIndexError> {
-    let paths = entries
-        .iter()
-        .map(|entry| entry.path.clone())
-        .collect::<Vec<_>>();
-    let content_hashes = filesystem_content_hashes_for_paths(root, &paths)?;
-    let tree_hash = filesystem_tree_hash_from_path_hashes(&content_hashes);
-    if source_commit_is_filesystem(ref_selector) && ref_selector != tree_hash {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "filesystem source snapshot {ref_selector} no longer matches live indexed scope {tree_hash}"
-        )));
-    }
-
-    Ok((tree_hash.clone(), tree_hash, content_hashes))
 }
 
 #[cfg(test)]

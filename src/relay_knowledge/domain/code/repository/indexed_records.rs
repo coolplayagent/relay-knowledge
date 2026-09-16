@@ -207,6 +207,9 @@ pub struct RepositoryCodeChunkRecord {
 /// File-level diagnostic produced by indexing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeFileDiagnostic {
+    /// Structured source I/O failure; absent for parser diagnostics and legacy rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub io: Option<super::path_io::CodePathIoDiagnostic>,
     pub repository_id: String,
     pub source_scope: String,
     pub path: String,

@@ -574,6 +574,7 @@ fn finalization_checkpoint(
     committed_reference_count: usize,
 ) -> CodeIndexCheckpoint {
     CodeIndexCheckpoint {
+        processed_path_count: 0,
         repository_id: session.repository_id.clone(),
         source_scope: session.source_scope.clone(),
         resolved_commit_sha: session.resolved_commit_sha.clone(),

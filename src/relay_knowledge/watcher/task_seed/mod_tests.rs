@@ -13,6 +13,7 @@ fn test_repository(alias: &str) -> WatchedRepository {
         language_filters: Vec::new(),
         source_scope: format!("scope-{alias}"),
         last_indexed_commit: "commit-base".to_owned(),
+        requires_source_io_recheck: false,
     }
 }
 
@@ -146,4 +147,20 @@ fn periodic_worktree_reconcile_seed_is_stable_for_one_clean_base() {
     assert_eq!(first.mode, crate::domain::CodeIndexMode::WorktreeOverlay);
     assert_eq!(first.resolved_commit_sha, "worktree:pending:commit-base");
     assert!(first.payload_json.contains("periodic_worktree_reconcile"));
+}
+
+#[test]
+fn source_io_recheck_seed_preserves_fingerprint_and_payload_across_minutes() {
+    let repository = WatchedRepository {
+        requires_source_io_recheck: true,
+        ..test_repository("partial")
+    };
+    let first = build_worktree_reconcile_task_seed(&repository, 0xabc, 59_999).unwrap();
+    let later = build_worktree_reconcile_task_seed(&repository, 0xabc, 180_000).unwrap();
+    assert_eq!(first.input_fingerprint, later.input_fingerprint);
+    assert_eq!(first.payload_json, later.payload_json);
+    let payload: serde_json::Value = serde_json::from_str(&first.payload_json).unwrap();
+    assert_eq!(payload["watcher"]["source_io_recheck"], true);
+    let changed = build_worktree_reconcile_task_seed(&repository, 0xdef, 180_000).unwrap();
+    assert_ne!(first.input_fingerprint, changed.input_fingerprint);
 }

@@ -36,6 +36,8 @@ fn checkpoint_state_transitions_update_the_persisted_record() {
 fn completed_checkpoint_loads_a_durable_multi_batch_incremental_summary() {
     let connection = checkpoint_database();
     let receipt = CodeIncrementalSummaryReceipt {
+        io_skipped_file_count: 0,
+        io_skipped_directory_count: 0,
         task_id: "task-incremental".to_owned(),
         base_resolved_commit_sha: "base-commit".to_owned(),
         changed_path_count: 12,
@@ -81,7 +83,7 @@ fn checkpoint_database() -> Connection {
                 language_filters_json TEXT NOT NULL,
                 total_path_count INTEGER NOT NULL,
                 parsed_file_count INTEGER NOT NULL,
-                committed_file_count INTEGER NOT NULL,
+                committed_file_count INTEGER NOT NULL, processed_path_count INTEGER NOT NULL DEFAULT 0,
                 committed_symbol_count INTEGER NOT NULL,
                 committed_reference_count INTEGER NOT NULL,
                 committed_chunk_count INTEGER NOT NULL,

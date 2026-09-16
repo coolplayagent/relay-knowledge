@@ -63,6 +63,30 @@ pub(super) fn quality_gate_stages(
             QualityGateStage::Parallel(vec![bm25_hierarchy_build_gate()]),
             QualityGateStage::Parallel(vec![bm25_hierarchy_gate()]),
             QualityGateStage::Parallel(vec![code_index_persistence_performance_gate()]),
+            QualityGateStage::Parallel(vec![quality_gate(
+                "code_index_source_io_isolation_build",
+                [
+                    "cargo",
+                    "test",
+                    "--all-targets",
+                    "--all-features",
+                    "--no-run",
+                ],
+                1200,
+            )]),
+            QualityGateStage::Parallel(vec![quality_gate(
+                "code_index_source_io_isolation_cases",
+                [
+                    "cargo",
+                    "test",
+                    "--all-targets",
+                    "--all-features",
+                    "source_io",
+                    "--",
+                    "--nocapture",
+                ],
+                300,
+            )]),
             QualityGateStage::Parallel(vec![
                 quality_gate(
                     "self_iteration_cargo_check",
@@ -318,6 +342,7 @@ pub(super) fn quality_budget_ms(name: &str) -> Option<f64> {
     match name {
         "cargo_build_debug" => Some(90_000.0),
         "code_index_recovery_cases" => Some(60_000.0),
+        "code_index_source_io_isolation_cases" => Some(60_000.0),
         "business_knowledge_regression_cases" => Some(30_000.0),
         "code_index_sqlite_lock_cases" => Some(60_000.0),
         "bm25_hierarchy_suite" => Some(30_000.0),

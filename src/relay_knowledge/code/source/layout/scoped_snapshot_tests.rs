@@ -5,13 +5,11 @@ use std::{
 };
 
 use crate::{
-    code::{CodeIndexError, source::changes::GitTreeEntry},
+    code::CodeIndexError,
     domain::{CodeRepositoryRegistration, CodeRepositorySelector},
 };
 
-use super::{
-    filesystem_policy_for_selector, scoped_filesystem_tree_hash, scoped_source_snapshot_for_filters,
-};
+use super::{filesystem_policy_for_selector, scoped_source_snapshot_for_filters};
 
 #[test]
 fn filesystem_policy_denies_disjoint_registration_and_selector_scopes() {
@@ -60,15 +58,12 @@ fn scoped_filesystem_snapshot_keeps_selected_content_and_hashes_aligned() {
 fn scoped_filesystem_tree_hash_rejects_a_stale_snapshot_ref() {
     let source = TestSource::create("stale-scoped-snapshot");
     source.write("src/lib.rs", "pub fn initial() {}\n");
-    let entries = vec![GitTreeEntry {
-        path: "src/lib.rs".to_owned(),
-        byte_count: 20,
-    }];
-    let (_, tree_hash, _) = scoped_filesystem_tree_hash(source.path(), &entries, "HEAD")
-        .expect("live filesystem hash should resolve");
+    let tree_hash = scoped_source_snapshot_for_filters(source.path(), "HEAD", &["src".into()], &[])
+        .expect("live filesystem hash should resolve")
+        .tree_hash;
     source.write("src/lib.rs", "pub fn changed() {}\n");
 
-    let error = scoped_filesystem_tree_hash(source.path(), &entries, &tree_hash)
+    let error = scoped_source_snapshot_for_filters(source.path(), &tree_hash, &["src".into()], &[])
         .expect_err("stale filesystem ref should be rejected");
 
     assert!(

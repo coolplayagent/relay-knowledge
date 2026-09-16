@@ -122,7 +122,7 @@ pub(super) fn jobs(
         .map_err(StorageError::from)
 }
 
-pub(super) fn schedule(
+pub(in crate::storage::sqlite::code) fn schedule(
     transaction: &Transaction<'_>,
     repository_id: &str,
     source_scope: &str,
@@ -164,6 +164,35 @@ pub(super) fn schedule(
     Ok(())
 }
 
+/// Advances only the explicitly retired scope within the normal row quantum.
+pub(in crate::storage::sqlite::code) fn process_scope(
+    transaction: &Transaction<'_>,
+    repository_id: &str,
+    source_scope: &str,
+    now_ms: u64,
+) -> Result<bool, StorageError> {
+    let progress = transaction
+        .query_row(
+            "SELECT phase, search_rowid_cursor FROM code_repository_scope_gc_jobs
+         WHERE repository_id = ?1 AND source_scope = ?2",
+            params![repository_id, source_scope],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?)),
+        )
+        .optional()?;
+    let Some((phase, cursor)) = progress else {
+        return Ok(true);
+    };
+    advance_scope(
+        transaction,
+        repository_id,
+        source_scope,
+        &phase,
+        cursor,
+        now_ms,
+    )
+    .map(|completed| completed.is_some())
+}
+
 pub(super) fn process_one(
     transaction: &Transaction<'_>,
     repository_id: &str,
@@ -190,11 +219,38 @@ pub(super) fn process_one(
         return Ok(None);
     };
 
-    let result = ScopeGcPhase::decode(&phase).and_then(|phase| {
+    match advance_scope(
+        transaction,
+        repository_id,
+        &source_scope,
+        &phase,
+        search_rowid_cursor,
+        now_ms,
+    ) {
+        Err(error) => {
+            transaction.execute(
+                "UPDATE code_repository_scope_gc_jobs SET updated_at_ms = ?2, last_error = ?3 WHERE source_scope = ?1",
+                params![source_scope, now_ms, error.to_string()],
+            )?;
+            Ok(None)
+        }
+        result => result,
+    }
+}
+
+fn advance_scope(
+    transaction: &Transaction<'_>,
+    repository_id: &str,
+    source_scope: &str,
+    phase: &str,
+    search_rowid_cursor: Option<i64>,
+    now_ms: u64,
+) -> Result<Option<String>, StorageError> {
+    let result = ScopeGcPhase::decode(phase).and_then(|phase| {
         let progress = if phase.is_search_orphans() {
-            delete_search_orphan_batch(transaction, &source_scope, search_rowid_cursor)
+            delete_search_orphan_batch(transaction, source_scope, search_rowid_cursor)
         } else {
-            delete_phase_batch(transaction, repository_id, &source_scope, phase).map(
+            delete_phase_batch(transaction, repository_id, source_scope, phase).map(
                 |(deleted, has_more)| PhaseProgress {
                     deleted,
                     has_more,
@@ -204,23 +260,12 @@ pub(super) fn process_one(
         }?;
         Ok((phase, progress))
     });
-    let (phase, progress) = match result {
-        Ok(result) => result,
-        Err(error) => {
-            transaction.execute(
-                "UPDATE code_repository_scope_gc_jobs
-                 SET updated_at_ms = ?2, last_error = ?3
-                 WHERE source_scope = ?1",
-                params![source_scope, now_ms, error.to_string()],
-            )?;
-            return Ok(None);
-        }
-    };
+    let (phase, progress) = result?;
     let next = (!progress.has_more).then(|| phase.next()).flatten();
     if progress.has_more {
         update_progress(
             transaction,
-            &source_scope,
+            source_scope,
             phase,
             progress.deleted,
             progress.search_rowid_cursor,
@@ -231,7 +276,7 @@ pub(super) fn process_one(
     if let Some(next) = next {
         update_progress(
             transaction,
-            &source_scope,
+            source_scope,
             next,
             progress.deleted,
             None,
@@ -244,7 +289,7 @@ pub(super) fn process_one(
         "DELETE FROM code_repository_scope_gc_jobs WHERE source_scope = ?1",
         params![source_scope],
     )?;
-    Ok(Some(source_scope))
+    Ok(Some(source_scope.to_owned()))
 }
 
 pub(in crate::storage::sqlite::code) fn reject_retiring_scope(

@@ -121,6 +121,11 @@ Partitioned upgrade recovery 不能把 receipt 存在本身当成 eligibility �
 
 ## 5. 升级与回滚
 
+源路径 I/O 隔离升级为文件诊断增加可空 `io_json`，为 checkpoint 增加默认零的 `processed_path_count`，为 scope GC 任务增加可空归属列 `source_replan_task_id`。旧诊断保持可读，旧 checkpoint 保留按文件计数的解释。未发布 filesystem session 的清理中断后，在所属任务的当前租约下续跑，完成后才切换快照身份。备份须将清理状态与任务、checkpoint 一致保存；分片模式还须包含 catalog 与 shard 数据库。`source-io-isolation-v1` 事实身份阻止不兼容旧 scope/checkpoint 被当作当前索引复用，应使用正常索引命令重建。二进制/数据库回滚使用升级前运行目录备份。本次变更不重置死信，也不改变安装目录。
+
+数据库快速打开检查会校验这三个新列，即使现有 schema marker 已是当前版本。缺列时先执行兼容迁移，再开放查询或索引；升级后的重开保留原有诊断、checkpoint 与 GC 行，并使用兼容默认值。
+
+
 升级流程：
 
 ```text
@@ -274,7 +279,7 @@ relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor 
 
 HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包括 `ref`、JSON 数组字符串 `path_filters`、`limit` 和 `cursor`；CLI 支持 `--remote`。MCP 工具为 `relay_code_diagnostics`，接受 `repository`、`ref_selector`、`path_filters`、`limit`、`cursor`，并遵守授权及上下文预算。
 
-此变更复用现有诊断表，无需迁移或重建索引。升级时应将 agent 的完整性判断改为读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。
+原有内容完整性字段复用现有诊断表。路径 I/O 隔离进一步增加兼容的诊断/checkpoint 列及新的事实身份；升级后使用正常索引命令重建旧快照。agent 的完整性判断应读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。
 
 跨语言配置与类型归属升级会变更代码事实身份，并新增可空的符号归属列。已有仓库作用域一次性标记 stale，由现有持久化索引任务重建事实，并在发布前创建 v4 类型归属查询索引。无需安装编译器、语言服务、新服务或非托管后台进程。升级、取消和重试继续保留任务租约、检查点和单写者发布屏障。切换二进制版本前备份运行时状态；回滚使用匹配备份或由所选版本重新构建索引，不能把新事实直接标记为旧版本兼容。
 
@@ -282,5 +287,7 @@ schema marker 9 同时增加类型归属检查点游标。打开旧数据库时�
 
 
 v56 portable-evidence 升级持久化可选的调用字节范围；旧 JSON 和 ATTACH 导入的旧 SQLite 快照默认保持未知。查询索引计划 v5 保留 v4 的前 19 个单元，在序号 19–22 追加配置身份/键及 caller/callee 身份索引。配置绑定身份采用事务内倒排表：插入、替换、更新、增量复制和附加数据库导入从有界元数据生成绑定，删除同步移除绑定。查询按索引身份定位，避免逐条扫描全部元数据 JSON；2 秒及 2,000,000 SQLite 步数预算保持不变。
+
+合并后的事实身份为 `config-registry-v56-portable-evidence-source-io-isolation-v1`。仅具有此前 portable evidence 或路径 I/O 隔离能力的作用域都必须重建。检查点同时保留类型归属游标和已处理路径计数；旧快照导入时缺失的调用字节范围与 I/O 诊断保持未知。
 
 schema marker 10 和一次性 portable evidence 迁移将旧事实标记 stale，通过持久化任务重建。迁移后若绑定表、触发器或清理索引缺失或不兼容，启动明确报错，不会在已发布事实之上静默创建空投影，也不会修改 writer 的租约和检查点。应恢复匹配的运行时备份，或在新运行时目录重新索引获准仓库后切换服务配置。二进制回滚使用相应升级前备份，或由所选版本在干净目录重建索引。

@@ -31,7 +31,7 @@ from C# Boolean parsing. Do not generalize Java inheritance or package rules
 to another language.
 
 After this extraction upgrade, rebuild through `repo index` or `repo update`.
-Fact version `config-registry-v56-portable-evidence` and deferred query-index
+Fact version `config-registry-v56-portable-evidence-source-io-isolation-v1` and deferred query-index
 plan v5 prevent old indexes from claiming the new capability. Retain normal
 durable tasks, leases, checkpoints and status reporting during recovery.
 

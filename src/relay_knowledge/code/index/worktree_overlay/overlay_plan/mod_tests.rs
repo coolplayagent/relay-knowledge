@@ -5,6 +5,7 @@ use super::*;
 #[test]
 fn plan_identity_distinguishes_clean_and_changed_overlay_inputs() {
     let clean = WorktreeOverlayPlan {
+        skipped_paths: Vec::new(),
         commit: "abc123".to_owned(),
         changed_path_count: 0,
         path_filters: Vec::new(),
@@ -15,6 +16,7 @@ fn plan_identity_distinguishes_clean_and_changed_overlay_inputs() {
     };
     let clean_identity = clean.identity();
     let changed = WorktreeOverlayPlan {
+        skipped_paths: Vec::new(),
         overlay_hash_input: b"F\0src/lib.rs\0hash\0".to_vec(),
         ..clean
     };

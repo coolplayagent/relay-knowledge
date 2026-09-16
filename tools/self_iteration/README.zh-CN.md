@@ -469,3 +469,5 @@ Java 接收者回归还覆盖隐式 Object 重载、枚举/record 合成成员�
 范围服务单元回归覆盖多语言 context 扩展与代码可见性、视图/业务来源、历史复用任务请求校验、增量/overlay 基础范围拒绝，以及已发布分片和旧 control 的显式范围读取。仅单元测试覆盖率与现有全目标 CI 命令分开测量；每轮最终测量都清理工作区插桩对象，而不仅清理 profile。
 
 框架范围回归还保护直接快照的节点/边持久化，并检查 SQLite 查询计划在结果上限前通过索引查找源文件语言。路由测试在 control 与分片中放置不同的非空配置、框架及变更文件影响证据。直接框架写入回归保护完整写入预算及发布计数；语言上限测试将被排除的记录放在匹配记录之前。
+
+fast 中的 `code_index_source_io_isolation_cases` 门禁覆盖过滤前置、结构化局部错误、部分快照、checkpoint 重放、租约隔离和无须 reset 的恢复。`source_io_windows.py` 提供真实 Windows I/O 与可选大型 Java 项目的测量，步骤见[路径 I/O 基准说明](../../docs/zh/05-benchmarks/12-elastic-index-budgets.md)。真实文件锁/ACL 错误与确定性注入的 `os error 1` 分别记录。

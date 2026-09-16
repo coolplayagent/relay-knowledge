@@ -106,6 +106,7 @@ impl RelayKnowledgeService {
             .await
             .map_err(storage_api_error)?;
         Ok(CodeRepositoryDiagnosticsResponse {
+            content_integrity: status.content_integrity.clone(),
             metadata: ApiMetadata::graph_only(&context, version),
             scope: CodeRepositoryScopeMetadata::from_status(
                 &status,

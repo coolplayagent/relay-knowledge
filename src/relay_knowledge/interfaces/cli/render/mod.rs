@@ -281,12 +281,28 @@ where
         "code.repo.status" => render_code_repository_status(&value),
         "code.repo.diagnostics" => {
             let mut lines = vec![format!(
-                "scope={} degraded_files={}",
+                "scope={} degraded_files={} io_skipped_files={} io_skipped_directories={}",
                 value["scope"]["scope_id"].as_str().unwrap_or("unknown"),
-                value["degraded_file_count"]
+                value["degraded_file_count"],
+                value["content_integrity"]["io_skipped_file_count"]
+                    .as_u64()
+                    .unwrap_or(0),
+                value["content_integrity"]["io_skipped_directory_count"]
+                    .as_u64()
+                    .unwrap_or(0)
             )];
             if let Some(diagnostics) = value["diagnostics"].as_array() {
                 for diagnostic in diagnostics {
+                    if let Some(io) = diagnostic.get("io") {
+                        lines.push(format!(
+                            "  action={} path_kind={} operation={} error_kind={} raw_os_error={}",
+                            io["action"].as_str().unwrap_or("skipped"),
+                            io["path_kind"].as_str().unwrap_or("file"),
+                            io["operation"].as_str().unwrap_or("unknown"),
+                            io["error_kind"].as_str().unwrap_or("unknown"),
+                            io["raw_os_error"]
+                        ));
+                    }
                     lines.push(format!(
                         "{} [{}]: {}",
                         diagnostic["path"].as_str().unwrap_or(""),

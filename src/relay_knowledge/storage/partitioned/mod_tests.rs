@@ -10,10 +10,10 @@ use std::{
 use super::*;
 use crate::{
     domain::{
-        CodeIndexMode, CodeIndexResourceBudget, CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat,
-        CodeParseStatus, CodeRepositorySelector, CodeWorkspaceMember, FreshnessPolicy,
-        RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
-        SoftwareGlobalKind,
+        CodeIndexBatch, CodeIndexMode, CodeIndexResourceBudget, CodeIndexSession,
+        CodeIndexSnapshot, CodeMonorepoWorkspace, CodeMonorepoWorkspaceFormat, CodeParseStatus,
+        CodeRepositorySelector, CodeWorkspaceMember, FreshnessPolicy, RepositoryCodeChunkRecord,
+        RepositoryCodeFileRecord, RepositoryCodeRange, SoftwareGlobalKind,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
