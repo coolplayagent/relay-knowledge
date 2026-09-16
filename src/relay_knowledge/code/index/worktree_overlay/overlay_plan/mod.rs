@@ -3,6 +3,7 @@
 use super::super::{full_snapshot::clean_worktree_overlay_hash, ids::stable_hash64};
 
 pub(super) struct WorktreeOverlayPlan {
+    pub(super) skipped_paths: Vec<crate::code::source::path_io::SkippedSourcePath>,
     pub(super) commit: String,
     pub(super) changed_path_count: usize,
     pub(super) path_filters: Vec<String>,

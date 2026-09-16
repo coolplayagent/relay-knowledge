@@ -332,6 +332,7 @@ fn checkpoint_for_plan(
 ) -> CodeIndexCheckpoint {
     let session = plan.session();
     CodeIndexCheckpoint {
+        processed_path_count: 0,
         repository_id: session.repository_id,
         source_scope: session.source_scope,
         resolved_commit_sha: session.resolved_commit_sha,

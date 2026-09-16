@@ -9,12 +9,13 @@ use super::super::{
 use super::{
     FileSystemScanPolicy,
     filesystem_access::{filesystem_byte_count, filesystem_files},
-    filesystem_hashes::filesystem_tree_hash_for_paths,
     identity::{RepositorySourceKind, source_kind},
 };
 
 #[derive(Debug, Clone)]
 pub(in crate::code) struct RepositorySourceSnapshot {
+    pub(in crate::code) skipped_paths: Vec<crate::code::source::path_io::SkippedSourcePath>,
+    pub(in crate::code) content_hashes: std::collections::BTreeMap<String, String>,
     pub(in crate::code) kind: RepositorySourceKind,
     pub(in crate::code) root: PathBuf,
     pub(in crate::code) resolved_commit_sha: String,
@@ -41,6 +42,8 @@ pub(in crate::code) fn source_snapshot(
                 git_tree_hash_with_submodules(&parent_tree_hash, &tracked.submodule_states);
             Ok(RepositorySourceSnapshot {
                 kind: RepositorySourceKind::Git,
+                skipped_paths: Vec::new(),
+                content_hashes: Default::default(),
                 root: root.to_path_buf(),
                 resolved_commit_sha: commit,
                 tree_hash,
@@ -76,15 +79,31 @@ pub(in crate::code) fn filesystem_source_snapshot(
     policy: FileSystemScanPolicy,
 ) -> Result<RepositorySourceSnapshot, CodeIndexError> {
     let root = root.canonicalize()?;
-    let files = filesystem_files(&root, &policy)?;
+    let mut skipped_paths = Vec::new();
+    let files = filesystem_files(&root, &policy, &mut skipped_paths)?;
     let mut entries = Vec::with_capacity(files.len());
     let mut hash_paths = Vec::new();
     for file in files {
-        let byte_count = filesystem_byte_count(&root, &file.path)?;
+        let mut byte_count = 0;
         if policy.hash_includes_path(&file.path)
             && policy.language_allows_hash(&file.path)
             && policy.file_preset_allows_hash(&file.path)
         {
+            byte_count = match filesystem_byte_count(&root, &file.path) {
+                Ok(count) => count,
+                Err(CodeIndexError::Io(error)) => {
+                    skipped_paths.push(
+                        crate::code::source::path_io::SkippedSourcePath::from_error(
+                            &file.path,
+                            crate::domain::CodePathKind::File,
+                            crate::domain::CodePathIoOperation::Metadata,
+                            error,
+                        )?,
+                    );
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             hash_paths.push(file.path.clone());
         }
         entries.push(GitTreeEntry {
@@ -92,10 +111,21 @@ pub(in crate::code) fn filesystem_source_snapshot(
             byte_count,
         });
     }
-    let tree_hash = filesystem_tree_hash_for_paths(&root, &hash_paths)?;
+    let content_hashes =
+        super::filesystem_hashes::index_content_hashes(&root, &hash_paths, &mut skipped_paths)?;
+    entries.retain(|entry| {
+        !skipped_paths
+            .iter()
+            .any(|skipped| skipped.covers(&entry.path))
+    });
+    std::fs::read_dir(&root)?;
+    let tree_hash =
+        super::filesystem_hashes::tree_hash_with_skipped(&content_hashes, &skipped_paths);
 
     Ok(RepositorySourceSnapshot {
         kind: RepositorySourceKind::FileSystem,
+        skipped_paths,
+        content_hashes,
         root,
         resolved_commit_sha: tree_hash.clone(),
         tree_hash,
@@ -106,3 +136,38 @@ pub(in crate::code) fn filesystem_source_snapshot(
 #[cfg(test)]
 #[path = "snapshot_tests.rs"]
 mod tests;
+
+/// Completes discovery-expanded paths without rereading admitted or failed source paths.
+pub(in crate::code) fn complete_selected_filesystem_entries(
+    root: &Path,
+    entries: &mut Vec<GitTreeEntry>,
+    hashes: &mut std::collections::BTreeMap<String, String>,
+    skipped: &mut Vec<crate::code::source::path_io::SkippedSourcePath>,
+) -> Result<(), CodeIndexError> {
+    let mut missing = Vec::new();
+    for entry in entries
+        .iter_mut()
+        .filter(|entry| !hashes.contains_key(&entry.path))
+    {
+        match filesystem_byte_count(root, &entry.path) {
+            Ok(count) => {
+                entry.byte_count = count;
+                missing.push(entry.path.clone());
+            }
+            Err(CodeIndexError::Io(error)) => {
+                skipped.push(crate::code::source::path_io::SkippedSourcePath::from_error(
+                    &entry.path,
+                    crate::domain::CodePathKind::File,
+                    crate::domain::CodePathIoOperation::Metadata,
+                    error,
+                )?)
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    hashes.extend(super::filesystem_hashes::index_content_hashes(
+        root, &missing, skipped,
+    )?);
+    entries.retain(|entry| hashes.contains_key(&entry.path));
+    Ok(())
+}

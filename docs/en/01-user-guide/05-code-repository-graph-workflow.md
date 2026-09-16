@@ -309,6 +309,9 @@ Reports include repository id, root, indexed commit, tree hash, file/symbol/refe
 
 ## 5.9 Troubleshooting
 
+Local source I/O failures are reported by `repo diagnostics` with an optional `io` object containing `action: skipped`, `path_kind`, `operation`, `error_kind`, and `raw_os_error`. These paths are skipped; successful task completion can have `content_integrity.state = partial`. `io_skipped_file_count` and `io_skipped_directory_count` are separate counters. A skipped directory has an unknown file count. Unselected paths do not create I/O diagnostics or dead-letter tasks. After repairing access, rerun the normal index/update command; reset is not required. Historical dead-letter records are retained.
+
+
 When `repo query` returns no results, check in order:
 
 1. Whether `repo status <alias>` shows an indexed clean commit or worktree overlay.

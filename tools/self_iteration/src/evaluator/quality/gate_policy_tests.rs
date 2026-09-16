@@ -69,7 +69,7 @@ fn full_profile_quality_gates_run_in_dependency_stages() {
 fn fast_profile_skips_full_quality_gates() {
     let stages = quality_gate_stages("fast", Some(ProductBinaryProfile::Release));
 
-    assert_eq!(stages.len(), 6);
+    assert_eq!(stages.len(), 8);
     let gate_names = stages
         .iter()
         .flat_map(|stage| match stage {
@@ -84,6 +84,7 @@ fn fast_profile_skips_full_quality_gates() {
         .collect::<Vec<_>>();
     assert!(gate_names.contains(&"cargo_build_release"));
     assert!(gate_names.contains(&"code_index_recovery_cases"));
+    assert!(gate_names.contains(&"code_index_source_io_isolation_cases"));
     assert!(gate_names.contains(&"business_knowledge_regression_cases"));
     assert!(gate_names.contains(&"map_storage_regression_cases"));
     assert!(gate_names.contains(&"software_relationship_storage_cases"));
@@ -150,6 +151,43 @@ fn fast_code_index_persistence_measurement_is_a_bounded_isolated_stage() {
         ]
     );
     assert_eq!(gate.timeout_seconds, 120);
+}
+
+#[test]
+fn source_io_measurement_has_an_isolated_complete_build_before_its_budgeted_run() {
+    let stages = quality_gate_stages("fast", Some(ProductBinaryProfile::Release));
+    let index = stages
+        .iter()
+        .position(|stage| stage_has_gate(stage, "code_index_source_io_isolation_build"))
+        .unwrap();
+    let build = only_parallel_gate(&stages[index]);
+    assert_eq!(
+        build.command,
+        [
+            "cargo",
+            "test",
+            "--all-targets",
+            "--all-features",
+            "--no-run"
+        ]
+    );
+    assert_eq!(build.timeout_seconds, 1200);
+    assert_eq!(quality_budget_ms(build.name), None);
+    let measurement = only_parallel_gate(&stages[index + 1]);
+    assert_eq!(measurement.name, "code_index_source_io_isolation_cases");
+    assert_eq!(
+        measurement.command,
+        [
+            "cargo",
+            "test",
+            "--all-targets",
+            "--all-features",
+            "source_io",
+            "--",
+            "--nocapture"
+        ]
+    );
+    assert_eq!(quality_budget_ms(measurement.name), Some(60_000.0));
 }
 
 #[test]

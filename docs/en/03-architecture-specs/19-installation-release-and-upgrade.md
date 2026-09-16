@@ -154,6 +154,11 @@ A rollback target that does not recognize query-plan v3 must first let the curre
 
 ## 5. Upgrade and Rollback
 
+The source I/O isolation update adds nullable `io_json` to persisted file diagnostics, `processed_path_count` (default zero) to checkpoints, and nullable `source_replan_task_id` ownership to scope GC jobs. Existing diagnostic rows remain readable; legacy checkpoints retain their file-count interpretation. Interrupted cleanup of an unpublished filesystem session resumes under the owning task's current lease before its snapshot identity changes. Backups must keep this cleanup state with the task, checkpoint and, in partitioned mode, catalog and shard databases. The `source-io-isolation-v1` fact identity prevents incompatible old scopes/checkpoints from being reused as current indexes; rebuild with the normal index command. Preserve the pre-upgrade runtime backup for binary/database rollback. This change does not reset dead letters or change installation directories.
+
+The database fast-open check verifies all three new columns even when the existing schema marker is current. A missing column runs the additive initializer before serving queries or indexing; reopening an upgraded database preserves existing diagnostic, checkpoint and GC rows with their compatible defaults.
+
+
 Upgrade flow:
 
 ```text
@@ -318,4 +323,4 @@ Pages default to 50 diagnostics, capped at 200, ordered by path and message. Reu
 
 HTTP: `GET /api/v1/code/repositories/{alias}/diagnostics`, with `ref`, JSON-array-string `path_filters`, `limit` and `cursor`. CLI supports `--remote`. MCP: `relay_code_diagnostics`, with `repository`, `ref_selector`, `path_filters`, `limit`, `cursor`, subject to authorization and context budgets.
 
-Existing diagnostic tables are reused; no migration or reindex is required. Update agents to inspect `content_integrity` when upgrading; older versions can still report overall `degraded` for partial content. Stale versions, unfinished tasks and graph-only responses retain conservative handling. Out-of-scope external dependencies remain unresolved edge metadata rather than file parse degradation.
+The original content-integrity fields reuse existing diagnostic tables. Source I/O isolation additionally adds compatible diagnostic/checkpoint columns and a new fact identity; rebuild older scopes with the normal index command after upgrading. Update agents to inspect `content_integrity`; older versions can still report overall `degraded` for partial content. Stale versions, unfinished tasks and graph-only responses retain conservative handling. Out-of-scope external dependencies remain unresolved edge metadata rather than file parse degradation.

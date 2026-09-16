@@ -121,6 +121,11 @@ Partitioned upgrade recovery 不能把 receipt 存在本身当成 eligibility �
 
 ## 5. 升级与回滚
 
+源路径 I/O 隔离升级为文件诊断增加可空 `io_json`，为 checkpoint 增加默认零的 `processed_path_count`，为 scope GC 任务增加可空归属列 `source_replan_task_id`。旧诊断保持可读，旧 checkpoint 保留按文件计数的解释。未发布 filesystem session 的清理中断后，在所属任务的当前租约下续跑，完成后才切换快照身份。备份须将清理状态与任务、checkpoint 一致保存；分片模式还须包含 catalog 与 shard 数据库。`source-io-isolation-v1` 事实身份阻止不兼容旧 scope/checkpoint 被当作当前索引复用，应使用正常索引命令重建。二进制/数据库回滚使用升级前运行目录备份。本次变更不重置死信，也不改变安装目录。
+
+数据库快速打开检查会校验这三个新列，即使现有 schema marker 已是当前版本。缺列时先执行兼容迁移，再开放查询或索引；升级后的重开保留原有诊断、checkpoint 与 GC 行，并使用兼容默认值。
+
+
 升级流程：
 
 ```text
@@ -274,4 +279,4 @@ relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor 
 
 HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包括 `ref`、JSON 数组字符串 `path_filters`、`limit` 和 `cursor`；CLI 支持 `--remote`。MCP 工具为 `relay_code_diagnostics`，接受 `repository`、`ref_selector`、`path_filters`、`limit`、`cursor`，并遵守授权及上下文预算。
 
-此变更复用现有诊断表，无需迁移或重建索引。升级时应将 agent 的完整性判断改为读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。
+原有内容完整性字段复用现有诊断表。路径 I/O 隔离进一步增加兼容的诊断/checkpoint 列及新的事实身份；升级后使用正常索引命令重建旧快照。agent 的完整性判断应读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。

@@ -42,11 +42,23 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     initialize_repository_schema(connection)?;
     super::super::schema::columns::ensure_column(
         connection,
+        "code_repository_file_diagnostics",
+        "io_json",
+        "TEXT",
+    )?;
+    super::super::schema::columns::ensure_column(
+        connection,
         "code_repository_schema_migrations",
         "applied_at_ms",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
     initialize_index_task_schema(connection)?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_index_checkpoints",
+        "processed_path_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     initialize_repository_set_schema(connection)?;
     initialize_search_schema(connection)?;
     super::super::schema::columns::ensure_column(
@@ -56,6 +68,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         "TEXT NOT NULL DEFAULT '{}'",
     )?;
     initialize_retention_schema(connection)?;
+    super::super::schema::columns::ensure_column(
+        connection,
+        "code_repository_scope_gc_jobs",
+        "source_replan_task_id",
+        "TEXT",
+    )?;
     super::super::schema::columns::ensure_column(
         connection,
         "code_repository_files",

@@ -10,6 +10,11 @@ To access a deployed resident service from a local CLI, use global `--remote <ba
 
 ## 3.1 Common Status Commands
 
+Local source I/O failures are reported by `repo diagnostics` with an optional `io` object containing `action: skipped`, `path_kind`, `operation`, `error_kind`, and `raw_os_error`. These paths are skipped; successful task completion can have `content_integrity.state = partial`. `io_skipped_file_count` and `io_skipped_directory_count` are separate counters. A skipped directory has an unknown file count. Unselected paths do not create I/O diagnostics or dead-letter tasks. After repairing access, rerun the normal index/update command; reset is not required. Historical dead-letter records are retained.
+
+
+For a skipped directory, `repo diagnostics --path <child-path>` also returns the ancestor diagnostic explaining why that child was omitted. An explicit `filesystem:<hash>` remains pinned: if access changes its content identity during indexing, the command fails; use `HEAD` to index the current filesystem state.
+
 Project status:
 
 ```bash
@@ -340,4 +345,4 @@ Pages default to 50 diagnostics, capped at 200, ordered by path and message. Reu
 
 HTTP: `GET /api/v1/code/repositories/{alias}/diagnostics`, with `ref`, JSON-array-string `path_filters`, `limit` and `cursor`. CLI supports `--remote`. MCP: `relay_code_diagnostics`, with `repository`, `ref_selector`, `path_filters`, `limit`, `cursor`, subject to authorization and context budgets.
 
-Existing diagnostic tables are reused; no migration or reindex is required. Update agents to inspect `content_integrity` when upgrading; older versions can still report overall `degraded` for partial content. Stale versions, unfinished tasks and graph-only responses retain conservative handling. Out-of-scope external dependencies remain unresolved edge metadata rather than file parse degradation.
+The original content-integrity fields reuse existing diagnostic tables. Source I/O isolation additionally adds compatible diagnostic/checkpoint columns and a new fact identity; rebuild older scopes with the normal index command after upgrading. Update agents to inspect `content_integrity`; older versions can still report overall `degraded` for partial content. Stale versions, unfinished tasks and graph-only responses retain conservative handling. Out-of-scope external dependencies remain unresolved edge metadata rather than file parse degradation.

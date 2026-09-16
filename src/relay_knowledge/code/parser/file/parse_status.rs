@@ -39,6 +39,7 @@ pub(super) fn record_file_status(build: &mut SnapshotBuild, input: FileStatusInp
 
     if let Some(message) = input.degraded_reason {
         build.diagnostics.push(CodeFileDiagnostic {
+            io: None,
             repository_id: build.repository_id.clone(),
             source_scope: build.source_scope.clone(),
             path: input.path.to_owned(),

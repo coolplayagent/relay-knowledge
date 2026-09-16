@@ -17,6 +17,9 @@ use crate::{
 };
 use tokio::sync::Barrier;
 
+#[path = "queue_source_io_tests.rs"]
+mod source_io_tests;
+
 #[tokio::test]
 async fn queue_reuses_unfinished_fingerprint_and_keeps_distinct_work_independent() {
     let store = registered_store().await;

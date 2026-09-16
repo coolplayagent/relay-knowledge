@@ -8,6 +8,8 @@ pub(in crate::code) mod filters;
 pub(in crate::code) mod git;
 pub(in crate::code) mod gitlink;
 pub(in crate::code) mod layout;
+pub(in crate::code) mod local_io;
+pub(in crate::code) mod path_io;
 mod repository;
 pub(in crate::code) mod resolution;
 pub(crate) mod roots;
@@ -20,3 +22,5 @@ use repository as source;
 use roots as source_roots;
 
 pub(in crate::code) use repository::*;
+
+pub(crate) use repository::source_commit_is_filesystem;

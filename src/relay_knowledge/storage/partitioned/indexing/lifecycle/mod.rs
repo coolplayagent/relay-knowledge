@@ -15,6 +15,43 @@ use crate::storage::{BusinessKnowledgeStore, SoftwareProjectionStore};
 
 use super::super::{PartitionedSqliteKnowledgeStore, status::mirror_status};
 
+/// Keeps the old task target and repository locator until shard cleanup completes.
+pub(in crate::storage::partitioned) fn cleanup_source_replan(
+    store: &PartitionedSqliteKnowledgeStore,
+    source_scope: String,
+    fence: CodeIndexPublicationFence,
+    resume_only: bool,
+) -> StorageFuture<'_, bool> {
+    let store = store.clone();
+    Box::pin(async move {
+        let Some(shard) = store
+            .catalog
+            .existing_repository_store(fence.repository_id.clone())
+            .await?
+        else {
+            return store
+                .control
+                .cleanup_source_replan_with_fence(source_scope, fence, resume_only)
+                .await;
+        };
+        let complete = shard
+            .cleanup_source_replan_with_fence(source_scope.clone(), fence.clone(), resume_only)
+            .await?;
+        if complete
+            && shard
+                .code_index_checkpoint(source_scope.clone())
+                .await?
+                .is_none()
+        {
+            store
+                .catalog
+                .remove_abandoned_scope_route(source_scope, fence)
+                .await?;
+        }
+        Ok(complete)
+    })
+}
+
 pub(in crate::storage::partitioned) fn apply_snapshot(
     _store: &PartitionedSqliteKnowledgeStore,
     snapshot: CodeIndexSnapshot,
@@ -99,7 +136,7 @@ fn apply_snapshot_inner(
             // idempotent target and only uses ATTACH for the attempt lock.
             store
                 .catalog
-                .prepare_snapshot_target(&snapshot, fence.clone())
+                .prepare_publication_target(crate::storage::sqlite::code::lifecycle::publication_fence::PartitionedPublicationTarget::from(&snapshot), fence.clone())
                 .await?;
             // The catalog route is the crash-recovery locator for every shard-side clone page and
             // delta handoff. Persist it before the first shard mutation so a lost response can
@@ -293,6 +330,14 @@ fn begin_session_inner(
     Box::pin(async move {
         let repository_id = session.repository_id.clone();
         let source_scope = session.source_scope.clone();
+        if session.resolved_commit_sha.starts_with("filesystem:") {
+            if let Some(fence) = fence.as_ref() {
+                store
+                    .catalog
+                    .prepare_publication_target(crate::storage::sqlite::code::lifecycle::publication_fence::PartitionedPublicationTarget::from(&session), fence.clone())
+                    .await?;
+            }
+        }
         let shard = store
             .catalog
             .staged_repository_store(repository_id.clone())

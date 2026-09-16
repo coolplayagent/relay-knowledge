@@ -6,6 +6,7 @@ mod fast_path;
 mod preview;
 mod queue;
 mod session;
+mod source_replan;
 mod start;
 mod state;
 mod task;
@@ -19,6 +20,7 @@ use crate::{
     domain::CodeIndexRequest,
 };
 
+#[cfg(test)]
 use self::task::CodeIndexTaskLeaseContext;
 
 pub(super) use task::recover_code_index_task_leases;
@@ -56,15 +58,6 @@ impl RelayKnowledgeService {
                     "durable repository index task '{task_id}' is already claimed or queued behind another repository writer; inspect repo status and let the managed worker drain it"
                 ))
             })
-    }
-
-    async fn index_code_repository_inner(
-        &self,
-        request: CodeIndexRequest,
-        context: RequestContext,
-        task_lease: Option<CodeIndexTaskLeaseContext>,
-    ) -> Result<CodeRepositoryIndexResponse, ApiError> {
-        workflow::run(self, request, context, task_lease).await
     }
 }
 

@@ -118,6 +118,12 @@ fn watched_repository_from_status(status: &CodeRepositoryStatus) -> Option<Watch
         language_filters: status.language_filters.clone(),
         source_scope,
         last_indexed_commit,
+        requires_source_io_recheck: status.content_integrity.io_skipped_file_count.unwrap_or(0) > 0
+            || status
+                .content_integrity
+                .io_skipped_directory_count
+                .unwrap_or(0)
+                > 0,
     })
 }
 

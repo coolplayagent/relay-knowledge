@@ -307,6 +307,9 @@ relay-knowledge repo status repo --format json
 
 ## 5.9 排障顺序
 
+本地源文件 I/O 故障通过 `repo diagnostics` 的可选 `io` 对象提供诊断，包含 `action: skipped`、`path_kind`、`operation`、`error_kind` 和 `raw_os_error`。这些路径会被跳过，任务成功时仍可能出现 `content_integrity.state = partial`。`io_skipped_file_count` 与 `io_skipped_directory_count` 分别统计跳过文件和目录；不可枚举目录的文件数量未知。未选中路径不产生 I/O 诊断或死信任务。修复访问故障后重新执行正常索引/更新命令即可恢复，无须 reset；历史死信记录保留。
+
+
 `repo query` 结果为空时，按顺序确认:
 
 1. `repo status <alias>` 是否显示已索引的 clean commit 或 worktree overlay。

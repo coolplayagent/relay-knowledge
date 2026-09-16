@@ -45,16 +45,20 @@ pub(in crate::storage::sqlite::code) fn page(
     let filters = serde_json::to_string(&request.path_filters)
         .map_err(|e| StorageError::InvalidInput(e.to_string()))?;
     let predicate = "source_scope = ?1 AND (json_array_length(?2) = 0 OR EXISTS (
-        SELECT 1 FROM json_each(?2) filter WHERE d.path = filter.value OR substr(d.path,1,length(filter.value)+1) = filter.value || '/'))";
+        SELECT 1 FROM json_each(?2) filter
+        WHERE d.path = filter.value
+           OR substr(d.path,1,length(filter.value)+1) = filter.value || '/'
+           OR (json_extract(d.io_json, '$.path_kind') = 'directory'
+               AND substr(filter.value,1,length(d.path)+1) = d.path || '/')))";
     let count = transaction.query_row(
         &format!(
-            "SELECT COUNT(DISTINCT path) FROM code_repository_file_diagnostics d WHERE {predicate}"
+            "SELECT COUNT(DISTINCT path) FROM code_repository_file_diagnostics d WHERE {predicate} AND COALESCE(json_extract(io_json, '$.path_kind'), 'file') = 'file'"
         ),
         params![request.source_scope, filters],
         |row| row.get(0),
     )?;
     let (after_path, after_message) = request.after.clone().unwrap_or_default();
-    let mut statement = transaction.prepare(&format!("SELECT repository_id, source_scope, path, parse_status, message FROM code_repository_file_diagnostics d WHERE {predicate} AND (?3 = 0 OR (path, message) > (?4, ?5)) ORDER BY path, message LIMIT ?6"))?;
+    let mut statement = transaction.prepare(&format!("SELECT repository_id, source_scope, path, parse_status, message, io_json FROM code_repository_file_diagnostics d WHERE {predicate} AND (?3 = 0 OR (path, message) > (?4, ?5)) ORDER BY path, message LIMIT ?6"))?;
     let rows = statement.query_map(
         params![
             request.source_scope,
@@ -75,6 +79,17 @@ pub(in crate::storage::sqlite::code) fn page(
                     )
                 })?;
             Ok(CodeFileDiagnostic {
+                io: row
+                    .get::<_, Option<String>>(5)?
+                    .map(|json| serde_json::from_str(&json))
+                    .transpose()
+                    .map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            5,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?,
                 repository_id: row.get(0)?,
                 source_scope: row.get(1)?,
                 path: row.get(2)?,

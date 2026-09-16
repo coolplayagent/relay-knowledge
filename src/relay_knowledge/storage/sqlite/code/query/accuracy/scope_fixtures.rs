@@ -119,6 +119,7 @@ pub(super) fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
             Some(message.clone()),
         ));
         diagnostics.push(CodeFileDiagnostic {
+            io: None,
             repository_id: "repo".to_owned(),
             source_scope: TEST_SOURCE_SCOPE.to_owned(),
             path,

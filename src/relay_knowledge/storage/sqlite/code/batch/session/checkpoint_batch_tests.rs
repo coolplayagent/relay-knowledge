@@ -366,3 +366,51 @@ async fn new_checkpoint_batch_replaces_colliding_path_rows() {
     assert_eq!(new_hits.len(), 1);
     assert_eq!(new_hits[0].path, path);
 }
+
+#[tokio::test]
+async fn source_io_diagnostic_only_batches_resume_and_replay_without_counting_fake_files() {
+    use crate::domain::{
+        CodeFileDiagnostic, CodePathIoAction, CodePathIoDiagnostic, CodePathIoErrorKind,
+        CodePathIoOperation, CodePathKind,
+    };
+    let store = registered_store().await;
+    let scope = "git_snapshot:source-io-checkpoint";
+    let session = session_for_scope(scope, 1);
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .unwrap();
+    let skipped = CodeIndexBatch {
+        parsed_byte_count: 0,
+        diagnostics: vec![CodeFileDiagnostic {
+            repository_id: "repo".into(),
+            source_scope: scope.into(),
+            path: "src/unreadable".into(),
+            parse_status: CodeParseStatus::Failed,
+            message: "source path skipped".into(),
+            io: Some(CodePathIoDiagnostic {
+                action: CodePathIoAction::Skipped,
+                path_kind: CodePathKind::Directory,
+                operation: CodePathIoOperation::ReadDirectory,
+                error_kind: CodePathIoErrorKind::PermissionDenied,
+                raw_os_error: None,
+            }),
+        }],
+        ..batch(scope, 1)
+    };
+    let first = store.apply_code_index_batch(skipped.clone()).await.unwrap();
+    let resumed = store
+        .begin_code_index_session(session.clone())
+        .await
+        .unwrap();
+    let replayed = store.apply_code_index_batch(skipped).await.unwrap();
+    assert_eq!(first, resumed);
+    assert_eq!(first, replayed);
+    assert_eq!(first.processed_path_count(), 1);
+    assert_eq!(first.committed_file_count, 0);
+    assert_eq!(first.parsed_file_count, 0);
+    let summary = store.finalize_code_index_session(session).await.unwrap();
+    assert_eq!(summary.indexed_file_count, 0);
+    assert_eq!(summary.progress.io_skipped_directory_count, 1);
+    assert_eq!(summary.progress.degraded_file_count, 0);
+}

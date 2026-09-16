@@ -42,6 +42,8 @@ pub(super) fn record_previous_gitlink_child_deletions(
 }
 
 pub(in crate::code::index::worktree_overlay) struct WorktreeOverlayRecorder<'a, 'scope> {
+    pub(in crate::code::index::worktree_overlay) skipped_paths:
+        &'a mut Vec<crate::code::source::path_io::SkippedSourcePath>,
     pub(in crate::code::index::worktree_overlay) scope: &'a WorktreeOverlayScope<'scope>,
     pub(in crate::code::index::worktree_overlay) previous_hashes: &'a BTreeMap<String, String>,
     pub(in crate::code::index::worktree_overlay) overlay_hash_input: &'a mut Vec<u8>,

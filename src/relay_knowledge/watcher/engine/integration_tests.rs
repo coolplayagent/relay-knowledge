@@ -30,6 +30,7 @@ fn test_repo(alias: &str) -> WatchedRepository {
         language_filters: vec![],
         source_scope: format!("scope-{alias}"),
         last_indexed_commit: "commit-base".to_owned(),
+        requires_source_io_recheck: false,
     }
 }
 
@@ -142,6 +143,7 @@ fn should_process_path_accepts_matching_file_in_repo() {
         language_filters: vec![],
         source_scope: "scope-test".to_owned(),
         last_indexed_commit: "commit-base".to_owned(),
+        requires_source_io_recheck: false,
     };
     let state = WatcherInternalState {
         repositories: vec![repo],
@@ -290,7 +292,7 @@ async fn unchanged_commit_reconciliation_skips_tree_scan_and_recovers_degraded_s
 }
 
 #[tokio::test]
-async fn periodic_reconciliation_tracks_stable_and_changed_worktree_observations() {
+async fn source_io_periodic_reconciliation_tracks_stable_changed_and_partial_worktrees() {
     let root = temp_dir("worktree-reconcile-observation");
     git(&root, &["init"]);
     git(&root, &["config", "user.email", "relay@example.test"]);
@@ -335,14 +337,32 @@ async fn periodic_reconciliation_tracks_stable_and_changed_worktree_observations
     fs::write(&source, "pub fn dirty_two() {}\n").expect("changed dirty source");
     reconcile_all_commit_heads(&state, &diag_tx, &dropped, &sink).await;
 
-    let queued = queued.lock().await;
-    assert_eq!(queued.len(), 3);
-    assert_eq!(queued[0].input_fingerprint, queued[1].input_fingerprint);
-    assert_ne!(queued[1].input_fingerprint, queued[2].input_fingerprint);
+    let queued_guard = queued.lock().await;
+    assert_eq!(queued_guard.len(), 3);
+    assert_eq!(
+        queued_guard[0].input_fingerprint,
+        queued_guard[1].input_fingerprint
+    );
+    assert_ne!(
+        queued_guard[1].input_fingerprint,
+        queued_guard[2].input_fingerprint
+    );
     assert!(
-        queued
+        queued_guard
             .iter()
             .all(|seed| seed.mode == crate::domain::CodeIndexMode::WorktreeOverlay)
+    );
+    let healthy_fingerprint = queued_guard[2].input_fingerprint.clone();
+    drop(queued_guard);
+    state.write().await.repositories[0].requires_source_io_recheck = true;
+    reconcile_all_commit_heads(&state, &diag_tx, &dropped, &sink).await;
+    let partial_fingerprint = queued.lock().await[3].input_fingerprint.clone();
+    assert_ne!(partial_fingerprint, healthy_fingerprint);
+    state.write().await.repositories[0].requires_source_io_recheck = false;
+    reconcile_all_commit_heads(&state, &diag_tx, &dropped, &sink).await;
+    assert_eq!(
+        queued.lock().await[4].input_fingerprint,
+        healthy_fingerprint
     );
 }
 

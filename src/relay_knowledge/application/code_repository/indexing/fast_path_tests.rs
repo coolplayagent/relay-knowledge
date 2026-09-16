@@ -27,6 +27,8 @@ fn incremental_publication_recovery_preserves_receipt_metrics_and_identity() {
     let budget = CodeIndexResourceBudget::new(7, 4096, 123)
         .expect("non-default durable budget should validate");
     let receipt = CodeIncrementalSummaryReceipt {
+        io_skipped_file_count: 0,
+        io_skipped_directory_count: 0,
         task_id: "task".to_owned(),
         base_resolved_commit_sha: "base".to_owned(),
         changed_path_count: 2,
@@ -64,6 +66,8 @@ fn incremental_publication_recovery_ignores_a_previous_tasks_receipt_on_adoption
     let mut receipt = checkpoint(
         budget,
         CodeIncrementalSummaryReceipt {
+            io_skipped_file_count: 0,
+            io_skipped_directory_count: 0,
             task_id: "task".to_owned(),
             base_resolved_commit_sha: "base".to_owned(),
             changed_path_count: 1,
@@ -93,6 +97,7 @@ fn checkpoint(
     receipt: CodeIncrementalSummaryReceipt,
 ) -> CodeIndexCheckpoint {
     CodeIndexCheckpoint {
+        processed_path_count: 0,
         repository_id: "repo".to_owned(),
         source_scope: "target".to_owned(),
         resolved_commit_sha: "head".to_owned(),

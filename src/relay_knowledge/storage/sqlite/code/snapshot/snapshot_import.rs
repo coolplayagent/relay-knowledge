@@ -17,6 +17,12 @@ const OPTIONAL_LEGACY_IMPORT_TABLES: &[&str] = &[
     "code_repository_framework_edges",
 ];
 const LEGACY_IMPORT_COLUMN_DEFAULTS: &[(&str, &str, &str)] = &[
+    ("code_repository_file_diagnostics", "io_json", "NULL"),
+    (
+        "code_repository_index_checkpoints",
+        "processed_path_count",
+        "0",
+    ),
     ("code_repository_files", "is_generated", "0"),
     ("code_repository_feature_flags", "metadata_json", "'{}'"),
     ("code_repository_symbols", "symbol_role_json", "NULL"),

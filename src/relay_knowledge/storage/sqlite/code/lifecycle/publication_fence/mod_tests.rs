@@ -339,3 +339,44 @@ fn initialize_authority_fixture(connection: &Connection, lease_expires_at_ms: u6
         )
         .expect("publication fence should initialize");
 }
+
+#[test]
+fn source_io_full_filesystem_rebind_preserves_repo_filters_and_workspace_identity() {
+    let config = CodeWorkspaceDetectionConfig::default();
+    let old = "filesystem:0123456789abcdef";
+    let new = "filesystem:fedcba9876543210";
+    let pending = PendingWorktreeTarget {
+        source_scope: code_snapshot_scope_id_with_workspace_detection(
+            "repo",
+            old,
+            &[],
+            &[],
+            &config,
+        ),
+        resolved_commit_sha: old.into(),
+        tree_hash: old.into(),
+        path_filters_json: "[]".into(),
+        language_filters_json: "[]".into(),
+        mode_json: serde_json::to_string(&CodeIndexMode::Full).unwrap(),
+    };
+    let actual = || WorktreeScopeIdentity {
+        repository_id: "repo".into(),
+        base_commit: None,
+        resolved_commit_sha: new.into(),
+        tree_hash: new.into(),
+        path_filters: vec![],
+        language_filters: vec![],
+        workspace_semantic: None,
+    };
+    assert!(pending.matches_real_scope("repo", &actual()).unwrap());
+    let mut invalid = actual();
+    invalid.path_filters.push("src".into());
+    assert!(!pending.matches_real_scope("repo", &invalid).unwrap());
+    invalid = actual();
+    invalid.resolved_commit_sha = old.into();
+    assert!(!pending.matches_real_scope("repo", &invalid).unwrap());
+    invalid = actual();
+    invalid.workspace_semantic = Some(7);
+    assert!(!pending.matches_real_scope("repo", &invalid).unwrap());
+    assert!(!pending.matches_real_scope("other", &actual()).unwrap());
+}

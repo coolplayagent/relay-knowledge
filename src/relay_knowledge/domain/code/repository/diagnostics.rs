@@ -19,15 +19,48 @@ pub enum CodeContentIntegrityState {
 /// Coverage of the served immutable code snapshot, never inferred from messages.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeContentIntegrity {
+    #[serde(default)]
+    pub io_skipped_file_count: Option<usize>,
+    #[serde(default)]
+    pub io_skipped_directory_count: Option<usize>,
     pub state: CodeContentIntegrityState,
     pub degraded_file_count: Option<usize>,
     pub source_scope: Option<String>,
 }
 
 impl CodeContentIntegrity {
+    /// Counts files and inaccessible directory boundaries independently.
+    pub fn from_diagnostics(source_scope: String, diagnostics: &[CodeFileDiagnostic]) -> Self {
+        let mut files = std::collections::BTreeSet::new();
+        let mut skipped_files = std::collections::BTreeSet::new();
+        let mut directories = std::collections::BTreeSet::new();
+        for diagnostic in diagnostics {
+            match diagnostic.io.as_ref().map(|io| io.path_kind) {
+                Some(super::CodePathKind::Directory) => {
+                    directories.insert(&diagnostic.path);
+                }
+                kind => {
+                    files.insert(&diagnostic.path);
+                    if kind.is_some() {
+                        skipped_files.insert(&diagnostic.path);
+                    }
+                }
+            }
+        }
+        let mut integrity = Self::measured(source_scope, files.len());
+        integrity.io_skipped_file_count = Some(skipped_files.len());
+        integrity.io_skipped_directory_count = Some(directories.len());
+        if !directories.is_empty() {
+            integrity.state = CodeContentIntegrityState::Partial;
+        }
+        integrity
+    }
+
     /// Associates a counted set of distinct degraded paths with its snapshot.
     pub fn measured(source_scope: String, count: usize) -> Self {
         Self {
+            io_skipped_file_count: Some(0),
+            io_skipped_directory_count: Some(0),
             state: if count == 0 {
                 CodeContentIntegrityState::Complete
             } else {
@@ -44,11 +77,21 @@ impl CodeContentIntegrity {
             return;
         }
         if self.source_scope == other.source_scope {
+            self.io_skipped_file_count = self
+                .io_skipped_file_count
+                .zip(other.io_skipped_file_count)
+                .map(|(a, b)| a.max(b));
+            self.io_skipped_directory_count = self
+                .io_skipped_directory_count
+                .zip(other.io_skipped_directory_count)
+                .map(|(a, b)| a.max(b));
             self.degraded_file_count = self
                 .degraded_file_count
                 .zip(other.degraded_file_count)
                 .map(|(a, b)| a.max(b));
         } else {
+            self.io_skipped_file_count = None;
+            self.io_skipped_directory_count = None;
             self.source_scope = None;
             self.degraded_file_count = None;
         }
