@@ -327,7 +327,7 @@ fatal runtime error: stack overflow, aborting
 
 精确样本 scope preview 预计：
 
-- `expected_degraded_file_count = 0`
+- `expected_degraded_file_count = 0`（历史版本字段；当前接口改为 `expected_degraded_files` 及截断标记）
 
 实际索引报告：
 

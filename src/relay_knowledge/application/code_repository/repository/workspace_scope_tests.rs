@@ -198,7 +198,7 @@ async fn scope_preview_matches_completed_index_without_writing_index_state() {
         .await
         .unwrap();
     assert_eq!(preview.preview.selected_file_count, 3);
-    assert_eq!(preview.preview.expected_degraded_file_count, 2);
+    assert_eq!(preview.preview.expected_degraded_files.len(), 2);
     assert_eq!(store.code_repository_totals().await.unwrap(), before);
     assert_eq!(
         store.code_index_task_queue_status().await.unwrap(),
@@ -216,7 +216,7 @@ async fn scope_preview_matches_completed_index_without_writing_index_state() {
         .await
         .unwrap();
     assert_eq!(
-        preview.preview.expected_degraded_file_count,
+        preview.preview.expected_degraded_files.len(),
         indexed.summary.degraded_file_count
     );
     assert_eq!(

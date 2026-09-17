@@ -7,10 +7,13 @@
 
 use std::{
     error::Error,
-    fmt, io,
+    fmt,
     path::{Component, Path, PathBuf},
     time::Duration,
 };
+
+#[cfg(any(not(windows), test))]
+use std::io;
 
 use crate::{
     env::{PathEnvOverrides, PlatformEnvironment, PlatformKind, RELAY_KNOWLEDGE_DATA_DIR},

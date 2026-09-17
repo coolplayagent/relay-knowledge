@@ -30,9 +30,9 @@ pub use registration::{
     RepositoryCodeRange,
 };
 pub use repository_status::{
-    CodeRepositoryExcludedPath, CodeRepositoryLanguagePreview, CodeRepositoryLargestFile,
-    CodeRepositoryLatencySample, CodeRepositoryRemovalSummary, CodeRepositoryReport,
-    CodeRepositoryScopePreview, CodeRepositoryStatus, CodeRepositoryTotals,
+    CodeRepositoryDegradedFile, CodeRepositoryExcludedPath, CodeRepositoryLanguagePreview,
+    CodeRepositoryLargestFile, CodeRepositoryLatencySample, CodeRepositoryRemovalSummary,
+    CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositoryStatus, CodeRepositoryTotals,
     CodeSymbolGenerationCounts,
 };
 pub use retrieval_request::{

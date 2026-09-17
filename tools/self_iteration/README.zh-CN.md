@@ -471,3 +471,5 @@ Java 接收者回归还覆盖隐式 Object 重载、枚举/record 合成成员�
 框架范围回归还保护直接快照的节点/边持久化，并检查 SQLite 查询计划在结果上限前通过索引查找源文件语言。路由测试在 control 与分片中放置不同的非空配置、框架及变更文件影响证据。直接框架写入回归保护完整写入预算及发布计数；语言上限测试将被排除的记录放在匹配记录之前。
 
 fast 中的 `code_index_source_io_isolation_cases` 门禁覆盖过滤前置、结构化局部错误、部分快照、checkpoint 重放、租约隔离和无须 reset 的恢复。`source_io_windows.py` 提供真实 Windows I/O 与可选大型 Java 项目的测量，步骤见[路径 I/O 基准说明](../../docs/zh/05-benchmarks/12-elastic-index-budgets.md)。真实文件锁/ACL 错误与确定性注入的 `os error 1` 分别记录。
+
+fast/performance 的 `code_index_persistence_performance_suite_scope_preview_stops_after_overflow_batch` 用例要求只读 scope preview 返回前 50 个降级文件路径及解析原因，实际发现第 51 个文件才标记截断，之后不再请求后续解析批次。如果解析越过该批次，取消 guard 会让用例失败；完整选中文件统计仍必须正确。另有边界测试覆盖 0/49/50/51 条、恰好 50 条后跨批次发现更多诊断，以及独立的排除列表截断。这只限制预览工作量，持久化索引仍须完成全部阶段。

@@ -41,13 +41,22 @@ fn scope_preview_matches_parser_diagnostics_for_the_same_git_snapshot() {
     let indexed =
         build_index_snapshot(&registration, &selector, CodeIndexMode::Full, Vec::new()).unwrap();
     assert_eq!(preview.selected_file_count, 9);
-    assert_eq!(preview.expected_degraded_file_count, 7);
+    assert_eq!(preview.expected_degraded_files.len(), 7);
     assert_eq!(
-        preview.expected_degraded_file_count,
+        preview.expected_degraded_files.len(),
         indexed.diagnostics.len()
     );
     assert_eq!(preview.resolved_commit_sha, indexed.resolved_commit_sha);
     assert_eq!(preview.tree_hash, indexed.tree_hash);
+    assert!(!preview.expected_degraded_files_truncated);
+    for file in &preview.expected_degraded_files {
+        let diagnostic = indexed
+            .diagnostics
+            .iter()
+            .find(|item| item.path == file.path)
+            .unwrap();
+        assert_eq!(file.reason, diagnostic.message);
+    }
     assert!(
         !indexed
             .diagnostics
@@ -72,11 +81,11 @@ fn scope_preview_checks_only_selected_files_in_filesystem_snapshots() {
     let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new()).unwrap();
     let preview = preview_repository_scope(&registration, &selector).unwrap();
     assert_eq!(preview.selected_file_count, 1);
-    assert_eq!(preview.expected_degraded_file_count, 1);
+    assert_eq!(preview.expected_degraded_files.len(), 1);
     let indexed =
         build_index_snapshot(&registration, &selector, CodeIndexMode::Full, Vec::new()).unwrap();
     assert_eq!(
-        preview.expected_degraded_file_count,
+        preview.expected_degraded_files.len(),
         indexed.diagnostics.len()
     );
     assert_eq!(preview.resolved_commit_sha, indexed.resolved_commit_sha);
@@ -103,7 +112,7 @@ fn scope_preview_discards_incomplete_counts_when_cancelled_between_batches() {
 }
 
 #[test]
-fn scope_preview_counts_diagnostics_across_multiple_bounded_batches() {
+fn code_index_persistence_performance_suite_scope_preview_stops_after_overflow_batch() {
     let repo = TempGitRepo::create("preview-multiple-batches");
     let count = crate::domain::CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH + 1;
     for index in 0..count {
@@ -119,9 +128,97 @@ fn scope_preview_counts_diagnostics_across_multiple_bounded_batches() {
         Vec::new(),
     )
     .unwrap();
-    let preview = preview_repository_scope(&registration, &repo.selector()).unwrap();
+    let checks = Cell::new(0);
+    let preview = preview_repository_scope_cancellable(&registration, &repo.selector(), || {
+        checks.set(checks.get() + 1);
+        // Admission, layout completion, then before/after the first parser batch.
+        // Any attempt to continue past the overflowing batch must fail this case.
+        checks.get() > 4
+    })
+    .unwrap();
     assert_eq!(preview.selected_file_count, count);
-    assert_eq!(preview.expected_degraded_file_count, count);
+    assert_eq!(preview.expected_degraded_files.len(), 50);
+    assert!(preview.expected_degraded_files_truncated);
+    assert_eq!(checks.get(), 4);
+    for (index, file) in preview.expected_degraded_files.iter().enumerate() {
+        assert_eq!(file.path, format!("src/file_{index:04}.c"));
+        assert!(!file.reason.is_empty());
+    }
+    assert!(!preview.excluded_paths_truncated);
+}
+
+#[test]
+fn scope_preview_degraded_list_distinguishes_exact_limit_from_overflow() {
+    for count in [0, 49, 50, 51] {
+        let source = TempSourceDir::create("preview-detail-boundary");
+        source.write("src/valid.c", "int valid;\n");
+        for index in 0..count {
+            source.write(&format!("src/file_{index:04}.c"), "int broken = ;\n");
+        }
+        let preview = preview_repository_scope(&source.registration(), &source.selector()).unwrap();
+        assert_eq!(preview.selected_file_count, count + 1);
+        assert_eq!(preview.expected_degraded_files.len(), count.min(50));
+        assert_eq!(preview.expected_degraded_files_truncated, count > 50);
+        assert!(!preview.excluded_paths_truncated);
+        let serialized = serde_json::to_value(&preview).unwrap();
+        assert!(serialized.get("expected_degraded_file_count").is_none());
+        assert!(serialized["expected_degraded_files"].is_array());
+        assert_eq!(
+            serde_json::from_value::<crate::domain::CodeRepositoryScopePreview>(serialized)
+                .unwrap(),
+            preview
+        );
+    }
+}
+
+#[test]
+fn scope_preview_keeps_checking_after_exactly_fifty_diagnostics() {
+    for extra_diagnostic in [false, true] {
+        let source = TempSourceDir::create("preview-late-overflow");
+        let batch_size = crate::domain::CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH;
+        for index in 0..=batch_size {
+            let broken = index < 50 || (extra_diagnostic && index == batch_size);
+            source.write(
+                &format!("src/file_{index:04}.c"),
+                if broken {
+                    "int broken = ;\n"
+                } else {
+                    "int valid;\n"
+                },
+            );
+        }
+        let preview = preview_repository_scope(&source.registration(), &source.selector()).unwrap();
+        assert_eq!(preview.selected_file_count, batch_size + 1);
+        assert_eq!(preview.expected_degraded_files.len(), 50);
+        assert_eq!(preview.expected_degraded_files_truncated, extra_diagnostic);
+        for (index, file) in preview.expected_degraded_files.iter().enumerate() {
+            assert_eq!(file.path, format!("src/file_{index:04}.c"));
+        }
+    }
+}
+
+#[test]
+fn scope_preview_rejects_source_read_failures_before_truncating_diagnostics() {
+    let source = TempSourceDir::create("preview-unreadable-overflow");
+    for index in 0..52 {
+        source.write(&format!("src/file_{index:04}.c"), "int broken = ;\n");
+    }
+    let checks = Cell::new(0);
+    let result =
+        preview_repository_scope_cancellable(&source.registration(), &source.selector(), || {
+            checks.set(checks.get() + 1);
+            if checks.get() == 3 {
+                // Planning is complete, but the first parser batch has not read its files.
+                fs::remove_file(source.path.join("src/file_0051.c")).unwrap();
+            }
+            false
+        });
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("source changed or became unreadable")
+    );
 }
 
 #[test]
@@ -142,9 +239,9 @@ fn scope_preview_pins_git_ref_before_parser_planning() {
             false
         })
         .unwrap();
-    assert_eq!(preview.expected_degraded_file_count, 1);
+    assert_eq!(preview.expected_degraded_files.len(), 1);
     let current = preview_repository_scope(&repo.registration(), &repo.selector()).unwrap();
-    assert_eq!(current.expected_degraded_file_count, 0);
+    assert_eq!(current.expected_degraded_files.len(), 0);
     assert_ne!(preview.resolved_commit_sha, current.resolved_commit_sha);
 }
 

@@ -1,6 +1,72 @@
 use super::render_text;
 
 #[test]
+fn scope_preview_formats_preserve_reasons_and_independent_truncation_flags() {
+    use super::super::OutputFormat;
+    let context = crate::api::RequestContext::with_ids(
+        crate::api::InterfaceKind::Cli,
+        "preview-render",
+        "preview-render",
+    );
+    let metadata = crate::api::ApiMetadata::graph_only(&context, crate::domain::GraphVersion::ZERO);
+    for (degraded_truncated, excluded_truncated) in
+        [(false, false), (true, false), (false, true), (true, true)]
+    {
+        let response = serde_json::json!({"preview": {
+            "selected_file_count": 70, "selected_byte_count": 100, "unsupported_file_count": 0,
+            "expected_degraded_files": [{"path": "src/broken.c", "reason": "syntax\nerror"}],
+            "expected_degraded_files_truncated": degraded_truncated,
+            "excluded_paths": [{"path": "assets/image.png", "reason": "excluded by file preset"}],
+            "excluded_paths_truncated": excluded_truncated
+        }});
+        for format in [
+            OutputFormat::Text,
+            OutputFormat::Markdown,
+            OutputFormat::Json,
+            OutputFormat::StreamingJson,
+        ] {
+            let output = super::render_response(
+                "code.repo.scope_preview",
+                metadata.clone(),
+                &response,
+                format,
+            )
+            .unwrap();
+            match format {
+                OutputFormat::Json => assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(&output).unwrap(),
+                    response
+                ),
+                OutputFormat::StreamingJson => {
+                    let item: serde_json::Value =
+                        serde_json::from_str(output.lines().nth(1).unwrap()).unwrap();
+                    assert_eq!(item["payload"], response);
+                }
+                _ => {
+                    assert!(output.contains("path=\"src/broken.c\" reason=\"syntax\\nerror\""));
+                    assert!(
+                        output.contains(
+                            "path=\"assets/image.png\" reason=\"excluded by file preset\""
+                        )
+                    );
+                    assert_eq!(
+                        output.contains("Remaining parser batches may not have been checked"),
+                        degraded_truncated
+                    );
+                    assert_eq!(
+                        output.contains("excluded_paths: showing the first 50"),
+                        excluded_truncated
+                    );
+                    assert!(output.contains(&format!(
+                        "expected_degraded_files_truncated={degraded_truncated}"
+                    )));
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn software_text_exposes_page_continuation() {
     let text = render_text("code.repo.software", &serde_json::json!({"request":{"kind":"modules"}, "build_targets":[], "relationships":[], "status":{"stale":false}, "next_cursor":"sw1:abcd"})).unwrap();
     assert!(text.contains("next_cursor=sw1:abcd"));
@@ -161,10 +227,13 @@ fn render_text_covers_operational_and_code_repository_summaries() {
                     "selected_file_count": 2,
                     "selected_byte_count": 128,
                     "unsupported_file_count": 1,
-                    "expected_degraded_file_count": 1,
+                    "expected_degraded_files": [{"path": "src/broken.c", "reason": "syntax error"}],
+                    "expected_degraded_files_truncated": false,
+                    "excluded_paths": [],
+                    "excluded_paths_truncated": false,
                 },
             }),
-            "preview files=2 bytes=128 unsupported=1 expected_degraded=1\n",
+            "preview files=2 bytes=128 unsupported=1 expected_degraded_files=1 expected_degraded_files_truncated=false excluded_paths=0 excluded_paths_truncated=false\nexpected_degraded_files path=\"src/broken.c\" reason=\"syntax error\"\n",
         ),
         (
             "code.repo.impact",
