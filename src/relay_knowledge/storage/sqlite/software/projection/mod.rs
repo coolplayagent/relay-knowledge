@@ -34,8 +34,8 @@ pub(in super::super) use fenced::{
     FencedProjectionAdvance, advance_fenced_projection, refreshed_fenced_projection,
 };
 
-const MAX_DEPENDENCY_COMPONENTS_PER_SCOPE: usize = 65_536;
-const MAX_SDK_USAGES_PER_SCOPE: usize = 131_072;
+const MAX_DEPENDENCY_COMPONENTS_PER_SCOPE: usize = 524_288;
+const MAX_SDK_USAGES_PER_SCOPE: usize = 1_048_576;
 const COMPONENT_USAGE_TARGET_QUERY_BATCH_SIZE: usize = 256;
 
 #[derive(Default)]

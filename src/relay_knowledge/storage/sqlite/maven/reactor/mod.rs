@@ -12,7 +12,7 @@ pub(in crate::storage::sqlite) use traversal::downstream;
 use crate::domain::{SoftwareBuildTarget, SoftwareRelationship};
 
 const MAX_MODULES: usize = 8_192;
-const MAX_EDGES: usize = 131_072;
+const MAX_EDGES: usize = 1_048_576;
 
 pub(in crate::storage::sqlite) struct ModuleImpact {
     pub path: String,

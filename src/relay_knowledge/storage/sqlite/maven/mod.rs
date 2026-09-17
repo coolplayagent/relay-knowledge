@@ -26,7 +26,7 @@ const MAVEN_SOURCE_KIND: &str = "pom.xml";
 const MAX_POM_DOCUMENTS_PER_SCOPE: usize = 8_192;
 const MAX_POM_CHUNKS_PER_SCOPE: usize = 16_384;
 const MAX_POM_BYTES_PER_SCOPE: usize = 64 * 1024 * 1024;
-const MAX_MAVEN_DEPENDENCIES_PER_SCOPE: usize = 131_072;
+const MAX_MAVEN_DEPENDENCIES_PER_SCOPE: usize = 1_048_576;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::storage::sqlite) struct EffectiveDependencyRefresh {
