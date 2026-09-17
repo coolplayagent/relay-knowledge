@@ -300,7 +300,7 @@ pub(in crate::interfaces::cli::spec) fn repo_context() -> CliCommandSpec {
 pub(in crate::interfaces::cli::spec) fn repo_feature_flags() -> CliCommandSpec {
     command!(
         &["repo", "feature-flags"],
-        "relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--limit <n>]",
+        "relay-knowledge repo feature-flags <alias> [--query <text>] [--domain <name>] [--source <format>] [--hot-reload <true|false>] [--consistency] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--limit <n>]",
         "List configuration-driven feature flags and code relationships from a repository index.",
         "code.repo.feature_flags",
         CommandEffect::ReadOnly,
@@ -313,6 +313,42 @@ pub(in crate::interfaces::cli::spec) fn repo_feature_flags() -> CliCommandSpec {
             &[],
         )],
         &[
+            opt(
+                "--domain",
+                Some("name"),
+                false,
+                false,
+                "Filter explicit owning domain metadata.",
+                None,
+                &[]
+            ),
+            opt(
+                "--source",
+                Some("format"),
+                false,
+                false,
+                "Filter source-format evidence while retaining linked usages.",
+                None,
+                crate::domain::CODE_CONFIG_SOURCE_FORMATS
+            ),
+            opt(
+                "--hot-reload",
+                Some("bool"),
+                false,
+                false,
+                "Filter explicitly documented hot-reload support.",
+                None,
+                &["true", "false"]
+            ),
+            opt(
+                "--consistency",
+                None,
+                false,
+                false,
+                "Compare definitions, reads, defaults and observed formats in the selected scope.",
+                None,
+                &[]
+            ),
             opt(
                 "--query",
                 Some("text"),
@@ -624,7 +660,7 @@ pub(in crate::interfaces::cli::spec) fn repo_view() -> CliCommandSpec {
 pub(in crate::interfaces::cli::spec) fn repo_software() -> CliCommandSpec {
     command!(
         &["repo", "software"],
-        "relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--freshness <policy>] [--limit <n>]",
+        "relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|modules|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--path <prefix>] [--freshness <policy>] [--limit <n>] [--cursor <token>]",
         "Read compatible software projections and provenance-bearing ontology entities, statements, and conflicts.",
         "code.repo.software",
         CommandEffect::ReadOnly,
@@ -637,6 +673,24 @@ pub(in crate::interfaces::cli::spec) fn repo_software() -> CliCommandSpec {
             &[],
         )],
         &[
+            opt(
+                "--cursor",
+                Some("token"),
+                false,
+                false,
+                "Continue a dependencies/modules page using next_cursor and the same ref and filters.",
+                None,
+                &[]
+            ),
+            opt(
+                "--path",
+                Some("prefix"),
+                false,
+                true,
+                "Restricts facts to the requested path prefix.",
+                None,
+                &[]
+            ),
             opt(
                 "--ref",
                 Some("ref"),
@@ -660,6 +714,7 @@ pub(in crate::interfaces::cli::spec) fn repo_software() -> CliCommandSpec {
                     "topics",
                     "relationships",
                     "build",
+                    "modules",
                     "iac",
                     "design",
                     "systems",
@@ -832,7 +887,8 @@ pub(in crate::interfaces::cli::spec) fn repo_business() -> CliCommandSpec {
         ],
         &["relay-knowledge repo business core --kind all --query MRR --format json"],
         &[
-            "The command reads the fenced business projection; it never scans glossary YAML at query time."
+            "The command reads the fenced business projection; it never scans glossary YAML at query time.",
+            "Code indexing does not infer business terms. Run map init for glossary schema and authoring guidance, commit the map and glossary, then repo index before querying. Responses separate request.mode, result.status/match_type and knowledge.state; empty results include structured diagnostics."
         ],
     )
 }

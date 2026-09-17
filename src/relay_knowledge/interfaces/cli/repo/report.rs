@@ -80,5 +80,11 @@ fn render_markdown_report(response: &CodeRepositoryReportResponse) -> Result<Str
         }
     }
 
+    if report.degradation_summary_truncated {
+        output.push_str(&format!(
+            "\nDiagnostic summary truncated. Continue with: `{}`\n",
+            report.diagnostics_command
+        ));
+    }
     Ok(output)
 }

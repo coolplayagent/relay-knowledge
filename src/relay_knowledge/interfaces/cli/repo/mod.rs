@@ -9,6 +9,7 @@ use super::{
     render_response, serialize_line,
 };
 
+mod diagnostics;
 mod index;
 mod parser;
 mod query;
@@ -23,6 +24,7 @@ pub use runner::run_repo;
 /// Parsed `repo` CLI command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepoCommand {
+    Diagnostics(crate::domain::CodeDiagnosticsRequest),
     List,
     Register {
         root_path: String,
@@ -87,6 +89,7 @@ pub enum RepoCommand {
         exclude_generated: bool,
     },
     FeatureFlags {
+        filters: crate::domain::CodeConfigFilter,
         alias: String,
         query: Option<String>,
         limit: usize,
@@ -118,6 +121,8 @@ pub enum RepoCommand {
         alias: String,
     },
     Software {
+        cursor: Option<String>,
+        path_filters: Vec<String>,
         alias: String,
         ref_selector: String,
         kind: SoftwareGlobalKind,

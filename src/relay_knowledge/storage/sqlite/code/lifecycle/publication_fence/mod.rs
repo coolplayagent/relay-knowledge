@@ -106,6 +106,27 @@ impl PublicationFenceGuard {
         Ok(mode == CodeIndexMode::WorktreeOverlay)
     }
 
+    pub(in crate::storage) fn bind_local_source_session(
+        &self,
+        transaction: &Transaction<'_>,
+        session: &crate::domain::CodeIndexSession,
+    ) -> Result<(), StorageError> {
+        if self.target_scope_matches(transaction, &session.source_scope)? {
+            return Ok(());
+        }
+        if !filesystem_snapshot_identity(&session.resolved_commit_sha) {
+            return Ok(());
+        }
+        let target = PartitionedPublicationTarget::from(session);
+        let identity = verified_worktree_scope_from_target(&target)?.ok_or_else(|| {
+            StorageError::Invariant("local source session has invalid snapshot identity".into())
+        })?;
+        if !self.rebind_verified_worktree_target(transaction, &session.source_scope, &identity)? {
+            return Err(self.inactive_error());
+        }
+        self.validate(transaction)
+    }
+
     pub(in crate::storage) fn validate_repository(
         &self,
         repository_id: &str,
@@ -156,7 +177,7 @@ impl PublicationFenceGuard {
         )))
     }
 
-    fn target_scope_matches(
+    pub(in crate::storage) fn target_scope_matches(
         &self,
         transaction: &Transaction<'_>,
         source_scope: &str,
@@ -505,6 +526,20 @@ impl From<&crate::domain::CodeIndexSnapshot> for PartitionedPublicationTarget {
     }
 }
 
+impl From<&crate::domain::CodeIndexSession> for PartitionedPublicationTarget {
+    fn from(session: &crate::domain::CodeIndexSession) -> Self {
+        Self {
+            repository_id: session.repository_id.clone(),
+            source_scope: session.source_scope.clone(),
+            base_resolved_commit_sha: session.base_resolved_commit_sha.clone(),
+            resolved_commit_sha: session.resolved_commit_sha.clone(),
+            tree_hash: session.tree_hash.clone(),
+            path_filters: session.path_filters.clone(),
+            language_filters: session.language_filters.clone(),
+        }
+    }
+}
+
 /// Durably prepares a partitioned publication target in the control database.
 ///
 /// SQLite cannot make an attached multi-database WAL transaction power-loss
@@ -556,6 +591,27 @@ impl PendingWorktreeTarget {
     ) -> Result<bool, StorageError> {
         let mode = serde_json::from_str::<CodeIndexMode>(&self.mode_json)
             .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+        if matches!(
+            mode,
+            CodeIndexMode::Full | CodeIndexMode::Incremental { .. }
+        ) && filesystem_snapshot_identity(&self.resolved_commit_sha)
+            && self.resolved_commit_sha == self.tree_hash
+            && target.resolved_commit_sha == target.tree_hash
+            && filesystem_snapshot_identity(&target.resolved_commit_sha)
+        {
+            let paths = parse_filters(&self.path_filters_json)?;
+            let languages = parse_filters(&self.language_filters_json)?;
+            return Ok(target.repository_id == repository_id
+                && target.path_filters == paths
+                && target.language_filters == languages
+                && code_snapshot_scope_workspace_semantic(
+                    repository_id,
+                    &self.tree_hash,
+                    &paths,
+                    &languages,
+                    &self.source_scope,
+                ) == Some(target.workspace_semantic));
+        }
         let Some(base_commit) = self.resolved_commit_sha.strip_prefix("worktree:pending:") else {
             return Ok(false);
         };
@@ -647,16 +703,14 @@ fn verified_worktree_scope_from_target(
         }
         Some(base_commit.to_owned())
     } else {
-        let Some(base_commit) = target.base_resolved_commit_sha.as_deref() else {
-            return Ok(None);
-        };
+        let base_commit = target.base_resolved_commit_sha.as_deref();
         if target.resolved_commit_sha != target.tree_hash
             || !filesystem_snapshot_identity(&target.resolved_commit_sha)
-            || !filesystem_snapshot_identity(base_commit)
+            || base_commit.is_some_and(|base| !filesystem_snapshot_identity(base))
         {
             return Ok(None);
         }
-        Some(base_commit.to_owned())
+        base_commit.map(ToOwned::to_owned)
     };
 
     Ok(Some(WorktreeScopeIdentity {

@@ -9,6 +9,71 @@ use crate::code::{
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn shebang_exclusions_keep_durable_prefixes_and_distinct_language_scopes() {
+    let repo = TempGitRepo::create("shebang-language-resume");
+    repo.write("src/a", "#!/bin/bash\nrun() { echo $ENABLED; }\nrun\n");
+    repo.write(
+        "src/b",
+        "#!/usr/bin/env python3\nimport os\nvalue = os.getenv('ENABLED')\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "script scopes"]);
+    let plan_for = |language: &str| {
+        let mut registration = repo.registration();
+        registration.language_filters = vec!["bash".into(), "python".into()];
+        let mut selector = repo.selector();
+        selector.language_filters = vec![language.into()];
+        prepare_full_index_plan(
+            registration,
+            selector,
+            CodeIndexResourceBudget::new(1, 1_024 * 1_024, 10_000).unwrap(),
+        )
+        .unwrap()
+    };
+    let bash = plan_for("bash");
+    let python = plan_for("python");
+    assert_ne!(bash.source_scope, python.source_scope);
+    assert!(
+        python
+            .clone()
+            .resume_from_checkpoint(&checkpoint_for_plan(&bash, "indexing", 1, 1))
+            .is_err()
+    );
+    for (language, plan) in [("bash", bash), ("python", python)] {
+        assert_eq!(plan.paths.len(), 2);
+        let (plan, first) = plan.parse_next_batch().unwrap();
+        let first = first.unwrap();
+        assert_eq!(first.files.len(), 1);
+        let resumed = plan_for(language)
+            .resume_from_checkpoint(&checkpoint_for_plan(&plan, "indexing", 1, 1))
+            .unwrap();
+        let (finished, second) = resumed.parse_next_batch().unwrap();
+        let second = second.unwrap();
+        let batches = [first, second];
+        assert_eq!(
+            batches.iter().map(|batch| batch.files.len()).sum::<usize>(),
+            2
+        );
+        for batch in batches {
+            if batch.files[0].language_id != language {
+                assert_eq!(
+                    batch.files[0].parse_status,
+                    crate::domain::CodeParseStatus::Excluded
+                );
+                assert!(
+                    batch.symbols.is_empty()
+                        && batch.references.is_empty()
+                        && batch.chunks.is_empty()
+                        && batch.feature_flags.is_empty()
+                );
+                assert!(batch.diagnostics.is_empty());
+            }
+        }
+        assert!(finished.parse_next_batch().unwrap().1.is_none());
+    }
+}
+
+#[test]
 fn parser_worker_count_keeps_tiny_batches_serial() {
     assert_eq!(worker_count(7, 32 * 1024), 1);
 }
@@ -153,7 +218,15 @@ fn durable_reference_resolution_direct_and_nested_reopen_without_parsing_a_blob(
     let nested = crate::domain::code_reference_resolution_query_index_repair_state(16, parsed)
         .expect("nested repair cursor should format");
 
-    for state in [direct, nested] {
+    let ownership =
+        crate::domain::CodeQueryIndexRepairResumePhase::ownership_checkpoint_state("symbol:31")
+            .unwrap();
+    for state in [
+        direct,
+        nested,
+        "finalizing:resolve_type_ownership".into(),
+        ownership,
+    ] {
         let checkpoint = checkpoint_for_plan(&plan, &state, 3, 3);
         let (resumed, batch) = plan
             .clone()
@@ -332,6 +405,7 @@ fn checkpoint_for_plan(
 ) -> CodeIndexCheckpoint {
     let session = plan.session();
     CodeIndexCheckpoint {
+        processed_path_count: 0,
         repository_id: session.repository_id,
         source_scope: session.source_scope,
         resolved_commit_sha: session.resolved_commit_sha,
@@ -372,6 +446,7 @@ fn batch_row_count_includes_feature_flags() {
     );
     build.feature_flags = crate::code::feature_flags::extract_feature_flags(
         crate::code::feature_flags::FeatureFlagFileInput {
+            syntax_root: None,
             repository_id: &build.repository_id,
             source_scope: &build.source_scope,
             file_id: "file",

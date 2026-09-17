@@ -19,7 +19,7 @@ pub(super) const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_symbols",
-        columns: "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end, symbol_role_json",
+        columns: "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end, symbol_role_json, type_owner_json, type_owner_identity",
         cursor: CodeScopeCursor::Key("symbol_snapshot_id"),
     },
     CodeScopeTable {
@@ -39,12 +39,12 @@ pub(super) const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_calls",
-        columns: "repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
+        columns: "repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end, byte_start, byte_end",
         cursor: CodeScopeCursor::Key("call_id"),
     },
     CodeScopeTable {
         table: "code_repository_feature_flags",
-        columns: "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt",
+        columns: "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt, metadata_json",
         cursor: CodeScopeCursor::Key("usage_id"),
     },
     CodeScopeTable {
@@ -69,7 +69,7 @@ pub(super) const CODE_SCOPE_TABLES: &[CodeScopeTable] = &[
     },
     CodeScopeTable {
         table: "code_repository_file_diagnostics",
-        columns: "repository_id, source_scope, path, parse_status, message",
+        columns: "repository_id, source_scope, path, parse_status, message, io_json",
         cursor: CodeScopeCursor::Pair("path", "message"),
     },
 ];
@@ -89,8 +89,23 @@ pub(super) const REFERENCE_SEARCH_SCOPE_TABLES: &[CodeScopeTable] = &[
 
 pub(super) const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
     CodeScopeTable {
+        table: "maven_reactor_status",
+        columns: "source_scope, complete",
+        cursor: CodeScopeCursor::Singleton,
+    },
+    CodeScopeTable {
+        table: "maven_reactor_modules",
+        columns: "source_scope, module_id, path, directory, payload",
+        cursor: CodeScopeCursor::Key("module_id"),
+    },
+    CodeScopeTable {
+        table: "maven_reactor_edges",
+        columns: "source_scope, edge_id, source_id, target_id, kind, resolution_state, dependency_scope, profile, payload",
+        cursor: CodeScopeCursor::Key("edge_id"),
+    },
+    CodeScopeTable {
         table: "code_repository_index_checkpoints",
-        columns: "source_scope, repository_id, state, resolved_commit_sha, tree_hash, path_filters_json, language_filters_json, total_path_count, parsed_file_count, committed_file_count, committed_symbol_count, committed_reference_count, committed_chunk_count, committed_fact_row_count, incremental_summary_json, batch_count, last_path, resource_budget_json, updated_at_ms, error_message",
+        columns: "source_scope, repository_id, state, resolved_commit_sha, tree_hash, path_filters_json, language_filters_json, total_path_count, parsed_file_count, committed_file_count, committed_symbol_count, committed_reference_count, committed_chunk_count, committed_fact_row_count, incremental_summary_json, batch_count, last_path, resource_budget_json, updated_at_ms, error_message, processed_path_count",
         cursor: CodeScopeCursor::Singleton,
     },
     CodeScopeTable {
@@ -159,3 +174,14 @@ pub(super) const IMPORTED_DERIVED_SCOPE_TABLES: &[CodeScopeTable] = &[
         cursor: CodeScopeCursor::Key("diagnostic_id"),
     },
 ];
+
+impl CodeScopeTable {
+    /// Local I/O outcomes must be observed again, never inherited into a new snapshot.
+    pub(super) fn local_io_exclusion_predicate(&self) -> &'static str {
+        if self.table == "code_repository_file_diagnostics" {
+            "io_json IS NOT NULL"
+        } else {
+            "0"
+        }
+    }
+}

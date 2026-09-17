@@ -84,6 +84,24 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
             FROM code_repository_symbols;
             DROP TABLE code_repository_symbols;
             ALTER TABLE legacy_code_repository_symbols RENAME TO code_repository_symbols;
+            DROP TRIGGER code_config_bindings_insert;
+            DROP TRIGGER code_config_bindings_update;
+            DROP TRIGGER code_config_bindings_delete;
+            ALTER TABLE code_repository_calls DROP COLUMN byte_start;
+            ALTER TABLE code_repository_calls DROP COLUMN byte_end;
+            INSERT INTO code_repository_calls (repository_id,source_scope,call_id,file_id,path,caller_name,callee_name,resolution_state,confidence_basis_points,confidence_tier,line_start,line_end) VALUES ('repo','git_snapshot:test','legacy-call','file','src/routes.ts','listUsers','open','unresolved',2500,'extracted',1,1);
+            ALTER TABLE code_repository_feature_flags DROP COLUMN metadata_json;
+            INSERT INTO code_repository_feature_flags (
+                repository_id, source_scope, feature_flag_id, usage_id, file_id, path,
+                language_id, name, source_kind, source_key, edge_kind,
+                confidence_basis_points, confidence_tier, byte_start, byte_end,
+                line_start, line_end, excerpt
+            ) VALUES ('repo', 'git_snapshot:test', 'flag', 'usage', 'file', 'src/routes.ts',
+                'typescript', 'flag', 'config_key', 'flag', 'reads_config', 9000,
+                'extracted', 0, 1, 1, 1, 'flag');
+            DROP TABLE maven_reactor_status;
+            DROP TABLE maven_reactor_modules;
+            DROP TABLE maven_reactor_edges;
             DROP TABLE code_repository_routes;
             DROP TABLE code_repository_commit_scopes;
             PRAGMA foreign_keys = OFF;
@@ -119,6 +137,22 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
     )
     .expect("legacy snapshot should import");
 
+    let metadata: String = target
+        .query_row(
+            "SELECT metadata_json FROM code_repository_feature_flags WHERE usage_id='usage'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("legacy configuration usage should import with unknown metadata");
+    assert_eq!(metadata, "{}");
+    let range: (Option<i64>, Option<i64>) = target
+        .query_row(
+            "SELECT byte_start,byte_end FROM code_repository_calls WHERE call_id='legacy-call'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(range, (None, None));
     let symbol_role: Option<String> = target
         .query_row(
             "
@@ -209,6 +243,15 @@ fn imports_legacy_code_snapshots_without_route_table_or_symbol_role_column() {
     .expect("legacy scope status should load");
     fs::remove_file(source_path).expect("temporary source database should be removed");
 
+    assert!(
+        crate::storage::sqlite::maven::reactor::require_complete(&target, "git_snapshot:test")
+            .is_ok()
+    );
+    target.execute("UPDATE code_repository_files SET path = 'pom.xml' WHERE source_scope = 'git_snapshot:test'", []).unwrap();
+    assert!(
+        crate::storage::sqlite::maven::reactor::require_complete(&target, "git_snapshot:test")
+            .is_err()
+    );
     assert!(symbol_role.is_none());
     assert_eq!(route_count, 0);
     assert_eq!(commit_alias_count, 1);

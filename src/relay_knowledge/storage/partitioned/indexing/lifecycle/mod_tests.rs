@@ -7,8 +7,8 @@ use crate::{
     },
     storage::{
         CodeIndexFinalizationStep, CodeIndexPublicationStore as _, CodeIndexTaskClaimRequest,
-        CodeIndexTaskSeed, CodeIndexTaskStore as _, PartitionedSqliteKnowledgeStore,
-        RepositoryCatalogStore as _, SoftwareProjectionStore as _,
+        CodeIndexTaskSeed, CodeIndexTaskStore as _, CodeQueryReadStore as _,
+        PartitionedSqliteKnowledgeStore, RepositoryCatalogStore as _, SoftwareProjectionStore as _,
     },
 };
 
@@ -123,7 +123,7 @@ async fn prepared_worktree_rebind_survives_reopen_and_publishes_direct_snapshot(
 
     store
         .catalog
-        .prepare_snapshot_target(&snapshot, publication_fence.clone())
+        .prepare_publication_target(crate::storage::sqlite::code::lifecycle::publication_fence::PartitionedPublicationTarget::from(&snapshot), publication_fence.clone())
         .await
         .expect("control WAL should durably prepare the real target");
     let prepared = store
@@ -201,7 +201,7 @@ async fn stale_generation_cannot_prepare_partitioned_worktree_rebind() {
 
     let error = store
         .catalog
-        .prepare_snapshot_target(&snapshot, fence(&old, "worker-old"))
+        .prepare_publication_target(crate::storage::sqlite::code::lifecycle::publication_fence::PartitionedPublicationTarget::from(&snapshot), fence(&old, "worker-old"))
         .await
         .expect_err("stale generation must not prepare the control handoff");
     assert!(
@@ -216,7 +216,7 @@ async fn stale_generation_cannot_prepare_partitioned_worktree_rebind() {
 
     store
         .catalog
-        .prepare_snapshot_target(&snapshot, fence(&current, "worker-current"))
+        .prepare_publication_target(crate::storage::sqlite::code::lifecycle::publication_fence::PartitionedPublicationTarget::from(&snapshot), fence(&current, "worker-current"))
         .await
         .expect("current generation should prepare the handoff");
     let prepared = store
@@ -304,7 +304,7 @@ async fn fenced_finalization_advances_one_durable_staged_shard_checkpoint_per_ca
     else {
         panic!("first finalization quantum must remain pending");
     };
-    assert_eq!(first_state, "finalizing:build_query_indexes:v3:0");
+    assert_eq!(first_state, "finalizing:build_query_indexes:v5:0");
     assert_eq!(
         shard
             .code_index_checkpoint(source_scope.clone())
@@ -325,7 +325,7 @@ async fn fenced_finalization_advances_one_durable_staged_shard_checkpoint_per_ca
     else {
         panic!("second finalization quantum must remain pending");
     };
-    assert_eq!(second_state, "finalizing:build_query_indexes:v3:2");
+    assert_eq!(second_state, "finalizing:build_query_indexes:v5:2");
     assert_eq!(
         shard
             .code_index_checkpoint(source_scope)
@@ -604,4 +604,49 @@ fn now_millis() -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+#[tokio::test]
+async fn partitioned_diagnostics_count_files_once_and_route_to_published_snapshot() {
+    use crate::domain::{CodeDiagnosticsPageRequest, CodeFileDiagnostic, CodeParseStatus};
+    let store = partitioned_store("diagnostics-paging");
+    store
+        .upsert_code_repository(super::publication_barrier_tests::registration())
+        .await
+        .unwrap();
+    let mut snapshot = super::publication_barrier_tests::snapshot("diagnostics-scope");
+    for message in ["first issue", "second issue"] {
+        snapshot.diagnostics.push(CodeFileDiagnostic {
+            io: None,
+            repository_id: "repo".into(),
+            source_scope: "diagnostics-scope".into(),
+            path: "src/lib.rs".into(),
+            parse_status: CodeParseStatus::Partial,
+            message: message.into(),
+        });
+    }
+    snapshot.files[0].parse_status = CodeParseStatus::Partial;
+    snapshot.files[0].degraded_reason = Some("first issue".into());
+    let summary = super::seed_snapshot_for_test(&store, snapshot)
+        .await
+        .unwrap();
+    assert_eq!(summary.degraded_file_count, 1);
+    let status = store
+        .code_repository_status("fixture".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(status.content_integrity.degraded_file_count, Some(1));
+    let request = CodeDiagnosticsPageRequest {
+        repository_id: "repo".into(),
+        source_scope: "diagnostics-scope".into(),
+        resolved_commit_sha: "commit".into(),
+        path_filters: vec![],
+        limit: 1,
+        after: None,
+    };
+    let page = store.code_repository_diagnostics(request).await.unwrap();
+    assert_eq!(page.degraded_file_count, 1);
+    assert_eq!(page.diagnostics.len(), 1);
+    assert!(page.has_more);
 }

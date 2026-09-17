@@ -8,6 +8,7 @@
 - [Commit-driven Git update loop](#commit-driven-git-update-loop)
 - [Knowledge graph query flow](#knowledge-graph-query-flow)
 - [Diagnostics](#diagnostics)
+- [Partial code indexing diagnostics](#partial-code-indexing-diagnostics)
 - [Out of scope](#out-of-scope)
 
 ## Installation and Upgrade Checks
@@ -251,6 +252,18 @@ start with `--kind hybrid`, then narrow based on the returned evidence. For
 call-chain prompts, expand `callers` or `callees` step by step and state that
 the CLI returns bounded one-hop edges when that limit matters.
 
+For supported short type names, `callers`/`callees` aggregates the type,
+constructors and direct methods in the requested direction. Names are
+case-sensitive; ownership is resolved within its language and module. An empty directional result
+does not justify broadening to text matches. Package-qualified class
+aggregation, inherited members and dynamic dispatch are not inferred.
+Path filters constrain call sites, so callers can lie outside the class file.
+Call-site byte ranges require current v56 facts; older imported records retain
+unknown ranges. Treat unresolved receiver hints as evidence gaps, not exact
+method targets. See [language capabilities](language-capabilities.md) for reader,
+Flow, shebang and cross-file constant boundaries.
+For `class call query incomplete`, narrow to a member such as `B.process`.
+
 ### `repo software --kind`
 
 Use `relay-knowledge repo software --kind ...` when the user asks for
@@ -264,6 +277,7 @@ software inventory, or "代码图关系":
 - `relationships`: cross-domain relationships between files, topics, configs,
   dependencies, SDK/API usages, build targets, IaC resources, and design facts.
 - `build`: build target and build-manifest facts.
+- `modules`: Maven reactor module targets and declared POM dependency edges.
 - `iac`: infrastructure-as-code resource facts.
 - `design`: design documentation and design element facts.
 - `all`: all software graph slices for broad repository overviews.
@@ -281,15 +295,44 @@ relay-knowledge repo software core \
   --format json
 ```
 
+For Maven inventories, `dependencies` includes package components, source
+usages, module targets and POM edges; `modules` selects the reactor graph.
+`--path` narrows module/file prefixes. Both kinds share one page limit across
+their returned arrays (1–500). Accumulate `next_cursor` pages with the same
+immutable ref, kind and filters until the cursor is absent. Other kinds do not
+accept continuation cursors, and `graph-only` cannot continue a page. A missing retained snapshot requires a new read
+after indexing; do not silently combine pages from different snapshots.
+
+```bash
+relay-knowledge repo software core --kind modules --path services --ref "$pinned_head" --limit 100 --format json
+relay-knowledge repo software core --kind modules --path services --ref "$pinned_head" --limit 100 --cursor "$next_cursor" --format json
+```
+
+Set `next_cursor` from the preceding JSON response. `repo impact --base ...
+--head ...` also returns default-profile downstream module evidence chains;
+these are declared Maven dependencies, not proof of runtime call reachability.
+
 ### `repo business --kind`
 
-Read `map route business-knowledge --format json` first, then use `repo
+Read `map route business-knowledge --type knowledge --format json` first, then use `repo
 business` for authored domain terms, aliases/acronyms, semantics, conflicting
 definitions, and technical mappings. The command-local kinds are `terms`,
 `mappings`, and `all`. Pin the same immutable `--ref` used by context and
-software queries. Supply `--domain` for homonyms; do not guess when resolution
+software queries. Supply a unique domain ID with `--domain` for homonyms; do not guess when `result.status`
 is `ambiguous`. Preserve unresolved `target_hint` values as bounded follow-up
 seeds rather than treating them as parser or repository degradation.
+
+Read `result.status` (`matched`, `no_match`, `ambiguous`, `unavailable`)
+separately from `knowledge.state` (`no_sources`, `empty_glossary`, `terms_only`,
+`mapped`, or `unknown`). The old top-level `resolution` and business `status`
+are removed. `request.mode` is derived from query presence as list/search;
+`result.match_type` is exact/partial only for matching searches. `mapped` means
+at least one declared mapping, not complete coverage or resolved targets.
+`graph-only` returns unknown knowledge and unavailable results; `allow-stale`
+may return a match with `knowledge.stale=true`. Use reason-specific diagnostic
+`next_steps` and [glossary authoring](knowledge-map-workflows.md) rather than
+reindexing an unchanged empty glossary. Check `truncated` before claiming that
+the returned terms/mappings exhaust the scope.
 
 ```bash
 relay-knowledge repo business core \
@@ -339,7 +382,7 @@ search is a fallback rather than the preferred code graph path.
 
 ### Feature Flag Query Flow
 
-For prompts about feature flags, config keys, environment-variable gates,
+For prompts about configuration definitions, reads, consistency, feature flags, config keys, environment-variable gates,
 settings gates, gray-release switches, or code guarded by runtime configuration,
 use `repo feature-flags` instead of `repo query --kind`. Feature flags are a
 separate indexed graph surface; do not pass `feature_flag` or `feature-flags` as
@@ -359,6 +402,28 @@ indexed scope. With `--query`, it filters indexed feature flag names, config
 sources, paths, and excerpts. It does not recursively grep the repository at
 query time; after adding flags or changing extraction rules, refresh the scope
 with `repo index` or `repo update`.
+
+The registry connects supported-language property/environment reads, key constants and
+zero-argument getters with properties, INI, Consul `.ctmpl`, dotenv and Shell
+definitions. Use explicit metadata filters and consistency analysis:
+
+```bash
+relay-knowledge repo feature-flags core --query checkout --domain payments --source properties --hot-reload true --ref "$pinned_head" --format json
+relay-knowledge repo feature-flags core --query checkout --consistency --ref "$pinned_head" --freshness wait-until-fresh --format json
+```
+
+Domain and hot-reload support are authored metadata, not inferred runtime
+behavior. Source filters select groups while retaining linked usages. Request
+path/language filters narrow displayed usages; connected consistency evidence
+may lie outside that display filter but must stay inside the registered scope.
+Inspect `read_without_definition`, `missing_from_format`, and
+`conflicting_defaults`; `conflicting_default_sources` locates conflicting
+values. Missing or unresolved evidence is not proof of a production value or
+definite absence. Stale/degraded scopes suppress definitive consistency
+diagnostics; incomplete binding/flow analysis suppresses absence conclusions.
+Budget exhaustion is an explicit error, not a successful complete analysis.
+See [language capabilities](language-capabilities.md) for type applicability,
+source identifiers, static binding limits and upgrade behavior.
 
 Use `grep`, `ripgrep`, `rg`, or another raw text search for feature flag prompts
 only when the CLI is unavailable, the target repository cannot be indexed, or
@@ -654,6 +719,44 @@ relay-knowledge service operator resume --format json
 
 Use platform service managers for long-running operation. Do not replace them
 with unmanaged CLI loops.
+
+## Partial code indexing diagnostics
+
+Freshness and content completeness are independent. Inspect `content_integrity` on repository status/report and query freshness. `partial` warns about missing facts even when the returned hits are healthy; `unknown` is not complete. Do not repeatedly index solely because legacy `degraded_reason` is present.
+
+```powershell
+relay-knowledge repo diagnostics core --ref HEAD --limit 50 --format json
+relay-knowledge repo diagnostics core --ref HEAD --limit 50 --cursor $nextCursor --format json
+```
+
+Set `$nextCursor` from the preceding JSON `next_cursor` and continue until it
+is null. Retain the same ref and path filters across pages. The cursor pins
+the served scope even when HEAD moves; removed snapshots fail explicitly.
+The default page limit is 50, with a maximum of 200. `repo report` contains only
+the first 20 diagnostics and reports truncation plus a pinned diagnostics
+command. Use that command to inspect the report's exact snapshot. Multiple
+diagnostics may refer to one file; `degraded_file_count` counts distinct files.
+Read `content_integrity.state` as complete/partial/unknown independently from
+freshness. Query/read-model failures still report degradation; partial file
+content alone does not require repeatedly refreshing an already fresh index.
+
+Before indexing, `repo scope preview` or `repo index --dry-run` can estimate
+degraded files using the actual indexing parser:
+
+```bash
+relay-knowledge repo scope preview core --ref "$pinned_head" --format json
+relay-knowledge repo index core --ref "$pinned_head" --dry-run --format json
+```
+
+`expected_degraded_file_count` counts each diagnostic file once, including
+syntax errors, invalid UTF-8, binary content, unsupported grammars and oversized
+files. Missing out-of-scope external dependency source is unresolved edge
+metadata, not file degradation. Preview reads/parses files but writes no index
+facts, tasks or checkpoints. It has two worker permits, a five-second admission
+wait and a 120-second response deadline; incomplete counts are not successful
+previews. Narrow the registered scope after a timeout. Compare the estimate
+only with a full index at the same resolved ref and scope; incremental or
+worktree summaries can cover different file sets.
 
 ## Out of Scope
 

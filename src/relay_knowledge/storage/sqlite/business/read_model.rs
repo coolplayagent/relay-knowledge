@@ -7,9 +7,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::{
     domain::{
         BusinessAlias, BusinessDefinitionFact, BusinessDomain, BusinessKnowledgeConflict,
-        BusinessKnowledgeProjection, BusinessKnowledgeQueryKind, BusinessKnowledgeQueryRequest,
-        BusinessKnowledgeResolution, BusinessKnowledgeStatus, BusinessTerm, GraphVersion,
-        OntologyEntityKind,
+        BusinessKnowledgeProjection, BusinessKnowledgeQueryRequest, BusinessKnowledgeStatus,
+        BusinessTerm, GraphVersion, OntologyEntityKind,
     },
     storage::StorageError,
 };
@@ -27,24 +26,8 @@ pub(in crate::storage::sqlite) fn projection_for_scope(
     let status = read_status(connection, source_scope, &request.repository.repository)?;
     let domains = read_domains(connection, source_scope, &status)?;
     let mut terms = read_terms(connection, source_scope, &status)?;
-    let resolution = filter_terms(&mut terms, &domains, &request);
-    terms.truncate(request.limit);
-    match request.kind {
-        BusinessKnowledgeQueryKind::Terms => {
-            for term in &mut terms {
-                term.mappings.clear();
-            }
-        }
-        BusinessKnowledgeQueryKind::Mappings => {
-            for term in &mut terms {
-                term.definitions.clear();
-                term.semantics.clear();
-                term.conflicts.clear();
-            }
-            terms.retain(|term| !term.mappings.is_empty());
-        }
-        BusinessKnowledgeQueryKind::All => {}
-    }
+    let result =
+        super::selection::select_terms(&mut terms, &domains, &request, status.source_count > 0);
     let selected_domains = domains
         .into_iter()
         .filter(|domain| {
@@ -57,7 +40,7 @@ pub(in crate::storage::sqlite) fn projection_for_scope(
         .collect();
     Ok(BusinessKnowledgeProjection {
         status,
-        resolution,
+        result,
         domains: selected_domains,
         terms,
     })
@@ -317,65 +300,4 @@ fn read_mappings(
         mappings.push(mapping);
     }
     Ok(mappings)
-}
-
-fn filter_terms(
-    terms: &mut Vec<BusinessTerm>,
-    domains: &[BusinessDomain],
-    request: &BusinessKnowledgeQueryRequest,
-) -> BusinessKnowledgeResolution {
-    if let Some(domain) = &request.domain {
-        let matching = domains
-            .iter()
-            .filter(|candidate| {
-                candidate.id.eq_ignore_ascii_case(domain)
-                    || candidate.name.eq_ignore_ascii_case(domain)
-            })
-            .map(|candidate| candidate.id.as_str())
-            .collect::<BTreeSet<_>>();
-        terms.retain(|term| matching.contains(term.domain_id.as_str()));
-    }
-    let Some(query) = request.query.as_ref() else {
-        return BusinessKnowledgeResolution::List;
-    };
-    let folded = query.to_lowercase();
-    let exact = terms
-        .iter()
-        .filter(|term| {
-            term.canonical_name.eq_ignore_ascii_case(query)
-                || term
-                    .aliases
-                    .iter()
-                    .any(|alias| alias.value.eq_ignore_ascii_case(query))
-        })
-        .map(|term| (term.domain_id.clone(), term.id.clone()))
-        .collect::<BTreeSet<_>>();
-    if !exact.is_empty() {
-        terms.retain(|term| exact.contains(&(term.domain_id.clone(), term.id.clone())));
-        return if exact.len() > 1 && request.domain.is_none() {
-            BusinessKnowledgeResolution::Ambiguous
-        } else {
-            BusinessKnowledgeResolution::Exact
-        };
-    }
-    terms.retain(|term| {
-        term.canonical_name.to_lowercase().contains(&folded)
-            || term
-                .aliases
-                .iter()
-                .any(|alias| alias.value.to_lowercase().contains(&folded))
-            || term
-                .definitions
-                .iter()
-                .any(|fact| fact.definition.to_lowercase().contains(&folded))
-            || term
-                .mappings
-                .iter()
-                .any(|mapping| mapping.target_hint.to_lowercase().contains(&folded))
-    });
-    if terms.is_empty() {
-        BusinessKnowledgeResolution::NotFound
-    } else {
-        BusinessKnowledgeResolution::List
-    }
 }

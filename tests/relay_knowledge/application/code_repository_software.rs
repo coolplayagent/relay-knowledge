@@ -854,3 +854,6 @@ fn git_command<const N: usize>(path: &Path, args: [&str; N]) -> Command {
     command.current_dir(path).args(args);
     command
 }
+
+#[path = "code_repository_maven.rs"]
+mod maven;

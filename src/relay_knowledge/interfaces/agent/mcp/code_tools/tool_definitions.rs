@@ -112,6 +112,10 @@ pub(in crate::interfaces::agent::mcp) fn code_feature_flags_tool_definition() ->
         "inputSchema": {
             "type": "object",
             "properties": {
+                "domain": {"type":"string","minLength":1,"maxLength":128},
+                "source": {"type":"string","enum":crate::domain::CODE_CONFIG_SOURCE_FORMATS},
+                "hot_reload": {"type":"boolean"},
+                "consistency": {"type":"boolean"},
                 "repository": {"type": "string", "minLength": 1},
                 "query": {"type": "string", "maxLength": MAX_AGENT_QUERY_CHARS},
                 "limit": {"type": "integer", "minimum": 1},
@@ -159,9 +163,10 @@ pub(in crate::interfaces::agent::mcp) fn code_software_query_tool_definition() -
                 "repository": {"type": "string", "minLength": 1},
                 "kind": {
                     "type": "string",
-                    "enum": ["dependency", "dependencies", "sdk", "sdks", "file", "files", "topic", "topics", "relationship", "relationships", "config", "configuration", "configurations", "build", "iac", "design", "model", "models", "system", "systems", "api", "apis", "resource", "resources", "test", "tests", "deployment", "deployments", "release", "releases", "statement", "statements", "conflict", "conflicts", "all"]
+                    "enum": ["dependency", "dependencies", "sdk", "sdks", "file", "files", "topic", "topics", "relationship", "relationships", "config", "configuration", "configurations", "build", "modules", "iac", "design", "model", "models", "system", "systems", "api", "apis", "resource", "resources", "test", "tests", "deployment", "deployments", "release", "releases", "statement", "statements", "conflict", "conflicts", "all"]
                 },
-                "limit": {"type": "integer", "minimum": 1},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+                "cursor": {"type": "string", "minLength": 1, "maxLength": 4096},
                 "ref_selector": {"type": "string"},
                 "path_filters": {"type": "array", "items": {"type": "string", "maxLength": MAX_AGENT_PATH_CHARS}},
                 "language_filters": {"type": "array", "items": {"type": "string"}},
@@ -182,7 +187,7 @@ pub(in crate::interfaces::agent::mcp) fn code_software_query_tool_definition() -
 pub(in crate::interfaces::agent::mcp) fn code_business_query_tool_definition() -> Value {
     json!({
         "name": CODE_BUSINESS_QUERY_TOOL,
-        "description": "Read route-authorized business terms, aliases, semantics, conflicts, evidence, and declared technical mappings from one indexed repository snapshot.",
+        "description": "Read route-authorized business terms, aliases, semantics, conflicts, evidence, and declared technical mappings from one indexed repository snapshot. The response separates request.mode, result.status/match_type, knowledge.state and freshness; diagnostics provide actionable guidance.",
         "inputSchema": {
             "type": "object",
             "properties": {

@@ -984,6 +984,8 @@ pub(super) fn reference_database() -> Connection {
                  '{\"max_files_per_batch\":1,\"max_bytes_per_batch\":1048576,\"max_rows_per_batch\":4}',
                  1, NULL
              );
+             ALTER TABLE code_repository_index_checkpoints ADD COLUMN type_owner_cursor TEXT;
+             ALTER TABLE code_repository_index_checkpoints ADD COLUMN incremental_summary_json TEXT;
              CREATE TABLE code_repository_reference_resolution_progress (
                  source_scope TEXT NOT NULL PRIMARY KEY,
                  protocol_version INTEGER NOT NULL, stage TEXT NOT NULL,

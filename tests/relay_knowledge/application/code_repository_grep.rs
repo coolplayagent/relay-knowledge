@@ -463,6 +463,7 @@ fn repository_status(root: &std::path::Path, commit: &str) -> CodeRepositoryStat
     let source_scope = code_snapshot_scope_id("repo", &tree_hash, &[], &[]);
 
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "fixture".to_owned(),
         root_path: root.display().to_string(),
@@ -666,6 +667,7 @@ impl CodeRepositorySetStore for CandidatePathUnavailableStore {}
 
 fn structured_hit(status: &CodeRepositoryStatus) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: status.repository_id.clone(),
         scope_id: status.last_indexed_scope_id.clone().unwrap_or_default(),
         resolved_commit_sha: status.last_indexed_commit.clone().unwrap_or_default(),

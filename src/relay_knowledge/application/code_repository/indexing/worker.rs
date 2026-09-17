@@ -86,7 +86,15 @@ impl RelayKnowledgeService {
                 request.repository.ref_selector = base_commit.to_owned();
             }
         } else if task.mode == CodeIndexMode::Full {
-            request.repository.ref_selector = task.resolved_commit_sha.clone();
+            // Live filesystem requests observe again when the durable worker starts.
+            // Explicit content pins retain their strict mismatch semantics.
+            if crate::code::source_commit_is_filesystem(&task.resolved_commit_sha)
+                && !crate::code::source_commit_is_filesystem(&task.ref_selector)
+            {
+                request.repository.ref_selector = task.ref_selector.clone();
+            } else {
+                request.repository.ref_selector = task.resolved_commit_sha.clone();
+            }
         } else {
             request.repository.ref_selector = task.ref_selector.clone();
         }

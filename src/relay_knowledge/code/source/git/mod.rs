@@ -356,6 +356,17 @@ fn validate_full_git_object_id(field: &str, value: &str) -> Result<(), CodeIndex
     )))
 }
 
+/// Process and pipe failures cannot be mistaken for skippable local source reads.
+fn git_process_error(args: &[&str], error: CodeIndexError) -> CodeIndexError {
+    match error {
+        CodeIndexError::Io(error) => CodeIndexError::Git {
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+            message: format!("Git process I/O failed: {error}"),
+        },
+        error => error,
+    }
+}
+
 pub(in crate::code) fn git_optional<const N: usize>(
     root: &Path,
     args: [&str; N],
@@ -364,7 +375,8 @@ pub(in crate::code) fn git_optional<const N: usize>(
         .arg("-C")
         .arg(root)
         .args(args)
-        .output()?;
+        .output()
+        .map_err(|error| git_process_error(&args, error.into()))?;
     if !output.status.success() {
         return Ok(None);
     }
@@ -391,7 +403,8 @@ pub(in crate::code) fn git_bytes_slice(
         .arg("-C")
         .arg(root)
         .args(args)
-        .output()?;
+        .output()
+        .map_err(|error| git_process_error(args, error.into()))?;
     if output.status.success() {
         return Ok(output.stdout);
     }
@@ -412,7 +425,8 @@ pub(in crate::code) fn git_dir_bytes(
         .arg("--work-tree")
         .arg(git_dir)
         .args(args)
-        .output()?;
+        .output()
+        .map_err(|error| git_process_error(args, error.into()))?;
     if output.status.success() {
         return Ok(output.stdout);
     }

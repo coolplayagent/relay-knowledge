@@ -292,6 +292,8 @@ class LEVELDB_EXPORT FilterPolicy {
 };
 
 }
+
+
 "#,
     );
     let file = snapshot
@@ -300,7 +302,7 @@ class LEVELDB_EXPORT FilterPolicy {
         .find(|file| file.path == "include/leveldb/filter_policy.h")
         .expect("header file should be indexed");
 
-    assert_eq!(file.language_id, "c");
+    assert_eq!(file.language_id, "cpp");
     assert!(
         snapshot
             .symbols
@@ -313,6 +315,67 @@ class LEVELDB_EXPORT FilterPolicy {
             .iter()
             .any(|symbol| { symbol.name == "LEVELDB_EXPORT" && symbol.kind == "function" }),
         "export macros should not replace the real C++ class name"
+    );
+}
+
+#[test]
+fn cpp_header_keeps_members_and_excludes_macro_and_field_false_definitions() {
+    let snapshot = parse_source_snapshot(
+        "db/member_headers.h",
+        include_bytes!("../c/tests/fixtures/member_headers.h"),
+    );
+    assert_eq!(snapshot.files[0].language_id, "cpp");
+    for (name, owner) in [
+        ("Recover", "DBImpl"),
+        ("RecoverLogFile", "DBImpl"),
+        ("GuardedRecover", "DBImpl"),
+        ("Validate", "Options"),
+        ("SetUrl", "Options"),
+        ("SetJson", "Options"),
+        ("Bar", "Compact"),
+        ("Baz", "Compact"),
+        ("AfterComment", "CommentedCompact"),
+        ("Seek", "Iterator"),
+        ("Save", "DB"),
+        ("Connect", "AttributeDB"),
+        ("Open", "ExportedDB"),
+        ("Close", "ExportedDB"),
+        ("Load", "ExportedOptions"),
+    ] {
+        assert!(
+            snapshot
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == name && symbol.qualified_name.contains(owner)),
+            "missing {owner}.{name}: {:?}",
+            snapshot.symbols
+        );
+    }
+    for name in [
+        "CommentedApi",
+        "defined",
+        "__attribute__",
+        "__declspec",
+        "log_filter",
+        "edit_",
+    ] {
+        assert!(
+            !snapshot.symbols.iter().any(|symbol| symbol.name == name
+                && crate::domain::code_call_targets::callable_target_symbol_kind(&symbol.kind)),
+            "false callable {name}"
+        );
+    }
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "SetUrl" && symbol.signature.contains("http://localhost"))
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "SetJson" && symbol.signature.contains("{}"))
     );
 }
 

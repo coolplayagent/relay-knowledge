@@ -37,7 +37,7 @@ pub(super) fn definition_kind(language_id: &str, node_kind: &str) -> Option<&'st
         }
         "kotlin" => kotlin::definition_kind(node_kind),
         "php" => php::definition_kind(node_kind),
-        "python" => python::definition_kind(node_kind),
+        "python" | "starlark" => python::definition_kind(node_kind),
         "ruby" => ruby::definition_kind(node_kind),
         "rust" => rust::definition_kind(node_kind),
         "scala" => scala::definition_kind(node_kind),
@@ -60,7 +60,7 @@ pub(super) fn is_call_node(language_id: &str, node_kind: &str) -> bool {
         "ini" | "json" | "markdown" | "properties" | "toml" | "yaml" => false,
         "kotlin" => kotlin::is_call_node(node_kind),
         "php" => php::is_call_node(node_kind),
-        "python" => python::is_call_node(node_kind),
+        "python" | "starlark" => python::is_call_node(node_kind),
         "ruby" => ruby::is_call_node(node_kind),
         "rust" => rust::is_call_node(node_kind),
         "scala" => scala::is_call_node(node_kind),

@@ -30,7 +30,10 @@ pub(in crate::storage::sqlite::code) fn required_repository(
         ))
     })?;
     let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
-    let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
+    let language_filters = crate::domain::code_scope_language_filters(
+        &status.language_filters,
+        &selector.language_filters,
+    );
     let scoped_status = match repository_scope_status(
         connection,
         &selector.repository,
@@ -140,6 +143,7 @@ pub(in crate::storage::sqlite::code) fn hit_from_parts(
     parts: HitParts,
 ) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: status.repository_id.clone(),
         scope_id: status.last_indexed_scope_id.clone().unwrap_or_default(),
         resolved_commit_sha: status.last_indexed_commit.clone().unwrap_or_default(),
@@ -321,6 +325,7 @@ pub(in crate::storage::sqlite::code) fn mark_hits_degraded(
     reason: &str,
 ) {
     for hit in hits {
+        hit.query_degraded = true;
         if hit.degraded_reason.is_none() {
             hit.degraded_reason = Some(reason.to_owned());
         }
@@ -328,6 +333,7 @@ pub(in crate::storage::sqlite::code) fn mark_hits_degraded(
 }
 
 fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit) {
+    target.query_degraded |= source.query_degraded;
     target.stale |= source.stale
         || source
             .staleness_hint

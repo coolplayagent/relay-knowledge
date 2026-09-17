@@ -15,7 +15,7 @@ use super::{
     discovery::discover_source_layout,
     scoped_snapshot::{
         filesystem_policy_for_selector, registration_allows_filesystem_ref,
-        scoped_filesystem_tree_hash, source_snapshot_for_scope,
+        source_snapshot_for_scope,
     },
     selection::selection_exclusion_reason_for_source,
 };
@@ -25,7 +25,7 @@ const PREVIEW_MAX_LARGEST_FILES: usize = 10;
 const DEFAULT_TEXT_FILE_BUDGET_BYTES: usize = 512 * 1024;
 
 /// Returns a non-mutating preview of the effective repository indexing scope.
-pub fn preview_repository_scope(
+pub(in crate::code) fn preview_repository_layout(
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
 ) -> Result<CodeRepositoryScopePreview, CodeIndexError> {
@@ -43,7 +43,6 @@ pub fn preview_repository_scope(
     let mut selected_file_count = 0usize;
     let mut unsupported_file_count = 0usize;
     let mut generated_or_heavy_file_count = 0usize;
-    let mut expected_degraded_file_count = 0usize;
     let mut language_distribution = BTreeMap::<String, (usize, usize)>::new();
     let mut largest_files = Vec::<CodeRepositoryLargestFile>::new();
     let mut excluded_paths = Vec::<CodeRepositoryExcludedPath>::new();
@@ -67,6 +66,58 @@ pub fn preview_repository_scope(
             }
             continue;
         }
+        selected_entries.push(entry);
+    }
+    let (resolved_commit_sha, tree_hash, _) = if snapshot.kind.is_filesystem() {
+        let mut hashes = snapshot.content_hashes;
+        let selected = selected_entries
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        hashes.retain(|path, _| selected.contains(path.as_str()));
+        let filters = super::effective_index_path_filters(registration, selector, &source_layout);
+        let mut skipped = snapshot
+            .skipped_paths
+            .into_iter()
+            .filter(|skipped| {
+                if skipped.io.path_kind == crate::domain::CodePathKind::Directory {
+                    super::path_overlaps_any_filter(&skipped.path, &filters)
+                } else {
+                    selection_exclusion_reason_for_source(
+                        &skipped.path,
+                        registration,
+                        selector,
+                        &source_layout,
+                        snapshot.kind,
+                    )
+                    .is_none()
+                }
+            })
+            .collect::<Vec<_>>();
+        crate::code::source::complete_selected_filesystem_entries(
+            &snapshot.root,
+            &mut selected_entries,
+            &mut hashes,
+            &mut skipped,
+        )?;
+        let tree = crate::code::source::tree_hash_with_skipped(&hashes, &skipped);
+        if crate::code::source::source_commit_is_filesystem(&selector.ref_selector)
+            && selector.ref_selector != tree
+        {
+            return Err(CodeIndexError::InvalidInput(format!(
+                "filesystem source snapshot {} no longer matches live indexed scope {tree}",
+                selector.ref_selector
+            )));
+        }
+        (tree.clone(), tree, hashes)
+    } else {
+        (
+            snapshot.resolved_commit_sha,
+            snapshot.tree_hash,
+            BTreeMap::new(),
+        )
+    };
+    for entry in &selected_entries {
         let language = preview_language_id(&entry.path);
         selected_file_count += 1;
         selected_byte_count = selected_byte_count.saturating_add(entry.byte_count);
@@ -84,24 +135,11 @@ pub fn preview_repository_scope(
         if is_generated || is_heavy {
             generated_or_heavy_file_count += 1;
         }
-        if is_unsupported || is_heavy {
-            expected_degraded_file_count += 1;
-        }
         largest_files.push(CodeRepositoryLargestFile {
             path: entry.path.clone(),
             byte_count: entry.byte_count,
         });
-        selected_entries.push(entry);
     }
-    let (resolved_commit_sha, tree_hash, _) = if snapshot.kind.is_filesystem() {
-        scoped_filesystem_tree_hash(&snapshot.root, &selected_entries, &selector.ref_selector)?
-    } else {
-        (
-            snapshot.resolved_commit_sha,
-            snapshot.tree_hash,
-            BTreeMap::new(),
-        )
-    };
     largest_files.sort_by(|left, right| {
         right
             .byte_count
@@ -120,7 +158,8 @@ pub fn preview_repository_scope(
         selected_byte_count,
         unsupported_file_count,
         generated_or_heavy_file_count,
-        expected_degraded_file_count,
+        // The index preview workflow fills this after validating parser batches.
+        expected_degraded_file_count: 0,
         language_distribution: language_distribution
             .into_iter()
             .map(

@@ -2,6 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::storage::StorageError;
 
+use super::columns::CODE_REPOSITORY_FILES_COLUMNS;
 use super::introspection::{
     index_has_columns, table_column_is_not_null, table_columns_have_no_defaults, table_exists,
     table_has_columns, table_has_exact_columns, table_has_exact_plain_columns,
@@ -10,10 +11,8 @@ use super::introspection::{
 };
 
 const SCHEMA_MARKER_KEY: &str = "sqlite_graph_store";
-// Version 8 adds the software ontology occurrence, statement, validation, and
-// provenance-status surfaces. Existing databases must run the additive schema
-// initializer before a v6 software projection can be published.
-pub(super) const SCHEMA_MARKER_VERSION: i64 = 8;
+// Version 10 preserves call-site bytes and invalidates prior portable facts.
+pub(super) const SCHEMA_MARKER_VERSION: i64 = 10;
 pub(in crate::storage::sqlite) const SEARCH_OWNER_V2_MIGRATION: &str =
     "search-owner-v2-writer-and-serving-gate";
 pub(in crate::storage::sqlite) const REFERENCE_SEARCH_GROUP_V2_MIGRATION: &str =
@@ -173,19 +172,7 @@ const CODE_WORKSPACE_PACKAGE_MAPPING_COLUMNS: &[&str] = &[
     "created_at_ms",
 ];
 const CODE_WORKSPACE_PACKAGE_MAPPING_UNIQUE: &[&str] = &["set_id", "package_name", "ecosystem"];
-const CODE_REPOSITORY_FILES_COLUMNS: &[&str] = &[
-    "repository_id",
-    "source_scope",
-    "file_id",
-    "path",
-    "language_id",
-    "blob_hash",
-    "byte_len",
-    "line_count",
-    "parse_status",
-    "is_generated",
-    "degraded_reason",
-];
+
 const FILE_INDEX_ROOT_COLUMNS: &[&str] = &[
     "scope_id",
     "root_id",
@@ -324,7 +311,7 @@ const CODE_SCOPE_GC_JOB_COLUMNS: &[&str] = &[
 pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     connection: &Connection,
 ) -> Result<bool, StorageError> {
-    if !schema_marker_table_exists(connection)? {
+    if !table_exists(connection, "relay_storage_schema_state")? {
         return Ok(false);
     }
     let version = connection
@@ -342,7 +329,19 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
     if version != Some(SCHEMA_MARKER_VERSION) {
         return Ok(false);
     }
-    if !graph_bm25_schema_is_current(connection)?
+    if !table_has_columns(
+        connection,
+        "code_repository_symbols",
+        &["type_owner_json", "type_owner_identity"],
+    )? || !table_has_columns(
+        connection,
+        "code_repository_index_checkpoints",
+        &["type_owner_cursor"],
+    )? || !table_has_columns(connection, "code_repository_calls", &["byte_start", "byte_end"])?
+        || !table_has_primary_key_columns(connection, "code_repository_config_bindings", &["source_scope", "binding", "usage_id"])?
+        || connection.query_row("SELECT COUNT(*) FROM sqlite_schema WHERE type='trigger' AND tbl_name='code_repository_feature_flags' AND name IN ('code_config_bindings_insert','code_config_bindings_update','code_config_bindings_delete')", [], |row| row.get::<_, i64>(0))? != 3
+        || !index_has_columns(connection, "code_repository_config_bindings_usage", &["source_scope", "usage_id"])?
+        || !graph_bm25_schema_is_current(connection)?
         || table_exists(connection, "graph_bm25_vocabulary")?
         || table_exists(connection, "graph_bm25_retired")?
         || !table_has_exact_columns(
@@ -456,6 +455,7 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
             CODE_SCOPE_GC_JOB_COLUMNS,
         )?
         || !code_schema_capability_markers_are_current(connection)?
+        || !super::source_io_marker::schema_is_current(connection)?
         || !table_has_columns(connection, "file_index_roots", FILE_INDEX_ROOT_COLUMNS)?
         || !table_has_columns(
             connection,
@@ -477,6 +477,7 @@ pub(in crate::storage::sqlite) fn schema_initialization_is_current(
         || !reference_resolution_progress_schema_is_current(connection)?
         || !super::incremental_clone_marker::schema_is_current(connection)?
         || !reference_search_group_schema_is_current(connection)?
+        || !table_column_is_not_null(connection, "code_repository_feature_flags", "metadata_json")?
     {
         return Ok(false);
     }
@@ -869,10 +870,6 @@ pub(in crate::storage::sqlite) fn mark_schema_initialization_current(
     )?;
 
     Ok(())
-}
-
-fn schema_marker_table_exists(connection: &Connection) -> Result<bool, StorageError> {
-    table_exists(connection, "relay_storage_schema_state")
 }
 
 fn workspace_package_mappings_current(connection: &Connection) -> Result<bool, StorageError> {

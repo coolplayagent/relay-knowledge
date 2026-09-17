@@ -11,6 +11,7 @@ pub(super) fn record_framework_graph(
     language_id: &str,
     content: &str,
     symbols: &[crate::domain::RepositoryCodeSymbolRecord],
+    syntax_root: tree_sitter::Node<'_>,
 ) -> Result<(), CodeIndexError> {
     let facts = frameworks::extract(
         build,
@@ -20,6 +21,7 @@ pub(super) fn record_framework_graph(
             language_id,
             content,
             symbols,
+            syntax_root: Some(syntax_root),
         },
     )?;
     build.framework_nodes.extend(facts.nodes);

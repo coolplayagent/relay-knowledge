@@ -340,6 +340,7 @@ fn request(query: &str, kind: CodeQueryKind, path_filters: Vec<String>) -> CodeR
 
 fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/tmp/repo".to_owned(),
@@ -360,6 +361,7 @@ fn status() -> CodeRepositoryStatus {
 
 fn hit(path: &str, excerpt: &str) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: "scope".to_owned(),
         resolved_commit_sha: "commit".to_owned(),

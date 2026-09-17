@@ -161,7 +161,14 @@ fn workspace_manifest_read_allowed(relative_path: &str, path_filters: &[String])
 fn is_workspace_manifest_path(relative_path: &str) -> bool {
     matches!(
         relative_path.rsplit('/').next(),
-        Some("pnpm-workspace.yaml" | "go.work" | "package.json" | "Cargo.toml" | "go.mod")
+        Some(
+            "pnpm-workspace.yaml"
+                | "go.work"
+                | "package.json"
+                | "Cargo.toml"
+                | "go.mod"
+                | "pom.xml"
+        )
     )
 }
 
@@ -274,8 +281,10 @@ impl SnapshotBuild {
         skipped_unchanged_count: usize,
     ) -> Self {
         let path_filters = merged_filters(&registration.path_filters, &selector.path_filters);
-        let language_filters =
-            merged_filters(&registration.language_filters, &selector.language_filters);
+        let language_filters = crate::domain::code_scope_language_filters(
+            &registration.language_filters,
+            &selector.language_filters,
+        );
         Self::new_with_scope_filters(
             registration,
             commit,
@@ -347,10 +356,10 @@ impl SnapshotBuild {
             .iter()
             .filter(|reference| reference.kind == "call")
             .map(|reference| {
-                let caller = caller_for_line(
+                let caller = caller_for_position(
                     &symbols_by_path,
                     &reference.path,
-                    reference.line_range.start,
+                    reference.byte_range.start,
                 );
                 let (caller_symbol_snapshot_id, caller_name) = caller
                     .map(|symbol| {
@@ -370,6 +379,7 @@ impl SnapshotBuild {
                     .unwrap_or_else(|| reference.name.clone());
 
                 CodeCallRecord {
+                    byte_range: Some(reference.byte_range.clone()),
                     repository_id: reference.repository_id.clone(),
                     source_scope: reference.source_scope.clone(),
                     call_id: stable_id(
@@ -513,17 +523,17 @@ fn build_symbol_id_index(
     index
 }
 
-fn caller_for_line<'a>(
+fn caller_for_position<'a>(
     symbols_by_path: &'a BTreeMap<&str, Vec<&'a RepositoryCodeSymbolRecord>>,
     path: &str,
-    line: u32,
+    byte: u32,
 ) -> Option<&'a RepositoryCodeSymbolRecord> {
     symbols_by_path
         .get(path)?
         .iter()
         .copied()
-        .filter(|symbol| symbol.line_range.start <= line && symbol.line_range.end >= line)
-        .max_by_key(|symbol| symbol.line_range.start)
+        .filter(|symbol| symbol.byte_range.start <= byte && symbol.byte_range.end > byte)
+        .min_by_key(|symbol| symbol.byte_range.end - symbol.byte_range.start)
 }
 
 pub(in crate::code) fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {

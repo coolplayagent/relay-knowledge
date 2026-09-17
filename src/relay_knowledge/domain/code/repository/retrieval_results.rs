@@ -30,6 +30,9 @@ pub struct CodeRetrievalHit {
     pub stale: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub staleness_hint: Option<StalenessHint>,
+    /// A query layer was unavailable; independent of file parsing diagnostics.
+    #[serde(default)]
+    pub query_degraded: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,6 +52,8 @@ pub struct CodeRetrievalHit {
 /// One code location where a feature flag is defined, read, or guards code.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeFeatureFlagUsage {
+    #[serde(default)]
+    pub metadata: super::CodeConfigMetadata,
     pub usage_id: String,
     pub path: String,
     pub language_id: String,
@@ -68,6 +73,13 @@ pub struct CodeFeatureFlagUsage {
 /// Feature flag graph grouped by stable configuration source.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeFeatureFlagGraph {
+    /// Located evidence for each conflicting default, populated by consistency checks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conflicting_default_sources: Vec<CodeFeatureFlagUsage>,
+    #[serde(default)]
+    pub consistency_diagnostics: Vec<String>,
+    #[serde(default)]
+    pub analysis_complete: bool,
     pub feature_flag_id: String,
     pub name: String,
     pub source_kind: String,

@@ -22,7 +22,13 @@ mod publication;
 mod query_index;
 
 use phase::FinalizationCheckpointPhase;
-use publication::{complete_unfenced_publication, publish_repository_scope};
+use publication::{
+    complete_unfenced_publication, locally_queryable_finalization_target, publish_repository_scope,
+};
+pub(super) use publication::{
+    finalization_target_is_unpublished, require_unpublished_finalization_owner,
+    require_unpublished_finalization_target,
+};
 use query_index::{
     advance_query_index_phase, advance_query_index_repair,
     advance_reference_search_query_index_repair, repair_query_indexes_after_coarse_checkpoint,
@@ -79,12 +85,17 @@ fn advance_session_once(
         return Err(super::checkpoint_identity_error(session));
     }
     super::validate_checkpoint_resume_record(&persisted, session)?;
+    finalize::type_ownership::checkpoint_cursor(&transaction, &session.source_scope)?;
     if let Some(fence) = fence {
         fence.validate_target_scope(&transaction, &session.source_scope)?;
         fence.validate(&transaction)?;
     }
     require_incremental_receipt_owner(&transaction, &persisted, session, fence)?;
-    if persisted.committed_file_count != persisted.total_path_count {
+    if persisted
+        .processed_path_count
+        .max(persisted.committed_file_count)
+        != persisted.total_path_count
+    {
         return Err(super::checkpoint_invariant_error(
             session,
             "finalization requires a complete committed file prefix",
@@ -315,6 +326,35 @@ fn advance_transaction(
         );
     }
     if finalization_phase_pending(checkpoint_state, finalize::phases::RESOLVE_CALL_TARGETS)? {
+        let unpublished = if let Some(fence) = fence {
+            if session.full_replace {
+                require_unpublished_finalization_owner(transaction, session, fence)?;
+                true
+            } else {
+                false
+            }
+        } else {
+            session.full_replace && !locally_queryable_finalization_target(transaction, session)?
+        };
+        let complete = if unpublished {
+            finalize::type_ownership::advance(transaction, session)?
+        } else {
+            finalize::type_ownership::advance_atomically(transaction, session)?
+        };
+        if let Some(fence) = fence.filter(|_| unpublished) {
+            require_unpublished_finalization_owner(transaction, session, fence)?;
+        }
+        if !complete {
+            let cursor: String = transaction.query_row("SELECT type_owner_cursor FROM code_repository_index_checkpoints WHERE source_scope=?1",[&session.source_scope],|r|r.get(0))?;
+            let state =
+                crate::domain::CodeQueryIndexRepairResumePhase::ownership_checkpoint_state(&cursor)
+                    .ok_or_else(|| {
+                        StorageError::Invariant(
+                            "type ownership page did not publish a valid cursor".into(),
+                        )
+                    })?;
+            return mark_phase_pending(transaction, session, checkpoint_state, &state);
+        }
         finalize::phases::resolve_call_targets(transaction, &session.source_scope)?;
         return mark_phase_pending(
             transaction,
@@ -445,72 +485,6 @@ fn mark_reference_search_advance(
     Ok(TransactionAdvance::Pending(next_state))
 }
 
-pub(super) fn finalization_target_is_unpublished(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    fence: &PublicationFenceGuard,
-) -> Result<bool, StorageError> {
-    if !session.full_replace {
-        return Ok(false);
-    }
-    fence.validate_repository(&session.repository_id)?;
-    fence.validate_target_scope(transaction, &session.source_scope)?;
-    fence.validate(transaction)?;
-    let locally_queryable = transaction.query_row(
-        "SELECT EXISTS (
-             SELECT 1 FROM code_repositories repository
-             WHERE repository.repository_id = ?1
-               AND repository.last_indexed_scope_id = ?2
-         ) OR EXISTS (
-             SELECT 1 FROM code_repository_scopes scope
-             WHERE scope.repository_id = ?1 AND scope.source_scope = ?2
-               AND (scope.stale = 0 OR scope.retiring <> 0)
-         ) OR EXISTS (
-             SELECT 1 FROM code_repository_commit_scopes commit_scope
-             WHERE commit_scope.repository_id = ?1 AND commit_scope.source_scope = ?2
-         ) OR EXISTS (
-             SELECT 1 FROM code_repository_scope_gc_jobs job
-             WHERE job.repository_id = ?1 AND job.source_scope = ?2
-         )",
-        params![session.repository_id, session.source_scope],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if locally_queryable {
-        return Ok(false);
-    }
-    if !fence.authority_is_local() {
-        fence.validate_partitioned_staged_scope(
-            transaction,
-            &session.repository_id,
-            &session.source_scope,
-        )?;
-    }
-    Ok(true)
-}
-
-pub(super) fn require_unpublished_finalization_target(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    fence: &PublicationFenceGuard,
-) -> Result<(), StorageError> {
-    require_unpublished_finalization_owner(transaction, session, fence)?;
-    super::super::super::schema::require_code_query_indexes_for_fact_publication(transaction)
-}
-
-pub(super) fn require_unpublished_finalization_owner(
-    transaction: &Transaction<'_>,
-    session: &CodeIndexSession,
-    fence: &PublicationFenceGuard,
-) -> Result<(), StorageError> {
-    if !finalization_target_is_unpublished(transaction, session, fence)? {
-        return Err(StorageError::Invariant(format!(
-            "durable finalization pages cannot mutate queryable scope '{}'",
-            session.source_scope
-        )));
-    }
-    Ok(())
-}
-
 fn mark_phase_pending(
     transaction: &Transaction<'_>,
     session: &CodeIndexSession,
@@ -550,77 +524,5 @@ pub(super) fn finalization_phase_pending(
     Ok(completed_position < target_position)
 }
 
-fn build_summary(
-    connection: &mut Connection,
-    session: &CodeIndexSession,
-) -> Result<CodeIndexSummary, StorageError> {
-    let status =
-        status::repository_scope_status_by_source_scope(connection, &session.source_scope)?
-            .ok_or_else(|| {
-                StorageError::InvalidInput(
-                    "code repository scope is missing after index".to_owned(),
-                )
-            })?;
-    let checkpoint = checkpoint::load(connection, &session.source_scope)?;
-    let sqlite_write_count = checkpoint::count_scope_rows(connection, &session.source_scope)?;
-    let symbol_generation_counts =
-        report::scope_symbol_generation_counts(connection, &session.source_scope)?;
-    let degraded_file_count =
-        checkpoint::count_scope_diagnostics(connection, status.last_indexed_scope_id.as_deref())?;
-    let incremental = checkpoint.incremental_summary.as_ref();
-
-    Ok(CodeIndexSummary {
-        repository_id: session.repository_id.clone(),
-        source_scope: session.source_scope.clone(),
-        base_resolved_commit_sha: incremental
-            .map(|receipt| receipt.base_resolved_commit_sha.clone())
-            .or_else(|| session.base_resolved_commit_sha.clone()),
-        resolved_commit_sha: session.resolved_commit_sha.clone(),
-        tree_hash: session.tree_hash.clone(),
-        indexed_file_count: status.indexed_file_count,
-        changed_path_count: incremental
-            .map(|receipt| receipt.changed_path_count)
-            .unwrap_or(session.changed_path_count),
-        skipped_unchanged_count: incremental
-            .map(|receipt| receipt.skipped_unchanged_count)
-            .unwrap_or(session.skipped_unchanged_count),
-        deleted_path_count: incremental
-            .map(|receipt| receipt.deleted_path_count)
-            .unwrap_or(session.deleted_paths.len()),
-        symbol_count: status.symbol_count,
-        handwritten_symbol_count: symbol_generation_counts.handwritten,
-        generated_symbol_count: symbol_generation_counts.generated,
-        reference_count: status.reference_count,
-        chunk_count: status.chunk_count,
-        degraded_file_count: incremental
-            .map(|receipt| receipt.degraded_file_count)
-            .unwrap_or(degraded_file_count),
-        progress: CodeIndexProgressSummary {
-            git_file_count: incremental
-                .map(|receipt| receipt.changed_path_count)
-                .unwrap_or(session.total_path_count),
-            blob_read_count: incremental
-                .map(|receipt| receipt.blob_read_count)
-                .unwrap_or(checkpoint.committed_file_count),
-            parsed_file_count: incremental
-                .map(|receipt| receipt.parsed_file_count)
-                .unwrap_or(checkpoint.parsed_file_count),
-            sqlite_write_count: incremental
-                .map(|receipt| receipt.sqlite_write_count)
-                .unwrap_or(sqlite_write_count),
-            skipped_file_count: incremental
-                .map(|receipt| receipt.skipped_unchanged_count)
-                .unwrap_or(session.skipped_unchanged_count),
-            degraded_file_count: incremental
-                .map(|receipt| receipt.degraded_file_count)
-                .unwrap_or(degraded_file_count),
-            batch_count: incremental
-                .map(|receipt| receipt.batch_count)
-                .unwrap_or(checkpoint.batch_count),
-            checkpoint_file_count: incremental
-                .map(|receipt| receipt.parsed_file_count)
-                .unwrap_or(checkpoint.committed_file_count),
-            resource_budget: session.resource_budget,
-        },
-    })
-}
+mod summary;
+use summary::build_summary;

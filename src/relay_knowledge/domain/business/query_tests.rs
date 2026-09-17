@@ -26,3 +26,29 @@ fn request_bounds_query_and_limit() {
         .is_err()
     );
 }
+
+#[test]
+fn business_query_mode_is_derived_instead_of_trusting_wire_input() {
+    let request = BusinessKnowledgeQueryRequest::new(
+        CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()).unwrap(),
+        None,
+        Some("MRR".into()),
+        BusinessKnowledgeQueryKind::All,
+        FreshnessPolicy::AllowStale,
+        10,
+    )
+    .unwrap();
+    assert_eq!(serde_json::to_value(&request).unwrap()["mode"], "search");
+    let mut json = serde_json::to_value(&request).unwrap();
+    json["mode"] = serde_json::json!("untrusted-mode");
+    let inbound: BusinessKnowledgeQueryRequest = serde_json::from_value(json).unwrap();
+    assert_eq!(serde_json::to_value(&inbound).unwrap()["mode"], "search");
+    assert_eq!(inbound.query.as_deref(), Some("MRR"));
+    let mut list = inbound;
+    list.query = None;
+    list.domain = Some("sales".into());
+    let json = serde_json::to_value(&list).unwrap();
+    assert_eq!(json["mode"], "list");
+    assert_eq!(json["domain"], "sales");
+    assert!(json.get("query").is_none());
+}

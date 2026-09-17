@@ -904,15 +904,16 @@ fn insert_chunk(
         .execute(
             "INSERT INTO code_repository_chunks (
                 repository_id, source_scope, chunk_id, file_id, path, language_id,
-                content, line_start
-            ) VALUES ('repo', 'scope-1', ?1, ?2, ?3, ?4, ?5, ?6)",
+                content, line_start, byte_end
+            ) VALUES ('repo', 'scope-1', ?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 chunk_id,
                 format!("file-{chunk_id}"),
                 path,
                 language_id,
                 content,
-                line_start
+                line_start,
+                content.len()
             ],
         )
         .expect("chunk should insert");

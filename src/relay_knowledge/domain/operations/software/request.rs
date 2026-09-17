@@ -12,6 +12,8 @@ pub enum SoftwareGlobalKind {
     Topics,
     Relationships,
     Build,
+    /// One Maven reactor module per POM and its declared dependency edges.
+    Modules,
     Iac,
     Design,
     Systems,
@@ -35,6 +37,7 @@ impl SoftwareGlobalKind {
             Self::Topics => "topics",
             Self::Relationships => "relationships",
             Self::Build => "build",
+            Self::Modules => "modules",
             Self::Iac => "iac",
             Self::Design => "design",
             Self::Systems => "systems",
@@ -57,6 +60,9 @@ pub struct SoftwareGlobalRequest {
     pub kind: SoftwareGlobalKind,
     pub freshness_policy: FreshnessPolicy,
     pub limit: usize,
+    /// Opaque continuation for dependencies/modules, bound to the indexed scope and filters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
 }
 
 impl SoftwareGlobalRequest {
@@ -78,7 +84,37 @@ impl SoftwareGlobalRequest {
             kind,
             freshness_policy,
             limit,
+            cursor: None,
         })
+    }
+
+    /// Rejects invalid page bounds and cursors on unsupported projection kinds.
+    pub fn with_cursor(mut self, cursor: Option<String>) -> Result<Self, DomainError> {
+        self.cursor = cursor;
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Validates deserialized requests as well as constructor-built requests.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        if !(1..=500).contains(&self.limit) {
+            return Err(DomainError::invalid("limit", "must be between 1 and 500"));
+        }
+        if let Some(cursor) = &self.cursor {
+            if !matches!(
+                self.kind,
+                SoftwareGlobalKind::Dependencies | SoftwareGlobalKind::Modules
+            ) || cursor.is_empty()
+                || cursor.len() > 4096
+                || self.freshness_policy == FreshnessPolicy::GraphOnly
+            {
+                return Err(DomainError::invalid(
+                    "cursor",
+                    "requires dependencies/modules, a non-graph-only policy and 1..4096 bytes",
+                ));
+            }
+        }
+        Ok(())
     }
 }
 

@@ -716,6 +716,7 @@ fn served_stale_reason_marks_scope_stale() {
 
 fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/tmp/repo".to_owned(),
@@ -767,6 +768,7 @@ fn call(
 ) -> CodebaseViewCall {
     CodebaseViewCall {
         call: CodeCallRecord {
+            byte_range: None,
             repository_id: "repo".to_owned(),
             source_scope: "scope".to_owned(),
             call_id: format!("call:{path}:{callee_name}"),
@@ -804,6 +806,7 @@ fn import(path: &str, module: &str, target_hint: Option<&str>) -> CodeImportReco
 
 fn feature_flag(path: &str, name: &str, source_key: &str) -> CodeFeatureFlagRecord {
     CodeFeatureFlagRecord {
+        metadata: Default::default(),
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         feature_flag_id: format!("flag:{name}"),

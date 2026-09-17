@@ -180,6 +180,7 @@ pub(in crate::storage::sqlite) fn refreshed_fenced_projection(
     let dependency_usage_count = count_dependency_usages(connection, source_scope)?;
 
     Ok(SoftwareGlobalProjection {
+        next_cursor: None,
         components: components_for_scope(
             connection,
             source_scope,
@@ -384,6 +385,7 @@ fn materialize_ontology(connection: &Connection, source_scope: &str) -> Result<(
     status.entity_count = projection.entities.len();
     status.statement_count = projection.statements.len();
     status.diagnostic_count = projection.diagnostics.len();
+    super::apply_maven_completeness(connection, &mut status)?;
     upsert_status(connection, &status)
 }
 
@@ -425,6 +427,7 @@ fn unfiltered_request(status: &SoftwareGlobalStatus) -> SoftwareGlobalRequest {
         kind: SoftwareGlobalKind::All,
         freshness_policy: FreshnessPolicy::AllowStale,
         limit: 1,
+        cursor: None,
     }
 }
 
@@ -439,4 +442,42 @@ fn count_dependency_usages(
             |row| row.get(0),
         )
         .map_err(StorageError::from)
+}
+
+#[cfg(test)]
+mod maven_status_tests {
+    use super::*;
+    #[test]
+    fn maven_fenced_ontology_preserves_incomplete_status_and_clears_it_on_repair() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        super::super::test_support::create_test_schema(&connection);
+        super::super::super::schema::initialize_schema(&connection).unwrap();
+        super::super::test_support::seed_scope(&connection);
+        super::super::refresh_projection(&mut connection, "scope-1").unwrap();
+        for complete in [false, true] {
+            connection
+                .execute(
+                    "UPDATE software_global_status SET stale=1 WHERE source_scope='scope-1'",
+                    [],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT OR REPLACE INTO maven_reactor_status VALUES ('scope-1', ?1)",
+                    [complete],
+                )
+                .unwrap();
+            materialize_ontology(&connection, "scope-1").unwrap();
+            let status = status_for_scope(&connection, "scope-1").unwrap().unwrap();
+            assert_eq!(
+                status.freshness,
+                if complete {
+                    crate::domain::SoftwareProjectionFreshness::Fresh
+                } else {
+                    crate::domain::SoftwareProjectionFreshness::Degraded
+                }
+            );
+            assert_eq!(status.last_error.is_some(), !complete);
+        }
+    }
 }

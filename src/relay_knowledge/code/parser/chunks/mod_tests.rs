@@ -365,6 +365,7 @@ fn symbol(
     line: usize,
 ) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         symbol_snapshot_id: format!("symbol-{name}"),

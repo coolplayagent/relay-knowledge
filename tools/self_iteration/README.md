@@ -1,6 +1,10 @@
 # relay-knowledge self-iteration
 
+The `code_index_persistence_performance_suite_maven_lifecycle_loads_models_once` case traces 128 indexed POMs through reset and lifecycle. It requires `maven_effective_model_loads=1` while verifying reactor module and lifecycle build facts, so repeated POM materialization fails the existing fast/performance gate. This preserves bounded worker phases, publication fences and incomplete-evidence retention.
+
 [中文](README.zh-CN.md) | English
+
+The fast profile includes `java_class_calls` (`cases/repository_java_class_calls.json`): a generated Java class/member call pair plus 32,768 unrelated calls across 256 noise files. Both class-name directions must return the correct member evidence under a 2,000 ms p95 query budget. This guards issue #388 without relying on canonical-ID selectors. Run a focused fast evaluation with `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=java_class_calls`; the normal fast profile includes the fixture by default.
 
 `tools/self_iteration` is the standalone Rust self-iteration harness. It asks Codex to generate candidate patches, then accepts only candidates that improve repository retrieval, semantic/vector retrieval, performance, stability, or research quality against fixed evaluation workloads. It stays outside the product crate `src/` tree and stores runtime state under `.git/relay-knowledge-self-iteration/`. The old tracked Python harness has been removed after feature parity checks; the repository-root `self-iterate.sh` builds and runs the Rust binary directly.
 
@@ -451,3 +455,21 @@ clone_pinned_repository https://github.com/Alamofire/Alamofire.git /opt/workspac
 All repository targets must use `scope=all`, and the evaluator rejects other values. Ordinary full-scope registration does not pass repository `path_filters` or `language_filters` to `repo register`, and a default guardrail verifies that product registration rejects `--language`; case-level filters remain available to test query filtering. The two official framework targets use the separate `registration_path_filters` field to authorize only the locked Angular layout and Vue SFC playground source ranges, while still running every indexing stage inside those scopes. Missing external dependency source is not parser, index, file, scope, or response degradation. It must surface as unresolved edge metadata such as `resolution_state` and `target_hint`, and source/text fallback must not mask authorization gaps, dependency coverage gaps, or parser recovery problems.
 
 The fast `software_relationship_storage_cases` gate runs `cargo test --lib software_relationship_storage -- --nocapture`: 4,096 map topics, zero persistent edge writes/pages, Unicode-normalized configuration-edge deduplication, stable IDs/provenance, scoped filtering before limits, and bounded count/query latency. A 16,384-usage fixture requires path/language filters before window ranking to reduce VM work by at least half; the normalization character set must match every Rust Unicode scalar. It protects the schema-8 removal of redundant compatibility-edge storage while retaining typed ontology statements.
+
+The fast/performance `code_index_persistence_performance_suite` also runs `type_ownership_uses_indexed_membership` and `portable_configuration_bounds_unrelated_evidence`. They measure SQLite VM work with 16,384 unrelated Rust member records and 8,192 unrelated TypeScript configuration records. Membership must stay below 5,000 steps; cross-file Python getter/guard resolution must stay within the existing 2,000,000-step configuration budget. Both assertions retain the actual returned ownership and configuration evidence.
+
+The portable semantic performance suite also verifies that Swift module-root proof ignores 16,384 unrelated Rust files through the covering language/file index, with fewer than 5,000 SQLite VM steps.
+
+The fast/performance suite also covers bounded receiver hints and a Shell export index with 1,100 unrelated function/command pairs. Configuration binding expansion now uses persisted inverted identities and retains the existing SQLite work budget.
+
+The same fast/performance test filter covers cgo target preselection with 2,000 same-name C definitions and 10,000 repeated lookups, including internal linkage, non-C targets and uppercase Go extensions. Import-backed C++ ownership retains bounded page-local evidence caches.
+
+Java qualified static-call regressions use exact ownership candidates and AST modifier proof. The regression suite rejects variable/pattern/static-import shadowing, inherited overload guesses, non-Java homonyms and same-file preference for duplicate types. Shell and cgo boundary tests are split into focused child modules to preserve the 1,000-line file limit.
+
+Java receiver regressions also cover implicit Object overloads, synthesized enum/record members and enum-constant anonymous ownership boundaries.
+
+Scope service unit regressions exercise multilingual context expansion and visibility, view/business provenance, historical-reuse payload validation, incremental/overlay base rejection, and explicit scope reads from published shards and legacy control. Unit-only coverage is measured separately from the existing all-target CI command; each final measurement clears workspace coverage objects, not just profiles.
+
+Framework scope regression checks also preserve direct-snapshot nodes/edges and inspect SQLite plans for indexed source-file language lookups before result limits. Routing tests seed distinct nonempty facts in control and shard stores, including configuration, framework and changed-file impact evidence. Direct-framework regression tests protect the full write budget and publication counters; language-limit tests place excluded records ahead of the matching record.
+
+The fast `code_index_source_io_isolation_cases` gate checks filtered reads, typed local failures, partial snapshots, checkpoint replay, lease isolation and recovery without reset. Windows source I/O and optional large Java measurements are available through `source_io_windows.py`; see the [source I/O benchmark procedure](../../docs/en/05-benchmarks/12-elastic-index-budgets.md). It records real sharing/ACL errors separately from deterministic `os error 1` injection.

@@ -97,6 +97,7 @@ fn hit(
     stale: bool,
 ) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: repository_id.to_owned(),
         scope_id: scope_id.to_owned(),
         resolved_commit_sha: format!("commit-{scope_id}"),

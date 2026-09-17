@@ -310,6 +310,7 @@ fn binary_outputs_machine_readable_help() {
                         "topics",
                         "relationships",
                         "build",
+                        "modules",
                         "iac",
                         "design",
                         "systems",

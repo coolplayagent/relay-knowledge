@@ -25,6 +25,7 @@ use crate::{
 const CATALOG_READ_BUSY_TIMEOUT: Duration = Duration::from_millis(50);
 
 mod read_access;
+mod retirement;
 mod schema;
 mod store_access;
 
@@ -121,13 +122,12 @@ impl SqliteShardCatalog {
 
     /// Persists the bounded control-plane handoff before the shard enters its
     /// publication transaction.
-    pub(super) async fn prepare_snapshot_target(
+    pub(super) async fn prepare_publication_target(
         &self,
-        snapshot: &crate::domain::CodeIndexSnapshot,
+        target: PartitionedPublicationTarget,
         fence: CodeIndexPublicationFence,
     ) -> Result<(), StorageError> {
         let control_path = self.control_path.clone();
-        let target = PartitionedPublicationTarget::from(snapshot);
         tokio::task::spawn_blocking(move || {
             let mut connection = open_catalog_connection(&control_path)?;
             prepare_partitioned_target(&mut connection, &target, fence)
@@ -264,25 +264,6 @@ impl SqliteShardCatalog {
                 )
                 .optional()
                 .map(|row| row.is_some())
-                .map_err(StorageError::from)
-        })
-        .await?
-    }
-
-    pub(super) async fn remove_scope_route(
-        &self,
-        repository_id: String,
-        source_scope: String,
-    ) -> Result<usize, StorageError> {
-        let control_path = self.control_path.clone();
-        tokio::task::spawn_blocking(move || {
-            let connection = open_catalog_connection(&control_path)?;
-            connection
-                .execute(
-                    "DELETE FROM storage_repository_shard_scopes
-                     WHERE repository_id = ?1 AND source_scope = ?2",
-                    params![repository_id, source_scope],
-                )
                 .map_err(StorageError::from)
         })
         .await?

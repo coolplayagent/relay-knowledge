@@ -3,7 +3,7 @@ use crate::{
     domain::{CodeRepositoryRegistration, CodeRepositorySelector},
 };
 
-use super::preview_repository_scope;
+use crate::code::preview_repository_scope;
 
 #[test]
 fn scope_preview_reports_file_preset_exclusions_and_tracked_directories() {

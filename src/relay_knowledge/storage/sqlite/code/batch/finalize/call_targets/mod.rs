@@ -6,7 +6,9 @@ use rusqlite::{Transaction, params};
 
 use crate::{
     domain::code_call_targets::{
-        call_target_name_candidates, callable_definition_symbol, callable_target_symbol_kind,
+        CgoTarget, call_target_name_candidates, callable_definition_symbol,
+        callable_target_symbol_kind, go_source_path, java_source_path, java_static_target,
+        select_cgo_target,
     },
     storage::StorageError,
 };
@@ -36,6 +38,11 @@ pub(super) fn resolve_references(
         ",
     )?;
     for reference in references {
+        if matches!(reference.confidence_tier.as_str(), "extracted" | "exact")
+            && reference.target_hint.is_some()
+        {
+            continue;
+        }
         match index.resolve(&reference.name, &reference.path) {
             TargetResolution::Resolved(symbol, target_hint) => {
                 update.execute(params![
@@ -74,7 +81,11 @@ pub(super) fn resolve_references(
                     source_scope,
                     reference.reference_id,
                     Option::<String>::None,
-                    reference.name,
+                    if java_source_path(&reference.path) {
+                        reference.target_hint.as_deref().unwrap_or(&reference.name)
+                    } else {
+                        &reference.name
+                    },
                     "unresolved",
                     2_500_u16,
                     "ambiguous"
@@ -87,12 +98,15 @@ pub(super) fn resolve_references(
 }
 
 struct CallTargetIndex {
+    java_targets: BTreeMap<String, Vec<CallTargetSymbol>>,
+    cgo_targets: BTreeMap<String, CgoTarget<String>>,
     by_name: BTreeMap<String, Vec<CallTargetSymbol>>,
     by_snapshot_id: BTreeMap<String, CallTargetSymbol>,
 }
 
 #[derive(Clone)]
 struct CallTargetSymbol {
+    language_id: String,
     symbol_snapshot_id: String,
     path: String,
     kind: String,
@@ -120,7 +134,8 @@ impl CallTargetIndex {
     fn load(transaction: &Transaction<'_>, source_scope: &str) -> Result<Self, StorageError> {
         let mut statement = transaction.prepare(
             "
-            SELECT symbol_snapshot_id, path, name, kind, signature
+            SELECT symbol_snapshot_id, path, name, kind, signature, language_id,
+                CASE WHEN language_id='java' AND length(CAST(type_owner_json AS BLOB))<=65536 THEN type_owner_json ELSE NULL END
             FROM code_repository_symbols
             WHERE source_scope = ?1
               AND kind IN (
@@ -140,18 +155,59 @@ impl CallTargetIndex {
                 path: row.get(1)?,
                 kind: row.get(3)?,
                 signature: row.get(4)?,
+                language_id: row.get(5)?,
             };
-            Ok((name, symbol))
+            let owner: Option<crate::domain::CodeTypeOwner> = row
+                .get::<_, Option<String>>(6)?
+                .map(|json| {
+                    serde_json::from_str(&json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            6,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })
+                })
+                .transpose()?;
+            let java_alias = java_static_target(&symbol.language_id, &name, owner.as_ref());
+            Ok((name, symbol, java_alias))
         })?;
         let mut by_name = BTreeMap::<String, Vec<CallTargetSymbol>>::new();
         let mut by_snapshot_id = BTreeMap::<String, CallTargetSymbol>::new();
+        let mut java_targets = BTreeMap::<String, Vec<CallTargetSymbol>>::new();
         for row in rows {
-            let (name, symbol) = row?;
+            let (name, symbol, java_alias) = row?;
+            if let Some(name) = java_alias {
+                java_targets.entry(name).or_default().push(symbol.clone());
+            }
             by_snapshot_id.insert(symbol.symbol_snapshot_id.clone(), symbol.clone());
             by_name.entry(name).or_default().push(symbol);
         }
 
+        let cgo_targets = by_name
+            .iter()
+            .map(|(name, symbols)| {
+                let selected = match select_cgo_target(symbols.iter().map(|symbol| {
+                    (
+                        symbol,
+                        symbol.language_id.as_str(),
+                        symbol.kind.as_str(),
+                        symbol.signature.as_str(),
+                        symbol.path.as_str(),
+                    )
+                })) {
+                    CgoTarget::Unique(symbol) => {
+                        CgoTarget::Unique(symbol.symbol_snapshot_id.clone())
+                    }
+                    CgoTarget::Missing => CgoTarget::Missing,
+                    CgoTarget::Ambiguous => CgoTarget::Ambiguous,
+                };
+                (name.clone(), selected)
+            })
+            .collect();
         Ok(Self {
+            java_targets,
+            cgo_targets,
             by_name,
             by_snapshot_id,
         })
@@ -168,6 +224,27 @@ impl CallTargetIndex {
     }
 
     fn resolve(&self, name: &str, reference_path: &str) -> TargetResolution {
+        if java_source_path(reference_path) && name.contains('.') {
+            return match self.java_targets.get(name).map(Vec::as_slice) {
+                Some([symbol]) => TargetResolution::Resolved(symbol.clone(), name.to_owned()),
+                Some([_, _, ..]) => TargetResolution::Ambiguous(name.to_owned()),
+                _ => TargetResolution::Unresolved,
+            };
+        }
+        if go_source_path(reference_path)
+            && let Some(leaf) = name.strip_prefix("C.")
+        {
+            return match self.cgo_targets.get(leaf) {
+                Some(CgoTarget::Unique(id)) => self
+                    .by_snapshot_id
+                    .get(id)
+                    .map_or(TargetResolution::Unresolved, |symbol| {
+                        TargetResolution::Resolved(symbol.clone(), name.to_owned())
+                    }),
+                Some(CgoTarget::Ambiguous) => TargetResolution::Ambiguous(name.to_owned()),
+                _ => TargetResolution::Unresolved,
+            };
+        }
         let candidates = call_target_name_candidates(name, reference_path);
         let mut ambiguous_target_hint = None;
         let mut deferred_resolution = None;

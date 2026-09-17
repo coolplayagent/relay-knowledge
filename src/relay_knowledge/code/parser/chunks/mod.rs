@@ -327,7 +327,7 @@ fn bounded_file_surface_chunks(
             file_id: file_id.to_owned(),
             path: path.to_owned(),
             language_id: language_id.to_owned(),
-            content: if language_id == "markdown" {
+            content: if matches!(language_id, "markdown" | "xml") {
                 excerpt.to_owned()
             } else {
                 excerpt.trim().to_owned()
@@ -441,7 +441,7 @@ fn add_file_chunk_to_vec(
 }
 
 fn file_chunk_content(path: &str, language_id: &str, content: &str) -> String {
-    if language_id == "markdown" {
+    if matches!(language_id, "markdown" | "xml") {
         return content.to_owned();
     }
     if keeps_complete_manifest_content(path) {

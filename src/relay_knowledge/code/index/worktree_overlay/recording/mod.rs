@@ -1,12 +1,15 @@
 //! Records regular worktree files and deletion replacement semantics.
 
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, path::Path};
 
 use crate::code::CodeIndexError;
+use crate::code::source::path_io::SkippedSourcePath;
+use crate::domain::{CodePathIoOperation, CodePathKind};
 
 use super::super::ids::stable_content_hash;
 
 pub(super) struct WorktreeFileOutputs<'a> {
+    pub(super) skipped_paths: &'a mut Vec<SkippedSourcePath>,
     pub(super) overlay_hash_input: &'a mut Vec<u8>,
     pub(super) deleted_paths: &'a mut Vec<String>,
     pub(super) files_to_parse: &'a mut Vec<(String, Vec<u8>)>,
@@ -46,7 +49,27 @@ pub(super) fn record_file_as(
     previous_hashes: &BTreeMap<String, String>,
     outputs: &mut WorktreeFileOutputs<'_>,
 ) -> Result<(), CodeIndexError> {
-    let bytes = fs::read(root.join(source_path))?;
+    if outputs
+        .skipped_paths
+        .iter()
+        .any(|skipped| skipped.covers(indexed_path))
+    {
+        return Ok(());
+    }
+    let bytes = match crate::code::source::local_io::read_file(&root.join(source_path)) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            std::fs::read_dir(root)?;
+            let skipped = SkippedSourcePath::from_error(
+                indexed_path,
+                CodePathKind::File,
+                CodePathIoOperation::Read,
+                error,
+            )?;
+            outputs.record_skipped(skipped, previous_hashes);
+            return Ok(());
+        }
+    };
     let blob_hash = stable_content_hash(&bytes);
     outputs.overlay_hash_input.extend_from_slice(b"F\0");
     outputs
@@ -74,6 +97,30 @@ pub(super) fn record_file_as(
         .push((indexed_path.to_owned(), bytes));
 
     Ok(())
+}
+
+impl WorktreeFileOutputs<'_> {
+    /// Revokes inherited facts and partially collected bytes under a failed boundary.
+    pub(super) fn record_skipped(
+        &mut self,
+        skipped: SkippedSourcePath,
+        previous_hashes: &BTreeMap<String, String>,
+    ) {
+        skipped.append_identity(self.overlay_hash_input);
+        self.files_to_parse
+            .retain(|(path, _)| !skipped.covers(path));
+        self.deleted_paths.extend(
+            previous_hashes
+                .keys()
+                .filter(|path| skipped.covers(path))
+                .cloned(),
+        );
+        if !self.deleted_paths.contains(&skipped.path) {
+            self.deleted_paths.push(skipped.path.clone());
+        }
+        self.skipped_paths.retain(|old| !skipped.covers(&old.path));
+        self.skipped_paths.push(skipped);
+    }
 }
 
 #[cfg(test)]

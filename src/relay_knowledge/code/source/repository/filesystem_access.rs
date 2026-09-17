@@ -14,7 +14,8 @@ pub(super) struct FileSystemFile {
 }
 
 pub(super) fn filesystem_bytes(root: &Path, path: &str) -> Result<Vec<u8>, CodeIndexError> {
-    fs::read(safe_filesystem_path(root, path)?).map_err(CodeIndexError::Io)
+    crate::code::source::local_io::read_file(&safe_filesystem_path(root, path)?)
+        .map_err(CodeIndexError::Io)
 }
 
 pub(super) fn filesystem_blob_sizes(
@@ -41,12 +42,13 @@ pub(super) fn filesystem_byte_count(root: &Path, path: &str) -> Result<usize, Co
 pub(super) fn filesystem_files(
     root: &Path,
     policy: &FileSystemScanPolicy,
+    skipped: &mut Vec<crate::code::source::path_io::SkippedSourcePath>,
 ) -> Result<Vec<FileSystemFile>, CodeIndexError> {
     if policy.path_scope_denied {
         return Ok(Vec::new());
     }
     let mut files = Vec::new();
-    collect_files(root, Path::new(""), policy, &mut files)?;
+    collect_files(root, Path::new(""), policy, &mut files, skipped)?;
     files.sort_by(|left, right| left.path.cmp(&right.path));
     files.dedup_by(|left, right| left.path == right.path);
 
@@ -65,7 +67,7 @@ fn safe_filesystem_path(root: &Path, path: &str) -> Result<PathBuf, CodeIndexErr
     for component in Path::new(path).components() {
         checked_path.push(component.as_os_str());
         checked_relative.push(component.as_os_str());
-        match fs::symlink_metadata(&checked_path) {
+        match crate::code::source::local_io::symlink_metadata(&checked_path) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(CodeIndexError::InvalidInput(format!(
                     "filesystem source path {path} component {} is a symlink and is outside the authorized regular-file scope",
@@ -81,7 +83,7 @@ fn safe_filesystem_path(root: &Path, path: &str) -> Result<PathBuf, CodeIndexErr
     }
 
     let full_path = checked_path;
-    match fs::symlink_metadata(&full_path) {
+    match crate::code::source::local_io::symlink_metadata(&full_path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             Err(CodeIndexError::InvalidInput(format!(
                 "filesystem source path {path} is a symlink and is outside the authorized regular-file scope"
@@ -98,27 +100,85 @@ fn collect_files(
     relative: &Path,
     policy: &FileSystemScanPolicy,
     files: &mut Vec<FileSystemFile>,
+    skipped: &mut Vec<crate::code::source::path_io::SkippedSourcePath>,
 ) -> Result<(), CodeIndexError> {
-    let mut entries = fs::read_dir(root.join(relative))?.collect::<Result<Vec<_>, _>>()?;
+    let enumeration = crate::code::source::local_io::read_directory(&root.join(relative));
+    let mut entries = match enumeration {
+        Ok(entries) => entries,
+        Err(error) => {
+            skipped.push(crate::code::source::path_io::SkippedSourcePath::from_error(
+                &relative.to_string_lossy().replace('\\', "/"),
+                crate::domain::CodePathKind::Directory,
+                crate::domain::CodePathIoOperation::ReadDirectory,
+                error,
+            )?);
+            return Ok(());
+        }
+    };
     entries.sort_by_key(|entry| entry.file_name());
+    let initial_file_count = files.len();
+    let initial_skip_count = skipped.len();
     for entry in entries {
         let path = relative.join(entry.file_name());
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
+        let relative_path = path.to_string_lossy().replace('\\', "/");
+        let selected = policy.hash_includes_path(&relative_path)
+            && policy.language_allows_hash(&relative_path)
+            && policy.file_preset_allows_hash(&relative_path);
+        if !selected && !policy.should_descend_directory(&relative_path) {
             continue;
         }
+        let file_type = match crate::code::source::local_io::directory_entry_type(&entry) {
+            Ok(kind) => kind,
+            Err(error) => {
+                // A selection predicate cannot establish the failed entry's type. Revoke
+                // the complete known parent subtree, including earlier nested results.
+                let failure = crate::code::source::path_io::SkippedSourcePath::from_error(
+                    &relative.to_string_lossy().replace('\\', "/"),
+                    crate::domain::CodePathKind::Directory,
+                    crate::domain::CodePathIoOperation::Metadata,
+                    error,
+                )?;
+                files.truncate(initial_file_count);
+                skipped.truncate(initial_skip_count);
+                skipped.push(failure);
+                return Ok(());
+            }
+        };
         if file_type.is_dir() {
             let directory = path.to_string_lossy().replace('\\', "/");
-            if directory_is_excluded(&path, policy)
-                || !policy.should_descend_directory(&directory)
-                || contains_git_metadata(root, &path)?
+            if directory_is_excluded(&path, policy) || !policy.should_descend_directory(&directory)
             {
                 continue;
             }
-            collect_files(root, &path, policy, files)?;
+            match contains_git_metadata(root, &path) {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(CodeIndexError::Io(error)) => {
+                    skipped.push(crate::code::source::path_io::SkippedSourcePath::from_error(
+                        &relative_path,
+                        crate::domain::CodePathKind::Directory,
+                        crate::domain::CodePathIoOperation::CheckRepositoryBoundary,
+                        error,
+                    )?);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+            collect_files(root, &path, policy, files, skipped)?;
             continue;
         }
         if !file_type.is_file() {
+            if selected {
+                skipped.push(crate::code::source::path_io::SkippedSourcePath::from_error(
+                    &relative_path,
+                    crate::domain::CodePathKind::File,
+                    crate::domain::CodePathIoOperation::Metadata,
+                    std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "source is not a regular file",
+                    ),
+                )?);
+            }
             continue;
         }
         let path = path.to_string_lossy().replace('\\', "/");

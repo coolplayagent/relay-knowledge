@@ -1,0 +1,265 @@
+//! Static configuration registry extraction, independent of callable graph resolution.
+use super::{FeatureFlagFileInput, feature_flag_record_from_range};
+use crate::code::config_files::ConfigRange;
+use crate::domain::{CodeConfigMetadata, CodeFeatureFlagRecord, DomainError};
+mod dotenv;
+mod files;
+mod java;
+mod portable;
+mod shell;
+
+pub(super) fn extract(
+    input: &FeatureFlagFileInput<'_>,
+) -> Result<Vec<CodeFeatureFlagRecord>, DomainError> {
+    if crate::code::language_metadata::is_dotenv(input.path) {
+        return dotenv::extract(input);
+    }
+    match input.language_id {
+        "java" => java::extract(input),
+        "gotemplate" if input.path.to_ascii_lowercase().ends_with(".ctmpl") => {
+            files::extract(input)
+        }
+        "properties" | "ini" => files::extract(input),
+        "bash" => shell::extract(input),
+        "python" | "javascript" | "jsx" | "typescript" | "tsx" | "rust" | "c" | "cpp" | "go"
+        | "csharp" | "kotlin" | "scala" | "ruby" | "php" | "swift" | "starlark" => {
+            portable::extract(input)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// Syntax-authoritative formats suppress the older line-level reader heuristic.
+pub(super) fn has_syntax_reader(input: &FeatureFlagFileInput<'_>) -> bool {
+    input.syntax_root.is_some()
+        && matches!(
+            input.language_id,
+            "java"
+                | "bash"
+                | "python"
+                | "javascript"
+                | "jsx"
+                | "typescript"
+                | "tsx"
+                | "rust"
+                | "c"
+                | "cpp"
+                | "go"
+                | "csharp"
+                | "kotlin"
+                | "scala"
+                | "ruby"
+                | "php"
+                | "swift"
+                | "starlark"
+                | "vue"
+        )
+}
+
+pub(super) fn check_fact_budget(count: usize) -> Result<(), DomainError> {
+    if count >= 10_000 {
+        return Err(DomainError::invalid(
+            "configuration",
+            "file fact budget exceeded",
+        ));
+    }
+    Ok(())
+}
+
+fn record(
+    input: &FeatureFlagFileInput<'_>,
+    kind: &str,
+    key: &str,
+    edge: &str,
+    start: usize,
+    end: usize,
+) -> Result<CodeFeatureFlagRecord, DomainError> {
+    let end = start
+        + input.content[start..end]
+            .trim_end_matches(['\r', '\n'])
+            .len();
+    let range = ConfigRange {
+        byte_start: start,
+        byte_end: end,
+        line_start: line_number(&input.content[..start]),
+        line_end: line_number(&input.content[..end]),
+    };
+    feature_flag_record_from_range(
+        input,
+        kind,
+        key,
+        edge,
+        range,
+        input.content[start..end].trim(),
+    )
+}
+
+fn line_number(prefix: &str) -> usize {
+    let bytes = prefix.as_bytes();
+    1 + bytes
+        .iter()
+        .enumerate()
+        .filter(|(i, b)| **b == b'\r' || (**b == b'\n' && (*i == 0 || bytes[*i - 1] != b'\r')))
+        .count()
+}
+
+pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadata {
+    let format = if crate::code::language_metadata::is_dotenv(input.path) {
+        "dotenv"
+    } else {
+        match input.language_id {
+            "gotemplate" if input.path.to_ascii_lowercase().ends_with(".ctmpl") => "ctmpl",
+            "bash" => "shell",
+            other => other,
+        }
+    };
+    let mut meta = CodeConfigMetadata {
+        source_format: format.to_owned(),
+        ..Default::default()
+    };
+    // Only an adjacent explicit annotation supplies domain/hot-reload evidence.
+    let line_start = input.content[..start]
+        .rfind(['\r', '\n'])
+        .map_or(0, |i| i + 1);
+    let prefix = &input.content[..line_start];
+    let adjacent = prefix
+        .strip_suffix("\r\n")
+        .or_else(|| prefix.strip_suffix(['\r', '\n']))
+        .unwrap_or(prefix);
+    let delimiters = match input.language_id {
+        "java" => Some(("/*", "*/")),
+        "gotemplate" => Some(("{{", "}}")),
+        _ => None,
+    };
+    let block = delimiters.and_then(|(open, close)| {
+        if !adjacent
+            .rsplit(['\r', '\n'])
+            .next()
+            .is_some_and(|line| line.trim_end().ends_with(close))
+        {
+            return None;
+        }
+        prefix
+            .rfind(open)
+            .filter(|begin| {
+                prefix.len() - begin <= 8192
+                    && prefix[*begin..].lines().count() <= 32
+                    && prefix[..*begin]
+                        .rsplit(['\r', '\n'])
+                        .next()
+                        .is_some_and(|line| line.trim().is_empty())
+                    && (input.language_id == "java"
+                        || prefix[*begin + 2..]
+                            .trim_start()
+                            .trim_start_matches('-')
+                            .trim_start()
+                            .starts_with("/*"))
+            })
+            .map(|begin| &prefix[begin..])
+    });
+    let mut remaining = Some(adjacent);
+    let lines = std::iter::from_fn(|| {
+        let rest = remaining.take()?;
+        if let Some(end) = rest.rfind(['\r', '\n']) {
+            let before = &rest[..end];
+            remaining = Some(if rest.as_bytes()[end] == b'\n' {
+                before.strip_suffix('\r').unwrap_or(before)
+            } else {
+                before
+            });
+            Some(&rest[end + 1..])
+        } else {
+            Some(rest)
+        }
+    });
+    for line in block.into_iter().chain(lines.take(3)) {
+        let line = if input.language_id == "properties" {
+            line.trim_matches(files::PROPERTY_WHITESPACE)
+        } else {
+            line.trim()
+        };
+        let comment = match input.language_id {
+            "java" => line
+                .strip_prefix("//")
+                .or_else(|| line.strip_prefix("/*"))
+                .map(|s| s.split("*/").next().unwrap_or(s)),
+            "properties" => line.strip_prefix('#').or_else(|| line.strip_prefix('!')),
+            "ini" => line.strip_prefix('#').or_else(|| line.strip_prefix(';')),
+            "bash" => line.strip_prefix('#'),
+            "gotemplate" => line
+                .strip_prefix("{{")
+                .and_then(|s| {
+                    s.trim_start()
+                        .trim_start_matches('-')
+                        .trim_start()
+                        .strip_prefix("/*")
+                })
+                .map(|s| s.split("*/").next().unwrap_or(s)),
+            _ if format == "dotenv" => line.strip_prefix('#'),
+            _ => None,
+        };
+        if line.is_empty() {
+            break;
+        }
+        let Some(comment) = comment else {
+            break;
+        };
+        if apply_annotation(&mut meta, comment) {
+            break;
+        }
+    }
+    meta
+}
+fn value_type(value: &str) -> &'static str {
+    if matches!(value, "true" | "false") {
+        "boolean"
+    } else if value.parse::<i64>().is_ok() {
+        "integer"
+    } else if value.parse::<f64>().is_ok() {
+        "number"
+    } else {
+        "string"
+    }
+}
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+mod test_support;
+
+fn set_default(metadata: &mut CodeConfigMetadata, value: String) {
+    if value.len() <= 60 * 1024
+        && serde_json::to_string(&value).is_ok_and(|json| json.len() <= 60 * 1024)
+    {
+        metadata.value_type = Some(value_type(&value).into());
+        metadata.default_value = Some(value);
+    } else {
+        metadata.default_value = None;
+        metadata.value_type = None;
+        metadata.flow_incomplete = Some("configuration_value_budget_exceeded".into());
+    }
+}
+
+fn apply_annotation(meta: &mut CodeConfigMetadata, comment: &str) -> bool {
+    if let Some((_, annotation)) = comment.split_once("@config ") {
+        for part in annotation.split_whitespace() {
+            if let Some((key, value)) = part.split_once('=') {
+                match key {
+                    "domain" => {
+                        meta.domain = if !value.is_empty() && value.len() <= 128 {
+                            let normalized = value.to_lowercase();
+                            (normalized.len() <= 128).then_some(normalized)
+                        } else {
+                            None
+                        };
+                    }
+                    "hot-reload" => meta.hot_reload = value.parse().ok(),
+                    _ => {}
+                }
+            }
+        }
+        return true;
+    }
+    false
+}

@@ -2,7 +2,7 @@ pub(in crate::code::parser) fn definition_kind(node_kind: &str) -> Option<&'stat
     match node_kind {
         "function_declaration" => Some("function"),
         "class_declaration" | "enum_declaration" => Some("class"),
-        "object_declaration" | "package_header" => Some("module"),
+        "object_declaration" | "companion_object" | "package_header" => Some("module"),
         "type_alias_declaration" => Some("type"),
         _ => None,
     }

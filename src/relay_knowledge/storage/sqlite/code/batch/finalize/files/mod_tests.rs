@@ -12,7 +12,8 @@ fn file_language_loading_is_strictly_scoped_and_path_keyed() {
             "CREATE TABLE code_repository_files (
                 source_scope TEXT NOT NULL,
                 path TEXT NOT NULL,
-                language_id TEXT NOT NULL
+                language_id TEXT NOT NULL,
+                parse_status TEXT NOT NULL DEFAULT 'parsed'
             );",
         )
         .expect("file schema should be created");
@@ -23,6 +24,7 @@ fn file_language_loading_is_strictly_scoped_and_path_keyed() {
             [],
         )
         .expect("files should be inserted");
+    connection.execute("INSERT INTO code_repository_files VALUES ('scope', 'src/foreign', 'python', 'excluded')", []).unwrap();
     let transaction = connection.transaction().expect("transaction should open");
 
     let languages = load_file_languages(&transaction, "scope").expect("languages should load");

@@ -14,6 +14,8 @@ pub enum CodeMonorepoWorkspaceFormat {
     GoModules,
     /// Rust workspace: `Cargo.toml` with a `[workspace]` section.
     CargoWorkspace,
+    /// Maven reactor rooted at an indexed pom.xml.
+    Maven,
 }
 
 /// A detected monorepo workspace that groups multiple packages under a common root.
@@ -113,6 +115,7 @@ impl CodeWorkspaceDetectionConfig {
             CodeMonorepoWorkspaceFormat::Pnpm,
             CodeMonorepoWorkspaceFormat::GoModules,
             CodeMonorepoWorkspaceFormat::CargoWorkspace,
+            CodeMonorepoWorkspaceFormat::Maven,
         ]
     }
 }

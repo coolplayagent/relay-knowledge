@@ -201,6 +201,7 @@ fn chunk(path: &str) -> RepositoryCodeChunkRecord {
 
 fn symbol(path: &str) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         symbol_snapshot_id: format!("symbol:{path}"),
@@ -221,6 +222,7 @@ fn symbol(path: &str) -> RepositoryCodeSymbolRecord {
 
 fn diagnostic(path: &str) -> CodeFileDiagnostic {
     CodeFileDiagnostic {
+        io: None,
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         path: path.to_owned(),
@@ -231,4 +233,38 @@ fn diagnostic(path: &str) -> CodeFileDiagnostic {
 
 fn range() -> RepositoryCodeRange {
     RepositoryCodeRange::new("fixture", 0, 1).expect("range")
+}
+
+#[test]
+fn source_io_diagnostic_only_delta_paths_are_bounded_without_fabricated_files() {
+    use crate::domain::{
+        CodePathIoAction, CodePathIoDiagnostic, CodePathIoErrorKind, CodePathIoOperation,
+        CodePathKind,
+    };
+    let mut delta = snapshot(&[]);
+    for path in ["a.rs", "blocked"] {
+        let mut d = diagnostic(path);
+        d.parse_status = CodeParseStatus::Failed;
+        d.io = Some(CodePathIoDiagnostic {
+            action: CodePathIoAction::Skipped,
+            path_kind: if path == "blocked" {
+                CodePathKind::Directory
+            } else {
+                CodePathKind::File
+            },
+            operation: CodePathIoOperation::Read,
+            error_kind: CodePathIoErrorKind::Unsupported,
+            raw_os_error: Some(1),
+        });
+        delta.diagnostics.push(d);
+    }
+    let plan =
+        DeltaBatchPlan::new(&delta, CodeIndexResourceBudget::new(1, 32768, 100).unwrap()).unwrap();
+    assert_eq!(plan.len(), 2);
+    for index in 0..2 {
+        let batch = plan.batch(index, index + 1).unwrap();
+        assert!(batch.files.is_empty());
+        assert_eq!(batch.processed_paths().len(), 1);
+        assert_eq!(batch.diagnostics.len(), 1);
+    }
 }

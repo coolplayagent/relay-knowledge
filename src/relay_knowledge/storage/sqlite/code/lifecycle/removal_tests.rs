@@ -404,6 +404,7 @@ fn create_minimal_schema(connection: &Connection) {
                 );
                 CREATE TABLE code_repository_scopes (
                     source_scope TEXT PRIMARY KEY,
+                    retiring INTEGER NOT NULL DEFAULT 0,
                     repository_id TEXT NOT NULL,
                     resolved_commit_sha TEXT NOT NULL,
                     tree_hash TEXT NOT NULL,
@@ -435,7 +436,7 @@ fn create_minimal_schema(connection: &Connection) {
                 CREATE TABLE code_repository_calls (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_routes (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_chunks (source_scope TEXT NOT NULL);
-                CREATE TABLE code_repository_file_diagnostics (source_scope TEXT NOT NULL);
+                CREATE TABLE code_repository_file_diagnostics (source_scope TEXT NOT NULL, path TEXT NOT NULL DEFAULT 'fixture', io_json TEXT);
                 CREATE TABLE code_repository_path_tombstones (source_scope TEXT NOT NULL);
                 CREATE TABLE code_repository_index_checkpoints (source_scope TEXT PRIMARY KEY, repository_id TEXT NOT NULL);
                 CREATE TABLE code_repository_index_tasks (
@@ -462,6 +463,9 @@ fn create_minimal_schema(connection: &Connection) {
                 CREATE TABLE software_topics (source_scope TEXT NOT NULL);
                 CREATE TABLE software_relationships (source_scope TEXT NOT NULL);
                 CREATE TABLE software_build_targets (source_scope TEXT NOT NULL);
+                CREATE TABLE maven_reactor_modules (source_scope TEXT NOT NULL);
+                CREATE TABLE maven_reactor_edges (source_scope TEXT NOT NULL);
+                CREATE TABLE maven_reactor_status (source_scope TEXT NOT NULL);
                 CREATE TABLE software_iac_resources (source_scope TEXT NOT NULL);
                 CREATE TABLE software_design_elements (source_scope TEXT NOT NULL);
                 CREATE TABLE software_global_status (source_scope TEXT NOT NULL);
@@ -550,6 +554,9 @@ fn insert_scope_rows(connection: &Connection, repository_id: &str, scope: &str, 
         "software_topics",
         "software_relationships",
         "software_build_targets",
+        "maven_reactor_modules",
+        "maven_reactor_edges",
+        "maven_reactor_status",
         "software_iac_resources",
         "software_design_elements",
         "software_global_status",

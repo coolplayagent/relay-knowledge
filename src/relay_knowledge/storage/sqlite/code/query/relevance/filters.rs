@@ -169,6 +169,9 @@ fn push_language_filter_sql(
     path_column: &str,
     filters: &[String],
 ) {
+    let atoms = crate::domain::code_language_filter_atoms(filters);
+    let filters = atoms.as_slice();
+
     let clauses_for_filters = filters
         .iter()
         .map(|filter| {
@@ -221,6 +224,9 @@ pub(in crate::storage::sqlite::code::query) fn push_language_filter_values(
     values: &mut Vec<Value>,
     filters: &[String],
 ) {
+    let atoms = crate::domain::code_language_filter_atoms(filters);
+    let filters = atoms.as_slice();
+
     values.extend(filters.iter().cloned().map(Value::Text));
 }
 

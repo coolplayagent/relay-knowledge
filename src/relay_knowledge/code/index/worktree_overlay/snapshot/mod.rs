@@ -16,7 +16,7 @@ use super::super::{
     full_snapshot::build_full_snapshot_as_worktree_overlay,
     git::{git_bytes, resolve_ref},
     parser::parse_indexed_file,
-    snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
+    snapshot::{SnapshotBuild, SnapshotScopeFilters},
     source::{RepositorySourceKind, source_commit_is_filesystem, source_kind},
 };
 use super::{
@@ -85,8 +85,10 @@ pub(in crate::code::index) fn build_worktree_overlay_snapshot(
         );
     }
     let (overlay_commit, tree_hash) = plan.identity();
-    let language_filters =
-        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let language_filters = crate::domain::code_scope_language_filters(
+        &registration.language_filters,
+        &selector.language_filters,
+    );
     let mut build = SnapshotBuild::new_with_scope_filters(
         registration,
         overlay_commit,
@@ -113,6 +115,11 @@ pub(in crate::code::index) fn build_worktree_overlay_snapshot(
         workspace_detection,
     );
 
+    build.diagnostics.extend(
+        plan.skipped_paths
+            .iter()
+            .map(|path| path.diagnostic(&build.repository_id, &build.source_scope)),
+    );
     for (path, bytes) in files_to_parse {
         parse_indexed_file(&mut build, &path, &bytes)?;
     }
@@ -144,6 +151,7 @@ fn plan_worktree_overlay(
         return Ok(WorktreeOverlayPlan {
             commit,
             changed_path_count: 0,
+            skipped_paths: Vec::new(),
             path_filters: overlay_scope.path_filters,
             overlay_hash_input: Vec::new(),
             deleted_paths: Vec::new(),
@@ -152,6 +160,7 @@ fn plan_worktree_overlay(
         });
     }
     let changes = bounded_worktree_changes(changes, &overlay_scope)?;
+    let mut skipped_paths = Vec::new();
     let mut overlay_hash_input = Vec::new();
     let mut deleted_paths = Vec::new();
     let mut files_to_parse = Vec::new();
@@ -163,6 +172,7 @@ fn plan_worktree_overlay(
         overlay_scope: &overlay_scope,
     };
     let mut outputs = super::recording::WorktreeFileOutputs {
+        skipped_paths: &mut skipped_paths,
         overlay_hash_input: &mut overlay_hash_input,
         deleted_paths: &mut deleted_paths,
         files_to_parse: &mut files_to_parse,
@@ -175,6 +185,7 @@ fn plan_worktree_overlay(
     Ok(WorktreeOverlayPlan {
         commit,
         changed_path_count: changes.len(),
+        skipped_paths,
         path_filters: overlay_scope.path_filters,
         overlay_hash_input,
         deleted_paths,

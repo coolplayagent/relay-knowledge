@@ -77,6 +77,7 @@ pub(super) fn workspace(format: CodeMonorepoWorkspaceFormat) -> CodeMonorepoWork
             CodeMonorepoWorkspaceFormat::Pnpm => "/repo/pnpm-workspace.yaml",
             CodeMonorepoWorkspaceFormat::GoModules => "/repo/go.work",
             CodeMonorepoWorkspaceFormat::CargoWorkspace => "/repo/Cargo.toml",
+            CodeMonorepoWorkspaceFormat::Maven => "/repo/pom.xml",
         }
         .to_owned(),
         members: vec![
@@ -85,6 +86,7 @@ pub(super) fn workspace(format: CodeMonorepoWorkspaceFormat) -> CodeMonorepoWork
                     CodeMonorepoWorkspaceFormat::Pnpm => "@scope/core",
                     CodeMonorepoWorkspaceFormat::GoModules => "example.com/svc/api",
                     CodeMonorepoWorkspaceFormat::CargoWorkspace => "core",
+                    CodeMonorepoWorkspaceFormat::Maven => "demo:core",
                 }
                 .to_owned(),
                 relative_path: "packages/core".to_owned(),
@@ -94,6 +96,7 @@ pub(super) fn workspace(format: CodeMonorepoWorkspaceFormat) -> CodeMonorepoWork
                     CodeMonorepoWorkspaceFormat::Pnpm => "@scope/app",
                     CodeMonorepoWorkspaceFormat::GoModules => "example.com/svc/app",
                     CodeMonorepoWorkspaceFormat::CargoWorkspace => "app",
+                    CodeMonorepoWorkspaceFormat::Maven => "demo:app",
                 }
                 .to_owned(),
                 relative_path: "packages/app".to_owned(),

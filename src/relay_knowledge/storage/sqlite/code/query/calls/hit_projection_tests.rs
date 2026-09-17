@@ -4,6 +4,7 @@ use crate::domain::{CodeRepositorySelector, FreshnessPolicy, RepositoryCodeRange
 #[test]
 fn callees_project_the_resolved_callee_identity() {
     let status = CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/repo".to_owned(),
@@ -30,6 +31,7 @@ fn callees_project_the_resolved_callee_identity() {
     )
     .expect("request should validate");
     let rows = vec![CallRow {
+        byte_range: None,
         file_id: "file".to_owned(),
         path: "src/service.rs".to_owned(),
         language_id: "rust".to_owned(),
@@ -52,7 +54,7 @@ fn callees_project_the_resolved_callee_identity() {
         is_generated: false,
     }];
 
-    let hits = call_rows_to_hits(&status, &request, rows);
+    let hits = call_rows_to_hits(&status, &request, rows, 0.0);
 
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].symbol_snapshot_id.as_deref(), Some("callee"));
@@ -79,7 +81,7 @@ fn callers_rank_production_symbols_before_embedded_test_symbols() {
         ),
     ];
 
-    let mut hits = call_rows_to_hits(&status, &request, rows);
+    let mut hits = call_rows_to_hits(&status, &request, rows, 0.0);
     hits.sort_by(|left, right| right.score.total_cmp(&left.score));
 
     assert!(hits[0].excerpt.starts_with("check_key_valid calls"));
@@ -114,6 +116,7 @@ fn caller_test_context_demotion_preserves_positive_evidence() {
 
 fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/repo".to_owned(),
@@ -146,6 +149,7 @@ fn request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
 
 fn caller_row(caller_name: &str, canonical_id: &str, line: u32) -> CallRow {
     CallRow {
+        byte_range: None,
         file_id: "file".to_owned(),
         path: "src/auth.rs".to_owned(),
         language_id: "rust".to_owned(),

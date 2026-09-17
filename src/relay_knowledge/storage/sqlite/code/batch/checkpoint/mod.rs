@@ -168,7 +168,7 @@ pub(super) fn load_optional(
                    committed_chunk_count, committed_fact_row_count, incremental_summary_json,
                    batch_count, last_path,
                    resource_budget_json,
-                   updated_at_ms
+                   updated_at_ms, processed_path_count
             FROM code_repository_index_checkpoints
             WHERE source_scope = ?1
             ",
@@ -208,6 +208,7 @@ fn checkpoint_from_row(row: &Row<'_>) -> rusqlite::Result<CodeIndexCheckpoint> {
     let path_filters = super::super::status::parse_json_list(row.get(4)?)?;
     let language_filters = super::super::status::parse_json_list(row.get(5)?)?;
     Ok(CodeIndexCheckpoint {
+        processed_path_count: row.get(19)?,
         repository_id: row.get(0)?,
         source_scope: row.get(1)?,
         resolved_commit_sha: row.get(2)?,
@@ -268,9 +269,9 @@ pub(super) fn count_scope_diagnostics(
     connection
         .query_row(
             "
-            SELECT COUNT(*)
+            SELECT COUNT(DISTINCT path)
             FROM code_repository_file_diagnostics
-            WHERE source_scope = ?1
+            WHERE source_scope = ?1 AND COALESCE(json_extract(io_json, '$.path_kind'), 'file') = 'file'
             ",
             params![source_scope],
             |row| row.get(0),

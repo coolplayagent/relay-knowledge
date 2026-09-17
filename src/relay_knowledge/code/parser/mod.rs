@@ -13,6 +13,7 @@ mod recovery;
 mod routes;
 mod syntax;
 mod text;
+mod type_ownership;
 pub(in crate::code) mod workspace;
 
 pub(in crate::code) use dependencies::{

@@ -67,6 +67,7 @@ fn importer_evidence_batches_large_module_seed_sets() {
 
 fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/repo".to_owned(),

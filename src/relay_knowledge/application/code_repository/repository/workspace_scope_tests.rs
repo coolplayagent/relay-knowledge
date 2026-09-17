@@ -9,7 +9,10 @@ use crate::{
         CodeIndexMode, CodeIndexRequest, CodeMonorepoWorkspaceFormat, CodeWorkspaceDetectionConfig,
         FreshnessPolicy, code_snapshot_scope_id_with_workspace_detection,
     },
-    storage::{CodeRepositorySetStore as _, SqliteGraphStore},
+    storage::{
+        CodeIndexPublicationStore as _, CodeIndexTaskStore as _, CodeQueryReadStore as _,
+        CodeRepositorySetStore as _, SqliteGraphStore,
+    },
 };
 
 use super::test_support::*;
@@ -78,6 +81,7 @@ async fn equivalent_enabled_workspace_config_reuses_the_exact_published_scope() 
                 CodeMonorepoWorkspaceFormat::CargoWorkspace,
                 CodeMonorepoWorkspaceFormat::Pnpm,
                 CodeMonorepoWorkspaceFormat::GoModules,
+                CodeMonorepoWorkspaceFormat::Maven,
                 CodeMonorepoWorkspaceFormat::CargoWorkspace,
             ],
         },
@@ -174,4 +178,50 @@ async fn scope_preview_uses_the_prospective_ref_and_workspace_identity() {
         enabled_preview.scope.scope_id,
         disabled_preview.scope.scope_id
     );
+}
+
+#[tokio::test]
+async fn scope_preview_matches_completed_index_without_writing_index_state() {
+    let repo = FixtureRepo::create("preview-degradation-parity");
+    repo.write("src/good.c", "int good(void) { return 1; }\n");
+    repo.write("src/broken.c", "int broken = ;\n");
+    repo.write("src/unknown.custom", "unknown\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "parser outcomes"]);
+    let store = Arc::new(SqliteGraphStore::open_in_memory().unwrap());
+    let service = service_with_store(Arc::clone(&store)).await;
+    register_fixture_repo(&service, &repo, "register-preview-parity").await;
+    let before = store.code_repository_totals().await.unwrap();
+    let queue_before = store.code_index_task_queue_status().await.unwrap();
+    let preview = service
+        .preview_code_repository_scope(request("fixture", "HEAD"), context("preview-parity"))
+        .await
+        .unwrap();
+    assert_eq!(preview.preview.selected_file_count, 3);
+    assert_eq!(preview.preview.expected_degraded_file_count, 2);
+    assert_eq!(store.code_repository_totals().await.unwrap(), before);
+    assert_eq!(
+        store.code_index_task_queue_status().await.unwrap(),
+        queue_before
+    );
+    assert!(
+        store
+            .code_index_checkpoint(preview.scope.scope_id.clone())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let indexed = service
+        .index_code_repository(request("fixture", "HEAD"), context("index-parity"))
+        .await
+        .unwrap();
+    assert_eq!(
+        preview.preview.expected_degraded_file_count,
+        indexed.summary.degraded_file_count
+    );
+    assert_eq!(
+        preview.preview.resolved_commit_sha,
+        indexed.summary.resolved_commit_sha
+    );
+    assert_eq!(preview.preview.tree_hash, indexed.summary.tree_hash);
 }

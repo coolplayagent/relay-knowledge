@@ -1,3 +1,4 @@
+mod diagnostic_counts;
 use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension};
@@ -18,10 +19,12 @@ mod repository_set_store;
 mod routes;
 pub(in crate::storage::sqlite) mod schema;
 mod search;
+mod semantic_modules;
 mod session_finalization;
 mod set;
 mod snapshot;
 mod software_projection_store;
+mod source_replan;
 mod symbols;
 mod tasks;
 mod views;
@@ -533,6 +536,25 @@ impl CodeIndexSourceStore for SqliteGraphStore {
 }
 
 impl CodeIndexPublicationStore for SqliteGraphStore {
+    fn cleanup_source_replan_with_fence(
+        &self,
+        source_scope: String,
+        fence: CodeIndexPublicationFence,
+        resume_only: bool,
+    ) -> StorageFuture<'_, bool> {
+        let authority_path = self.publication_authority_path.clone();
+        self.run(move |connection| {
+            let guard = lifecycle::publication_fence::prepare_guard(
+                connection,
+                fence,
+                authority_path.as_deref(),
+            )?;
+            super::connection_runtime::retry::retry_sqlite_transient(|| {
+                source_replan::advance(connection, &source_scope, &guard, resume_only)
+            })
+        })
+    }
+
     fn code_index_checkpoint(
         &self,
         source_scope: String,
@@ -795,6 +817,13 @@ impl CodeQueryReadStore for SqliteGraphStore {
 
     fn code_repository_totals(&self) -> StorageFuture<'_, CodeRepositoryTotals> {
         self.run_read(report::repository_totals)
+    }
+
+    fn code_repository_diagnostics(
+        &self,
+        request: crate::domain::CodeDiagnosticsPageRequest,
+    ) -> StorageFuture<'_, crate::domain::CodeDiagnosticsPage> {
+        self.run_read(move |connection| lifecycle::diagnostics::page(connection, request))
     }
 
     fn code_repository_report(

@@ -51,6 +51,8 @@ mod worktree_overlay_tests;
 pub(crate) use business_glossary::load_business_knowledge_projection;
 pub use error::CodeIndexError;
 pub(crate) use index::CodeIndexPlanRecovery;
+pub use index::preview_repository_scope;
+pub(crate) use index::preview_repository_scope_cancellable;
 pub use index::{
     CodeIndexPlan, prepare_full_index_plan, prepare_full_index_plan_with_workspace_detection,
 };
@@ -59,7 +61,7 @@ pub use index::{
     changed_paths_for_diff_with_path_filters, deleted_symbol_names_for_diff,
 };
 pub use registration::register_repository;
-pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
+pub use scope::partition_changed_paths_for_selector;
 pub(crate) use source::git::{
     first_parent_ancestors_bounded, repository_worktree_observation_bounded,
     resolve_git_ref_bounded, resolve_git_tree_bounded,
@@ -117,6 +119,28 @@ use language_metadata as languages;
 #[cfg(test)]
 use parser::parse_indexed_file;
 
+/// Exercises the real parser without a Git process or developer-local state.
+#[cfg(test)]
+pub(crate) fn syntax_snapshot_for_tests(
+    sources: &[(&str, &str)],
+) -> crate::domain::CodeIndexSnapshot {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+            .unwrap();
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".into(),
+        "tree".into(),
+        true,
+        sources.len(),
+        0,
+    );
+    for (path, source) in sources {
+        parse_indexed_file(&mut build, path, source.as_bytes()).unwrap();
+    }
+    build.finish()
+}
+
 #[cfg(test)]
 use {
     crate::domain::{
@@ -128,3 +152,5 @@ use {
     scope::{path_is_selected, path_scope_allows, path_scope_overlaps},
     source::{RepositorySourceKind, source_snapshot_batch_bytes},
 };
+
+pub(crate) use source::source_commit_is_filesystem;

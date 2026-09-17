@@ -23,6 +23,7 @@ use crate::{
 
 use super::{WebState, api_error_response};
 
+mod diagnostics;
 mod index_request;
 mod view_request;
 
@@ -67,6 +68,10 @@ pub(super) fn routes() -> Router<WebState> {
         .route(
             "/api/v1/code/repositories/{alias}/impact",
             post(code_repository_impact),
+        )
+        .route(
+            "/api/v1/code/repositories/{alias}/diagnostics",
+            get(diagnostics::get),
         )
         .route(
             "/api/v1/code/repositories/{alias}/report",
@@ -548,7 +553,9 @@ fn normalize_feature_flag_request(request: &mut CodeFeatureFlagRequest) -> Optio
         request.repository.clone(),
         request.limit,
         request.freshness_policy,
-    ) {
+    )
+    .and_then(|validated| validated.with_filters(request.filters.clone()))
+    {
         Ok(validated) => {
             *request = validated;
             None
@@ -604,7 +611,9 @@ fn normalize_software_request(request: &mut SoftwareGlobalRequest) -> Option<Api
         request.kind,
         request.freshness_policy,
         request.limit,
-    ) {
+    )
+    .and_then(|validated| validated.with_cursor(request.cursor.clone()))
+    {
         Ok(validated) => {
             *request = validated;
             None

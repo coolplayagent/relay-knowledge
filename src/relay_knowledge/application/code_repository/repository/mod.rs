@@ -1,6 +1,10 @@
+mod diagnostics;
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod mod_tests;
+#[cfg(test)]
+#[path = "query_freshness_tests.rs"]
+mod query_freshness_tests;
 mod staleness;
 mod status;
 #[cfg(test)]

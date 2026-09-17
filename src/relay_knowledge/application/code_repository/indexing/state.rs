@@ -87,8 +87,10 @@ pub(super) async fn fresh_full_index_probe(
         }
 
         let path_filters = merged_filters(&registration.path_filters, &selector.path_filters);
-        let language_filters =
-            merged_filters(&registration.language_filters, &selector.language_filters);
+        let language_filters = crate::domain::code_scope_language_filters(
+            &registration.language_filters,
+            &selector.language_filters,
+        );
         let (resolved_commit_sha, tree_hash) = resolve_repository_snapshot_with_filters(
             &root,
             &selector.ref_selector,
@@ -110,23 +112,28 @@ pub(super) async fn degraded_file_count_for_fresh_index(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     scoped_status: &CodeRepositoryStatus,
 ) -> Result<usize, ApiError> {
-    if let Some(count) = degraded_file_count_from_status(scoped_status) {
+    if let Some(count) = scoped_status.content_integrity.degraded_file_count {
         return Ok(count);
     }
-    let report = store
-        .code_repository_report(scoped_status.repository_id.clone())
+    let source_scope = scoped_status
+        .last_indexed_scope_id
+        .clone()
+        .ok_or_else(|| ApiError::invalid_argument("missing diagnostic scope"))?;
+    let page = store
+        .code_repository_diagnostics(crate::domain::CodeDiagnosticsPageRequest {
+            repository_id: scoped_status.repository_id.clone(),
+            source_scope,
+            resolved_commit_sha: scoped_status
+                .last_indexed_commit
+                .clone()
+                .ok_or_else(|| ApiError::invalid_argument("missing diagnostic commit"))?,
+            path_filters: Vec::new(),
+            limit: 1,
+            after: None,
+        })
         .await
         .map_err(storage_api_error)?;
-
-    Ok(report.degraded_file_count)
-}
-
-fn degraded_file_count_from_status(status: &CodeRepositoryStatus) -> Option<usize> {
-    let reason = status.degraded_reason.as_deref()?;
-    let (count, rest) = reason.split_once(' ')?;
-    (rest == "file(s) degraded during code indexing")
-        .then(|| count.parse().ok())
-        .flatten()
+    Ok(page.degraded_file_count)
 }
 
 pub(super) fn index_start_from_completed(
@@ -165,7 +172,7 @@ pub(super) async fn previous_index_state_for_index(
     let base_commit =
         resolve_code_ref_for_selector(status, &request.repository, base_ref.to_owned()).await?;
     let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
-    let language_filters = merged_filters(
+    let language_filters = crate::domain::code_scope_language_filters(
         &status.language_filters,
         &request.repository.language_filters,
     );
@@ -333,7 +340,9 @@ pub(super) async fn plan_full_index_reuse(
 
         let mut incremental = request.clone();
         incremental.repository.path_filters = path_filters.clone();
-        incremental.repository.language_filters = language_filters.clone();
+        // Effective language groups belong to the persisted session/scope. Keep
+        // the public selector here: durable task payloads must deserialize through
+        // the same public validation as the original request.
         incremental.mode = CodeIndexMode::incremental(ancestor, target_commit.clone())
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         return Ok(FullIndexReusePlan::Incremental(incremental));
@@ -444,3 +453,7 @@ pub(super) async fn active_full_index_task_for_request(
 #[cfg(test)]
 #[path = "state_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "state_scope_tests.rs"]
+mod scope_tests;

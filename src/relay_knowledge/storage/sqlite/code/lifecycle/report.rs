@@ -96,7 +96,18 @@ pub(in crate::storage::sqlite::code) fn repository_report(
     }
     .to_owned();
 
+    let degradation_summary_truncated = connection.query_row(
+        "SELECT COUNT(*) > 20 FROM code_repository_file_diagnostics WHERE source_scope = ?1",
+        params![scope],
+        |row| row.get(0),
+    )?;
+    let diagnostics_command = format!(
+        "relay-knowledge repo diagnostics {} --ref {} --format json",
+        status.alias,
+        status.last_indexed_commit.as_deref().unwrap_or("HEAD")
+    );
     Ok(CodeRepositoryReport {
+        content_integrity: status.content_integrity.clone(),
         repository_id: status.repository_id,
         alias: status.alias,
         root_path: status.root_path,
@@ -114,6 +125,8 @@ pub(in crate::storage::sqlite::code) fn repository_report(
         resolved_edge_count: edge_counts.resolved,
         ambiguous_edge_count: edge_counts.ambiguous,
         unresolved_edge_count: edge_counts.unresolved,
+        degradation_summary_truncated,
+        diagnostics_command,
         degradation_summary,
         representative_queries,
         latency_samples: Vec::<CodeRepositoryLatencySample>::new(),
@@ -219,6 +232,7 @@ fn parse_status_counts_from_rows(
             value if value == CodeParseStatus::Partial.as_str() => counts.partial = count,
             value if value == CodeParseStatus::TextOnly.as_str() => counts.text_only = count,
             value if value == CodeParseStatus::Failed.as_str() => counts.failed = count,
+            value if value == CodeParseStatus::Excluded.as_str() => counts.excluded = count,
             other => {
                 return Err(StorageError::InvalidInput(format!(
                     "unknown code repository parse status '{other}'"
@@ -256,7 +270,7 @@ fn repository_degraded_file_count(
     connection
         .query_row(
             "
-            SELECT COUNT(*)
+            SELECT COUNT(DISTINCT path)
             FROM code_repository_file_diagnostics
             WHERE source_scope = ?1
             ",

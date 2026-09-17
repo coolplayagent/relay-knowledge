@@ -91,6 +91,7 @@ pub(super) fn framework_edge(
             framework.as_str(),
             kind.as_str(),
             source_node_id,
+            target_node_id.as_deref().unwrap_or_default(),
             target_hint.as_deref().unwrap_or_default(),
             &byte_start.to_string(),
         ],

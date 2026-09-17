@@ -38,6 +38,10 @@ use super::{
 const SNAPSHOT_LIMIT_MULTIPLIER: usize = 20;
 const SNAPSHOT_LIMIT_MAX: usize = 2_000;
 
+#[cfg(test)]
+#[path = "service_tests.rs"]
+mod tests;
+
 impl RelayKnowledgeService {
     /// Builds a deterministic, evidence-backed repository understanding view.
     pub async fn codebase_view(
@@ -273,6 +277,9 @@ async fn view_freshness(
 
     Ok(CodeRepositoryFreshnessDiagnostics::code_query(
         CodeRepositoryFreshnessInput {
+            content_integrity: input.scoped_status.content_integrity.clone(),
+            query_degraded: input.degraded_reason.is_some()
+                && input.degraded_reason != input.scoped_status.degraded_reason,
             graph_version: input.graph_version,
             freshness_policy: input.request.freshness_policy,
             source_scope: indexed_source_scope(input.scoped_status),

@@ -5,6 +5,8 @@ use std::path::Path;
 use tree_sitter::Language;
 
 use crate::code::config_files;
+mod source;
+pub(in crate::code) use source::detect_source_language;
 
 #[derive(Clone, Copy)]
 pub(in crate::code) struct LanguageSpec {
@@ -64,8 +66,24 @@ pub(in crate::code) fn language_id(path: &str) -> Option<&'static str> {
     detect_language(path).map(|language| language.id)
 }
 
+/// Recognize environment files and their checked-in templates or named variants.
+pub(in crate::code) fn is_dotenv(path: &str) -> bool {
+    let name = path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(path)
+        .to_ascii_lowercase();
+    name.ends_with(".env")
+        || name
+            .strip_prefix(".env.")
+            .is_some_and(|suffix| !suffix.is_empty())
+}
+
 pub(in crate::code) fn detect_language(path: &str) -> Option<LanguageSpec> {
     let file_name = Path::new(path).file_name()?.to_str()?;
+    if is_dotenv(path) {
+        return Some(bash());
+    }
     if matches!(
         file_name,
         ".bash_profile" | ".bashrc" | ".profile" | "bashrc" | "bash_profile"
@@ -340,7 +358,7 @@ fn language_for_extension(extension: &str) -> Option<LanguageSpec> {
         "swift" => Some(LanguageSpec {
             id: "swift",
             language: || tree_sitter_swift::LANGUAGE.into(),
-            tags_query: tree_sitter_swift::TAGS_QUERY,
+            tags_query: include_str!("swift_tags.scm"),
         }),
         "sql" => Some(LanguageSpec {
             id: "sql",

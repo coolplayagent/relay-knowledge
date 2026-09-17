@@ -397,6 +397,8 @@ fn retained_adoption_database() -> Connection {
 
 fn incremental_receipt(task_id: &str) -> CodeIncrementalSummaryReceipt {
     CodeIncrementalSummaryReceipt {
+        io_skipped_file_count: 0,
+        io_skipped_directory_count: 0,
         task_id: task_id.to_owned(),
         base_resolved_commit_sha: "base".to_owned(),
         changed_path_count: 1,

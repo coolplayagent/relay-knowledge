@@ -206,6 +206,8 @@ pub(super) fn measure_snapshot_insert_surface(
         .saturating_add(snapshot.dependencies.len())
         .saturating_add(snapshot.calls.len())
         .saturating_add(snapshot.feature_flags.len())
+        .saturating_add(snapshot.framework_nodes.len())
+        .saturating_add(snapshot.framework_edges.len())
         .saturating_add(snapshot.routes.len())
         .saturating_add(snapshot.chunks.len());
     let insert_rows = fact_rows

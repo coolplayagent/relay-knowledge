@@ -1,6 +1,6 @@
 //! Direct tests for caller ownership and call-edge materialization helpers.
 
-use super::{super::symbols::SymbolKey, caller_for_line};
+use super::{super::symbols::SymbolKey, caller_for_position};
 use crate::domain::RepositoryCodeRange;
 
 #[test]
@@ -13,7 +13,7 @@ fn caller_lookup_uses_sorted_prefix_and_prefers_innermost_symbol() {
     ];
     let symbol_refs = symbols.iter().collect::<Vec<_>>();
 
-    let caller = caller_for_line(Some(&symbol_refs), 30).expect("caller should match");
+    let caller = caller_for_position(Some(&symbol_refs), 30).expect("caller should match");
 
     assert_eq!(caller.name, "same_start_inner");
 }
@@ -23,7 +23,7 @@ fn caller_lookup_ignores_symbols_that_start_after_call_line() {
     let symbols = [symbol("before", 1, 5), symbol("after", 20, 30)];
     let symbol_refs = symbols.iter().collect::<Vec<_>>();
 
-    assert!(caller_for_line(Some(&symbol_refs), 10).is_none());
+    assert!(caller_for_position(Some(&symbol_refs), 10).is_none());
 }
 
 fn symbol(name: &str, start: u32, end: u32) -> SymbolKey {
@@ -31,6 +31,6 @@ fn symbol(name: &str, start: u32, end: u32) -> SymbolKey {
         symbol_snapshot_id: format!("symbol:{name}"),
         path: "src/lib.rs".to_owned(),
         name: name.to_owned(),
-        line_range: RepositoryCodeRange { start, end },
+        byte_range: RepositoryCodeRange { start, end },
     }
 }

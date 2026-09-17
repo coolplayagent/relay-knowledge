@@ -28,6 +28,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some("framework") => parse_framework_graph(&tokens[1..]),
         Some("impact") => parse_impact(&tokens[1..]),
         Some("status") => parse_status(&tokens[1..]),
+        Some("diagnostics") => super::diagnostics::parse(&tokens[1..]),
         Some("report") => parse_report(&tokens[1..]),
         Some("software") => parse_software(&tokens[1..]),
         Some("business") => parse_business(&tokens[1..]),
@@ -284,6 +285,7 @@ fn parse_update(tokens: &[String]) -> Result<RepoCommand, CliError> {
 
 fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let alias = positional_alias(tokens)?;
+    let mut filters = crate::domain::CodeConfigFilter::default();
     let mut query = None;
     let mut limit = 50;
     let mut ref_selector = "HEAD".to_owned();
@@ -293,6 +295,35 @@ fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
+            "--domain" | "--source" => {
+                let option = if tokens[index] == "--domain" {
+                    "--domain"
+                } else {
+                    "--source"
+                };
+                let value = value_after(tokens, index, option)?;
+                if value.starts_with('-') {
+                    return Err(CliError::MissingValue(option));
+                }
+                if option == "--domain" {
+                    filters.domain = Some(value);
+                } else {
+                    filters.source = Some(value);
+                }
+                index += 2;
+            }
+            "--hot-reload" => {
+                let value = value_after(tokens, index, "--hot-reload")?;
+                filters.hot_reload = Some(value.parse::<bool>().map_err(|_| {
+                    CliError::UnexpectedArgument("--hot-reload requires true or false".into())
+                })?);
+                index += 2;
+            }
+            "--consistency" => {
+                filters.consistency = true;
+                index += 1;
+            }
+
             "--query" => {
                 let (value, next_index) = collect_query_value(tokens, index, "--query")?;
                 query = Some(value);
@@ -330,7 +361,11 @@ fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
         }
     }
 
+    let filters = filters
+        .validate()
+        .map_err(|e| CliError::UnexpectedArgument(e.to_string()))?;
     Ok(RepoCommand::FeatureFlags {
+        filters,
         alias,
         query,
         limit,
@@ -467,9 +502,19 @@ fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let mut kind = SoftwareGlobalKind::All;
     let mut freshness = FreshnessPolicy::AllowStale;
     let mut limit = 100;
+    let mut path_filters = Vec::new();
+    let mut cursor = None;
     let mut index = 1;
     while index < tokens.len() {
         match tokens[index].as_str() {
+            "--cursor" => {
+                cursor = Some(value_after(tokens, index, "--cursor")?);
+                index += 2;
+            }
+            "--path" => {
+                path_filters.push(value_after(tokens, index, "--path")?);
+                index += 2;
+            }
             "--ref" => {
                 ref_selector = value_after(tokens, index, "--ref")?;
                 index += 2;
@@ -494,6 +539,8 @@ fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
     }
 
     Ok(RepoCommand::Software {
+        cursor,
+        path_filters,
         alias,
         ref_selector,
         kind,
@@ -681,6 +728,7 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, CliError> {
         "topics" => Ok(SoftwareGlobalKind::Topics),
         "relationships" => Ok(SoftwareGlobalKind::Relationships),
         "build" => Ok(SoftwareGlobalKind::Build),
+        "modules" => Ok(SoftwareGlobalKind::Modules),
         "iac" => Ok(SoftwareGlobalKind::Iac),
         "design" => Ok(SoftwareGlobalKind::Design),
         "systems" => Ok(SoftwareGlobalKind::Systems),

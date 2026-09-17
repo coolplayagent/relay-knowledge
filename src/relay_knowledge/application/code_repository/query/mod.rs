@@ -1,5 +1,9 @@
 //! Coordinates repository retrieval and feature-flag query workflows.
 
+#[cfg(test)]
+#[path = "scope_tests.rs"]
+mod scope_tests;
+
 use crate::{
     api::{
         ApiError, ApiMetadata, CodeRepositoryFeatureFlagsResponse,
@@ -123,13 +127,18 @@ impl RelayKnowledgeService {
             .search_code_scope(source_scope, request.clone())
             .await
             .map_err(storage_api_error)?;
+        let storage_query_degraded = results.iter().any(|hit| hit.query_degraded);
+        let storage_query_degraded_reason = results
+            .iter()
+            .filter(|hit| hit.query_degraded)
+            .find_map(|hit| hit.degraded_reason.clone());
         let fallback_degraded_reason =
             apply_code_grep_fallback(&store, &status, &scoped_status, &request, &mut results)
                 .await?;
-        let degraded_reason = results
-            .iter()
-            .find_map(|hit| hit.degraded_reason.clone())
+        let query_degraded = storage_query_degraded || fallback_degraded_reason.is_some();
+        let degraded_reason = storage_query_degraded_reason
             .or(fallback_degraded_reason)
+            .or_else(|| results.iter().find_map(|hit| hit.degraded_reason.clone()))
             .or_else(|| scoped_status.degraded_reason.clone())
             .or_else(|| stale_reason.clone());
         let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
@@ -147,6 +156,7 @@ impl RelayKnowledgeService {
         let freshness = code_query_freshness_diagnostics(
             &store,
             CodeQueryFreshnessContext {
+                query_degraded,
                 base_status: &status,
                 scoped_status: &scoped_status,
                 request: &request,
@@ -257,10 +267,25 @@ impl RelayKnowledgeService {
             .map_err(storage_api_error)?;
         let source_scope = indexed_source_scope(&scoped_status)
             .ok_or_else(|| missing_indexed_source_scope_error(&scoped_status))?;
-        let flags = store
+        let mut flags = store
             .search_code_feature_flags_scope(source_scope, request.clone())
             .await
             .map_err(storage_api_error)?;
+        if served_stale_scope
+            || stale_reason.is_some()
+            || scoped_status.stale
+            || scoped_status.degraded_reason.is_some()
+        {
+            for flag in &mut flags {
+                flag.analysis_complete = false;
+                flag.conflicting_default_sources.clear();
+                flag.consistency_diagnostics.clear();
+                if request.filters.consistency {
+                    flag.consistency_diagnostics
+                        .push("incomplete_analysis: served scope is stale or degraded".into());
+                }
+            }
+        }
         let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
             &scoped_status,
             &request.repository,
@@ -280,6 +305,7 @@ impl RelayKnowledgeService {
         let freshness = code_feature_flag_freshness_diagnostics(
             &store,
             CodeFeatureFlagFreshnessContext {
+                query_degraded: false,
                 base_status: &status,
                 scoped_status: &scoped_status,
                 request: &request,

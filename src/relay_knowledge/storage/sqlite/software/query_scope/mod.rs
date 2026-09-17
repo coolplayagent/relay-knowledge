@@ -1,3 +1,4 @@
+pub(super) use super::super::scope_filters::{path_filter_sql_for_column, push_path_filter_values};
 use rusqlite::{Connection, OptionalExtension, params, types::Value};
 
 use crate::{domain::SoftwareGlobalRequest, storage::StorageError};
@@ -76,19 +77,6 @@ pub(super) fn repository_id_for_scope(
         .map_err(StorageError::from)
 }
 
-pub(super) fn path_filter_sql_for_column(column: &str, filters: &[String]) -> String {
-    let clauses = filters
-        .iter()
-        .filter_map(|filter| normalized_sql_path_filter(filter))
-        .map(|_| format!("({column} = ? OR {column} LIKE ? ESCAPE '\\')"))
-        .collect::<Vec<_>>();
-    if clauses.is_empty() {
-        String::new()
-    } else {
-        format!("AND ({})", clauses.join(" OR "))
-    }
-}
-
 pub(super) fn language_filter_sql_for_column(column: &str, filters: &[String]) -> String {
     let clauses = filters
         .iter()
@@ -98,16 +86,6 @@ pub(super) fn language_filter_sql_for_column(column: &str, filters: &[String]) -
         String::new()
     } else {
         format!("AND ({})", clauses.join(" OR "))
-    }
-}
-
-pub(super) fn push_path_filter_values(values: &mut Vec<Value>, filters: &[String]) {
-    for filter in filters
-        .iter()
-        .filter_map(|filter| normalized_sql_path_filter(filter))
-    {
-        values.push(Value::Text(filter.clone()));
-        values.push(Value::Text(format!("{}/%", escape_sql_like(&filter))));
     }
 }
 
@@ -144,22 +122,6 @@ fn repository_id_for_request(
 
 fn parse_filter_json(value: &str) -> Result<Vec<String>, StorageError> {
     serde_json::from_str(value).map_err(|error| StorageError::InvalidInput(error.to_string()))
-}
-
-fn normalized_sql_path_filter(filter: &str) -> Option<String> {
-    let mut filter = filter.trim_end_matches(['/', '\\']);
-    while let Some(stripped) = filter.strip_prefix("./") {
-        filter = stripped;
-    }
-
-    (!filter.is_empty() && filter != ".").then(|| filter.to_owned())
-}
-
-fn escape_sql_like(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
 }
 
 fn source_scope_filter_error(request: &SoftwareGlobalRequest) -> StorageError {

@@ -95,6 +95,7 @@ fn software_file_page(
                    ) AS authorized_topic_shard
             FROM code_repository_files files
             WHERE files.source_scope = ?1 AND files.path > ?2
+              AND files.parse_status != 'excluded'
             ORDER BY files.path ASC
             LIMIT ?5
             ",
@@ -146,6 +147,7 @@ fn software_file_page(
                    ) AS authorized_topic_shard
             FROM code_repository_files files
             WHERE files.source_scope = ?1
+              AND files.parse_status != 'excluded'
             ORDER BY files.path ASC
             LIMIT ?4
             ",

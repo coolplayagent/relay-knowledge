@@ -1,10 +1,13 @@
 //! Storage contracts for code repository indexes.
 
-use crate::domain::CodeIndexSummary;
-
-use super::{FrameworkGraphStore, StorageError};
+use super::FrameworkGraphStore;
 
 mod catalog;
+mod finalization;
+pub use finalization::{
+    CODE_INDEX_FINALIZATION_COARSE_PHASE_COUNT, CODE_INDEX_FINALIZATION_MAX_STEPS,
+    CodeIndexFinalizationStep, code_index_finalization_max_steps,
+};
 mod projection;
 mod publication;
 mod query;
@@ -29,38 +32,6 @@ pub const CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE: &str =
 /// Default error text for stores that do not support code task lease renewal.
 pub const CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE: &str =
     "code index task lease renewal is unavailable";
-
-/// Stable coarse states in the durable code-index finalization plan.
-pub const CODE_INDEX_FINALIZATION_COARSE_PHASE_COUNT: usize = 11;
-
-/// Hard bound for missing index units, coarse phases, and terminal observation.
-pub const CODE_INDEX_FINALIZATION_MAX_STEPS: usize = crate::domain::CODE_QUERY_INDEX_PLAN_UNIT_COUNT
-    + CODE_INDEX_FINALIZATION_COARSE_PHASE_COUNT
-    + 2;
-
-/// Derives the hard finalization quantum bound including worst-case
-/// byte-limited reference resolution plus reference-search cleanup, group
-/// discovery, and build pages.
-pub fn code_index_finalization_max_steps(
-    committed_reference_count: usize,
-) -> Result<usize, StorageError> {
-    committed_reference_count
-        .checked_mul(4)
-        .and_then(|pages| pages.checked_add(CODE_INDEX_FINALIZATION_MAX_STEPS + 6))
-        .ok_or_else(|| {
-            StorageError::CapacityExceeded(
-                "reference-resolution and search finalization step bound exceeds platform capacity"
-                    .to_owned(),
-            )
-        })
-}
-
-/// Result of advancing one durable code-index finalization writer quantum.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CodeIndexFinalizationStep {
-    Pending { checkpoint_state: String },
-    Ready(Box<CodeIndexSummary>),
-}
 
 /// Diff-derived inputs used to seed code impact expansion.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

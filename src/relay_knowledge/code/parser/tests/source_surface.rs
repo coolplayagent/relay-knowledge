@@ -142,3 +142,30 @@ fn parse_source_snapshot(path: &str, source: &[u8]) -> CodeIndexSnapshot {
 
     build.finish()
 }
+
+#[test]
+fn maven_xml_surface_windows_preserve_bytes_and_whitespace() {
+    let content = format!(
+        "  <project>\n<description>{}</description>\n</project>\n",
+        "多字节 text ".repeat(1800)
+    );
+    let snapshot = parse_source_snapshot("pom.xml", content.as_bytes());
+    let mut chunks = snapshot
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.symbol_snapshot_id.is_none())
+        .collect::<Vec<_>>();
+    chunks.sort_by_key(|chunk| chunk.byte_range.start);
+    assert!(chunks.len() > 2);
+    let mut assembled = String::new();
+    for chunk in chunks {
+        assert_eq!(chunk.byte_range.start as usize, assembled.len());
+        assert_eq!(
+            chunk.content.len(),
+            (chunk.byte_range.end - chunk.byte_range.start) as usize
+        );
+        assert!(chunk.content.len() <= 8_000);
+        assembled.push_str(&chunk.content);
+    }
+    assert_eq!(assembled, content);
+}

@@ -154,12 +154,19 @@ pub(super) fn code_context_request(payload: &Value) -> Result<CodeGraphContextRe
 pub(super) fn code_feature_flag_request(
     payload: &Value,
 ) -> Result<CodeFeatureFlagRequest, WebError> {
+    let filters = crate::domain::CodeConfigFilter {
+        domain: optional_filter_string(payload, "domain")?,
+        source: optional_filter_string(payload, "source")?,
+        hot_reload: optional_bool_field(payload, "hot_reload")?,
+        consistency: optional_bool_field(payload, "consistency")?.unwrap_or(false),
+    };
     CodeFeatureFlagRequest::new(
         optional_string_field(payload, "query"),
         code_selector(payload)?,
         usize_field(payload, "limit")?,
         parse_freshness(string_field(payload, "freshness")?)?,
     )
+    .and_then(|request| request.with_filters(filters))
     .map_err(|error| WebError::bad_request(error.to_string()))
 }
 
@@ -188,12 +195,18 @@ pub(super) fn code_impact_request(payload: &Value) -> Result<CodeImpactRequest, 
 }
 
 pub(super) fn code_software_request(payload: &Value) -> Result<SoftwareGlobalRequest, WebError> {
+    let cursor = match payload.get("cursor") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(cursor)) => Some(cursor.clone()),
+        _ => return Err(WebError::bad_request("cursor must be a string".into())),
+    };
     SoftwareGlobalRequest::new(
         code_selector(payload)?,
         parse_software_kind(string_field(payload, "kind")?)?,
         parse_freshness(string_field(payload, "freshness")?)?,
         usize_field(payload, "limit")?,
     )
+    .and_then(|request| request.with_cursor(cursor))
     .map_err(|error| WebError::bad_request(error.to_string()))
 }
 
@@ -294,6 +307,17 @@ pub(super) fn string_field<'a>(
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| WebError::bad_request(format!("{field} is required")))
+}
+
+fn optional_filter_string(
+    payload: &Value,
+    field: &'static str,
+) -> Result<Option<String>, WebError> {
+    match payload.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(_) => Err(WebError::bad_request(format!("{field} must be a string"))),
+    }
 }
 
 pub(super) fn optional_string_field(payload: &Value, field: &'static str) -> Option<String> {
@@ -435,6 +459,7 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, WebError> {
         "topics" => Ok(SoftwareGlobalKind::Topics),
         "relationships" => Ok(SoftwareGlobalKind::Relationships),
         "build" => Ok(SoftwareGlobalKind::Build),
+        "modules" => Ok(SoftwareGlobalKind::Modules),
         "iac" => Ok(SoftwareGlobalKind::Iac),
         "design" => Ok(SoftwareGlobalKind::Design),
         "systems" => Ok(SoftwareGlobalKind::Systems),

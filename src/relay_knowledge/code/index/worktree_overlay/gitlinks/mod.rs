@@ -1,8 +1,8 @@
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{collections::BTreeSet, path::Path};
 
 use crate::code::{
     CodeIndexError,
-    source::{changes, git::git_bytes, gitlink as source_gitlink, layout as scope},
+    source::{changes, gitlink as source_gitlink, layout as scope},
 };
 
 use super::super::MAX_INCREMENTAL_GITLINK_EXPANDED_PATHS;
@@ -21,6 +21,7 @@ use state::{
 
 pub(super) mod recorder;
 mod state;
+mod worktree_status;
 
 pub(super) fn record_deleted_gitlink_overlay(
     root: &Path,
@@ -210,15 +211,12 @@ fn record_dirty_submodule_worktree_overlay(
         Ok(submodule_root) => submodule_root,
         Err(_) => return Ok(false),
     };
-    let status = git_bytes(
-        &submodule_root,
-        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
-    let changes = changes::worktree_changed_paths(&status);
+    let changes = worktree_status::read_changes(&submodule_root)?;
     if changes.is_empty() {
         return Ok(false);
     }
-    for change in &changes {
+    for entry in &changes {
+        let change = &entry.change;
         if let Some(deleted_path) = &change.deleted_source {
             let parent_deleted_path = submodule_worktree_parent_path(indexed_path, deleted_path);
             if recorder.path_is_selected(&parent_deleted_path) {
@@ -232,14 +230,45 @@ fn record_dirty_submodule_worktree_overlay(
         if change.is_untracked() && !recorder.untracked_path_is_selected(&parent_path) {
             continue;
         }
-        record_dirty_submodule_path(
+        // Porcelain v2 supplies exact type evidence in the existing status command.
+        if entry.known_file && !recorder.path_is_selected(&parent_path) {
+            continue;
+        }
+        let result = record_dirty_submodule_path(
             &submodule_root,
             indexed_path,
             &change.path,
             &parent_path,
             change,
             recorder,
-        )?;
+        );
+        if let Err(CodeIndexError::Io(error)) = result {
+            let kind = if recorder
+                .previous_hashes
+                .keys()
+                .any(|child| child.starts_with(&format!("{parent_path}/")))
+            {
+                crate::domain::CodePathKind::Directory
+            } else {
+                crate::domain::CodePathKind::File
+            };
+            let skipped = crate::code::source::path_io::SkippedSourcePath::from_error(
+                &parent_path,
+                kind,
+                crate::domain::CodePathIoOperation::Metadata,
+                error,
+            )?;
+            let mut outputs = WorktreeFileOutputs {
+                skipped_paths: &mut *recorder.skipped_paths,
+                overlay_hash_input: &mut *recorder.overlay_hash_input,
+                deleted_paths: &mut *recorder.deleted_paths,
+                files_to_parse: &mut *recorder.files_to_parse,
+                skipped_unchanged_count: &mut *recorder.skipped_unchanged_count,
+            };
+            outputs.record_skipped(skipped, recorder.previous_hashes);
+        } else {
+            result?;
+        }
     }
 
     Ok(true)
@@ -253,19 +282,21 @@ fn record_dirty_submodule_path(
     change: &changes::WorktreePathChange,
     recorder: &mut WorktreeOverlayRecorder<'_, '_>,
 ) -> Result<(), CodeIndexError> {
-    let metadata = match fs::symlink_metadata(submodule_root.join(child_path)) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if recorder.path_is_selected(parent_path) {
-                recorder.record_deleted_path(parent_path);
+    let metadata =
+        match crate::code::source::local_io::symlink_metadata(&submodule_root.join(child_path)) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if recorder.path_is_selected(parent_path) {
+                    recorder.record_deleted_path(parent_path);
+                }
+                return Ok(());
             }
-            return Ok(());
-        }
-        Err(error) => return Err(error.into()),
-    };
+            Err(error) => return Err(error.into()),
+        };
     let file_type = metadata.file_type();
     if file_type.is_file() && recorder.path_is_selected(parent_path) {
         let mut outputs = WorktreeFileOutputs {
+            skipped_paths: &mut *recorder.skipped_paths,
             overlay_hash_input: &mut *recorder.overlay_hash_input,
             deleted_paths: &mut *recorder.deleted_paths,
             files_to_parse: &mut *recorder.files_to_parse,
@@ -292,10 +323,36 @@ fn record_dirty_submodule_path(
         && change.is_untracked()
         && worktree_directory_is_expandable(submodule_root, child_path)?
     {
-        for nested_path in worktree_directory_files(submodule_root, child_path)? {
+        let mut skipped = Vec::new();
+        let paths = worktree_directory_files(
+            submodule_root,
+            child_path,
+            &mut skipped,
+            &|path, directory| {
+                let parent = submodule_worktree_parent_path(submodule_path, path);
+                if directory {
+                    recorder.path_scope_overlaps(&parent)
+                } else {
+                    recorder.untracked_path_is_selected(&parent)
+                }
+            },
+        )?;
+        for mut failure in skipped {
+            failure.path = submodule_worktree_parent_path(submodule_path, &failure.path);
+            let mut outputs = WorktreeFileOutputs {
+                skipped_paths: &mut *recorder.skipped_paths,
+                overlay_hash_input: &mut *recorder.overlay_hash_input,
+                deleted_paths: &mut *recorder.deleted_paths,
+                files_to_parse: &mut *recorder.files_to_parse,
+                skipped_unchanged_count: &mut *recorder.skipped_unchanged_count,
+            };
+            outputs.record_skipped(failure, recorder.previous_hashes);
+        }
+        for nested_path in paths {
             let parent_nested_path = submodule_worktree_parent_path(submodule_path, &nested_path);
             if recorder.untracked_path_is_selected(&parent_nested_path) {
                 let mut outputs = WorktreeFileOutputs {
+                    skipped_paths: &mut *recorder.skipped_paths,
                     overlay_hash_input: &mut *recorder.overlay_hash_input,
                     deleted_paths: &mut *recorder.deleted_paths,
                     files_to_parse: &mut *recorder.files_to_parse,

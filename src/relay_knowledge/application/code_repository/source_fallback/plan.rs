@@ -73,7 +73,7 @@ pub(super) fn plan_code_grep_fallback(
     }
     let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
     let language_filters = query_language_filters(
-        merged_filters(
+        crate::domain::code_scope_language_filters(
             &status.language_filters,
             &request.repository.language_filters,
         ),

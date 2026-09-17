@@ -669,6 +669,7 @@ fn code_search_unavailable_error() -> StorageError {
 
 fn partial_code_hit(path: &str, layer: CodeRetrievalLayer, score: f64) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: CASE_INTENT_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
@@ -696,6 +697,7 @@ fn partial_code_hit(path: &str, layer: CodeRetrievalLayer, score: f64) -> CodeRe
 }
 
 fn assert_read_model_degraded(hit: &CodeRetrievalHit) {
+    assert!(hit.query_degraded);
     let reason = hit
         .degraded_reason
         .as_deref()
@@ -789,6 +791,7 @@ fn code_query_symbol(
     name: &str,
 ) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: CASE_INTENT_SOURCE_SCOPE.to_owned(),
         symbol_snapshot_id: symbol_snapshot_id.to_owned(),
@@ -833,6 +836,7 @@ fn code_query_reference(
 
 fn code_query_call(call_id: &str, file_id: &str, path: &str) -> CodeCallRecord {
     CodeCallRecord {
+        byte_range: None,
         repository_id: "repo".to_owned(),
         source_scope: CASE_INTENT_SOURCE_SCOPE.to_owned(),
         call_id: call_id.to_owned(),

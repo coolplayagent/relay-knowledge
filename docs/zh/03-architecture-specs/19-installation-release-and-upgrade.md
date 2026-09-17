@@ -258,6 +258,11 @@ Partitioned upgrade recovery 不能把 receipt 存在本身当成 eligibility �
 
 ## 5. 升级与回滚
 
+源路径 I/O 隔离升级为文件诊断增加可空 `io_json`，为 checkpoint 增加默认零的 `processed_path_count`，为 scope GC 任务增加可空归属列 `source_replan_task_id`。旧诊断保持可读，旧 checkpoint 保留按文件计数的解释。未发布 filesystem session 的清理中断后，在所属任务的当前租约下续跑，完成后才切换快照身份。备份须将清理状态与任务、checkpoint 一致保存；分片模式还须包含 catalog 与 shard 数据库。`source-io-isolation-v1` 事实身份阻止不兼容旧 scope/checkpoint 被当作当前索引复用，应使用正常索引命令重建。二进制/数据库回滚使用升级前运行目录备份。本次变更不重置死信，也不改变安装目录。
+
+数据库快速打开检查会校验这三个新列，即使现有 schema marker 已是当前版本。缺列时先执行兼容迁移，再开放查询或索引；升级后的重开保留原有诊断、checkpoint 与 GC 行，并使用兼容默认值。
+
+
 升级流程：
 
 ```text
@@ -323,6 +328,103 @@ Plan rendering 与 execution 必须使用 bootstrap 捕获的精确 source execu
 - 安装后的 Web 服务必须通过显式的托管仓库别名与持久化仓库根目录解析 Knowledge Map 操作；服务行为不得依赖 service manager 设置的进程工作目录。
 - Release workflow 或等价门禁必须运行 service lifecycle dry-run smoke，验证发布二进制生成的 service definition、rollback plan 和 package manifest 检查不会与 release tag 漂移。
 
+
+### Maven reactor 派生数据升级
+
+投影 checkpoint 改为 v3 token。旧 v1/v2 的非终态 token 在原有 publication fence 下从 reset 重放派生，包括升级停在 files/topics/relationships/ontology/publish 的情况，避免 schema 9 被标为 fresh 却缺少 reactor 完成证据。
+
+从 schema 9 之前的数据库导入时，允许缺少新增的三个 reactor 表；包含 POM 却没有 reactor 完成标记的 scope 保持 incomplete，直到 durable repair/reindex 发布完整图。非 Maven 旧 scope 无需 reactor 事实。
+
+Software projection schema 升至 9，新增 `maven_reactor_modules`、`maven_reactor_edges` 和 `maven_reactor_status` 三张 snapshot-scoped 派生表。旧投影标记 stale，由现有 durable repair/index task 重建，不在查询热路径解析 POM。三个 owner 同时纳入 immutable-scope import、显式 scope 清理和有界 retention GC；新表只在升级后开始填充，升级前已越过新增 GC phase 的旧任务没有这些数据需要回收。没有新增运行目录、环境变量或服务进程。
+
+升级后为 Maven 仓库执行完整索引或等待既有投影修复任务完成，再查询 modules。旧二进制回滚前应 drain/cancel 当前任务并恢复一致的数据库备份；不要手工删除 reactor marker 或修改 checkpoint。新 workspace `maven` 使用 workspace-v1 mask 的第 4 位，旧三种格式的位值不变；禁用检测的 scope identity 保持兼容。
+
+依赖分页在 schema 初始化时幂等增加 `(source_scope, component_id)` 与 `(source_scope, usage_id)` 读取索引，不改变事实载荷或 schema 9 版本。已有调用可以省略 `cursor`；需要完整 dependencies/modules 结果的客户端必须消费 `next_cursor`。回滚旧二进制会忽略新增索引，并失去扩展的 dependencies 返回内容和游标支持。
+
 ---
 
 导航: 上一章: [18. 可观测性、诊断与 SLO](18-observability-diagnostics-and-slo.md) | 下一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md)
+
+配置事实增加 `config-registry-v31` 作用域组件。即使源码 HEAD 未变，普通 `repo index <alias> --ref HEAD` 也会重建旧二进制产生的 completed scope，无需 `--reset`。SQLite 为配置使用关系增加默认空对象的 `metadata_json` 列，热启动 schema 检查在复用当前库前验证该能力；启动时不扫描源码或回填事实。持久快照复制包含元数据。查询索引计划 ordinal 与 Python/C++ 事实版本不变。切换版本前先用兼容二进制完成或取消未完成任务；备份和回滚时同时保留数据库、WAL 与检查点。
+
+从旧数据库导入时，若源表缺少 `metadata_json` 列，按空元数据对象复制使用关系，保留旧快照及其过期状态，再通过正常重新索引生成配置事实。
+`xml-lossless-windows-v1` 代码事实身份使曾裁掉边界空白的旧 XML 源码窗口失效。升级后重新索引仓库以发布无损 POM 证据，无需删除数据库或修改配置。POM 证据不完整时，保留的 Maven 软件事实持续显示 degraded，直到修复并重新索引。
+
+配置快照版本 v32 补齐 dotenv 文件发现（包括 `.env`）、Java 继承键字段优先于静态导入、排除已知非 String 的本地键字段，以及不适用 String 参数的引用类型重载处理。旧快照通过现有有界索引流程刷新。
+
+配置快照 v33 识别 `.env.*` 模板及变体。已证明的 Java 数值转换按返回值归一化默认值，无效或不支持的数值回退保持未知。一致性检查比较每个 Properties、INI、dotenv 或 Shell 文件中最后一次定义，历史赋值仍保留供查看。注册范围和查询路径均按大小写精确过滤。
+
+配置快照 v34 保留受无关静态通配导入影响的显式或本地 Java 接收者类型。Consul 读取器支持管道传入的字面量键及末尾回退参数。Shell 读取前的条件赋值会清除受影响定义的默认值并标记不确定性；后续无条件赋值恢复已知流程。
+
+配置快照 v35 传播条件变量 unset 的不确定性，仅针对函数的 unset 不影响变量。函数、子 Shell 或条件分支内已由同一作用域赋值满足的读取不作为外部配置读取；没有已知局部赋值的单独 export 仍保留外部读取证据。
+
+配置快照 v36 在收集 Java 字段时约束元数据大小。超限类型保留有界的不完整证据，快照仍可发布；依赖该类型的查询明确报告分析不完整。无方法体的零参数 getter 声明作为继承屏障，不作为配置提供者。
+
+配置快照 v37 为继承的隐式 getter 调用保留有界层级解析引用；多行 SDK 调用从调用起始位置查找注释；非 Consul Go 模板继续保留结构化布尔配置事实；Shell 参数展开 `:-` 和 `-` 保留静态默认值，动态或超限默认值保持未知并标记流程不完整。
+
+配置快照 v38 将 Java super 限定的键解析到父类提供者，支持有界的模板括号字面量参数，识别相邻多行 Go 模板注释中的配置标注，并保留前导注释动作之后的静态输出。
+
+超大静态配置默认值保留定义事实，将值标记为未知并记录分析不完整，不再阻断快照发布。Shell 赋值式参数默认值（`:=`/`=`）保留静态回退值；格式清单扫描超限时使用统一的分析不完整错误。 Fact version: `config-registry-v39`.
+
+Dotenv 使用独立赋值语法，支持等号两侧空格、带引号多行值与注释。超大 Shell/dotenv 默认值和 Java 父类型元数据保留有界不完整事实；依赖这些继承证据的查询报告分析不完整。条件式 allexport 变更保留可能定义及不确定性。Java `this.KEY` 可以解析继承字段，不与局部变量混淆。 Fact version: `config-registry-v40`.
+
+模板回退值使用共享静态值预算。值中或末尾不产生输出的注释动作保留静态默认值，支持多行注释。无关键词时，组合元数据筛选仍在解析后的配置组上判断，允许条件证据分布在 Java 符号使用和具体配置定义之间。 Fact version: `config-registry-v41`.
+
+括号包裹的字面量管道输入保留配置读取及回退值。Shell 短路列表仅将最左操作数视为必执行。可证明的 final 局部 Java String 键直接解析，字段键仍保留符号关联；限定外层 this 接收者关联到指定外层类型。 Fact version: `config-registry-v42`.
+
+模板语法校验与提取共享识别引号和注释的动作边界，字面量分隔符不会使合法模板降级。Dotenv 保留未带引号值中的字面量井号，仅在空白分隔的注释边界截断，并支持 CR、LF 和 CRLF 换行。裸 export 从导出位置读取注释，同时保留赋值位置的默认值证据。 Fact version: `config-registry-v43`.
+
+限定外层实例的配置键字段按显式外层类型解析。裸 export 前的条件式 unset 保留较早赋值证据，但默认值未知并标记分析不完整。一致性证据仍区分查询展示筛选与注册授权范围，详见工作流说明。 Fact version: `config-registry-v44`.
+
+多行模板动作持续跟踪到闭合分隔符，避免动作续行被误报为输出定义。单文件事实预算同时约束注册表与旧有/SDK 提取结果。已确认的 Double 转换保留规范化 NaN 和带符号 Infinity 默认值，包括合法十进制输入溢出。 Fact version: `config-registry-v45`.
+
+配置事实版本 `config-registry-v46` 支持直接通过 System 环境变量/属性集合读取（保留平台遮蔽检查）、dotenv export 后的空格或 Tab，以及 Java 文本块键和默认值的换行、缩进与转义处理。旧作用域通过正常持久化流程重新索引。
+
+配置事实版本 `config-registry-v47` 记录零参数平台遮蔽方法，在同名不同参数重载存在时保留继承的零参数 getter，抽取 Integer.getInteger/Long.getLong 数字属性读取，并忽略 dotenv 文件开头的一个 BOM、保留源码偏移。共享配置查询在构造 SQL 前拒绝超过 64 个词、每个规范化词 256 字节或总计 10,000 字节的输入，不静默截断。旧事实作用域需要正常重新索引。
+
+配置注册表验收契约：Java 平台读取、符号常量及 getter 关联守卫共享快照内绑定；properties/INI/Consul 模板/Shell/dotenv 定义保留各自语法和源码位置。条件 Shell 导出与模板控制块保留可能的定义，但默认值未知、值流不完整；函数及子 shell 导出不定义父环境。模板裁剪标记统一作用于注释和赋值，并覆盖相邻物理行。接口及外部类限定的 super 调用保留非虚调用归属，环境 Map.getOrDefault 保留默认值。不推断任意程序执行和生产开关状态。测试覆盖等价接收者形式、遮蔽、格式空白、条件/延迟执行、注册与展示范围、陈旧快照、默认值来源及资源限制。`config-registry-v48` 需要正常重新索引。隐式 getter 查找已归入现有 Java names 模块，配置 schema 能力检查归入现有 marker 模块，删除了两个冗余模块文件。
+
+同时删除无逻辑的查询转发函数和 Shell 到 files 的中间路由；保留共享服务、完整索引写入及测试。
+
+等价读取矩阵还覆盖直接属性读取和集合属性读取后的包装类型转换，确保相同数字/布尔默认值具有相同的规范化结果。
+
+
+外部类 getter 回退需要已索引继承证据；延迟模板定义不发布根模板默认值。Shell 引号选项遵循引号移除规则，接口静态方法不参与继承。十六进制 Double 默认字符串仍明确不支持：保留原始证据，默认值未知，一致性不完整；本次不扩展为任意 Java 数值语法求值。 Fact version: `config-registry-v49`.
+
+软件本体配置投影排除内部常量、类型/getter 标记及未解析符号行，同时保留其索引证据。Shell set 选项与 export 选项采用相同的静态引号移除规则，覆盖启用、禁用及选项终止符。 Fact version: `config-registry-v50`.
+
+业务配置键映射采用相同的公开事实过滤；内部符号仍保留在索引中用于注册表解析。
+
+显式但无法求值的 Java 默认值使一致性不完整；已知 String 常量表达式参与重载适用性判断。模板行内不输出值的控制动作保留静态/条件文本。聚合后仍支持边类型查询。无路径/语言投影的纯元数据查询先筛选匹配组，再执行有界符号扩展。集合 containsKey 存在性 API 和命名模板体执行不在限定抽取清单中；缺少定义诊断描述已观察的静态证据，不表示运行时渲染或取值。 Fact version: `config-registry-v51`.
+
+Shell 内置命令名先静态解码，引号、拼接和转义形式使用相同导出分类，普通命令的赋值操作数保留默认值。for/select 循环变量在循环体中遮蔽继承环境值，循环输入展开仍保留读取证据，循环后的可能覆盖保持不确定。Java 属性读取显式 null 默认值经布尔转换得到 false；其他无法求值的默认值仍标记不完整。catch 参数在其语句体内绑定接收者并遮蔽外层字段；无法证明唯一静态类型的 multi-catch 接收者保持未解析。 Fact version: `config-registry-v52`.
+
+配置自由文本查询同时匹配持久化元数据、配置键和使用位置，最终分组匹配与行评分遵守 SQL 元数据搜索契约。显式查询不含任何字母、数字或下划线时，在加载数据前报错；省略查询参数才表示不筛选注册表。Java try-with-resources 声明在 try 体和后续资源初始化中绑定接收者，不在 catch/finally 中生效。Shell 已识别导出内置命令前的赋值，仅在该命令导出同名变量时形成配置定义；普通命令的临时环境赋值不定义父环境配置。 Fact version: `config-registry-v53`.
+
+已证明的 getter 转换同时规范化显式环境回退值与属性回退值，属性特有的可空默认处理保持独立。已知平台通配静态导入只贡献实际提供的受支持成员，final var 配置键须有已证明的 String 初始化值。具名 Java 局部类型使用词法身份，互不相关的方法或代码块不会共享 getter 提供者。异步 Shell 命令不能定义或修改父环境配置及导出状态。nameref 别名跟踪和 command/builtin 分派包装器不在有限 Shell 抽取清单内；直接内置命令名及引号等价形式的识别不执行包装器或间接变量写入。缺少定义诊断描述该清单内已观察的静态证据。 Fact version: `config-registry-v54`.
+
+## 文件诊断与内容完整性（#393）
+
+代码索引的版本新鲜度与内容完整性分别表达。`freshness.state=fresh` 表示请求版本已追上，不保证每个文件都完整解析。仓库状态、报告与查询 freshness 的 `content_integrity` 包含 `state`（`complete`、`partial`、`unknown`）、`degraded_file_count`（按路径去重）和 `source_scope`。旧响应缺少该字段时按 `unknown` 处理。`degraded_reason` 保留为兼容诊断，不能单独用于判断是否需要重新索引。
+
+```powershell
+relay-knowledge repo diagnostics demo --ref HEAD --limit 50 --format json
+relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor $nextCursor --format json
+```
+
+分页默认 50 条，最多 200 条；按路径、消息排序。重复使用同一 ref 与路径过滤条件，传入返回的 `next_cursor` 继续读取；HEAD 移动不会改变已开始分页的快照。快照被清理后明确报错。`repo report` 继续展示最多 20 条摘要，并通过 `degradation_summary_truncated` 和 `diagnostics_command` 提供完整诊断入口。内容不完整时，即使命中的文件正常，也不能推断查询覆盖完整；缺失事实可能影响未命中文件或跨文件关系。
+
+HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包括 `ref`、JSON 数组字符串 `path_filters`、`limit` 和 `cursor`；CLI 支持 `--remote`。MCP 工具为 `relay_code_diagnostics`，接受 `repository`、`ref_selector`、`path_filters`、`limit`、`cursor`，并遵守授权及上下文预算。
+
+原有内容完整性字段复用现有诊断表。路径 I/O 隔离进一步增加兼容的诊断/checkpoint 列及新的事实身份；升级后使用正常索引命令重建旧快照。agent 的完整性判断应读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。
+
+跨语言配置与类型归属升级会变更代码事实身份，并新增可空的符号归属列。已有仓库作用域一次性标记 stale，由现有持久化索引任务重建事实，并在发布前创建 v4 类型归属查询索引。无需安装编译器、语言服务、新服务或非托管后台进程。升级、取消和重试继续保留任务租约、检查点和单写者发布屏障。切换二进制版本前备份运行时状态；回滚使用匹配备份或由所选版本重新构建索引，不能把新事实直接标记为旧版本兼容。
+
+schema marker 9 同时增加类型归属检查点游标。打开旧数据库时迁移会校验所需列，启动阶段不会为已有大表立即构建归属查询索引。旧版已经完成的粗粒度检查点，不能作为新事实版本已经提取的证明。
+
+
+v56 portable-evidence 升级持久化可选的调用字节范围；旧 JSON 和 ATTACH 导入的旧 SQLite 快照默认保持未知。查询索引计划 v5 保留 v4 的前 19 个单元，在序号 19–22 追加配置身份/键及 caller/callee 身份索引。配置绑定身份采用事务内倒排表：插入、替换、更新、增量复制和附加数据库导入从有界元数据生成绑定，删除同步移除绑定。查询按索引身份定位，避免逐条扫描全部元数据 JSON；2 秒及 2,000,000 SQLite 步数预算保持不变。
+
+合并后的事实身份为 `config-registry-v56-portable-evidence-source-io-isolation-v1`。仅具有此前 portable evidence 或路径 I/O 隔离能力的作用域都必须重建。检查点同时保留类型归属游标和已处理路径计数；旧快照导入时缺失的调用字节范围与 I/O 诊断保持未知。启动检查直接调用共享 SQLite schema 检视函数确认 marker 表是否存在，保持 marker 模块既有的行数预算。
+
+schema marker 10 和一次性 portable evidence 迁移将旧事实标记 stale，通过持久化任务重建。迁移后若绑定表、触发器或清理索引缺失或不兼容，启动明确报错，不会在已发布事实之上静默创建空投影，也不会修改 writer 的租约和检查点。应恢复匹配的运行时备份，或在新运行时目录重新索引获准仓库后切换服务配置。二进制回滚使用相应升级前备份，或由所选版本在干净目录重建索引。

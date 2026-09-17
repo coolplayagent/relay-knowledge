@@ -129,6 +129,7 @@ async fn import_path_direct_rows_apply_inline_path_before_gate() {
     )
     .expect("request should validate");
     let status = CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/tmp/repo".to_owned(),
@@ -266,6 +267,7 @@ fn identifier_request() -> CodeRetrievalRequest {
 
 fn identifier_status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "repo".to_owned(),
         root_path: "/repo".to_owned(),

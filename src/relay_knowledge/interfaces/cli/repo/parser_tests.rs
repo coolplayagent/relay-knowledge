@@ -1,4 +1,30 @@
 use super::*;
+#[test]
+fn feature_flags_accepts_every_canonical_source_format() {
+    for source in crate::domain::CODE_CONFIG_SOURCE_FORMATS {
+        let command = parse_repo(&[
+            "feature-flags".into(),
+            "fixture".into(),
+            "--source".into(),
+            (*source).into(),
+        ])
+        .unwrap();
+        let RepoCommand::FeatureFlags { filters, .. } = command else {
+            panic!("wrong command");
+        };
+        assert_eq!(filters.source.as_deref(), Some(*source));
+        filters.validate().unwrap();
+    }
+}
+#[test]
+fn feature_flags_rejects_missing_filter_values_before_following_options() {
+    for option in ["--domain", "--source"] {
+        let tokens = ["feature-flags", "repo", option, "--consistency"].map(str::to_owned);
+        assert!(
+            matches!(parse_repo(&tokens), Err(CliError::MissingValue(value)) if value == option)
+        );
+    }
+}
 
 #[test]
 fn parses_software_export_profile_and_bounded_scope() {
@@ -252,6 +278,7 @@ fn parses_repo_feature_flags_with_optional_filter_and_scope() {
     assert_eq!(
         command,
         RepoCommand::FeatureFlags {
+            filters: Default::default(),
             alias: "core".to_owned(),
             query: Some("checkout".to_owned()),
             limit: 20,
@@ -636,4 +663,35 @@ fn update_parser_rejects_impact_only_and_duplicate_flags() {
     ])
     .expect_err("duplicate refs should fail closed");
     assert_eq!(duplicate, CliError::UnexpectedArgument("--head".to_owned()));
+}
+
+#[test]
+fn parses_software_page_cursor_and_path() {
+    let args = [
+        "software",
+        "demo",
+        "--kind",
+        "dependencies",
+        "--limit",
+        "2",
+        "--cursor",
+        "sw1:abcd",
+        "--path",
+        "module-a",
+    ]
+    .map(str::to_owned);
+    let RepoCommand::Software {
+        cursor,
+        path_filters,
+        kind,
+        limit,
+        ..
+    } = parse_repo(&args).unwrap()
+    else {
+        panic!("software command expected")
+    };
+    assert_eq!(cursor.as_deref(), Some("sw1:abcd"));
+    assert_eq!(path_filters, vec!["module-a"]);
+    assert_eq!(kind, SoftwareGlobalKind::Dependencies);
+    assert_eq!(limit, 2);
 }

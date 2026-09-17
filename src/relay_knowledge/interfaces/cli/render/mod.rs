@@ -279,6 +279,43 @@ where
         ),
         "code.repo.list" => render_code_repository_list(&value),
         "code.repo.status" => render_code_repository_status(&value),
+        "code.repo.diagnostics" => {
+            let mut lines = vec![format!(
+                "scope={} degraded_files={} io_skipped_files={} io_skipped_directories={}",
+                value["scope"]["scope_id"].as_str().unwrap_or("unknown"),
+                value["degraded_file_count"],
+                value["content_integrity"]["io_skipped_file_count"]
+                    .as_u64()
+                    .unwrap_or(0),
+                value["content_integrity"]["io_skipped_directory_count"]
+                    .as_u64()
+                    .unwrap_or(0)
+            )];
+            if let Some(diagnostics) = value["diagnostics"].as_array() {
+                for diagnostic in diagnostics {
+                    if let Some(io) = diagnostic.get("io") {
+                        lines.push(format!(
+                            "  action={} path_kind={} operation={} error_kind={} raw_os_error={}",
+                            io["action"].as_str().unwrap_or("skipped"),
+                            io["path_kind"].as_str().unwrap_or("file"),
+                            io["operation"].as_str().unwrap_or("unknown"),
+                            io["error_kind"].as_str().unwrap_or("unknown"),
+                            io["raw_os_error"]
+                        ));
+                    }
+                    lines.push(format!(
+                        "{} [{}]: {}",
+                        diagnostic["path"].as_str().unwrap_or(""),
+                        diagnostic["parse_status"].as_str().unwrap_or("unknown"),
+                        diagnostic["message"].as_str().unwrap_or("")
+                    ));
+                }
+            }
+            if let Some(cursor) = value["next_cursor"].as_str() {
+                lines.push(format!("next_cursor={cursor}"));
+            }
+            lines.join("\n")
+        }
         "code.repo.report" => format!(
             "repo={} files={} freshness={}",
             value["report"]["alias"].as_str().unwrap_or(""),
@@ -286,6 +323,12 @@ where
             value["report"]["freshness_state"]
                 .as_str()
                 .unwrap_or("unknown")
+        ),
+        "code.repo.software" if value["request"]["kind"] == "modules" => format!(
+            "maven modules={} relationships={} stale={}",
+            value["build_targets"].as_array().map_or(0, Vec::len),
+            value["relationships"].as_array().map_or(0, Vec::len),
+            value["status"]["stale"].as_bool().unwrap_or(true)
         ),
         "code.repo.software" => format!(
             "software scope={} components={} dependency_usages={} sdk_usages={} files={} topics={} relationships={} build_targets={} iac_resources={} design_elements={} stale={}",
@@ -342,6 +385,11 @@ where
         _ => operation.to_owned(),
     };
 
+    if operation == "code.repo.software" {
+        if let Some(cursor) = value["next_cursor"].as_str() {
+            return Ok(format!("{line} next_cursor={}\n", single_line(cursor)));
+        }
+    }
     Ok(format!("{line}\n"))
 }
 

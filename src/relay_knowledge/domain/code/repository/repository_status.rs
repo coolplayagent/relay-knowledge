@@ -6,6 +6,8 @@ use super::CodeQueryKind;
 /// Repository index status and diagnostics summary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryStatus {
+    #[serde(default)]
+    pub content_integrity: super::CodeContentIntegrity,
     pub repository_id: String,
     pub alias: String,
     pub root_path: String,
@@ -70,6 +72,7 @@ pub struct CodeRepositoryScopePreview {
     pub selected_byte_count: usize,
     pub unsupported_file_count: usize,
     pub generated_or_heavy_file_count: usize,
+    /// Parser-validated degradation count for the selected snapshot, not a metadata estimate.
     pub expected_degraded_file_count: usize,
     pub language_distribution: Vec<CodeRepositoryLanguagePreview>,
     pub largest_files: Vec<CodeRepositoryLargestFile>,
@@ -113,6 +116,8 @@ pub struct CodeRepositoryLatencySample {
 /// Reusable repository operations report.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeRepositoryReport {
+    #[serde(default)]
+    pub content_integrity: super::CodeContentIntegrity,
     pub repository_id: String,
     pub alias: String,
     pub root_path: String,
@@ -133,6 +138,10 @@ pub struct CodeRepositoryReport {
     pub ambiguous_edge_count: usize,
     pub unresolved_edge_count: usize,
     pub degradation_summary: Vec<String>,
+    #[serde(default)]
+    pub degradation_summary_truncated: bool,
+    #[serde(default)]
+    pub diagnostics_command: String,
     pub representative_queries: Vec<String>,
     pub latency_samples: Vec<CodeRepositoryLatencySample>,
     pub freshness_state: String,

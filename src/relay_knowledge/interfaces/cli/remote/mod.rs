@@ -48,6 +48,7 @@ pub(super) fn supports(action: &CliAction) -> bool {
                 | RepoCommand::FeatureFlags { .. }
                 | RepoCommand::FrameworkGraph { .. }
                 | RepoCommand::Impact { .. }
+                | RepoCommand::Diagnostics(_)
                 | RepoCommand::Report { .. }
                 | RepoCommand::Software { .. }
                 | RepoCommand::SoftwareExport { .. }
@@ -314,6 +315,7 @@ pub(super) async fn run_remote(
             .map(Some)
         }
         RepoCommand::FeatureFlags {
+            filters,
             alias,
             query,
             limit,
@@ -334,6 +336,7 @@ pub(super) async fn run_remote(
                 *limit,
                 *freshness,
             )
+            .and_then(|request|request.with_filters(filters.clone()))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = client
                 .post_repository::<_, CodeRepositoryFeatureFlagsResponse>(
@@ -423,6 +426,10 @@ pub(super) async fn run_remote(
             )
             .map(Some)
         }
+        RepoCommand::Diagnostics(request) => {
+            let response = client.get_diagnostics(request).await?;
+            render_response("code.repo.diagnostics",response.metadata.clone(),&response,format).map(Some)
+        }
         RepoCommand::Report { alias } => {
             let response = client
                 .get_repository::<CodeRepositoryReportResponse>(alias, "report")
@@ -431,6 +438,8 @@ pub(super) async fn run_remote(
             repo::render_report_response(&response, format).map(Some)
         }
         RepoCommand::Software {
+            cursor,
+            path_filters,
             alias,
             ref_selector,
             kind,
@@ -441,7 +450,7 @@ pub(super) async fn run_remote(
                 repo::selector(
                     alias.clone(),
                     ref_selector.clone(),
-                    Vec::new(),
+                    path_filters.clone(),
                     Vec::new(),
                     format,
                 )?,
@@ -449,6 +458,7 @@ pub(super) async fn run_remote(
                 *freshness,
                 *limit,
             )
+            .and_then(|request| request.with_cursor(cursor.clone()))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = client
                 .post_repository::<_, SoftwareGlobalResponse>(alias, "software", &request)
@@ -645,6 +655,38 @@ impl RemoteCliClient {
         .await
         .map_err(|error| qos_transport_error(error, self.format))?;
 
+        decode_response(response, self.format).await
+    }
+
+    async fn get_diagnostics(
+        &self,
+        request: &crate::domain::CodeDiagnosticsRequest,
+    ) -> Result<crate::api::CodeRepositoryDiagnosticsResponse, CliError> {
+        let mut url = repository_url(
+            &self.base_url,
+            &request.repository.repository,
+            "diagnostics",
+            self.format,
+        )?;
+        let paths = serde_json::to_string(&request.repository.path_filters)
+            .map_err(|e| CliError::invalid_api_argument(e.to_string(), self.format))?;
+        url.query_pairs_mut()
+            .append_pair("ref", &request.repository.ref_selector)
+            .append_pair("path_filters", &paths)
+            .append_pair("limit", &request.limit.to_string());
+        if let Some(cursor) = &request.cursor {
+            url.query_pairs_mut().append_pair("cursor", cursor);
+        }
+        let response = http::send_request_with_qos(
+            &self.qos,
+            &self.qos_policy,
+            self.client
+                .get(url)
+                .header("x-relay-request-id", &self.context.request_id)
+                .header("x-relay-trace-id", &self.context.trace_id),
+        )
+        .await
+        .map_err(|e| qos_transport_error(e, self.format))?;
         decode_response(response, self.format).await
     }
 

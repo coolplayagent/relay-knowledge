@@ -35,7 +35,7 @@ pub(super) fn resolve_mapping(
         )?,
         TechnicalTargetKind::ConfigKey => lookup_target_with_path(
             connection,
-            "SELECT feature_flag_id FROM code_repository_feature_flags WHERE source_scope = ?1 AND (name = ?2 OR source_key = ?2) AND (?3 IS NULL OR path = ?3) ORDER BY path LIMIT 1",
+            "SELECT feature_flag_id FROM code_repository_feature_flags WHERE source_scope = ?1 AND source_kind != 'config_symbol' AND edge_kind NOT IN ('declares_string_constant','declares_config_getter') AND (name = ?2 OR source_key = ?2) AND (?3 IS NULL OR path = ?3) ORDER BY path LIMIT 1",
             source_scope,
             &mapping.target,
             mapping.path.as_deref(),
@@ -195,5 +195,30 @@ pub(super) fn parse_target_kind(value: &str) -> Result<TechnicalTargetKind, Stor
         _ => Err(StorageError::Invariant(format!(
             "unknown technical target kind '{value}'"
         ))),
+    }
+}
+
+#[test]
+fn business_config_mapping_ignores_internal_registry_candidates() {
+    let connection = Connection::open_in_memory().unwrap();
+    connection.execute_batch("CREATE TABLE code_repository_feature_flags (source_scope TEXT, feature_flag_id TEXT, name TEXT, source_key TEXT, path TEXT, source_kind TEXT, edge_kind TEXT);
+        INSERT INTO code_repository_feature_flags VALUES
+        ('scope','internal','flag','flag','a.java','config_symbol','reads_config'),
+        ('scope','constant','constant','constant','a.java','config_key','declares_string_constant'),
+        ('scope','real','flag','flag','z.properties','config_key','defines_config');").unwrap();
+    for (target, expected) in [("flag", Some("real")), ("constant", None)] {
+        let mapping = BusinessTechnicalMappingDefinition {
+            relation: BusinessMappingRelation::RepresentedBy,
+            target_kind: TechnicalTargetKind::ConfigKey,
+            target: target.into(),
+            path: None,
+            source_scope: None,
+        };
+        assert_eq!(
+            resolve_mapping(&connection, "scope", &mapping)
+                .unwrap()
+                .as_deref(),
+            expected
+        );
     }
 }

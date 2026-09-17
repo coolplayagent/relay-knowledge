@@ -18,13 +18,20 @@ fn projection_publishes_vue_component_facts() {
         1,
         0,
     );
+    let source = "<script setup>const props = defineProps(['title'])</script><template>{{ title }}</template>";
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_html::LANGUAGE.into())
+        .unwrap();
+    let tree = parser.parse(source, None).unwrap();
     record_framework_graph(
         &mut build,
         "src/App.vue",
         "file",
         "vue",
-        "<script setup>const props = defineProps(['title'])</script><template>{{ title }}</template>",
+        source,
         &[],
+        tree.root_node(),
     )
     .unwrap();
 

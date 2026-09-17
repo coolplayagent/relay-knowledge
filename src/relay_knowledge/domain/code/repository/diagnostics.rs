@@ -1,0 +1,227 @@
+//! Snapshot-bound content integrity and bounded diagnostic paging contracts.
+
+use super::{CodeFileDiagnostic, CodeRepositorySelector, CodeRepositoryStatus};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+const MAX_DIAGNOSTIC_CURSOR_BYTES: usize = 16384;
+
+/// Content coverage is independent of indexed-version freshness.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeContentIntegrityState {
+    Complete,
+    Partial,
+    #[default]
+    Unknown,
+}
+
+/// Coverage of the served immutable code snapshot, never inferred from messages.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeContentIntegrity {
+    #[serde(default)]
+    pub io_skipped_file_count: Option<usize>,
+    #[serde(default)]
+    pub io_skipped_directory_count: Option<usize>,
+    pub state: CodeContentIntegrityState,
+    pub degraded_file_count: Option<usize>,
+    pub source_scope: Option<String>,
+}
+
+impl CodeContentIntegrity {
+    /// Counts files and inaccessible directory boundaries independently.
+    pub fn from_diagnostics(source_scope: String, diagnostics: &[CodeFileDiagnostic]) -> Self {
+        let mut files = std::collections::BTreeSet::new();
+        let mut skipped_files = std::collections::BTreeSet::new();
+        let mut directories = std::collections::BTreeSet::new();
+        for diagnostic in diagnostics {
+            match diagnostic.io.as_ref().map(|io| io.path_kind) {
+                Some(super::CodePathKind::Directory) => {
+                    directories.insert(&diagnostic.path);
+                }
+                kind => {
+                    files.insert(&diagnostic.path);
+                    if kind.is_some() {
+                        skipped_files.insert(&diagnostic.path);
+                    }
+                }
+            }
+        }
+        let mut integrity = Self::measured(source_scope, files.len());
+        integrity.io_skipped_file_count = Some(skipped_files.len());
+        integrity.io_skipped_directory_count = Some(directories.len());
+        if !directories.is_empty() {
+            integrity.state = CodeContentIntegrityState::Partial;
+        }
+        integrity
+    }
+
+    /// Associates a counted set of distinct degraded paths with its snapshot.
+    pub fn measured(source_scope: String, count: usize) -> Self {
+        Self {
+            io_skipped_file_count: Some(0),
+            io_skipped_directory_count: Some(0),
+            state: if count == 0 {
+                CodeContentIntegrityState::Complete
+            } else {
+                CodeContentIntegrityState::Partial
+            },
+            degraded_file_count: Some(count),
+            source_scope: Some(source_scope),
+        }
+    }
+
+    /// Preserves conservative coverage when context combines different snapshots.
+    pub fn merge(&mut self, other: &Self) {
+        if self == other {
+            return;
+        }
+        if self.source_scope == other.source_scope {
+            self.io_skipped_file_count = self
+                .io_skipped_file_count
+                .zip(other.io_skipped_file_count)
+                .map(|(a, b)| a.max(b));
+            self.io_skipped_directory_count = self
+                .io_skipped_directory_count
+                .zip(other.io_skipped_directory_count)
+                .map(|(a, b)| a.max(b));
+            self.degraded_file_count = self
+                .degraded_file_count
+                .zip(other.degraded_file_count)
+                .map(|(a, b)| a.max(b));
+        } else {
+            self.io_skipped_file_count = None;
+            self.io_skipped_directory_count = None;
+            self.source_scope = None;
+            self.degraded_file_count = None;
+        }
+        self.state = if self.state == CodeContentIntegrityState::Partial
+            || other.state == CodeContentIntegrityState::Partial
+        {
+            CodeContentIntegrityState::Partial
+        } else {
+            CodeContentIntegrityState::Unknown
+        };
+    }
+}
+
+/// Public selector for a bounded diagnostic page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeDiagnosticsRequest {
+    pub repository: CodeRepositorySelector,
+    pub limit: usize,
+    pub cursor: Option<String>,
+}
+
+impl CodeDiagnosticsRequest {
+    /// Binds the normalized filter set without copying large prefixes into every cursor.
+    pub fn path_filters_fingerprint(&self) -> String {
+        let mut digest = Sha256::new();
+        for path in &self.repository.path_filters {
+            digest.update((path.len() as u64).to_le_bytes());
+            digest.update(path.as_bytes());
+        }
+        format!("{:x}", digest.finalize())
+    }
+
+    /// Canonicalizes bounded repository-relative prefixes before cursor binding.
+    pub fn normalize_paths(&mut self) -> Result<(), String> {
+        if self.repository.path_filters.len() > 64 {
+            return Err("at most 64 diagnostic path filters are supported".into());
+        }
+        let mut paths = Vec::new();
+        let mut whole_scope = false;
+        for raw in &self.repository.path_filters {
+            if raw.len() > 4096 {
+                return Err("diagnostic path filter exceeds 4096 bytes".into());
+            }
+            let value = raw.replace('\\', "/");
+            if value.starts_with('/') || value.contains(':') || value.split('/').any(|p| p == "..")
+            {
+                return Err("diagnostic paths must be repository-relative prefixes".into());
+            }
+            let value = value
+                .split('/')
+                .filter(|p| !p.is_empty() && *p != ".")
+                .collect::<Vec<_>>()
+                .join("/");
+            if value.is_empty() {
+                whole_scope = true;
+                continue;
+            }
+            paths.push(value);
+        }
+        if whole_scope {
+            paths.clear();
+        }
+        paths.sort();
+        paths.dedup();
+        self.repository.path_filters = paths;
+        Ok(())
+    }
+
+    /// Rejects oversized pages and tokens at every entry point, including storage.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(1..=200).contains(&self.limit) {
+            return Err("diagnostic limit must be between 1 and 200".into());
+        }
+        if self
+            .cursor
+            .as_ref()
+            .is_some_and(|c| c.len() > MAX_DIAGNOSTIC_CURSOR_BYTES)
+        {
+            return Err("diagnostic cursor exceeds 16384 bytes".into());
+        }
+        if !self.repository.language_filters.is_empty() {
+            return Err("diagnostics do not accept language filters".into());
+        }
+        Ok(())
+    }
+}
+
+/// Keyset continuation bound to the original selector and immutable served scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodeDiagnosticsCursor {
+    pub repository_id: String,
+    pub source_scope: String,
+    pub resolved_commit_sha: String,
+    pub requested_ref: String,
+    pub path_filters_fingerprint: String,
+    pub after_path: String,
+    pub after_message: String,
+}
+
+impl CodeDiagnosticsCursor {
+    /// Never emits a continuation that the next request would reject as oversized.
+    pub fn encode(&self) -> Result<String, String> {
+        let token = serde_json::to_string(self).map_err(|error| error.to_string())?;
+        if token.len() > MAX_DIAGNOSTIC_CURSOR_BYTES {
+            return Err("diagnostic continuation exceeds the cursor byte budget".into());
+        }
+        Ok(token)
+    }
+}
+
+/// Storage request resolved and authorized by the application service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeDiagnosticsPageRequest {
+    pub repository_id: String,
+    pub source_scope: String,
+    pub resolved_commit_sha: String,
+    pub path_filters: Vec<String>,
+    pub limit: usize,
+    pub after: Option<(String, String)>,
+}
+
+/// Diagnostic rows with a distinct-file total and explicit continuation signal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeDiagnosticsPage {
+    pub scope_status: CodeRepositoryStatus,
+    pub degraded_file_count: usize,
+    pub diagnostics: Vec<CodeFileDiagnostic>,
+    pub has_more: bool,
+}
+
+#[cfg(test)]
+mod mod_tests;

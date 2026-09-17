@@ -9,7 +9,9 @@ use crate::{
 
 use super::super::{checkpoint, finalize};
 use super::{TransactionAdvance, finalization_phase_pending};
-use crate::storage::sqlite::code::workspace;
+use crate::storage::sqlite::code::{
+    lifecycle::publication_fence::PublicationFenceGuard, workspace,
+};
 
 pub(super) fn complete_unfenced_publication(
     transaction: &Transaction<'_>,
@@ -74,13 +76,18 @@ pub(super) fn publish_repository_scope(
     }
     let chunk_count =
         count_code_rows(transaction, "code_repository_chunks", &session.source_scope)?;
-    let degraded_file_count = count_code_rows(
+    let integrity = crate::storage::sqlite::code::diagnostic_counts::measure(
         transaction,
-        "code_repository_file_diagnostics",
         &session.source_scope,
     )?;
-    let degraded_reason = (degraded_file_count > 0)
-        .then(|| format!("{degraded_file_count} file(s) degraded during code indexing"));
+    let degraded_reason = (integrity.state == crate::domain::CodeContentIntegrityState::Partial)
+        .then(|| {
+            format!(
+                "{} file(s) degraded; {} directory boundary(s) skipped during code indexing",
+                integrity.degraded_file_count.unwrap_or(0),
+                integrity.io_skipped_directory_count.unwrap_or(0)
+            )
+        });
     let path_filters_json = checkpoint::serialize_json(&session.path_filters)?;
     let language_filters_json = checkpoint::serialize_json(&session.language_filters)?;
     crate::storage::sqlite::code::publication::stage(
@@ -134,6 +141,82 @@ fn require_grouped_reference_search_manifest(
     {
         return Err(StorageError::Invariant(format!(
             "full code scope '{source_scope}' has an invalid grouped reference-search manifest"
+        )));
+    }
+    Ok(())
+}
+
+pub(in crate::storage::sqlite::code::batch::session) fn finalization_target_is_unpublished(
+    transaction: &Transaction<'_>,
+    session: &CodeIndexSession,
+    fence: &PublicationFenceGuard,
+) -> Result<bool, StorageError> {
+    if !session.full_replace {
+        return Ok(false);
+    }
+    fence.validate_repository(&session.repository_id)?;
+    fence.validate_target_scope(transaction, &session.source_scope)?;
+    fence.validate(transaction)?;
+    if locally_queryable_finalization_target(transaction, session)? {
+        return Ok(false);
+    }
+    if !fence.authority_is_local() {
+        fence.validate_partitioned_staged_scope(
+            transaction,
+            &session.repository_id,
+            &session.source_scope,
+        )?;
+    }
+    Ok(true)
+}
+
+pub(super) fn locally_queryable_finalization_target(
+    transaction: &Transaction<'_>,
+    session: &CodeIndexSession,
+) -> Result<bool, StorageError> {
+    transaction
+        .query_row(
+            "SELECT EXISTS (
+             SELECT 1 FROM code_repositories repository
+             WHERE repository.repository_id = ?1
+               AND repository.last_indexed_scope_id = ?2
+         ) OR EXISTS (
+             SELECT 1 FROM code_repository_scopes scope
+             WHERE scope.repository_id = ?1 AND scope.source_scope = ?2
+               AND (scope.stale = 0 OR scope.retiring <> 0)
+         ) OR EXISTS (
+             SELECT 1 FROM code_repository_commit_scopes commit_scope
+             WHERE commit_scope.repository_id = ?1 AND commit_scope.source_scope = ?2
+         ) OR EXISTS (
+             SELECT 1 FROM code_repository_scope_gc_jobs job
+             WHERE job.repository_id = ?1 AND job.source_scope = ?2
+         )",
+            params![session.repository_id, session.source_scope],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(StorageError::from)
+}
+
+pub(in crate::storage::sqlite::code::batch::session) fn require_unpublished_finalization_target(
+    transaction: &Transaction<'_>,
+    session: &CodeIndexSession,
+    fence: &PublicationFenceGuard,
+) -> Result<(), StorageError> {
+    require_unpublished_finalization_owner(transaction, session, fence)?;
+    crate::storage::sqlite::code::schema::require_code_query_indexes_for_fact_publication(
+        transaction,
+    )
+}
+
+pub(in crate::storage::sqlite::code::batch::session) fn require_unpublished_finalization_owner(
+    transaction: &Transaction<'_>,
+    session: &CodeIndexSession,
+    fence: &PublicationFenceGuard,
+) -> Result<(), StorageError> {
+    if !finalization_target_is_unpublished(transaction, session, fence)? {
+        return Err(StorageError::Invariant(format!(
+            "durable finalization pages cannot mutate queryable scope '{}'",
+            session.source_scope
         )));
     }
     Ok(())

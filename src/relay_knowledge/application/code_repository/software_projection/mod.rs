@@ -49,6 +49,9 @@ impl RelayKnowledgeService {
         request: SoftwareGlobalRequest,
         context: RequestContext,
     ) -> Result<SoftwareGlobalResponse, ApiError> {
+        request
+            .validate()
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         let store = self.store().await.map_err(storage_api_error)?;
         let status =
             required_code_repository(store.as_ref(), &request.repository.repository).await?;
@@ -58,6 +61,7 @@ impl RelayKnowledgeService {
                 .await
                 .map_err(storage_api_error)?;
             return Ok(SoftwareGlobalResponse {
+                next_cursor: None,
                 metadata: ApiMetadata::graph_only(&context, graph_version),
                 scope: crate::api::CodeRepositoryScopeMetadata::from_status(
                     &status,
@@ -188,6 +192,7 @@ impl RelayKnowledgeService {
         }
 
         Ok(SoftwareGlobalResponse {
+            next_cursor: projection.next_cursor,
             metadata,
             scope,
             request,

@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     api::{ApiMetadata, CodeRepositoryFreshnessDiagnostics, CodeRepositoryScopeMetadata},
     domain::{
-        BusinessDomain, BusinessKnowledgeQueryRequest, BusinessKnowledgeResolution,
-        BusinessKnowledgeStatus, BusinessTerm, CodeFeatureFlagGraph, CodeFeatureFlagRequest,
+        BusinessDomain, BusinessKnowledgeQueryRequest, BusinessKnowledgeResult,
+        BusinessKnowledgeSummary, BusinessTerm, CodeFeatureFlagGraph, CodeFeatureFlagRequest,
         CodeImpactPathGroups, CodeImpactRequest, CodeIndexCheckpoint, CodeIndexSummary,
         CodeIndexTaskRecord, CodeRepositoryRegistration, CodeRepositoryRemovalSummary,
         CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositoryStatus, CodeRetrievalHit,
@@ -196,6 +196,9 @@ pub struct CodeRepositoryReportResponse {
 /// Repository-scoped software global model projection response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SoftwareGlobalResponse {
+    /// Pass back as cursor with the same ref, kind and filters to continue this page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
     pub metadata: ApiMetadata,
     pub scope: CodeRepositoryScopeMetadata,
     pub request: SoftwareGlobalRequest,
@@ -231,11 +234,25 @@ pub struct SoftwareGlobalExportResponse {
 /// Repository-scoped authored business knowledge projection response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BusinessKnowledgeQueryResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<crate::api::BusinessKnowledgeDiagnostics>,
     pub metadata: ApiMetadata,
     pub scope: CodeRepositoryScopeMetadata,
     pub request: BusinessKnowledgeQueryRequest,
-    pub status: BusinessKnowledgeStatus,
-    pub resolution: BusinessKnowledgeResolution,
+    pub knowledge: BusinessKnowledgeSummary,
+    pub result: BusinessKnowledgeResult,
     pub domains: Vec<BusinessDomain>,
     pub terms: Vec<BusinessTerm>,
+}
+
+/// One bounded page of diagnostics tied to an immutable published code scope.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CodeRepositoryDiagnosticsResponse {
+    #[serde(default)]
+    pub content_integrity: crate::domain::CodeContentIntegrity,
+    pub metadata: crate::api::ApiMetadata,
+    pub scope: crate::api::CodeRepositoryScopeMetadata,
+    pub degraded_file_count: usize,
+    pub diagnostics: Vec<crate::domain::CodeFileDiagnostic>,
+    pub next_cursor: Option<String>,
 }

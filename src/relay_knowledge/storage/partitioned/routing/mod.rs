@@ -34,7 +34,10 @@ pub(super) async fn repository_store_for_selector(
         return Ok(None);
     };
     let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
-    let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
+    let language_filters = crate::domain::code_scope_language_filters(
+        &status.language_filters,
+        &selector.language_filters,
+    );
     let mut candidate = shard
         .code_repository_scope_status(
             status.repository_id.clone(),

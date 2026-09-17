@@ -115,6 +115,8 @@ pub(super) fn collect_configurations(
                edge_kind, confidence_basis_points, line_start, line_end
         FROM code_repository_feature_flags
         WHERE source_scope = ?1
+          AND source_kind != 'config_symbol'
+          AND edge_kind NOT IN ('declares_string_constant', 'declares_config_getter')
         ORDER BY path ASC, line_start ASC, feature_flag_id ASC
         ",
     )?;
@@ -143,7 +145,9 @@ pub(super) fn collect_configurations(
         attributes.insert("language_id".to_owned(), row.language_id);
         attributes.insert("source_key".to_owned(), row.source_key.clone());
         attributes.insert("edge_kind".to_owned(), row.edge_kind);
-        attributes.insert("display_name".to_owned(), row.name);
+        if !row.name.trim().is_empty() {
+            attributes.insert("display_name".to_owned(), row.name);
+        }
         let configuration_key = builder.add_entity(OntologyEntityCandidate {
             projection_id: Some(&row.projection_id),
             kind: SoftwareEntityKind::Configuration,
@@ -190,3 +194,7 @@ struct ConfigurationRow {
     line_start: u32,
     line_end: u32,
 }
+
+#[cfg(test)]
+#[path = "code_tests.rs"]
+mod tests;

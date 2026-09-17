@@ -21,6 +21,8 @@ const LEASE_OWNER: &str = "publication-barrier-worker";
 
 #[path = "publication_barrier_business_tests.rs"]
 mod business_projection_tests;
+#[path = "ownership_publication_tests.rs"]
+mod ownership_publication_tests;
 
 #[tokio::test]
 async fn active_scope_reference_search_rebuild_rejects_nonempty_owner_without_mutation() {
@@ -238,7 +240,7 @@ async fn staged_reference_search_advances_set_based_pages_without_becoming_query
             "finalizing:rebuild_reference_search:v2:discover:3",
             "finalizing:rebuild_reference_search:v2:build:0",
             "finalizing:rebuild_reference_search:v2:build:1",
-            "finalizing:query_index_repair:v3:16:resume:reference_search:v2:build:1",
+            "finalizing:query_index_repair:v5:16:resume:reference_search:v2:build:1",
             "finalizing:rebuild_reference_search:v2:build:1",
             "finalizing:rebuild_reference_search:v2:build:2",
             "finalizing:rebuild_reference_search:v2:build:3",
@@ -884,6 +886,8 @@ pub(super) async fn begin_fenced_session(
 
 fn terminal_receipt(task_id: &str) -> CodeIncrementalSummaryReceipt {
     CodeIncrementalSummaryReceipt {
+        io_skipped_file_count: 0,
+        io_skipped_directory_count: 0,
         task_id: task_id.to_owned(),
         base_resolved_commit_sha: "base".to_owned(),
         changed_path_count: 3,

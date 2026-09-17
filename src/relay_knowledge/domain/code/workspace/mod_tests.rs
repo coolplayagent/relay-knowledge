@@ -45,6 +45,7 @@ fn go_workspace() -> CodeMonorepoWorkspace {
 #[test]
 fn workspace_format_serde_round_trip() {
     let cases = [
+        (CodeMonorepoWorkspaceFormat::Maven, "\"maven\""),
         (CodeMonorepoWorkspaceFormat::Pnpm, "\"pnpm\""),
         (CodeMonorepoWorkspaceFormat::GoModules, "\"go_modules\""),
         (

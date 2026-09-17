@@ -4,6 +4,7 @@ use super::*;
 
 fn status(last_indexed_scope_id: Option<&str>, stale: bool) -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo-1".to_owned(),
         alias: "core".to_owned(),
         root_path: "/tmp/core".to_owned(),
@@ -83,4 +84,33 @@ fn task_record(state: CodeIndexTaskState) -> CodeIndexTaskRecord {
         created_at_ms: 1,
         updated_at_ms: 2,
     }
+}
+
+#[test]
+fn source_io_watch_registration_tracks_only_current_io_gaps() {
+    let mut current = status(Some("scope"), false);
+    assert!(
+        !watched_repository_from_status(&current)
+            .unwrap()
+            .requires_source_io_recheck
+    );
+    current.content_integrity.io_skipped_directory_count = Some(1);
+    assert!(
+        watched_repository_from_status(&current)
+            .unwrap()
+            .requires_source_io_recheck
+    );
+    current.content_integrity.io_skipped_directory_count = Some(0);
+    current.content_integrity.io_skipped_file_count = Some(2);
+    assert!(
+        watched_repository_from_status(&current)
+            .unwrap()
+            .requires_source_io_recheck
+    );
+    current.content_integrity.io_skipped_file_count = Some(0);
+    assert!(
+        !watched_repository_from_status(&current)
+            .unwrap()
+            .requires_source_io_recheck
+    );
 }

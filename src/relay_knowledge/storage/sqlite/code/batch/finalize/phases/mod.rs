@@ -12,6 +12,7 @@ mod tests;
 pub(crate) const RESOLVE_REFERENCES: &str = "finalizing:resolve_references";
 pub(crate) const BUILD_QUERY_INDEXES: &str = "finalizing:build_query_indexes";
 pub(crate) const RESOLVE_IMPORTS: &str = "finalizing:resolve_imports";
+pub(crate) const RESOLVE_TYPE_OWNERSHIP: &str = "finalizing:resolve_type_ownership";
 pub(crate) const RESOLVE_CALL_TARGETS: &str = "finalizing:resolve_call_targets";
 pub(crate) const REFRESH_DEPENDENCIES: &str = "finalizing:refresh_dependencies";
 pub(crate) const REBUILD_REFERENCE_SEARCH: &str = "finalizing:rebuild_reference_search";
@@ -21,10 +22,11 @@ pub(crate) const PUBLISH_SCOPE: &str = "finalizing:publish_scope";
 pub(crate) const SOFTWARE_PROJECTION: &str = crate::domain::SOFTWARE_PROJECTION_CHECKPOINT;
 pub(crate) const PARTITIONED_PUBLISH: &str = "finalizing:partitioned_publish";
 
-pub(crate) const ORDERED_FINALIZATION_PHASES: [&str; 11] = [
+pub(crate) const ORDERED_FINALIZATION_PHASES: [&str; 12] = [
     BUILD_QUERY_INDEXES,
     RESOLVE_REFERENCES,
     RESOLVE_IMPORTS,
+    RESOLVE_TYPE_OWNERSHIP,
     RESOLVE_CALL_TARGETS,
     REFRESH_DEPENDENCIES,
     REBUILD_REFERENCE_SEARCH,
@@ -39,6 +41,8 @@ const _: [(); crate::storage::CODE_INDEX_FINALIZATION_COARSE_PHASE_COUNT] =
     [(); ORDERED_FINALIZATION_PHASES.len()];
 
 pub(crate) fn position(state: &str) -> Option<usize> {
+    let state = crate::domain::CodeQueryIndexRepairResumePhase::from_checkpoint_state(state)?
+        .checkpoint_state();
     ORDERED_FINALIZATION_PHASES
         .iter()
         .position(|phase| *phase == state)

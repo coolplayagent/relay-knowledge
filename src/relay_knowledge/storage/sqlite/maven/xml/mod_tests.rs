@@ -26,3 +26,15 @@ fn xml_parser_preserves_children_text_cdata_and_start_lines() {
 fn xml_parser_rejects_unclosed_documents() {
     assert!(parse_xml_document("<project><artifactId>demo</artifactId>").is_err());
 }
+
+#[test]
+fn xml_entities_reject_unknown_references_and_leave_cdata_literal() {
+    let root = parse_xml_document(
+        "<project><value>&lt;&gt;&amp;&quot;&apos;&#65;&#x42;<![CDATA[&amp;]]></value></project>",
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(root.child("value").unwrap().text, r#"<>&"'AB&amp;"#);
+    assert!(parse_xml_document("<project>&unknown;</project>").is_err());
+    assert!(parse_xml_document("<project>&#invalid;</project>").is_err());
+}

@@ -1,5 +1,6 @@
 mod agent_budget;
 mod codebase_view;
+pub(super) mod diagnostics;
 mod insight_handlers;
 mod request_contracts;
 mod retrieval_handlers;
@@ -33,6 +34,9 @@ pub(super) async fn run_code_tool(
     request_id: String,
 ) -> Value {
     match name {
+        super::tool_registry::CODE_DIAGNOSTICS_TOOL => {
+            diagnostics::run(server, arguments, request_id).await
+        }
         CODE_QUERY_TOOL => retrieval_handlers::code_query_tool(server, arguments, request_id).await,
         CODE_CONTEXT_TOOL => {
             retrieval_handlers::code_context_tool(server, arguments, request_id).await

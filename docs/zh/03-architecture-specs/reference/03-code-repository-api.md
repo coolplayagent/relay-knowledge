@@ -147,7 +147,7 @@
 
 ### 6.3.3 POST /api/v1/code/repositories/{alias}/business
 
-读取索引阶段写入的 authored business projection，不在请求路径读取 YAML。请求为共享的 `BusinessKnowledgeQueryRequest`：`repository` 选择器、可选 `domain`/`query`、`kind`（`terms`、`mappings` 或 `all`）、`freshness_policy` 与 `limit`（1–500）。响应返回 resolution（包含 `ambiguous`）、domain、canonical term、definitions、aliases、semantics、conflicts、technical mappings、`resolution_state`、`target_hint`、evidence 和 repository scope。
+读取索引阶段写入的 authored business projection，不在请求路径读取 YAML。请求为共享的 `BusinessKnowledgeQueryRequest`：`repository` 选择器、可选 `domain`/`query`、`kind`（`terms`、`mappings` 或 `all`）、`freshness_policy` 与 `limit`（1–500）。响应通过 `request.mode`、`result.status`（含 `ambiguous`）、可选 `result.match_type` 和 `knowledge.state` 分离查询方式、结果和知识就绪状态；`knowledge` 保留整体计数、commit/scope、图版本和 freshness，`result` 返回实际数量和 `truncated`。不再返回旧 `resolution` 与顶层业务 `status`。响应同时返回 domain、canonical term、definitions、aliases、semantics、conflicts、technical mappings、`resolution_state`、`target_hint`、evidence 和 repository scope。
 
 `code_query_kind` 枚举：`hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`、`sbom`、`impact`
 

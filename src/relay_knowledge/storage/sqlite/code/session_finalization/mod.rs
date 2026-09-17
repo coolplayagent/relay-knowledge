@@ -124,7 +124,10 @@ async fn finalization_step_bound(
                 "code index checkpoint for scope '{source_scope}' is unavailable"
             ))
         })?;
-    code_index_finalization_max_steps(checkpoint.committed_reference_count)
+    code_index_finalization_max_steps(
+        checkpoint.committed_reference_count,
+        checkpoint.committed_symbol_count,
+    )
 }
 
 fn finalization_step(advance: batch::CodeIndexFinalizationAdvance) -> CodeIndexFinalizationStep {

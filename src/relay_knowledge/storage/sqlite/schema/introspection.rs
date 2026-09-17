@@ -53,7 +53,7 @@ pub(super) fn table_has_exact_plain_columns(
             .all(|((name, hidden), expected)| name == expected && *hidden == 0))
 }
 
-pub(super) fn table_has_primary_key_columns(
+pub(in crate::storage::sqlite) fn table_has_primary_key_columns(
     connection: &Connection,
     table: &str,
     expected_columns: &[&str],
@@ -129,7 +129,7 @@ pub(super) fn table_has_unique_columns(
     Ok(false)
 }
 
-pub(super) fn index_has_columns(
+pub(in crate::storage::sqlite) fn index_has_columns(
     connection: &Connection,
     index: &str,
     expected_columns: &[&str],

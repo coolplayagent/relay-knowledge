@@ -75,7 +75,7 @@ pub(super) async fn fresh_full_index_response(
             scoped_status.repository_id.clone(),
             probe.resolved_commit_sha.clone(),
             scoped_status.path_filters.clone(),
-            scoped_status.language_filters.clone(),
+            Vec::new(),
         )
         .map_err(|error| ApiError::invalid_argument(error.to_string()))?,
         SoftwareGlobalKind::All,
@@ -130,6 +130,14 @@ pub(super) async fn fresh_full_index_response(
         chunk_count: scoped_status.chunk_count,
         degraded_file_count,
         progress: CodeIndexProgressSummary {
+            io_skipped_file_count: scoped_status
+                .content_integrity
+                .io_skipped_file_count
+                .unwrap_or(0),
+            io_skipped_directory_count: scoped_status
+                .content_integrity
+                .io_skipped_directory_count
+                .unwrap_or(0),
             git_file_count: scoped_status.indexed_file_count,
             blob_read_count: 0,
             parsed_file_count: 0,
@@ -171,7 +179,7 @@ pub(super) async fn published_task_response(
             lease.publication_fence.repository_id.clone(),
             lease.resolved_commit_sha.clone(),
             lease.path_filters.clone(),
-            lease.language_filters.clone(),
+            Vec::new(),
         )
         .await
         .map_err(storage_api_error)?
@@ -202,7 +210,7 @@ pub(super) async fn published_task_response(
             repository_status.alias.clone(),
             lease.resolved_commit_sha.clone(),
             lease.path_filters.clone(),
-            lease.language_filters.clone(),
+            Vec::new(),
         )
         .map_err(|error| ApiError::invalid_argument(error.to_string()))?,
         crate::domain::SoftwareGlobalKind::All,
@@ -285,10 +293,20 @@ pub(super) async fn published_task_response(
         degraded_file_count,
         progress: incremental.as_ref().map_or_else(
             || {
-                publication_recovery_progress(
+                let mut progress = publication_recovery_progress(
                     scoped_status.indexed_file_count,
                     lease.resource_budget,
-                )
+                );
+                progress.io_skipped_file_count = scoped_status
+                    .content_integrity
+                    .io_skipped_file_count
+                    .unwrap_or(0);
+                progress.io_skipped_directory_count = scoped_status
+                    .content_integrity
+                    .io_skipped_directory_count
+                    .unwrap_or(0);
+                progress.degraded_file_count = degraded_file_count;
+                progress
             },
             |receipt| incremental_recovery_progress(receipt, lease.resource_budget),
         ),
@@ -349,6 +367,8 @@ fn incremental_recovery_progress(
     resource_budget: CodeIndexResourceBudget,
 ) -> CodeIndexProgressSummary {
     CodeIndexProgressSummary {
+        io_skipped_file_count: receipt.io_skipped_file_count,
+        io_skipped_directory_count: receipt.io_skipped_directory_count,
         git_file_count: receipt.changed_path_count,
         blob_read_count: receipt.blob_read_count,
         parsed_file_count: receipt.parsed_file_count,
@@ -366,6 +386,8 @@ fn publication_recovery_progress(
     resource_budget: CodeIndexResourceBudget,
 ) -> CodeIndexProgressSummary {
     CodeIndexProgressSummary {
+        io_skipped_file_count: 0,
+        io_skipped_directory_count: 0,
         git_file_count: 0,
         blob_read_count: 0,
         parsed_file_count: 0,

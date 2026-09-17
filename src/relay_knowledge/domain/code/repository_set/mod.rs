@@ -52,6 +52,7 @@ pub struct CodeRepositorySetAddMemberRequest {
     pub repository_alias: String,
     pub ref_selector: String,
     pub path_filters: Vec<String>,
+    #[serde(deserialize_with = "crate::domain::deserialize_code_language_filters")]
     pub language_filters: Vec<String>,
     pub priority: i32,
 }
@@ -70,7 +71,10 @@ impl CodeRepositorySetAddMemberRequest {
             repository_alias: required_text("repository_alias", repository_alias)?,
             ref_selector: required_text("ref_selector", ref_selector)?,
             path_filters: normalize_filter_list("path_filter", path_filters)?,
-            language_filters: normalize_filter_list("language_filter", language_filters)?,
+            language_filters: crate::domain::normalize_code_filter_list(
+                "language_filter",
+                language_filters,
+            )?,
             priority,
         })
     }
@@ -160,6 +164,7 @@ pub struct CodeRepositorySetQueryRequest {
     pub limit: usize,
     pub freshness_policy: FreshnessPolicy,
     pub path_filters: Vec<String>,
+    #[serde(deserialize_with = "crate::domain::deserialize_code_language_filters")]
     pub language_filters: Vec<String>,
     #[serde(default)]
     pub exclude_generated: bool,
@@ -188,7 +193,10 @@ impl CodeRepositorySetQueryRequest {
             limit,
             freshness_policy,
             path_filters: normalize_filter_list("path_filter", path_filters)?,
-            language_filters: normalize_filter_list("language_filter", language_filters)?,
+            language_filters: crate::domain::normalize_code_filter_list(
+                "language_filter",
+                language_filters,
+            )?,
             exclude_generated: false,
         })
     }

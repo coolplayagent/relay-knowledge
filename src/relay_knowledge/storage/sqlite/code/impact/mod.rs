@@ -2,6 +2,7 @@
 
 mod evidence;
 mod path_selection;
+mod reactor;
 mod seed;
 
 #[cfg(test)]
@@ -61,6 +62,10 @@ fn analyze_impact_with_status(
     let changed_modules =
         import_module_seeds(&changed, &changed_symbols, &changes.deleted_symbol_names);
     let mut hits = Vec::new();
+
+    hits.extend(reactor::module_impacts(
+        connection, status, &request, &changed,
+    )?);
 
     hits.extend(chunks_for_paths(connection, status, &changed, &request)?);
     hits.extend(callers_for_symbols(

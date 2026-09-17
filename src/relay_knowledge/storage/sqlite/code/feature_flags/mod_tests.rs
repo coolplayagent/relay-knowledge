@@ -4,7 +4,7 @@ use super::*;
 use crate::domain::{CodeRepositorySelector, FreshnessPolicy};
 
 #[test]
-fn feature_flag_sql_applies_filters_and_limit_before_usage_lookup() {
+fn feature_flag_sql_applies_scope_and_bounded_candidate_budget() {
     let selector = CodeRepositorySelector::new(
         "fixture",
         "commit",
@@ -23,28 +23,39 @@ fn feature_flag_sql_applies_filters_and_limit_before_usage_lookup() {
         .query
         .as_deref()
         .map(query_terms)
+        .transpose()
+        .unwrap()
         .unwrap_or_default();
 
     let query = feature_flag_sql_query("scope", &status(), &request, &terms);
 
     assert!(query.sql.contains("WITH filtered_flags AS"));
     assert!(query.sql.contains("LIMIT ?"));
-    assert_eq!(query.sql.matches("flag.source_scope = ?").count(), 2);
+    // Key seeds, symbolic seeds, and returned usages each enforce authorization.
+    assert_eq!(query.sql.matches("flag.source_scope = ?").count(), 3);
     assert_eq!(
         query
             .sql
-            .matches("flag.path = ? OR flag.path LIKE ? ESCAPE '\\'")
+            .matches("flag.path = ? OR instr(flag.path, ?) = 1")
             .count(),
-        4
+        6
     );
-    assert_eq!(query.sql.matches("flag.language_id IN").count(), 4);
-    assert!(query.sql.contains("lower(flag.source_key) LIKE ?"));
-    assert_eq!(query.params.len(), 27);
-    assert!(query.params.contains(&Value::Integer(1)));
+    assert_eq!(query.sql.matches("flag.language_id IN").count(), 6);
+    assert!(
+        query
+            .sql
+            .contains("config_casefold(flag.source_key) LIKE ?")
+    );
+    assert_eq!(query.params.len(), 29);
     assert!(
         query
             .params
-            .contains(&Value::Text("src/payments/%".to_owned()))
+            .contains(&Value::Integer(registry::MAX_ROWS as i64 + 1))
+    );
+    assert!(
+        query
+            .params
+            .contains(&Value::Text("src/payments/".to_owned()))
     );
     assert!(
         query
@@ -55,6 +66,7 @@ fn feature_flag_sql_applies_filters_and_limit_before_usage_lookup() {
 
 fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
+        content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
         alias: "fixture".to_owned(),
         root_path: "/tmp/repo".to_owned(),
@@ -70,5 +82,38 @@ fn status() -> CodeRepositoryStatus {
         chunk_count: 0,
         stale: false,
         degraded_reason: None,
+    }
+}
+
+#[test]
+fn configuration_query_terms_reject_overflow_without_truncating() {
+    assert_eq!(query_terms(&vec!["x"; 64].join(" ")).unwrap().len(), 64);
+    assert_eq!(query_terms(&"x".repeat(256)).unwrap()[0].len(), 256);
+    for query in [
+        vec!["x"; 65].join(" "),
+        vec!["x"; 5000].join(" "),
+        "x".repeat(257),
+        " ".repeat(10001),
+        "İ".repeat(100),
+    ] {
+        let error = query_terms(&query).unwrap_err();
+        assert!(matches!(error, StorageError::InvalidInput(_)));
+        assert!(error.to_string().contains("budget exceeded"));
+    }
+}
+
+#[test]
+fn supplied_queries_require_a_searchable_term() {
+    for query in ["", " ", ".", "... --", "🧪", "💡.🚀"] {
+        assert!(
+            query_terms(query)
+                .unwrap_err()
+                .to_string()
+                .contains("alphanumeric"),
+            "{query}"
+        );
+    }
+    for (query, expected) in [("_", "_"), ("feature.🧪", "feature"), ("账务", "账务")] {
+        assert_eq!(query_terms(query).unwrap(), vec![expected]);
     }
 }

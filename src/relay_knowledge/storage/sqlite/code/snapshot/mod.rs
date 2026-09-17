@@ -296,6 +296,10 @@ fn apply_snapshot_attempt(
     let symbol_generation_counts =
         report::scope_symbol_generation_counts(connection, &snapshot.source_scope)?;
 
+    let integrity = crate::domain::CodeContentIntegrity::from_diagnostics(
+        snapshot.source_scope.clone(),
+        &snapshot.diagnostics,
+    );
     Ok(CodeIndexSummary {
         repository_id: snapshot.repository_id.clone(),
         source_scope: snapshot.source_scope.clone(),
@@ -305,14 +309,16 @@ fn apply_snapshot_attempt(
         indexed_file_count: status.indexed_file_count,
         changed_path_count: snapshot.changed_path_count,
         skipped_unchanged_count: snapshot.skipped_unchanged_count,
-        deleted_path_count: snapshot.deleted_paths.len(),
+        deleted_path_count: snapshot.confirmed_deleted_paths().count(),
         symbol_count: status.symbol_count,
         handwritten_symbol_count: symbol_generation_counts.handwritten,
         generated_symbol_count: symbol_generation_counts.generated,
         reference_count: status.reference_count,
         chunk_count: status.chunk_count,
-        degraded_file_count: snapshot.diagnostics.len(),
+        degraded_file_count: integrity.degraded_file_count.unwrap_or(0),
         progress: CodeIndexProgressSummary {
+            io_skipped_file_count: integrity.io_skipped_file_count.unwrap_or(0),
+            io_skipped_directory_count: integrity.io_skipped_directory_count.unwrap_or(0),
             git_file_count: if snapshot.full_replace {
                 status.indexed_file_count
             } else {
@@ -330,10 +336,12 @@ fn apply_snapshot_attempt(
                 .saturating_add(snapshot.calls.len())
                 .saturating_add(snapshot.feature_flags.len())
                 .saturating_add(snapshot.routes.len())
+                .saturating_add(snapshot.framework_nodes.len())
+                .saturating_add(snapshot.framework_edges.len())
                 .saturating_add(snapshot.chunks.len())
                 .saturating_add(snapshot.diagnostics.len()),
             skipped_file_count: snapshot.skipped_unchanged_count,
-            degraded_file_count: snapshot.diagnostics.len(),
+            degraded_file_count: integrity.degraded_file_count.unwrap_or(0),
             batch_count: 1,
             checkpoint_file_count: snapshot.files.len(),
             resource_budget: direct_budget,
@@ -351,9 +359,10 @@ fn clone_code_table(
     transaction.execute(
         &format!(
             "INSERT INTO {table_name} ({columns})
-             SELECT {selected_columns} FROM {table_name} WHERE source_scope = ?1",
+             SELECT {selected_columns} FROM {table_name} WHERE source_scope = ?1 AND NOT ({local_io})",
             table_name = table.table,
             columns = table.columns,
+            local_io = table.local_io_exclusion_predicate(),
         ),
         params![base_scope, target_scope],
     )?;
@@ -418,9 +427,9 @@ fn insert_imports_calls_chunks_diagnostics<'t>(
         INSERT INTO code_repository_calls (
             repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id,
             caller_name, callee_symbol_snapshot_id, callee_name, target_hint,
-            resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
+            resolution_state, confidence_basis_points, confidence_tier, line_start, line_end, byte_start, byte_end
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         ",
     )?;
     for call in &snapshot.calls {
@@ -452,6 +461,8 @@ fn insert_imports_calls_chunks_diagnostics<'t>(
             call.confidence_tier,
             call.line_range.start,
             call.line_range.end,
+            call.byte_range.as_ref().map(|range| range.start),
+            call.byte_range.as_ref().map(|range| range.end),
         ])?;
         search_inserter.insert(
             &call.source_scope,
@@ -474,6 +485,11 @@ fn insert_imports_calls_chunks_diagnostics<'t>(
     }
     super::batch::dependencies::insert_dependency_records(transaction, &snapshot.dependencies)?;
     super::routes::insert_records(transaction, &snapshot.routes)?;
+    super::frameworks::insert_records(
+        transaction,
+        &snapshot.framework_nodes,
+        &snapshot.framework_edges,
+    )?;
     let mut chunk_statement = transaction.prepare(
         "
         INSERT INTO code_repository_chunks (
@@ -515,8 +531,8 @@ fn insert_imports_calls_chunks_diagnostics<'t>(
     let mut diagnostic_statement = transaction.prepare(
         "
         INSERT OR REPLACE INTO code_repository_file_diagnostics
-            (repository_id, source_scope, path, parse_status, message)
-        VALUES (?1, ?2, ?3, ?4, ?5)
+            (repository_id, source_scope, path, parse_status, message, io_json)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
         ",
     )?;
     for diagnostic in &snapshot.diagnostics {
@@ -526,6 +542,12 @@ fn insert_imports_calls_chunks_diagnostics<'t>(
             diagnostic.path,
             diagnostic.parse_status.as_str(),
             diagnostic.message,
+            diagnostic
+                .io
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|e| StorageError::InvalidInput(e.to_string()))?,
         ])?;
     }
     let mut tombstone_statement = transaction.prepare(
@@ -632,13 +654,18 @@ fn stage_repository_after_snapshot(
         "code_repository_chunks",
         &snapshot.source_scope,
     )?;
-    let degraded_file_count = count_code_rows(
+    let integrity = crate::storage::sqlite::code::diagnostic_counts::measure(
         transaction,
-        "code_repository_file_diagnostics",
         &snapshot.source_scope,
     )?;
-    let degraded_reason = (degraded_file_count > 0)
-        .then(|| format!("{degraded_file_count} file(s) degraded during code indexing"));
+    let degraded_reason = (integrity.state == crate::domain::CodeContentIntegrityState::Partial)
+        .then(|| {
+            format!(
+                "{} file(s) degraded; {} directory boundary(s) skipped during code indexing",
+                integrity.degraded_file_count.unwrap_or(0),
+                integrity.io_skipped_directory_count.unwrap_or(0)
+            )
+        });
     let path_filters_json = serde_json::to_string(&snapshot.path_filters)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
     let language_filters_json = serde_json::to_string(&snapshot.language_filters)
@@ -663,3 +690,7 @@ fn stage_repository_after_snapshot(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "source_io_tests.rs"]
+mod source_io_tests;

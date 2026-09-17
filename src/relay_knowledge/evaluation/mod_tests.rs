@@ -65,6 +65,7 @@ fn observation(ids: &[&str], sources: &[RetrieverSource], stale: bool) -> Evalua
 
 fn code_hit(stale: bool) -> CodeRetrievalHit {
     CodeRetrievalHit {
+        query_degraded: false,
         repository_id: "repo".to_owned(),
         scope_id: "main".to_owned(),
         resolved_commit_sha: "abc".to_owned(),

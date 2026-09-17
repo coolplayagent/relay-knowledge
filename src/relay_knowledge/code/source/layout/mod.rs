@@ -16,7 +16,7 @@ pub(in crate::code) use self::path_scope::{
     intersect_path_filters, path_overlaps_any_filter, path_scope_overlaps,
     submodule_child_scope_filters, submodule_child_scope_filters_from_filters,
 };
-pub use self::preview::preview_repository_scope;
+pub(in crate::code) use self::preview::preview_repository_layout;
 pub(in crate::code) use self::scoped_snapshot::{
     ScopedSourceSnapshot, filesystem_policy_for_selector, scoped_source_snapshot,
     scoped_source_snapshot_for_filters, scoped_source_snapshot_for_registration,

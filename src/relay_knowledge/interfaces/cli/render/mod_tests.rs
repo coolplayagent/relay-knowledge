@@ -1,6 +1,12 @@
 use super::render_text;
 
 #[test]
+fn software_text_exposes_page_continuation() {
+    let text = render_text("code.repo.software", &serde_json::json!({"request":{"kind":"modules"}, "build_targets":[], "relationships":[], "status":{"stale":false}, "next_cursor":"sw1:abcd"})).unwrap();
+    assert!(text.contains("next_cursor=sw1:abcd"));
+}
+
+#[test]
 fn map_show_reports_complete_v1_history_window() {
     let rendered = render_text(
         "knowledge.map.show",
@@ -267,6 +273,11 @@ fn render_text_covers_operational_and_code_repository_summaries() {
             "software scope=scope-1 components=1 dependency_usages=1 sdk_usages=2 files=1 topics=1 relationships=1 build_targets=1 iac_resources=1 design_elements=1 stale=false\n",
         ),
         (
+            "code.repo.software",
+            serde_json::json!({"request": {"kind": "modules"}, "build_targets": [{}, {}], "relationships": [{}], "status": {"stale": false}}),
+            "maven modules=2 relationships=1 stale=false\n",
+        ),
+        (
             "setup.doctor",
             serde_json::json!({
                 "configuration_ready": true,
@@ -292,4 +303,13 @@ fn render_text_covers_operational_and_code_repository_summaries() {
 
         assert_eq!(rendered, expected);
     }
+}
+
+#[test]
+fn diagnostics_text_includes_paths_reasons_and_continuation() {
+    let response = serde_json::json!({"scope":{"scope_id":"scope"},"degraded_file_count":2,"diagnostics":[{"path":"src/a.py","parse_status":"partial","message":"syntax error"}],"next_cursor":"cursor"});
+    let output = super::render_text("code.repo.diagnostics", &response).unwrap();
+    assert!(output.contains("degraded_files=2"));
+    assert!(output.contains("src/a.py [partial]: syntax error"));
+    assert!(output.contains("next_cursor=cursor"));
 }

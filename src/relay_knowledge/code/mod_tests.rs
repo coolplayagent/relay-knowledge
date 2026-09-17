@@ -111,6 +111,16 @@ fn detects_supported_languages_and_filters_paths() {
     assert_eq!(language_id("schema/main.sql"), Some("sql"));
     assert_eq!(language_id("scripts/app.sh"), Some("bash"));
     assert_eq!(language_id(".bashrc"), Some("bash"));
+    for path in [
+        ".env",
+        "src/.env",
+        "config/app.env",
+        "config/APP.ENV",
+        "src/.env.example",
+        "src/.env.production",
+    ] {
+        assert_eq!(language_id(path), Some("bash"));
+    }
     assert!(path_is_selected("src/lib.rs", &registration, &selector));
     assert!(path_is_selected(
         "src/lib.rs",

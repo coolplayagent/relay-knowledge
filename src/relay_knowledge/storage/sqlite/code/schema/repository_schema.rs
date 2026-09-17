@@ -105,6 +105,8 @@ pub(super) fn initialize_repository_schema(connection: &Connection) -> Result<()
             line_start INTEGER NOT NULL,
             line_end INTEGER NOT NULL,
             symbol_role_json TEXT,
+            type_owner_json TEXT,
+            type_owner_identity TEXT,
             PRIMARY KEY (source_scope, symbol_snapshot_id),
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );

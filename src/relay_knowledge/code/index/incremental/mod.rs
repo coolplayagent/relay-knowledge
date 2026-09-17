@@ -27,7 +27,7 @@ use crate::code::{
         self, discover_source_layout, effective_index_path_filters_for_layouts,
         path_is_selected_with_layout, path_scope_overlaps,
     },
-    snapshot::{self, SnapshotBuild, SnapshotScopeFilters},
+    snapshot::{SnapshotBuild, SnapshotScopeFilters},
     source::{
         RepositorySourceKind, git_tree_hash_with_submodules, gitlink as source_gitlink,
         gitlink::paths as source_gitlink_paths, source_batch_bytes_after_content_verification,
@@ -93,8 +93,10 @@ pub(super) fn build_incremental_snapshot(
         &[&source_layout, &base_source_layout, &previous_source_layout],
     );
     let effective_path_filters = path_filters.clone();
-    let language_filters =
-        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let language_filters = crate::domain::code_scope_language_filters(
+        &registration.language_filters,
+        &selector.language_filters,
+    );
     let prefetched_bytes = prefetch_changed_path_bytes(ChangedPathPrefetchRequest {
         registration,
         selector,

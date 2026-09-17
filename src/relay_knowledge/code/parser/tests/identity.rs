@@ -169,7 +169,15 @@ export const layer = Service.of({
         .find(|chunk| chunk.symbol_snapshot_id.as_deref() == Some(&generate.symbol_snapshot_id))
         .expect("function factory member should have a retrievable chunk");
 
-    assert_eq!(call.caller_name.as_deref(), Some("generate"));
+    let closure = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| Some(&symbol.symbol_snapshot_id) == call.caller_symbol_snapshot_id.as_ref())
+        .expect("the arrow owns its call");
+    assert!(closure.name.starts_with("anonymous@"));
+    assert!(closure.signature.contains("generateObject(params)"));
+    assert!(closure.byte_range.start > generate.byte_range.start);
+    assert!(closure.byte_range.end < generate.byte_range.end);
     assert!(chunk.content.contains("generateObject(params)"));
 }
 
@@ -270,6 +278,7 @@ fn snapshot_build() -> SnapshotBuild {
 
 fn duplicate_identity_symbol(kind: &str) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: "scope".to_owned(),
         symbol_snapshot_id: "symbol:Session".to_owned(),

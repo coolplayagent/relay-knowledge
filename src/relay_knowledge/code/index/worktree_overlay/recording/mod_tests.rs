@@ -43,6 +43,7 @@ fn file_recording_replaces_deletion_even_when_content_is_known() {
     let mut files_to_parse = Vec::new();
     let mut skipped_unchanged_count = 0;
     let mut outputs = WorktreeFileOutputs {
+        skipped_paths: &mut Vec::new(),
         overlay_hash_input: &mut hash_input,
         deleted_paths: &mut deleted_paths,
         files_to_parse: &mut files_to_parse,

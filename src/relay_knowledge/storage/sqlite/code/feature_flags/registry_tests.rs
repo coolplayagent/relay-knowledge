@@ -1,0 +1,713 @@
+use super::*;
+use crate::domain::{
+    CodeConfigFilter, CodeConfigMetadata, CodeRepositorySelector, FreshnessPolicy,
+};
+fn fixture() -> Connection {
+    let connection = Connection::open_in_memory().unwrap();
+    connection.execute_batch("CREATE TABLE code_repository_feature_flags (feature_flag_id TEXT, usage_id TEXT, file_id TEXT, path TEXT, language_id TEXT, name TEXT, source_kind TEXT, source_key TEXT, edge_kind TEXT, confidence_basis_points INTEGER, confidence_tier TEXT, byte_start INTEGER, byte_end INTEGER, line_start INTEGER, line_end INTEGER, excerpt TEXT, metadata_json TEXT, source_scope TEXT);
+    CREATE TABLE code_repository_files(source_scope TEXT,path TEXT,language_id TEXT);
+    CREATE INDEX scope_flags ON code_repository_feature_flags(source_scope,feature_flag_id);
+    CREATE TABLE code_repository_symbols(source_scope TEXT,path TEXT,line_start INTEGER,line_end INTEGER,symbol_snapshot_id TEXT,name TEXT,language_id TEXT,type_owner_json TEXT);").unwrap();
+    connection.execute_batch("CREATE INDEX flags_usage ON code_repository_feature_flags(source_scope,usage_id); CREATE INDEX flags_key ON code_repository_feature_flags(source_scope,source_kind,source_key);").unwrap();
+    crate::storage::sqlite::code::schema::initialize_config_bindings(&connection).unwrap();
+    connection
+}
+fn status() -> CodeRepositoryStatus {
+    CodeRepositoryStatus {
+        content_integrity: Default::default(),
+        repository_id: "repo".into(),
+        alias: "fixture".into(),
+        root_path: "/tmp/repo".into(),
+        path_filters: vec![],
+        language_filters: vec![],
+        last_indexed_scope_id: Some("scope".into()),
+        last_indexed_commit: Some("commit".into()),
+        tree_hash: Some("tree".into()),
+        state: "indexed".into(),
+        indexed_file_count: 1,
+        symbol_count: 0,
+        reference_count: 0,
+        chunk_count: 0,
+        stale: false,
+        degraded_reason: None,
+    }
+}
+fn add(connection: &Connection, key: &str, kind: &str, edge: &str, metadata: CodeConfigMetadata) {
+    let id = connection.last_insert_rowid() + 1;
+    connection.execute("INSERT INTO code_repository_feature_flags VALUES (?1,?2,'file','src/config','java',?3,?4,?3,?5,9000,'extracted',0,1,1,1,?3,?6,'scope')",params![format!("{kind}:{key}"),id.to_string(),key,kind,edge,serde_json::to_string(&metadata).unwrap()]).unwrap();
+}
+fn request(query: Option<&str>, filters: CodeConfigFilter) -> CodeFeatureFlagRequest {
+    CodeFeatureFlagRequest::new(
+        query.map(str::to_owned),
+        CodeRepositorySelector::new("fixture", "HEAD", vec![], vec![]).unwrap(),
+        1,
+        FreshnessPolicy::AllowStale,
+    )
+    .unwrap()
+    .with_filters(filters)
+    .unwrap()
+}
+#[test]
+fn group_filters_keep_resolved_constant_reads_and_definition_metadata() {
+    let db = fixture();
+    add(
+        &db,
+        "feature_x",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            domain: Some("business".into()),
+            hot_reload: Some(true),
+            default_value: Some("true".into()),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "feature_x",
+        "config_key",
+        "declares_config_key",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            bindings: vec!["Keys.X".into()],
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "Keys.X",
+        "config_symbol",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            reference: Some("Keys.X".into()),
+            target_kind: Some("config_key".into()),
+            ..Default::default()
+        },
+    );
+    let result = search(
+        &db,
+        &status(),
+        &request(
+            Some("feature_x"),
+            CodeConfigFilter {
+                domain: Some("business".into()),
+                source: Some("properties".into()),
+                hot_reload: Some(true),
+                consistency: false,
+            },
+        ),
+    )
+    .unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].usages.len(), 3);
+    assert_eq!(result[0].source_key, "feature_x");
+    assert!(result[0].analysis_complete);
+}
+#[test]
+fn ordinary_getters_cannot_displace_known_configuration_from_seed_limit() {
+    let db = fixture();
+    for index in 0..150 {
+        let key = format!("Ordinary{index}.getName");
+        add(
+            &db,
+            &key,
+            "config_symbol",
+            "guards_code",
+            CodeConfigMetadata {
+                reference: Some(key.clone()),
+                ..Default::default()
+            },
+        );
+    }
+    add(
+        &db,
+        "real_flag",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata::default(),
+    );
+    let result = search(&db, &status(), &request(None, CodeConfigFilter::default())).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].source_key, "real_flag");
+}
+#[test]
+fn ambiguous_getter_targets_suppress_absence_diagnostics() {
+    let db = fixture();
+    for key in ["feature_a", "feature_b"] {
+        add(
+            &db,
+            key,
+            "config_key",
+            "reads_config",
+            CodeConfigMetadata {
+                source_format: "java".into(),
+                bindings: vec!["Config.getX".into()],
+                ..Default::default()
+            },
+        );
+    }
+    add(
+        &db,
+        "Config.getX",
+        "config_symbol",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            reference: Some("Config.getX".into()),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "other",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            ..Default::default()
+        },
+    );
+    let result = search(
+        &db,
+        &status(),
+        &request(
+            Some("feature_a"),
+            CodeConfigFilter {
+                consistency: true,
+                ..Default::default()
+            },
+        ),
+    )
+    .unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(!result[0].analysis_complete);
+    assert!(
+        !result[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.starts_with("missing_from_format"))
+    );
+}
+#[test]
+fn stale_scope_cannot_claim_consistency_or_absence() {
+    let db = fixture();
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata::default(),
+    );
+    let mut status = status();
+    status.stale = true;
+    let result = search(
+        &db,
+        &status,
+        &request(
+            Some("flag"),
+            CodeConfigFilter {
+                consistency: true,
+                ..Default::default()
+            },
+        ),
+    )
+    .unwrap();
+    assert!(!result[0].analysis_complete);
+    assert!(
+        result[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.starts_with("incomplete_analysis"))
+    );
+}
+#[test]
+fn malformed_metadata_is_an_error_instead_of_an_empty_registry() {
+    let db = fixture();
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata::default(),
+    );
+    db.execute(
+        "UPDATE code_repository_feature_flags SET metadata_json='{'",
+        [],
+    )
+    .unwrap();
+    assert!(
+        search(
+            &db,
+            &status(),
+            &request(Some("flag"), CodeConfigFilter::default())
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn empty_template_inventory_drives_scoped_missing_format_diagnostics() {
+    let db = fixture();
+    db.execute_batch("INSERT INTO code_repository_files VALUES ('scope','cfg/empty.ctmpl','gotemplate'),('other','elsewhere.ini','ini');").unwrap();
+    add(
+        &db,
+        "feature_y",
+        "config_key",
+        "declares_config_key",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            ..Default::default()
+        },
+    );
+    let query = request(
+        Some("feature_y"),
+        CodeConfigFilter {
+            consistency: true,
+            ..Default::default()
+        },
+    );
+    let groups = search(&db, &status(), &query).unwrap();
+    assert!(
+        groups[0]
+            .consistency_diagnostics
+            .contains(&"missing_from_format: ctmpl".into())
+    );
+    assert!(
+        !groups[0]
+            .consistency_diagnostics
+            .contains(&"missing_from_format: ini".into())
+    );
+    let mut restricted = query;
+    restricted.repository.language_filters = vec!["java".into()];
+    let groups = search(&db, &status(), &restricted).unwrap();
+    assert!(
+        groups[0]
+            .consistency_diagnostics
+            .contains(&"missing_from_format: ctmpl".into())
+    );
+    let mut authorized = status();
+    authorized.language_filters = vec!["java".into()];
+    let groups = search(&db, &authorized, &restricted).unwrap();
+    assert!(
+        !groups[0]
+            .consistency_diagnostics
+            .contains(&"missing_from_format: ctmpl".into())
+    );
+}
+#[test]
+fn ordinary_constants_require_visible_read_evidence_and_keep_key_lookup() {
+    let db = fixture();
+    add(
+        &db,
+        "application.name",
+        "config_key",
+        "declares_string_constant",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            bindings: vec!["Messages.NAME".into()],
+            ..Default::default()
+        },
+    );
+    let query = request(Some("application.name"), CodeConfigFilter::default());
+    assert!(search(&db, &status(), &query).unwrap().is_empty());
+    add(
+        &db,
+        "Messages.NAME",
+        "config_symbol",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            reference: Some("Messages.NAME".into()),
+            target_kind: Some("config_key".into()),
+            ..Default::default()
+        },
+    );
+    let groups = search(&db, &status(), &query).unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].source_key, "application.name");
+    assert!(
+        groups[0]
+            .usages
+            .iter()
+            .any(|u| u.edge_kind == "declares_config_key")
+    );
+    assert!(
+        groups[0]
+            .usages
+            .iter()
+            .any(|u| u.edge_kind == "reads_config")
+    );
+}
+#[test]
+fn conflicts_include_located_sources_and_unknown_flow_cannot_claim_completeness() {
+    let db = fixture();
+    for value in ["true", "false"] {
+        add(
+            &db,
+            "feature_x",
+            "config_key",
+            "reads_config",
+            CodeConfigMetadata {
+                source_format: "java".into(),
+                default_value: Some(value.into()),
+                ..Default::default()
+            },
+        );
+    }
+    let query = request(
+        Some("feature_x"),
+        CodeConfigFilter {
+            consistency: true,
+            ..Default::default()
+        },
+    );
+    let groups = search(&db, &status(), &query).unwrap();
+    assert_eq!(groups[0].conflicting_default_sources.len(), 2);
+    for source in &groups[0].conflicting_default_sources {
+        assert!(!source.path.is_empty());
+        assert!(
+            groups[0]
+                .usages
+                .iter()
+                .any(|u| u.usage_id == source.usage_id)
+        );
+    }
+    add(
+        &db,
+        "feature_x",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            flow_incomplete: Some("unsupported_getter_value_flow".into()),
+            ..Default::default()
+        },
+    );
+    let groups = search(&db, &status(), &query).unwrap();
+    assert!(!groups[0].analysis_complete);
+    assert_eq!(groups[0].conflicting_default_sources.len(), 2);
+    assert!(
+        groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.starts_with("conflicting_defaults:"))
+    );
+    assert!(
+        !groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.starts_with("missing_from_format:") || d == "read_without_definition")
+    );
+    assert!(
+        groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d.starts_with("incomplete_analysis"))
+    );
+}
+
+#[path = "dispatch_tests.rs"]
+mod dispatch_tests;
+#[path = "review_tests.rs"]
+mod review_tests;
+
+#[path = "scope_evidence_tests.rs"]
+mod scope_evidence_tests;
+
+#[path = "portable_tests.rs"]
+mod portable_tests;
+
+#[test]
+fn interrupted_format_inventory_reports_incomplete_analysis() {
+    let db = fixture();
+    db.progress_handler(1, Some(|| true));
+    let error = consistency::formats(
+        &db,
+        "scope",
+        &status(),
+        &request(None, CodeConfigFilter::default()),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, StorageError::InvalidInput(message) if message.contains("configuration analysis incomplete") && message.contains("SQLite query time or step budget exceeded"))
+    );
+    db.progress_handler(0, None::<fn() -> bool>);
+}
+
+#[test]
+fn combined_metadata_filters_match_across_resolved_symbolic_usages_without_query() {
+    let db = fixture();
+    add(
+        &db,
+        "feature",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "feature",
+        "config_key",
+        "declares_config_key",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            bindings: vec!["Keys.FEATURE".into()],
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "Keys.FEATURE",
+        "config_symbol",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            domain: Some("payments".into()),
+            hot_reload: Some(true),
+            reference: Some("Keys.FEATURE".into()),
+            target_kind: Some("config_key".into()),
+            ..Default::default()
+        },
+    );
+    for domain in ["payments", "unrelated"] {
+        let result = search(
+            &db,
+            &status(),
+            &request(
+                None,
+                CodeConfigFilter {
+                    domain: Some(domain.into()),
+                    source: Some("properties".into()),
+                    hot_reload: Some(true),
+                    consistency: false,
+                },
+            ),
+        )
+        .unwrap();
+        assert_eq!(result.len(), usize::from(domain == "payments"));
+        if let Some(group) = result.first() {
+            assert_eq!(group.source_key, "feature");
+            assert_eq!(group.usages.len(), 3);
+        }
+    }
+}
+
+#[test]
+fn query_path_projection_keeps_authorized_consistency_evidence_but_registration_bounds_it() {
+    let db = fixture();
+    add(
+        &db,
+        "feature",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            default_value: Some("false".into()),
+            ..Default::default()
+        },
+    );
+    db.execute(
+        "UPDATE code_repository_feature_flags SET path='src/Reader.java'",
+        [],
+    )
+    .unwrap();
+    add(
+        &db,
+        "feature",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            default_value: Some("true".into()),
+            ..Default::default()
+        },
+    );
+    db.execute("UPDATE code_repository_feature_flags SET path='config/app.properties',language_id='properties' WHERE edge_kind='defines_config'",[]).unwrap();
+    let mut query = request(
+        None,
+        CodeConfigFilter {
+            consistency: true,
+            ..Default::default()
+        },
+    );
+    query.repository.path_filters = vec!["src".into()];
+    let groups = search(&db, &status(), &query).unwrap();
+    assert_eq!(groups.len(), 1);
+    assert!(groups[0].usages.iter().all(|u| u.path.starts_with("src/")));
+    assert_eq!(groups[0].conflicting_default_sources.len(), 2);
+    assert!(
+        !groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d == "read_without_definition")
+    );
+    let mut restricted = status();
+    restricted.path_filters = vec!["src".into()];
+    let groups = search(&db, &restricted, &query).unwrap();
+    assert!(groups[0].conflicting_default_sources.is_empty());
+    assert!(
+        groups[0]
+            .consistency_diagnostics
+            .iter()
+            .any(|d| d == "read_without_definition")
+    );
+}
+
+#[test]
+fn excessive_query_terms_fail_before_sql_statement_preparation() {
+    let db = fixture();
+    db.execute("DROP TABLE code_repository_feature_flags", [])
+        .unwrap();
+    let query = "x ".repeat(5000);
+    let error = search(
+        &db,
+        &status(),
+        &request(Some(&query), CodeConfigFilter::default()),
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("query term budget exceeded"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn edge_kind_queries_survive_final_group_matching() {
+    let db = fixture();
+    for edge in ["reads_config", "guards_code"] {
+        add(
+            &db,
+            "flag",
+            "config_key",
+            edge,
+            CodeConfigMetadata::default(),
+        );
+        let groups = search(
+            &db,
+            &status(),
+            &request(Some(edge), CodeConfigFilter::default()),
+        )
+        .unwrap();
+        assert_eq!(groups.len(), 1, "{edge}");
+        assert_eq!(groups[0].source_key, "flag");
+    }
+}
+#[test]
+fn metadata_seeds_exclude_more_than_ten_thousand_unrelated_symbols() {
+    let db = fixture();
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "dotenv".into(),
+            domain: Some("payments".into()),
+            hot_reload: Some(true),
+            ..Default::default()
+        },
+    );
+    db.execute_batch("WITH RECURSIVE counter(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM counter WHERE n<10001) INSERT INTO code_repository_feature_flags SELECT 'symbol:'||n,'symbol:'||n,'file','src/Noise.java','java','noise','config_symbol','Noise.get'||n,'reads_config',9000,'extracted',0,1,1,1,'noise','{}','scope' FROM counter;").unwrap();
+    for filters in [
+        CodeConfigFilter {
+            source: Some("dotenv".into()),
+            ..Default::default()
+        },
+        CodeConfigFilter {
+            domain: Some("payments".into()),
+            ..Default::default()
+        },
+        CodeConfigFilter {
+            hot_reload: Some(true),
+            ..Default::default()
+        },
+    ] {
+        let groups = search(&db, &status(), &request(None, filters)).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].source_key, "flag");
+    }
+}
+
+#[test]
+fn metadata_only_query_terms_survive_group_matching_and_affect_rank() {
+    let db = fixture();
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "defines_config",
+        CodeConfigMetadata {
+            source_format: "properties".into(),
+            domain: Some("payments".into()),
+            default_value: Some("disabled".into()),
+            value_type: Some("boolean".into()),
+            hot_reload: Some(true),
+            ..Default::default()
+        },
+    );
+    add(
+        &db,
+        "flag",
+        "config_key",
+        "reads_config",
+        CodeConfigMetadata {
+            source_format: "java".into(),
+            flow_incomplete: Some("unevaluated_explicit_default".into()),
+            ..Default::default()
+        },
+    );
+    let all = search(&db, &status(), &request(None, CodeConfigFilter::default())).unwrap();
+    for query in [
+        "payments",
+        "properties",
+        "disabled",
+        "boolean",
+        "true",
+        "domain",
+        "hot_reload",
+        "unevaluated_explicit_default",
+        "payments unevaluated_explicit_default",
+    ] {
+        let groups = search(
+            &db,
+            &status(),
+            &request(Some(query), CodeConfigFilter::default()),
+        )
+        .unwrap();
+        assert_eq!(groups.len(), 1, "{query}");
+        assert_eq!(groups[0].usages.len(), 2, "{query}");
+        if query == "payments" {
+            assert!(groups[0].score > all[0].score);
+        }
+    }
+    assert!(
+        search(
+            &db,
+            &status(),
+            &request(Some("unrelated_metadata"), CodeConfigFilter::default())
+        )
+        .unwrap()
+        .is_empty()
+    );
+}
+
+#[test]
+fn zero_term_queries_fail_before_loading_registry_rows() {
+    let db = fixture();
+    db.execute("DROP TABLE code_repository_feature_flags", [])
+        .unwrap();
+    for query in [".", "--", "🧪"] {
+        let error = search(
+            &db,
+            &status(),
+            &request(Some(query), CodeConfigFilter::default()),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("alphanumeric"), "{error}");
+    }
+}

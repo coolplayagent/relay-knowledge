@@ -6,9 +6,14 @@ This chapter is an executable command index. Workflow details live in later chap
 
 When `--format json` or `--format streaming-json` is requested, parse diagnostics and runtime API failures written to stderr are JSON. Runtime API failures use the stable API error shape with `error_kind`, `message`, and optional `metadata`; text and markdown formats keep human-readable stderr messages.
 
-To access a deployed resident service from a local CLI, use global `--remote <base-url>` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote mode covers `repo list`, `repo index`, `repo update`, `repo scope preview`, `repo status`, `repo query`, `repo graph`, `repo context`, `repo framework`, `repo feature-flags`, `repo impact`, `repo report`, `repo software` (including `export`), and `repo view` for repositories already registered on the service host. `repo index --reset` and `repo index-worker` are rejected while remote mode is selected and must be run on the service host; unrelated local commands such as `status` and `health` keep using local runtime state when only the environment variable is set.
+To access a deployed resident service from a local CLI, use global `--remote <base-url>` or `RELAY_KNOWLEDGE_REMOTE_BASE_URL`. Remote mode covers `repo list`, `repo index`, `repo update`, `repo scope preview`, `repo status`, `repo query`, `repo graph`, `repo context`, `repo framework`, `repo feature-flags`, `repo impact`, `repo report`, `repo diagnostics`, `repo software` (including `export`), `repo business`, and `repo view` for repositories already registered on the service host. `repo index --reset` and `repo index-worker` are rejected while remote mode is selected and must be run on the service host; unrelated local commands such as `status` and `health` keep using local runtime state when only the environment variable is set.
 
 ## 3.1 Common Status Commands
+
+Local source I/O failures are reported by `repo diagnostics` with an optional `io` object containing `action: skipped`, `path_kind`, `operation`, `error_kind`, and `raw_os_error`. These paths are skipped; successful task completion can have `content_integrity.state = partial`. `io_skipped_file_count` and `io_skipped_directory_count` are separate counters. A skipped directory has an unknown file count. Unselected paths do not create I/O diagnostics or dead-letter tasks. After repairing access, rerun the normal index/update command; reset is not required. Historical dead-letter records are retained.
+
+
+For a skipped directory, `repo diagnostics --path <child-path>` also returns the ancestor diagnostic explaining why that child was omitted. An explicit `filesystem:<hash>` remains pinned: if access changes its content identity during indexing, the command fails; use `HEAD` to index the current filesystem state.
 
 Project status:
 
@@ -115,10 +120,10 @@ relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definiti
 relay-knowledge repo graph <alias> --focus <path> --path <root> [--ref <ref>] [--depth 1|2] [--node-limit <n>] [--edge-limit <n>]
 relay-knowledge repo context <alias> --query <text> [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--max-context-bytes <n>] [--no-code] [--exclude-generated]
 relay-knowledge repo framework <alias> [--query <text>] [--framework angular|vue] [--kind component|directive|pipe|template|input|output|prop|emit|model|slot|template-variable|control-flow] [--ref <ref>] [--path <filter>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
-relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
+relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>] [--domain <domain>] [--source <format>] [--hot-reload true|false] [--consistency] [--freshness allow-stale|wait-until-fresh|graph-only]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
-relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
+relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|modules|iac|design|systems|apis|resources|tests|deployments|releases|statements|conflicts|all] [--path <prefix>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--cursor <token>]
 relay-knowledge repo software export <alias> --profile spdx-3|cyclonedx-1.7|prov-o [--ref <ref>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo business <alias> [--ref <ref>] [--domain <id>] [--query <text>] [--kind terms|mappings|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo view <alias> [--kind architecture-layers|business-domains|dependency-tour|process-flow|affected-scope] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>] [--changed-path <path>]
@@ -154,7 +159,7 @@ Kind values are scoped to their command family:
   `input`, `output`, `prop`, `emit`, `model`, `slot`, `template-variable`,
   `control-flow`.
 - `repo software --kind`: `dependencies`, `sdks`, `files`, `topics`,
-  `relationships`, `build`, `iac`, `design`, `systems`, `apis`, `resources`,
+  `relationships`, `build`, `modules`, `iac`, `design`, `systems`, `apis`, `resources`,
   `tests`, `deployments`, `releases`, `statements`, `conflicts`, `all`.
 - `repo business --kind`: `terms`, `mappings`, `all`.
 - `repo view --kind`: `architecture-layers`, `business-domains`,
@@ -167,11 +172,13 @@ Kind values are scoped to their command family:
 
 Do not pass kind values across command families. Use `repo impact` for impact
 analysis, `repo framework` for Angular/Vue template semantics, and
-`repo feature-flags` for feature flags; they are not
-`repo query --kind` values.
+`repo feature-flags` for feature flags; they are not `repo query --kind` values.
+
+`repo feature-flags --query` accepts at most 10,000 UTF-8 bytes, 64 terms and 256 UTF-8 bytes per term after case normalization. Exceeding these limits returns an explicit input-budget error before SQL construction; query terms are not silently truncated.
 
 `--path` is the CLI flag for a path filter. `repo register --path` stores the
-indexed scope, while `repo query --path`, `repo framework --path`, and `repo feature-flags --path` narrow
+indexed scope, while `repo query --path`, `repo framework --path`, `repo software --path`,
+`repo diagnostics --path`, and `repo feature-flags --path` narrow
 reads inside that indexed scope. `repo index` does not accept `--path`; it uses
 the registered scope and the selected `--ref`. Non-Git source directories use
 `HEAD` for the normal moving filesystem snapshot, and status records the
@@ -201,6 +208,44 @@ After a bulk code-index snapshot apply or checkpointed finalize succeeds, SQLite
 `repo query --query` accepts inline filters such as `kind:function`, `lang:rust` or `language:rust`, `path:storage`, and `name:query`. Unknown `prefix:value` tokens remain ordinary search text. Inline language filters intersect explicit `--language`; `kind` and language narrow SQL candidates, while `path` and `name` filter scored hits before truncation. `name:` matches symbol identities and SBOM package identities, not arbitrary excerpt text.
 
 `repo feature-flags` reads configuration-driven feature-flag graph facts written during indexing. By default it lists flags, configuration sources, and code-usage edges in the selected repository scope; `--query` filters by flag name, config key, path, or excerpt. Its JSON response includes the same `freshness` object as `repo query`, including pending task, checkpoint cursor, index lag, stale/degraded reason, and direct-source-read paths for returned feature-flag usage files. The extractor recognizes environment variables, config/settings keys, boolean config declarations, and common SDK evaluation calls such as OpenFeature, LaunchDarkly, and Unleash clients. It does not sync provider control-plane state, strategies, segments, or rollout variants. The command does not scan the whole source tree at query time; after extractor changes or newly added flags, run `repo index` or `repo update` before expecting new facts.
+
+Configuration registry filters are `--domain <domain>` (an explicit annotation value), `--source <format>`, and `--hot-reload true|false`. Source and domain values are case-insensitive; unknown domain or hot-reload metadata does not match an explicit filter. Filters select configuration groups while retaining their connected usages. `--query` uses Unicode-aware lowercase matching. `--consistency` adds read-without-definition, missing-format and conflicting-default diagnostics; `conflicting_default_sources` attributes each value to its path, line range and excerpt. `analysis_complete: false` suppresses absence conclusions for connected groups affected by unresolved bindings or unsupported flow; explicit loaded defaults can still establish conflicts. Stale/degraded scopes suppress all consistency conclusions. Unrelated groups remain independently analyzable. Exceeding bounded usage, byte, symbol, expansion-depth or SQLite query budgets returns an explicit incomplete-analysis error; narrow the query scope. Java nested types and annotated constant fields participate in binding resolution. Configuration line ranges exclude the terminating newline. Binding results and configuration evidence are memoized by reference and remaining depth, bounding repeated interface-provider work. Java getter markers share the 10,000-fact file budget; getter collection is also bounded. Local guard evidence excludes unrelated method/field names. Shell definitions require an unconditional parent-shell assignment/export; conditional, deferred function and subshell exports cannot prove a parent-shell definition.
+
+Text queries can start from matching getter paths or excerpts before resolution and group metadata filtering. Getter bodies ignore comments when proving a sole return. Wildcard imports alone do not prove a receiver owner; without indexed type evidence the receiver remains unresolved, while explicit imports and visible local types retain precedence. Referenced Java key declarations join the property/environment namespaces established by their reads, including both when a constant is reused. Properties defaults retain trailing whitespace. Properties, INI, template and Shell extraction share the 10,000-fact per-file limit, including template read actions.
+
+Query terms select groups; all in-scope evidence for selected or symbolically resolved keys is loaded before consistency analysis. Missing `--domain`/`--source` values are errors even when followed by another option. Java `this.KEY` resolves its declaring field. Bare keys and whitespace separators are properties-only syntax; INI/template definitions require `=` or `:`. Template `keyOrDefault` records its quoted fallback and type for conflict checks.
+
+Unicode domain annotations and filters use the same lowercase normalization. Properties continuations are flushed at EOF. Inferred lambda parameters block outer-field lookup, and unrelated nested types do not shadow Java platform APIs. Shell defaults respect parsed quoting and escapes; lexical scan exhaustion is an explicit incomplete-analysis error. Row loading checks cumulative bytes before retaining each row, including owned strings and metadata, instead of allocating the entire result before enforcing the 16 MiB fact budget. Operation domain/source fields accept strings or null (unspecified); other value types are rejected.
+
+Annotations require source-format comment syntax; executable text and string literals cannot supply metadata. Implicit zero-argument Java getter calls resolve only to visible declared methods; Java literals use bounded Java escape decoding. Conditional Shell assignments retain potential inherited reads. Incomplete binding/flow analysis suppresses absence conclusions but preserves conflicts proven by loaded defaults and their source locations.
+
+Metadata-only filters retain annotated symbolic getter usages until binding resolution. Java resolves visible lexical nested types and follows same-file supertype chains with bounded node and closure budgets. Shell function exports (`export -f`, including combined options) do not change variable export state. ANSI-C quoted Shell defaults remain unknown rather than being decoded as ordinary quotes. Properties supports CR, LF and CRLF natural lines, including continuations and accurate source ranges.
+
+Properties comments never continue onto the next natural line. Template double-quoted arguments use bounded Go byte/Unicode escape decoding; comment delimiters ignore quoted text inside comments. Shell assignments retain proven prior export attributes. Java preserves the established literal-key config/settings/feature_flags/flags/toggles/options reader forms through AST extraction, supports imported numeric conversion owners, and reports guard-scan exhaustion explicitly. Directly stale or degraded scopes suppress all definitive consistency diagnostics, including loaded default conflicts.
+
+Java parent relationships are persisted as internal configuration hierarchy facts and resolved across files only within the served snapshot and registered authorized scope. Hierarchy evidence is capped at 4 MiB, each type closure at 64 types, and expanded symbols at 1,000. Conditional reassignment retains possible guards with incomplete-flow metadata; direct boolean readers report boolean types. Adjacent Java block/Javadoc annotations are scanned within 8 KiB/32 lines. Properties whitespace is limited to space, tab and form feed. Shell tilde-expanded defaults remain unknown, and prior-assignment scan exhaustion is explicit. SDK-owned flags do not require an in-repository definition.
+
+Annotation lookup stops at blank lines, including CR/LF/CRLF boundaries. Java inline switch selectors and Shell if/elif, loop, case and short-circuit predicates emit guard usages linked to their reads. Shell conditional overrides retain a prior guaranteed definition with an unknown default and incomplete-flow metadata; append assignments retain definitions without treating the appended suffix as a complete default. Shell predicate scans are bounded and fail explicitly on budget exhaustion.
+
+Java numeric addition inside string keys remains unresolved instead of being concatenated as digits. Copies of tracked locals mark guard flow incomplete. Transparent Java wrapper conversions carry same-package shadow requirements checked against the authorized snapshot; a shadow preserves the read but removes getter bindings and marks flow incomplete. Static/private getters bind only their declaring type, including during cross-file hierarchy resolution.
+
+Explicit super calls resolve through the direct superclass. Constructed receivers retain exact runtime types, including through casts, so derived overrides cannot contaminate their getter resolution. Java SDK evaluations share adjacent domain/hot-reload annotation parsing. Supported numeric literals normalize separators, suffixes and radix before default comparison; unsupported arithmetic remains unresolved. INI retains exclamation-prefixed keys. Template readers are recognized only at pipeline command positions, including nested commands and control/declaration pipelines.
+
+Getter inheritance stops at intervening declarations and preserves exact dispatch; private getters are not inherited. Same-package Java type declarations are checked before wildcard import ambiguity. Binding, hierarchy and consistency evidence stay within the registered authorized scope, while request path/language filters apply to returned usages. Signed numeric defaults are captured, including Java minimum integer values. INI and template separators treat backslashes literally; only Properties escapes separators.
+
+Path/language-selected symbolic calls are seeded independently of resolved key and metadata filters; group filters run after binding resolution. Java getter providers retain declaring package and visibility. Package-private propagation stops at package boundaries, including intermediate supertypes; public/protected overrides retain cross-package behavior and interfaces keep implicit public visibility.
+
+Static getter calls resolve visible local and explicitly imported type receivers. Final query matching includes binding/reference names. Java keys must be string expressions; numeric/boolean literals remain valid defaults, and untyped generic readers do not claim a string return type. Implicit System/Boolean reads are checked against same-package type declarations throughout the authorized snapshot, even when output paths are narrowed; fully qualified java.lang calls and explicit imports remain valid. Internal platform-shadow declarations are not user-facing configuration groups.
+
+Enhanced-for variables bind getter receivers within the loop body; unknown inferred loop types do not fall through to outer fields. Java key composition follows bounded final-string references in the same file, with depth/node/value-size limits; mutable or cyclic expressions remain unresolved. Template control actions and nested pipelines expose supported key/env calls with distinct call-site ranges and a per-action token budget. Properties retain semicolon-prefixed and escaped-whitespace keys. Unicode matching uses the same lowercase normalization for selection and ranking.
+
+Java inherited string constants resolve through indexed parent types; descendant field declarations, including nonconstant fields, stop inherited aliases, and private/package access boundaries remain enforced. Type evidence loads only relevant symbolic owners, platform-shadow candidates and bounded connected hierarchies (1,000 owners, 64 rounds, 4 MiB), so unrelated Java declarations do not exhaust a simple read query. Dotenv boolean definitions use the environment-variable namespace, allowing indexed definitions to satisfy environment-read consistency. Consul extraction and template-presence checks require a `.ctmpl` extension; Helm manifests and generic Go templates do not create Consul configuration groups.
+
+Dotenv (.env) assignments are indexed as environment definitions for boolean, string, numeric and unknown values; --source dotenv selects their evidence. Dynamic Consul output keys count as definitions, while Java key constants alone do not. Single-owner static wildcard key imports remain symbolic until snapshot resolution; multiple wildcard owners remain ambiguous. Wildcard-ambiguous supertypes reconcile same-package declarations. Static platform imports check indexed inherited member signatures and Java visibility before accepting a configuration read. Proven Boolean conversions of no-default System.getProperty reads retain their false fallback, invalidated when conversion owners are shadowed. Shell exports in unconditional brace groups search enclosing assignments and stop at unset or execution-scope boundaries. Extraction suites are mounted directly by Java, names, types, files and Shell owners; only metadata and assembly contracts remain at the registry facade, with fixtures in test_support.
+
+Multiple query terms may match different connected usages of one configuration group. Seeding matches individual terms within the authorized scope, and the final assembled group must match every term. Config-key format comparisons exclude Shell files because Shell definitions belong to the environment-variable namespace.
+
+Explicit property fallbacks passed through proven Boolean conversions are compared as effective booleans (for example TRUE becomes true); shadowed conversions restore the raw fallback. Shell unset operands are decoded with their quotation and escape syntax. Domain annotations must be nonempty and at most 128 UTF-8 bytes both before and after lowercase normalization; invalid domain metadata is ignored without dropping the configuration fact or blocking index publication.
 
 `repo framework` reads the independent Angular/Vue component-template graph written during indexing. Repeat `--framework`, `--kind`, or `--path` to intersect filters; omit them to enumerate the bounded selected scope. The graph includes typed nodes for components, templates, bindings, slots, template variables, and control flow, plus ownership, render, binding, event, read/write, directive, and slot edges. Vue SFC script symbols and imports remain available through ordinary `repo query`. The command never scans source at query time and never starts indexing; `wait-until-fresh` requires the durable indexed snapshot to include current framework facts.
 
@@ -256,3 +301,51 @@ positive and negative instances before release packaging.
 
 The skill intentionally does not configure MCP, call MCP tools, or manage ACP
 sessions. Use the MCP/ACP chapters for protocol-level agent access.
+
+`repo software --kind dependencies` returns Maven module targets and declared POM edges alongside components and source usages. `--kind modules` selects only the reactor graph. Both share a per-page `--limit` (maximum 500) across their arrays and return `next_cursor` when more facts exist. Continue using `--cursor <token>` with the same ref and filters; accumulate pages until the cursor is absent. `repo impact` returns default-profile downstream POM evidence chains. See [Software Global Modeling](../03-architecture-specs/21-software-global-domain-modeling.md).
+
+
+### Business glossary bootstrap and empty results
+
+`repo business` reads authored definitions and declared mappings; `repo index` does not infer business terms from code. Knowledge `map init` results include `business_bootstrap` with the default glossary path, schema version, a complete YAML example, documentation URL and authoring steps. New glossary files remain empty and contain a commented example; repeated initialization preserves reviewed content.
+
+Run these commands from the registered repository root, replacing `demo` with its alias:
+
+```bash
+relay-knowledge map init --format json
+relay-knowledge map route business-knowledge --type knowledge --format json
+```
+
+Edit the routed glossary (default `knowledge/glossary/business-glossary.yaml`) with repository-specific domains, terms and technical mappings. Commit the Knowledge Map, its referenced topic files and the glossary, then index the new commit:
+
+```bash
+relay-knowledge repo index demo --ref HEAD --format json
+relay-knowledge repo business demo --kind all --ref HEAD --format json
+```
+
+HEAD reads committed files only; uncommitted authoring is ignored even when HEAD is indexed again.
+
+The response removes the mixed `resolution` and top-level business `status`. `request.mode` is derived from `query` as `list` or `search`; inbound mode values are ignored. `result.status` is `matched`, `no_match`, `ambiguous` or `unavailable`. `result.match_type` is `exact` or `partial` only for matching searches. Returned term/mapping counts describe the output slice; `truncated` reports results cut off by `--limit`; `repo business` has no continuation cursor. Kind eligibility and domain/text matching precede classification and limit, so unmapped terms do not consume mapping-query slots and cross-domain exact ambiguity survives truncation. A domain name shared by multiple domain IDs does not disambiguate; use a unique ID.
+
+`knowledge.state` uses scope-wide persisted counts: `no_sources`, `empty_glossary`, `terms_only` or `mapped`. The same object retains counts, repository/commit/scope identity, graph version and `stale`. `mapped` means at least one declared mapping, not complete coverage or resolved targets; per-mapping `resolution_state` is unchanged. `graph-only` yields `unknown` knowledge and `unavailable` results; zero placeholder counts do not prove an empty glossary. No sources yields `unavailable`; an indexed empty glossary yields `no_match`. With `allow-stale`, a result may be `matched` and `knowledge.stale=true`. Storage failures still return errors.
+
+Diagnostics provide reason-specific `next_steps`: inspect routes and committed files for no sources, author/commit/re-index for empty glossaries or missing mappings, adjust filters for no match, specify a domain for ambiguity, and re-index/change freshness for stale or unread projections. Authoring reasons include a `bootstrap` schema resource. Default paths do not prove which legacy/additional sources were indexed. Queries never scan workspace YAML. CLI, HTTP and MCP share this contract; context still consumes the same commit-bound terms and mappings. This response contract change needs no database migration.
+
+## File diagnostics and content integrity (#393)
+
+Indexed-version freshness and content coverage are independent. `freshness.state=fresh` means the requested version is indexed, not that every file parsed completely. Repository status, reports and query freshness include `content_integrity`: `state` (`complete`, `partial`, `unknown`), `degraded_file_count` (distinct paths) and `source_scope`. Missing fields in older responses mean `unknown`. The legacy `degraded_reason` remains diagnostic text and must not alone trigger reindexing.
+
+Query capability failures remain conservative: if a search read model is unavailable, surviving hits carry `query_degraded=true` and the response remains `freshness.state=degraded`, even when source fallback supplies usable matches. This flag is separate from file parse warnings and defaults to `false` on older hits; it does not override the response freshness or establish complete content coverage.
+
+```powershell
+relay-knowledge repo diagnostics demo --ref HEAD --limit 50 --format json
+relay-knowledge repo diagnostics demo --ref HEAD --path src --limit 50 --cursor $nextCursor --format json
+```
+
+Pages default to 50 diagnostics, capped at 200, ordered by path and message. Reuse the same ref and path filters with `next_cursor`; moving HEAD does not change the pinned snapshot. A removed snapshot produces an error. `repo report` retains its 20-entry summary and exposes `degradation_summary_truncated` and `diagnostics_command`. Healthy hits do not prove full coverage: missing facts can affect omitted files and cross-file relationships.
+
+HTTP: `GET /api/v1/code/repositories/{alias}/diagnostics`, with `ref`, JSON-array-string `path_filters`, `limit` and `cursor`. CLI supports `--remote`. MCP: `relay_code_diagnostics`, with `repository`, `ref_selector`, `path_filters`, `limit`, `cursor`, subject to authorization and context budgets.
+
+The original content-integrity fields reuse existing diagnostic tables. Source I/O isolation additionally adds compatible diagnostic/checkpoint columns and a new fact identity; rebuild older scopes with the normal index command after upgrading. Update agents to inspect `content_integrity`; older versions can still report overall `degraded` for partial content. Stale versions, unfinished tasks and graph-only responses retain conservative handling. Out-of-scope external dependencies remain unresolved edge metadata rather than file parse degradation.
+
+Configuration source filters also accept the canonical code-language identifiers in the [language capability matrix](05-code-repository-graph-workflow.md#510-language-capability-matrix). `shell`, `ctmpl` and `dotenv` remain unchanged. The CLI help and MCP schema share the validated source-format inventory.

@@ -36,6 +36,7 @@ pub struct CodeRepositoryRegistration {
     pub alias: String,
     pub root_path: String,
     pub path_filters: Vec<String>,
+    #[serde(deserialize_with = "super::validation::deserialize_language_filters")]
     pub language_filters: Vec<String>,
 }
 
@@ -64,6 +65,7 @@ pub struct CodeRepositorySelector {
     pub repository: String,
     pub ref_selector: String,
     pub path_filters: Vec<String>,
+    #[serde(deserialize_with = "super::validation::deserialize_language_filters")]
     pub language_filters: Vec<String>,
 }
 

@@ -324,6 +324,7 @@ pub async fn run_repo(
             )
         }
         RepoCommand::FeatureFlags {
+            filters,
             alias,
             query,
             limit,
@@ -338,6 +339,7 @@ pub async fn run_repo(
                 limit,
                 freshness,
             )
+            .and_then(|request| request.with_filters(filters))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .query_code_repository_feature_flags(request, context)
@@ -423,6 +425,18 @@ pub async fn run_repo(
                 format,
             )
         }
+        RepoCommand::Diagnostics(request) => {
+            let response = service
+                .code_repository_diagnostics(request, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+            render_response(
+                "code.repo.diagnostics",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
         RepoCommand::Report { alias } => {
             let response = service
                 .code_repository_report(
@@ -434,6 +448,8 @@ pub async fn run_repo(
             render_report_response(&response, format)
         }
         RepoCommand::Software {
+            cursor,
+            path_filters,
             alias,
             ref_selector,
             kind,
@@ -441,11 +457,12 @@ pub async fn run_repo(
             limit,
         } => {
             let request = SoftwareGlobalRequest::new(
-                selector(alias, ref_selector, Vec::new(), Vec::new(), format)?,
+                selector(alias, ref_selector, path_filters, Vec::new(), format)?,
                 kind,
                 freshness,
                 limit,
             )
+            .and_then(|request| request.with_cursor(cursor))
             .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .software_global_projection(request, context)

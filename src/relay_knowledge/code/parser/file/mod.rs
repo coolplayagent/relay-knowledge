@@ -11,8 +11,8 @@ use super::{
 };
 
 use crate::code::{
-    CodeIndexError, SnapshotBuild, config_files, generated_detection, languages::detect_language,
-    stable_content_hash, stable_id,
+    CodeIndexError, SnapshotBuild, config_files, generated_detection,
+    languages::detect_source_language, stable_content_hash, stable_id,
 };
 
 mod contracts;
@@ -31,12 +31,39 @@ pub(in crate::code) fn parse_indexed_file(
     path: &str,
     bytes: &[u8],
 ) -> Result<(), CodeIndexError> {
+    crate::domain::validate_code_language_filters(build.language_filters())
+        .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
     let blob_hash = stable_content_hash(bytes);
     let file_id = stable_id(
         "file",
         [&build.repository_id, &build.source_scope, path, &blob_hash],
     );
-    let language = detect_language(path);
+    let language = detect_source_language(path, bytes);
+    if std::path::Path::new(path).extension().is_none()
+        && crate::code::language_metadata::language_id(path).is_none()
+        && !build.language_filters().is_empty()
+        && language.is_none_or(|spec| {
+            !crate::domain::code_language_filter_groups(build.language_filters())
+                .iter()
+                .all(|group| group.contains(&spec.id))
+        })
+    {
+        parse_status::record_file_status(
+            build,
+            parse_status::FileStatusInput {
+                path,
+                file_id: &file_id,
+                language_id: language.map_or("unknown", |spec| spec.id),
+                blob_hash: &blob_hash,
+                byte_len: bytes.len(),
+                line_count: count_lines(bytes),
+                parse_status: CodeParseStatus::Excluded,
+                is_generated: generated_detection::is_generated_file(path, bytes),
+                degraded_reason: None,
+            },
+        );
+        return Ok(());
+    }
     let line_count = count_lines(bytes);
     let is_generated = generated_detection::is_generated_file(path, bytes);
     let (parse_status, degraded_reason, content) = validate_text_content(path, bytes, language)?;
@@ -80,7 +107,7 @@ pub(in crate::code) fn parse_indexed_file(
         add_file_chunk(build, path, &file_id, "unknown", &content)?;
         record_dependencies(build, path, &file_id, &content)?;
         feature_flag_projection::record_feature_flags(
-            build, path, &file_id, "unknown", &content, None,
+            build, path, &file_id, "unknown", &content, None, None,
         )?;
         return Ok(());
     };
@@ -108,6 +135,7 @@ pub(in crate::code) fn parse_indexed_file(
             &file_id,
             language.id,
             &content,
+            None,
             None,
         )?;
         route_projection::record_routes(build, path, &file_id, language.id, &content);
@@ -168,11 +196,27 @@ pub(in crate::code::parser) fn parse_syntax_file(
         &config_references,
         &mut output,
     )?;
+    if input.language.id == "cpp" {
+        super::type_ownership::normalize_cpp_symbols(&mut output.symbols);
+    }
+    super::type_ownership::extract(
+        root,
+        input.content,
+        input.path,
+        input.language.id,
+        &mut output.symbols,
+    )?;
     let mut embedded_imports = if input.language.id == "vue" {
-        collect_vue_script_facts(build, &input, &mut output)?
+        collect_vue_script_facts(build, &input, &mut output, root)?
     } else {
         Vec::new()
     };
+    super::records::bind_call_receivers(
+        root,
+        input.content,
+        &output.symbols,
+        &mut output.references,
+    )?;
     framework_projection::record_framework_graph(
         build,
         input.path,
@@ -180,6 +224,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
         input.language.id,
         input.content,
         &output.symbols,
+        root,
     )?;
     let mut imports = collect_imports(
         build,
@@ -231,6 +276,7 @@ pub(in crate::code::parser) fn parse_syntax_file(
         input.language.id,
         input.content,
         Some(&config_definitions),
+        Some(root),
     )?;
     build.chunks.extend(chunks);
     route_projection::record_routes(
@@ -245,11 +291,13 @@ pub(in crate::code::parser) fn parse_syntax_file(
 }
 
 fn collect_vue_script_facts(
-    build: &SnapshotBuild,
+    build: &mut SnapshotBuild,
     input: &SyntaxFileInput<'_>,
     output: &mut FileParseOutput,
+    syntax_root: tree_sitter::Node<'_>,
 ) -> Result<Vec<crate::domain::CodeImportRecord>, CodeIndexError> {
-    let Some((masked_content, typescript)) = super::frameworks::vue_script_mask(input.content)
+    let Some((masked_content, typescript)) =
+        super::frameworks::vue_script_mask(input.content, syntax_root)
     else {
         return Ok(Vec::new());
     };
@@ -274,17 +322,45 @@ fn collect_vue_script_facts(
     let symbol_start = output.symbols.len();
     records_from_captures(&context, captures, output)?;
     collect_manual_nodes(&context, root, &[], &[], output)?;
+    super::type_ownership::extract(
+        root,
+        input.content,
+        input.path,
+        embedded_language.id,
+        &mut output.symbols[symbol_start..],
+    )?;
     for symbol in &mut output.symbols[symbol_start..] {
         symbol.language_id = "vue".to_owned();
     }
-    collect_imports(
+    super::records::bind_call_receivers(
+        root,
+        input.content,
+        &output.symbols,
+        &mut output.references,
+    )?;
+    let imports = collect_imports(
         build,
         input.path,
         input.file_id,
         embedded_language.id,
         input.content,
         root,
-    )
+    )?;
+    let start = build.feature_flags.len();
+    feature_flag_projection::record_feature_flags(
+        build,
+        input.path,
+        input.file_id,
+        embedded_language.id,
+        input.content,
+        Some(&[]),
+        Some(root),
+    )?;
+    for row in &mut build.feature_flags[start..] {
+        row.language_id = "vue".to_owned();
+        row.metadata.source_format = "vue".to_owned();
+    }
+    Ok(imports)
 }
 
 fn record_syntax_failure_fallback(
@@ -308,6 +384,7 @@ fn record_syntax_failure_fallback(
         input.file_id,
         input.language.id,
         input.content,
+        None,
         None,
     )?;
     route_projection::record_routes(

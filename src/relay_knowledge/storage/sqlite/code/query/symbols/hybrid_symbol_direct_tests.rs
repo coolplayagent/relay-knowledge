@@ -108,6 +108,7 @@ fn file(file_id: &str, path: &str) -> RepositoryCodeFileRecord {
 
 fn symbol(symbol_snapshot_id: &str, file_id: &str, path: &str) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
+        type_owner: None,
         repository_id: "repo".to_owned(),
         source_scope: HYBRID_DIRECT_TEST_SOURCE_SCOPE.to_owned(),
         symbol_snapshot_id: symbol_snapshot_id.to_owned(),

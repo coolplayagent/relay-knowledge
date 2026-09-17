@@ -62,7 +62,7 @@ pub(in crate::interfaces::cli::spec) fn repo_index() -> CliCommandSpec {
             "relay-knowledge repo index core --reset --format json",
         ],
         &[
-            "`--dry-run` returns a scope preview instead of writing index state.",
+            "`--dry-run` reads and parses the selected snapshot in bounded batches without writing index state; expected_degraded_file_count uses the same parser diagnostics as full indexing. Large previews may time out; narrow the registered scope and retry.",
             "`--ref worktree` indexes uncommitted and untracked files in the current Git worktree as a bounded overlay over the checked-out HEAD scope; queries that need those facts must also use `--ref worktree`.",
             "`--ref worktree` requires a matching checked-out HEAD base index; run `repo index <alias> --ref HEAD` before the first worktree overlay.",
             "`--ref worktree --dry-run` previews the checked-out HEAD scope used as the overlay base and does not write overlay index state.",

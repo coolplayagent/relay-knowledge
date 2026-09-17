@@ -411,7 +411,7 @@ fn import_scope_path_line_index_has_exact_startup_shape_and_supports_path_seek()
         .expect("fresh target tables should receive all query indexes");
 
     let descriptor = SEARCH_QUERY_INDEXES
-        .last()
+        .get(16)
         .expect("the query-index plan should not be empty");
     assert_eq!(
         descriptor.name,
@@ -461,14 +461,14 @@ fn version_one_finalization_cursor_builds_the_appended_import_index() {
         advance,
         SearchQueryIndexAdvance::Created {
             completed_unit: 16,
-            plan_complete: true,
+            plan_complete: false,
         }
     );
     assert_eq!(
         persisted_query_index_columns(
             &connection,
             SEARCH_QUERY_INDEXES
-                .last()
+                .get(16)
                 .expect("the appended descriptor should exist"),
         )
         .expect("appended import index shape should load")
