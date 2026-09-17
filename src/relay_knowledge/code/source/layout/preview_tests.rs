@@ -98,7 +98,7 @@ fn scope_preview_includes_tracked_paths_ignored_by_worktree_gitignore() {
 }
 
 #[test]
-fn scope_preview_counts_each_degraded_file_once() {
+fn scope_preview_lists_each_degraded_file_once() {
     let repo = TempGitRepo::create("scope-preview-degraded-count");
     repo.write("docs/large.custom", &"x".repeat(512 * 1024 + 1));
     repo.git(["add", "."]);
@@ -119,5 +119,42 @@ fn scope_preview_counts_each_degraded_file_once() {
     assert_eq!(preview.selected_file_count, 1);
     assert_eq!(preview.unsupported_file_count, 1);
     assert_eq!(preview.generated_or_heavy_file_count, 1);
-    assert_eq!(preview.expected_degraded_file_count, 1);
+    assert_eq!(preview.expected_degraded_files.len(), 1);
+    assert_eq!(preview.expected_degraded_files[0].path, "docs/large.custom");
+    assert!(!preview.expected_degraded_files[0].reason.is_empty());
+    assert!(!preview.expected_degraded_files_truncated);
+}
+
+#[test]
+fn scope_preview_exclusion_limit_preserves_complete_selected_statistics() {
+    for count in [0, 49, 50, 51] {
+        let repo = TempGitRepo::create("preview-exclusion-boundary");
+        let content = "int broken = ;\n";
+        repo.write("src/last.c", content);
+        for index in 0..count {
+            repo.write(&format!("data/file_{index:04}.jsonl"), "{}\n");
+        }
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "exclusion boundary"]);
+        let registration = CodeRepositoryRegistration::new(
+            "repo",
+            "alias",
+            repo.path.display().to_string(),
+            vec![".".to_owned()],
+            Vec::new(),
+        )
+        .unwrap();
+        let preview = preview_repository_scope(&registration, &repo.selector()).unwrap();
+        assert_eq!(preview.excluded_paths.len(), count.min(50));
+        assert_eq!(preview.excluded_paths_truncated, count > 50);
+        assert_eq!(preview.selected_file_count, 1);
+        assert_eq!(preview.selected_byte_count, content.len());
+        assert_eq!(preview.language_distribution[0].file_count, 1);
+        assert_eq!(preview.expected_degraded_files.len(), 1);
+        assert!(!preview.expected_degraded_files_truncated);
+        for (index, file) in preview.excluded_paths.iter().enumerate() {
+            assert_eq!(file.path, format!("data/file_{index:04}.jsonl"));
+            assert_eq!(file.reason, "excluded by file preset");
+        }
+    }
 }

@@ -151,6 +151,17 @@ async fn serves_versioned_code_repository_index_status_and_query_apis() {
     )
     .await;
     assert_eq!(preview["preview"]["selected_file_count"], 1);
+    assert_eq!(preview["preview"]["expected_degraded_files"], json!([]));
+    assert_eq!(
+        preview["preview"]["expected_degraded_files_truncated"],
+        false
+    );
+    assert_eq!(preview["preview"]["excluded_paths_truncated"], false);
+    assert!(
+        preview["preview"]
+            .get("expected_degraded_file_count")
+            .is_none()
+    );
 
     let incremental = CodeIndexRequest {
         repository: selector.clone(),

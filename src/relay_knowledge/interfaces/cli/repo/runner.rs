@@ -534,3 +534,7 @@ pub async fn run_repo(
 #[cfg(test)]
 #[path = "runner_tests.rs"]
 mod runner_tests;
+
+#[cfg(test)]
+#[path = "preview_tests.rs"]
+mod preview_tests;

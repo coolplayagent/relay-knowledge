@@ -62,7 +62,7 @@ pub(in crate::interfaces::cli::spec) fn repo_index() -> CliCommandSpec {
             "relay-knowledge repo index core --reset --format json",
         ],
         &[
-            "`--dry-run` reads and parses the selected snapshot in bounded batches without writing index state; expected_degraded_file_count uses the same parser diagnostics as full indexing. Large previews may time out; narrow the registered scope and retry.",
+            "`--dry-run` reads the selected snapshot using the indexing parser without writing index state. Previews return at most 50 expected_degraded_files and 50 excluded_paths, each with path and reason, plus independent expected_degraded_files_truncated and excluded_paths_truncated flags. Finding a 51st degraded file stops subsequent parser batches; exactly 50 requires checking the remaining scope. Scope statistics remain complete. Large previews may time out; narrow the registered scope and retry.",
             "`--ref worktree` indexes uncommitted and untracked files in the current Git worktree as a bounded overlay over the checked-out HEAD scope; queries that need those facts must also use `--ref worktree`.",
             "`--ref worktree` requires a matching checked-out HEAD base index; run `repo index <alias> --ref HEAD` before the first worktree overlay.",
             "`--ref worktree --dry-run` previews the checked-out HEAD scope used as the overlay base and does not write overlay index state.",
@@ -127,7 +127,9 @@ pub(in crate::interfaces::cli::spec) fn repo_scope_preview() -> CliCommandSpec {
             &[],
         )],
         &["relay-knowledge repo scope preview core --ref HEAD --format json"],
-        &[],
+        &[
+            "Previews return at most 50 expected_degraded_files and 50 excluded_paths, each with path and reason, plus independent expected_degraded_files_truncated and excluded_paths_truncated flags. Finding a 51st degraded file stops subsequent parser batches; exactly 50 requires checking the remaining scope. Scope statistics remain complete. Large previews may time out; narrow the registered scope and retry."
+        ],
     )
 }
 

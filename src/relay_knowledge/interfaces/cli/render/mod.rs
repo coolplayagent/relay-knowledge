@@ -1,3 +1,5 @@
+mod preview;
+
 use crate::{
     api::{ApiMetadata, ApiStreamEvent, ProjectStatusResponse, StreamEventKind},
     project::KNOWLEDGE_MAP_RELATIVE_PATH,
@@ -219,21 +221,7 @@ where
                 )
             }
         }
-        "code.repo.scope_preview" => format!(
-            "preview files={} bytes={} unsupported={} expected_degraded={}",
-            value["preview"]["selected_file_count"]
-                .as_u64()
-                .unwrap_or(0),
-            value["preview"]["selected_byte_count"]
-                .as_u64()
-                .unwrap_or(0),
-            value["preview"]["unsupported_file_count"]
-                .as_u64()
-                .unwrap_or(0),
-            value["preview"]["expected_degraded_file_count"]
-                .as_u64()
-                .unwrap_or(0)
-        ),
+        "code.repo.scope_preview" => preview::render_scope_preview(&value["preview"]),
         "code.repo.query" => format!(
             "results={}",
             value["results"].as_array().map_or(0, Vec::len)

@@ -60,6 +60,13 @@ pub struct CodeRepositoryExcludedPath {
     pub reason: String,
 }
 
+/// Parser diagnostic for one selected file in a repository scope preview.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryDegradedFile {
+    pub path: String,
+    pub reason: String,
+}
+
 /// Non-mutating preview of the effective repository indexing scope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryScopePreview {
@@ -72,11 +79,20 @@ pub struct CodeRepositoryScopePreview {
     pub selected_byte_count: usize,
     pub unsupported_file_count: usize,
     pub generated_or_heavy_file_count: usize,
-    /// Parser-validated degradation count for the selected snapshot, not a metadata estimate.
-    pub expected_degraded_file_count: usize,
+    /// First parser-diagnosed files, in snapshot traversal order, with at most 50 entries.
+    pub expected_degraded_files: Vec<CodeRepositoryDegradedFile>,
+    /// More diagnosed files were observed; later parser batches may not have been checked.
+    pub expected_degraded_files_truncated: bool,
     pub language_distribution: Vec<CodeRepositoryLanguagePreview>,
     pub largest_files: Vec<CodeRepositoryLargestFile>,
     pub excluded_paths: Vec<CodeRepositoryExcludedPath>,
+    /// More excluded paths were observed than the returned list contains.
+    pub excluded_paths_truncated: bool,
+}
+
+impl CodeRepositoryScopePreview {
+    /// Maximum entries returned in each preview diagnostic or exclusion list.
+    pub const MAX_DETAIL_FILES: usize = 50;
 }
 
 /// Aggregated totals for repository indexes separate from graph-evidence code rows.

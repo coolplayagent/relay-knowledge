@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use crate::{
     code::{CodeIndexError, source::layout::preview_repository_layout},
     domain::{
-        CodeIndexResourceBudget, CodeRepositoryRegistration, CodeRepositoryScopePreview,
-        CodeRepositorySelector,
+        CodeIndexResourceBudget, CodeRepositoryDegradedFile, CodeRepositoryRegistration,
+        CodeRepositoryScopePreview, CodeRepositorySelector,
     },
 };
 
@@ -32,7 +32,7 @@ pub(crate) fn preview_repository_scope_cancellable(
         if cancelled() {
             Err(CodeIndexError::Io(std::io::Error::new(
                 std::io::ErrorKind::Interrupted,
-                "repository preview cancelled or timed out; no complete degradation count is available",
+                "repository preview cancelled or timed out; no degradation preview is available",
             )))
         } else {
             Ok(())
@@ -58,14 +58,39 @@ pub(crate) fn preview_repository_scope_cancellable(
         ));
     }
     let mut parsed = 0usize;
-    let mut degraded = 0usize;
     loop {
         check_cancelled()?;
         let (next, batch) = plan.parse_next_batch()?;
+        check_cancelled()?;
         plan = next;
+        if plan.needs_source_replan {
+            return Err(CodeIndexError::InvalidInput(
+                "repository source changed or became unreadable during preview; retry against a stable snapshot"
+                    .to_owned(),
+            ));
+        }
         let Some(batch) = batch else { break };
         parsed += batch.files.len();
-        degraded += batch.diagnostics.len();
+        for diagnostic in batch.diagnostics {
+            if preview
+                .expected_degraded_files
+                .iter()
+                .any(|file| file.path == diagnostic.path)
+            {
+                continue;
+            }
+            if preview.expected_degraded_files.len() == CodeRepositoryScopePreview::MAX_DETAIL_FILES
+            {
+                preview.expected_degraded_files_truncated = true;
+                return Ok(preview);
+            }
+            preview
+                .expected_degraded_files
+                .push(CodeRepositoryDegradedFile {
+                    path: diagnostic.path,
+                    reason: diagnostic.message,
+                });
+        }
         // Drop each batch's facts immediately; preview never accumulates a repository graph.
     }
     if parsed != preview.selected_file_count {
@@ -73,7 +98,6 @@ pub(crate) fn preview_repository_scope_cancellable(
             "preview parser did not cover the selected file set".to_owned(),
         ));
     }
-    preview.expected_degraded_file_count = degraded;
     Ok(preview)
 }
 

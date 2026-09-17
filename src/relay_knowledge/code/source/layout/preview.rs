@@ -20,7 +20,6 @@ use super::{
     selection::selection_exclusion_reason_for_source,
 };
 
-const PREVIEW_MAX_EXCLUDED_PATHS: usize = 50;
 const PREVIEW_MAX_LARGEST_FILES: usize = 10;
 const DEFAULT_TEXT_FILE_BUDGET_BYTES: usize = 512 * 1024;
 
@@ -46,6 +45,7 @@ pub(in crate::code) fn preview_repository_layout(
     let mut language_distribution = BTreeMap::<String, (usize, usize)>::new();
     let mut largest_files = Vec::<CodeRepositoryLargestFile>::new();
     let mut excluded_paths = Vec::<CodeRepositoryExcludedPath>::new();
+    let mut excluded_paths_truncated = false;
 
     let entries = snapshot.entries;
     let source_layout = discover_source_layout(&entries);
@@ -58,11 +58,13 @@ pub(in crate::code) fn preview_repository_layout(
             &source_layout,
             snapshot.kind,
         ) {
-            if excluded_paths.len() < PREVIEW_MAX_EXCLUDED_PATHS {
+            if excluded_paths.len() < CodeRepositoryScopePreview::MAX_DETAIL_FILES {
                 excluded_paths.push(CodeRepositoryExcludedPath {
                     path: entry.path,
                     reason,
                 });
+            } else {
+                excluded_paths_truncated = true;
             }
             continue;
         }
@@ -159,7 +161,8 @@ pub(in crate::code) fn preview_repository_layout(
         unsupported_file_count,
         generated_or_heavy_file_count,
         // The index preview workflow fills this after validating parser batches.
-        expected_degraded_file_count: 0,
+        expected_degraded_files: Vec::new(),
+        expected_degraded_files_truncated: false,
         language_distribution: language_distribution
             .into_iter()
             .map(
@@ -172,6 +175,7 @@ pub(in crate::code) fn preview_repository_layout(
             .collect(),
         largest_files,
         excluded_paths,
+        excluded_paths_truncated,
     })
 }
 
