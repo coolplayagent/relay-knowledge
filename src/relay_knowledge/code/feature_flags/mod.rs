@@ -21,6 +21,7 @@ use extractors::{
 };
 
 pub(crate) struct FeatureFlagFileInput<'a> {
+    pub(crate) line_index: registry::LineIndex,
     pub(crate) syntax_root: Option<tree_sitter::Node<'a>>,
     pub(crate) repository_id: &'a str,
     pub(crate) source_scope: &'a str,

@@ -464,6 +464,7 @@ fn syntax_records_literal_and_constant_environment_keys() {
         parser.set_language(&(language.language)()).unwrap();
         let tree = parser.parse(source, None).unwrap();
         let input = FeatureFlagFileInput {
+            line_index: Default::default(),
             syntax_root: Some(tree.root_node()),
             repository_id: "repo",
             source_scope: "scope",
@@ -493,6 +494,7 @@ fn analyze(path: &str, source: &str) -> (Vec<CodeFeatureFlagRecord>, String) {
     parser.set_language(&(language.language)()).unwrap();
     let tree = parser.parse(source, None).unwrap();
     let input = FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: Some(tree.root_node()),
         repository_id: "repo",
         source_scope: "scope",

@@ -446,6 +446,7 @@ fn batch_row_count_includes_feature_flags() {
     );
     build.feature_flags = crate::code::feature_flags::extract_feature_flags(
         crate::code::feature_flags::FeatureFlagFileInput {
+            line_index: Default::default(),
             syntax_root: None,
             repository_id: &build.repository_id,
             source_scope: &build.source_scope,

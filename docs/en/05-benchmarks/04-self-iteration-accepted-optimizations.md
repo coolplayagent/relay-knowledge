@@ -17,6 +17,16 @@ not published evidence. A current acceptance record must cite a tracked dated
 report with the revision or report digest, selected/executed/skipped counts,
 profile, product binary, environment, budgets, and result.
 
+## Accepted: lossless cold-index configuration scanning (2026-09-17)
+
+- Status: `accepted` only for the completed focused A/B and local verification scope against `df331786`; all eight timing scenarios run with none skipped. Binary identities, raw-report digests, and quality verification are in the [2026-09-17 verification record](../06-verification/17-lossless-cold-index-2026-09-17.md). This is not full self-iteration evaluator acceptance or overall release certification.
+- Algorithm: a string-search prefilter avoids character-by-character quote work for absent API patterns; matching lines retain quote, escape, and UTF-8 offset semantics with statically dispatched predicates. A lazy per-file CR/LF/CRLF position index replaces repeated prefix scans. FTS batch bindings borrow existing strings instead of duplicating document bodies.
+- Owners: the lexical/registry modules under `code::feature_flags` and SQLite code-search persistence. The line cache belongs to one bounded file input, with no cross-repository or snapshot cache.
+- Invariants: all configuration support facts, excerpts, FTS writes, binding triggers, call indexes, ranking, unresolved states, fact versions, storage formats, leases, checkpoints, publication fences, and budgets remain unchanged.
+- Regression protection: the fast `configuration_scan_work_suite` rejects quote-predicate work for absent patterns. Differential tests cover Unicode, empty patterns, escapes, and line boundaries; existing persistence gates retain ordering, variable limits, rollback, and recovery checks.
+- Measurements: three-run real-repository medians are 31.585→30.017 seconds for cold indexing (-4.96%) and 8.827→6.413 seconds for full previews (-27.35%); 1,024/2,048-file cold indexes improve by 22.41%/15.49%. All 1,545,613 rows across 16 tables and ten real-repository queries match, as do five snapshot pairs and eight queries across three existing fixtures. All original fixture budgets pass.
+- Limits: real cold-index sample ranges overlap, and three runs do not establish statistical significance. Median peak RSS increases 7.81%, so there is no memory-improvement claim. The line cache uses memory proportional to the bounded file's newline count; no per-change ablation assigns individual gains.
+
 ## Issue #232: Software Ontology Classification and Provenance Guardrail
 
 - Classification contract: `software_global_fixture` fixes ordinary README “Getting Started” and “Chapter Index” headings as documentation only, requires Dockerfile/Containerfile to become build definitions, and forbids GitHub Actions or GitLab CI jobs from becoming IaC resources. Terraform, Kubernetes, Compose, and systemd deployment/resource types and explicit metadata promotion to systems or APIs are protected in the same fixture.

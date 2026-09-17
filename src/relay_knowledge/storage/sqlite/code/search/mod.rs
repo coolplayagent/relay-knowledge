@@ -144,12 +144,12 @@ impl<'transaction> SearchDocumentInserter<'transaction> {
         let mut values = Vec::with_capacity(self.documents.len() * SEARCH_DOCUMENT_COLUMN_COUNT);
         for document in &self.documents {
             values.extend([
-                Value::Text(document.source_scope.clone()),
-                Value::Text(document.document_kind.clone()),
-                Value::Text(document.record_id.clone()),
-                Value::Text(document.path.clone()),
-                Value::Text(document.language_id.clone()),
-                Value::Text(document.content.clone()),
+                document.source_scope.as_str(),
+                document.document_kind.as_str(),
+                document.record_id.as_str(),
+                document.path.as_str(),
+                document.language_id.as_str(),
+                document.content.as_str(),
             ]);
         }
         let inserted_search_document_count = if pending_document_count == self.document_batch_size {

@@ -25,6 +25,7 @@
 14. [软件全域证据优先级验证记录 2026-08-31](14-software-global-evidence-priority-2026-08-31.md)
 15. [Durable Worktree Delta 与固定身份查询验证记录 2026-08-31](15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
 16. [地图与图关系存储验收 2026-09-07](16-map-graph-storage-acceptance-2026-09-07.md)
+17. [冷索引无损优化验证 2026-09-17](17-lossless-cold-index-2026-09-17.md)
 
 ## 证据规则
 

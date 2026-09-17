@@ -33,6 +33,7 @@ The 2026-06-05 documentation audit remains a historical snapshot.
 14. [Software-Global Evidence Priority Verification 2026-08-31](14-software-global-evidence-priority-2026-08-31.md)
 15. [Durable Worktree Delta and Pinned Query Verification 2026-08-31](15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
 16. [Map and Graph Storage Acceptance 2026-09-07](16-map-graph-storage-acceptance-2026-09-07.md)
+17. [Lossless Cold-Index Verification 2026-09-17](17-lossless-cold-index-2026-09-17.md)
 
 Records 3 and 4 remain explicit positions in the chronological index even
 though their English translations are pending. This keeps record identity

@@ -14,6 +14,16 @@
 tracked report，记录 revision/report digest、profile、product binary、selected/executed/skipped、
 预算、环境和结果，而不能把本机 patch cache 当作 acceptance 证明。
 
+## 已采纳：冷索引配置扫描与全文写入的无损优化（2026-09-17）
+
+- 状态：`accepted`，仅限已完成的 focused A/B 和本地验证范围；以 `df331786` 为基线，八项耗时场景全部执行、无跳过。测量身份、原始报告摘要及质量验证见[2026-09-17 验证记录](../06-verification/17-lossless-cold-index-2026-09-17.md)，不等同于整轮 self-iteration evaluator 采纳或整体发版认证。
+- 算法：配置词法扫描先用字符串搜索排除不含 API 模式的行，保留命中行的引号、转义和 UTF-8 偏移规则；引号谓词采用静态分派。每个文件按需建立一次 CR/LF/CRLF 换行位置索引，以二分查询替代每条配置事实的前缀重扫。全文检索批量参数借用已有字符串，消除正文的临时副本。
+- 所有权：改动位于 `code::feature_flags` 的 lexical/registry owner 与 `storage::sqlite::code::search`；文件级缓存只存当前有界输入的换行位置，没有跨仓库或快照缓存。
+- 不变量：保留全部配置支持证据、正文、FTS 写入、绑定触发器、调用索引、查询排序和未解析状态；不改变事实版本、持久化格式、任务租约、单写者、检查点、发布屏障及各项资源预算。
+- 回归门禁：`tools/self_iteration` 的 fast 路径增加 `configuration_scan_work_suite`，验证不含目标模式的长行不执行逐字符引号判断；UTF-8、空模式及转义边界与原扫描器逐项对照。原有持久化门禁继续验证全文索引顺序、变量限制、回滚和恢复。
+- 实测：三轮真实仓库冷索引中位数 31.585→30.017 秒（-4.96%），完整预览 8.827→6.413 秒（-27.35%）；1,024/2,048 文件冷索引分别减少 22.41%/15.49%。16 张表的 1,545,613 行和十项真实仓库查询一致；三个既有 fixture 的五对快照与八项查询也一致，原有预算全部满足。
+- 限制：真实仓库冷索引样本范围重叠，三轮不能证明统计显著性；峰值 RSS 中位数增加 7.81%，不能宣称内存改善。行号缓存占用与当前有界文件换行数线性相关，没有逐项消融来分配各优化的收益。
+
 ## Issue #232：软件本体分类与 provenance 护栏
 
 - 分类契约：`software_global_fixture` 固定普通 README 的 “Getting Started”/“Chapter Index” 只能成为 documentation，Dockerfile/Containerfile 必须成为 build definition，GitHub Actions/GitLab CI job 不得成为 IaC resource；Terraform、Kubernetes、Compose、systemd 的 deployment/resource 类型和显式 metadata 晋升 system/API 的路径同时受保护。

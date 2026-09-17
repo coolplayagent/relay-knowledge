@@ -63,6 +63,7 @@ fn portable_ancillary_grammars_preserve_structured_evidence_without_type_members
 
 fn input(content: &str) -> FeatureFlagFileInput<'_> {
     FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -122,6 +123,7 @@ fn emits_definitions_from_structured_configuration_facts() {
         },
     }];
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -143,6 +145,7 @@ fn emits_definitions_from_structured_configuration_facts() {
 #[test]
 fn ignores_comment_only_feature_flag_examples() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -184,6 +187,7 @@ fn ignores_inline_comment_feature_flag_examples() {
 #[test]
 fn ignores_process_env_inside_string_literals() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -202,6 +206,7 @@ fn ignores_process_env_inside_string_literals() {
 #[test]
 fn extracts_flags_from_executable_star_prefixed_lines() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -243,6 +248,7 @@ fn keeps_nested_rust_block_comments_active() {
 fn keeps_nested_block_comments_active_for_nested_comment_languages() {
     for language_id in ["kotlin", "scala", "swift"] {
         let records = extract_feature_flags(FeatureFlagFileInput {
+            line_index: Default::default(),
             syntax_root: None,
             repository_id: "repo",
             source_scope: "scope",
@@ -262,6 +268,7 @@ fn keeps_nested_block_comments_active_for_nested_comment_languages() {
 #[test]
 fn extracts_preprocessor_feature_gates() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -292,6 +299,7 @@ fn extracts_preprocessor_feature_gates() {
 #[test]
 fn extracts_elif_and_all_preprocessor_expression_symbols() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -314,6 +322,7 @@ fn extracts_elif_and_all_preprocessor_expression_symbols() {
 #[test]
 fn extracts_sdk_feature_flag_keys() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -360,6 +369,7 @@ fn extracts_sdk_feature_flag_keys() {
 #[test]
 fn extracts_pascal_case_launchdarkly_sdk_feature_flag_keys() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -384,6 +394,7 @@ fn extracts_pascal_case_launchdarkly_sdk_feature_flag_keys() {
 #[test]
 fn ignores_sdk_default_literals_when_flag_key_is_dynamic() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -402,6 +413,7 @@ fn ignores_sdk_default_literals_when_flag_key_is_dynamic() {
 #[test]
 fn removes_tracked_sdk_receiver_after_reassignment() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -420,6 +432,7 @@ fn removes_tracked_sdk_receiver_after_reassignment() {
 #[test]
 fn tracks_typed_optional_and_constructed_sdk_receivers() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -446,6 +459,7 @@ fn tracks_typed_optional_and_constructed_sdk_receivers() {
 #[test]
 fn tracks_property_multibinding_multiline_and_non_js_sdk_receivers() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -489,6 +503,7 @@ fn tracks_property_multibinding_multiline_and_non_js_sdk_receivers() {
 #[test]
 fn ignores_sdk_shapes_inside_template_strings_and_preserves_statement_order() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -522,6 +537,7 @@ fn ignores_sdk_shapes_inside_template_strings_and_preserves_statement_order() {
 #[test]
 fn respects_sdk_receiver_order_multiline_openers_and_scope_shadowing() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -589,6 +605,7 @@ fn respects_sdk_receiver_order_multiline_openers_and_scope_shadowing() {
 #[test]
 fn ignores_sdk_feature_flag_keys_inside_comments_and_strings() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -608,6 +625,7 @@ fn ignores_sdk_feature_flag_keys_inside_comments_and_strings() {
 #[test]
 fn non_javascript_function_parameters_shadow_tracked_sdk_receivers() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -635,6 +653,7 @@ fn non_javascript_function_parameters_shadow_tracked_sdk_receivers() {
 #[test]
 fn extracts_additional_environment_source_key_shapes() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -657,6 +676,7 @@ fn extracts_additional_environment_source_key_shapes() {
 #[test]
 fn extracts_boolean_flags_from_inline_config_objects() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -697,6 +717,7 @@ fn extracts_boolean_flags_from_inline_config_objects() {
 #[test]
 fn treats_hash_lines_as_comments_in_config_files() {
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -781,6 +802,7 @@ fn consul_configuration_requires_ctmpl_extension() {
         "config.ctmpl",
     ] {
         let rows = extract_feature_flags(FeatureFlagFileInput {
+            line_index: Default::default(),
             syntax_root: None,
             repository_id: "repo",
             source_scope: "scope",
@@ -799,6 +821,7 @@ fn consul_configuration_requires_ctmpl_extension() {
 fn multiline_java_sdk_metadata_uses_the_call_opener() {
     let source = "class App { void run() {\nvar client = OpenFeature.getClient();\n// @config domain=payments hot-reload=true\nclient.getBooleanValue(\n\"sdk_feature\", false);\n} }";
     let rows = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         language_id: "java",
         path: "App.java",
@@ -826,6 +849,7 @@ fn non_consul_templates_retain_structured_boolean_definitions() {
     }];
     for path in ["templates/deployment.yaml", "templates/_helpers.tpl"] {
         let rows = extract_feature_flags(FeatureFlagFileInput {
+            line_index: Default::default(),
             syntax_root: None,
             language_id: "gotemplate",
             path,
@@ -851,6 +875,7 @@ fn java_registry_and_sdk_share_the_per_file_fact_budget() {
             "class Keys {{ static final String {fields}; void run() {{\nvar client = OpenFeature.getClient();\nclient.getBooleanValue(\"sdk_feature\", false);\n}} }}"
         );
         let result = extract_feature_flags(FeatureFlagFileInput {
+            line_index: Default::default(),
             syntax_root: None,
             language_id: "java",
             path: "Keys.java",

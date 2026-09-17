@@ -7,6 +7,7 @@ pub(super) fn facts(language: &str, source: &str) -> Vec<CodeFeatureFlagRecord> 
 }
 pub(super) fn raw_facts(language: &str, source: &str) -> Vec<CodeFeatureFlagRecord> {
     super::extract(&FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",

@@ -69,7 +69,7 @@ fn full_profile_quality_gates_run_in_dependency_stages() {
 fn fast_profile_skips_full_quality_gates() {
     let stages = quality_gate_stages("fast", Some(ProductBinaryProfile::Release));
 
-    assert_eq!(stages.len(), 8);
+    assert_eq!(stages.len(), 9);
     let gate_names = stages
         .iter()
         .flat_map(|stage| match stage {
@@ -92,6 +92,7 @@ fn fast_profile_skips_full_quality_gates() {
     assert!(gate_names.contains(&"bm25_hierarchy_build"));
     assert!(gate_names.contains(&"bm25_hierarchy_suite"));
     assert!(gate_names.contains(&"code_index_persistence_performance_suite"));
+    assert!(gate_names.contains(&"configuration_scan_work_suite"));
     assert!(gate_names.contains(&"self_iteration_cargo_check"));
     assert!(gate_names.contains(&"linux_glibc_compatibility_policy"));
     assert!(gate_names.contains(&"skill_metadata_policy_cases"));

@@ -7,6 +7,7 @@ pub(crate) fn extract(path: &str, source: &str) -> Vec<CodeFeatureFlagRecord> {
     parser.set_language(&(language.language)()).unwrap();
     let tree = parser.parse(source, None).unwrap();
     extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: Some(tree.root_node()),
         repository_id: "repo",
         source_scope: "scope",

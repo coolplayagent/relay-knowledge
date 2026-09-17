@@ -69,6 +69,7 @@ fn java_getter_markers_and_collection_obey_the_file_budget() {
         }
         source.push('}');
         let error = extract(&FeatureFlagFileInput {
+            line_index: Default::default(),
             syntax_root: None,
             repository_id: "repo",
             source_scope: "scope",
@@ -240,6 +241,7 @@ fn java_guard_scan_exhaustion_is_explicit() {
         "work();".repeat(700)
     );
     let error = extract(&FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
