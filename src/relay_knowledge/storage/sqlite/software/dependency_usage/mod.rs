@@ -21,11 +21,11 @@ use persistence::import_evidence;
 pub(super) use persistence::{delete_scope, insert_usages, usage_from_row, usages_for_scope};
 pub(super) use schema::initialize_schema;
 
-const MAX_COMPONENT_ALIAS_EVIDENCE_PER_SCOPE: usize = 65_536;
-const MAX_IMPORT_EVIDENCE_PER_SCOPE: usize = 131_072;
-const MAX_PYTHON_FILES_PER_SCOPE: usize = 131_072;
-const MAX_PYTHON_LOCAL_MODULES_PER_SCOPE: usize = 262_144;
-const MAX_DEPENDENCY_USAGES_PER_SCOPE: usize = 131_072;
+const MAX_COMPONENT_ALIAS_EVIDENCE_PER_SCOPE: usize = 524_288;
+const MAX_IMPORT_EVIDENCE_PER_SCOPE: usize = 1_048_576;
+const MAX_PYTHON_FILES_PER_SCOPE: usize = 1_048_576;
+const MAX_PYTHON_LOCAL_MODULES_PER_SCOPE: usize = 2_097_152;
+const MAX_DEPENDENCY_USAGES_PER_SCOPE: usize = 1_048_576;
 const MAX_MATCH_CANDIDATES_PER_IMPORT: usize = 128;
 
 pub(super) fn derive_dependency_usages(
