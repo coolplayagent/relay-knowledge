@@ -499,11 +499,10 @@ async fn service_status_reports_partitioned_storage_diagnostics() {
     if health.storage.missing_shard_count == 0 {
         assert!(health.metadata.stale);
         assert!(
-            health
-                .degraded_reason
-                .as_deref()
-                .is_some_and(|reason| reason.contains("storage_busy")),
-            "the bounded health fallback must make a concurrent timeout observable"
+            health.degraded_reason.as_deref().is_some_and(
+                |reason| reason.contains("storage_busy") || reason.starts_with("storage_cold:")
+            ),
+            "the bounded health fallback must identify cold shards or a concurrent timeout"
         );
     } else {
         assert_eq!(health.storage.missing_shard_count, 1);

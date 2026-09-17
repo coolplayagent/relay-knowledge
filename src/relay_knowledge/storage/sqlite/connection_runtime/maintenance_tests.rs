@@ -436,3 +436,105 @@ fn cleanup_database_path(path: &Path) {
     shm_path.push("-shm");
     let _ = std::fs::remove_file(PathBuf::from(shm_path));
 }
+
+#[tokio::test]
+async fn inspection_batch_reads_multiple_shards_without_initializing_missing_databases() {
+    let root = unique_database_path("diagnostic-batch").with_extension("root");
+    let environment = crate::env::EnvironmentConfig::from_pairs(
+        crate::env::PlatformKind::current(),
+        [("RELAY_KNOWLEDGE_HOME", root.to_str().unwrap())],
+    )
+    .unwrap();
+    let paths =
+        crate::paths::RuntimePaths::resolve(&environment.platform, &environment.paths).unwrap();
+    std::fs::create_dir_all(&paths.data_dir).unwrap();
+    drop(Connection::open(paths.database_file()).unwrap());
+    for id in ["first", "second"] {
+        let path = paths.repository_shard_database_file(id);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let connection = Connection::open(path).unwrap();
+        initialize_schema(&connection).unwrap();
+        persist_maintenance_result(&connection, 42, None).unwrap();
+    }
+    let results = read_only_shard_diagnostics(
+        paths.clone(),
+        vec![
+            "first".to_owned(),
+            "second".to_owned(),
+            "missing".to_owned(),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(results.len(), 3);
+    for (_, result) in &results[..2] {
+        assert_eq!(result.as_ref().unwrap().last_maintenance_at_ms, Some(42));
+    }
+    assert!(
+        results[2]
+            .1
+            .as_ref()
+            .unwrap_err()
+            .to_string()
+            .contains("missing")
+    );
+    assert!(!paths.repository_shard_database_file("missing").exists());
+    for id in ["first", "second"] {
+        let connection = Connection::open_with_flags(
+            paths.repository_shard_database_file(id),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let tables: i64 = connection.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'", [], |row| row.get(0)).unwrap();
+        assert_eq!(tables, 1, "inspection must not initialize the graph schema");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn inspection_batch_enforces_policy_capacity_and_cancellation() {
+    let root = unique_database_path("diagnostic-admission").with_extension("root");
+    let environment = crate::env::EnvironmentConfig::from_pairs(
+        crate::env::PlatformKind::current(),
+        [("RELAY_KNOWLEDGE_HOME", root.to_str().unwrap())],
+    )
+    .unwrap();
+    let mut paths =
+        crate::paths::RuntimePaths::resolve(&environment.platform, &environment.paths).unwrap();
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    drop(receiver);
+    assert!(
+        matches!(inspect_shards(&paths, vec!["unopened".to_owned()], sender), Err(StorageError::Io(error)) if error.kind() == std::io::ErrorKind::Interrupted)
+    );
+    paths.windows_data_sid = Some("S-1-5-18".to_owned());
+    assert!(
+        read_only_shard_diagnostics(paths.clone(), Vec::new())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("account policy")
+    );
+    assert!(
+        read_only_shard_diagnostics(
+            paths.clone(),
+            vec!["unused".to_owned(); MAX_SQLITE_DIAGNOSTIC_SHARDS + 1]
+        )
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("exceeds")
+    );
+    paths.windows_data_sid = None;
+    paths.data_dir = PathBuf::from("D:/relay-knowledge/users/S-1-invalid/data");
+    assert!(
+        read_only_shard_diagnostics(paths, Vec::new())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("invalid account SID")
+    );
+    assert!(
+        !root.exists(),
+        "failed admission must not create runtime state"
+    );
+}

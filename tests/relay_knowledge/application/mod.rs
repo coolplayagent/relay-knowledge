@@ -6,6 +6,7 @@ mod code_repository_recovery;
 mod code_repository_semantic_equivalence;
 mod code_repository_set;
 mod code_repository_software;
+mod code_repository_source_io;
 mod code_repository_source_layout;
 mod code_repository_views;
 mod code_repository_workspace_cross_resolution;
@@ -14,5 +15,5 @@ mod graphrag_evaluation;
 mod knowledge_development_loop;
 mod local_files;
 mod unified_api;
-
-mod code_repository_source_io;
+#[cfg(windows)]
+mod windows_storage;

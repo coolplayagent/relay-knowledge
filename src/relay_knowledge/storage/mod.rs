@@ -11,7 +11,7 @@ mod partitioned;
 mod sqlite;
 
 pub use contracts::*;
-pub use partitioned::PartitionedSqliteKnowledgeStore;
+pub use partitioned::{PartitionedSqliteKnowledgeStore, diagnostics::SqliteTopologyReader};
 pub use sqlite::SqliteGraphStore;
 
 /// Async result returned by a configured storage factory.
@@ -26,6 +26,14 @@ pub trait KnowledgeStoreFactory: Send + Sync {
     fn open(&self) -> KnowledgeStoreFactoryFuture<'_, Arc<dyn KnowledgeStore>>;
 
     fn topology_snapshot(&self) -> KnowledgeStoreFactoryFuture<'_, StorageTopologySnapshot>;
+
+    /// Checks an existing catalog before lifecycle planning without creating a
+    /// database; a missing data path must not prevent plan or uninstall use.
+    /// Factories without an external lifecycle catalog retain the original
+    /// contract and need not implement this optional preflight capability.
+    fn validate_lifecycle_storage(&self) -> KnowledgeStoreFactoryFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 #[cfg(test)]

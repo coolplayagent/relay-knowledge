@@ -244,7 +244,23 @@ fn external_authority_adopts_metadata_without_writing_a_local_receipt() {
     let guard = super::super::lifecycle::publication_fence::prepare_guard(
         &connection,
         publication_fence(),
-        Some(&authority_path),
+        Some(
+            &super::super::lifecycle::publication_fence::PublicationAuthority {
+                path: authority_path.clone(),
+                paths: {
+                    let environment = crate::env::EnvironmentConfig::from_pairs(
+                        crate::env::PlatformKind::current(),
+                        [(
+                            "RELAY_KNOWLEDGE_HOME",
+                            authority_path.parent().unwrap().to_str().unwrap(),
+                        )],
+                    )
+                    .unwrap();
+                    crate::paths::RuntimePaths::resolve(&environment.platform, &environment.paths)
+                        .unwrap()
+                },
+            },
+        ),
     )
     .expect("external publication guard should prepare");
     let before = derived_fact_state(&connection);

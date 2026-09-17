@@ -224,6 +224,42 @@ fn macos_service_definition_preserves_runtime_data_dir() {
 }
 
 #[test]
+fn service_plans_preserve_environment_selected_sqlite_and_shard_directories() {
+    let root = std::env::temp_dir().join("relay-knowledge-service-data-override");
+    let data_dir = root.join("custom data");
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [
+            ("RELAY_KNOWLEDGE_HOME", &root),
+            ("RELAY_KNOWLEDGE_DATA_DIR", &data_dir),
+        ],
+    )
+    .expect("environment should parse");
+    let paths = RuntimePaths::resolve(&environment.platform, &environment.paths)
+        .expect("runtime should resolve");
+    for platform in ["windows", "macos", "linux"] {
+        let plan = render_service_plan_for_platform(
+            &paths,
+            StorageTopology::PartitionedSqlite,
+            &request(ServiceManagerAction::Install),
+            platform,
+            root.join("bin/relay-knowledge"),
+        )
+        .expect("service plan should render");
+        assert!(plan.definition.contains("RELAY_KNOWLEDGE_DATA_DIR"));
+        assert!(plan.definition.contains(data_dir.to_str().unwrap()));
+        assert!(
+            plan.runtime_state_paths
+                .contains(&paths.database_file().display().to_string())
+        );
+        assert!(
+            plan.runtime_state_paths
+                .contains(&paths.repository_shards_dir().display().to_string())
+        );
+    }
+}
+
+#[test]
 fn windows_install_command_quotes_binary_and_plans_environment_step() {
     let paths = runtime_paths();
     let mut request = request(ServiceManagerAction::Install);

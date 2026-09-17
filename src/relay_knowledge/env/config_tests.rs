@@ -237,6 +237,7 @@ fn windows_environment_names_are_case_insensitive() {
             ("home", "/home/alice"),
             ("appdata", "/roaming"),
             ("localappdata", "/local"),
+            ("relay_knowledge_data_dir", "E:\\Knowledge Data\\数据库"),
             ("relay_knowledge_http_bind", "localhost:8791"),
             ("ssl_verify", "off"),
         ],
@@ -250,5 +251,23 @@ fn windows_environment_names_are_case_insensitive() {
         Some(PathBuf::from("/local"))
     );
     assert_eq!(config.network.http_bind, Some("localhost:8791".to_owned()));
+    assert_eq!(
+        config.paths.data_dir,
+        Some(PathBuf::from("E:\\Knowledge Data\\数据库"))
+    );
     assert_eq!(config.network.ssl_verify, Some(false));
+}
+
+#[test]
+fn empty_sqlite_data_directory_reports_environment_error() {
+    for platform in [
+        PlatformKind::Unix,
+        PlatformKind::Macos,
+        PlatformKind::Windows,
+    ] {
+        let error = EnvironmentConfig::from_pairs(platform, [(RELAY_KNOWLEDGE_DATA_DIR, "")])
+            .expect_err("empty data directory must not silently use defaults");
+        assert_eq!(error.variable, RELAY_KNOWLEDGE_DATA_DIR);
+        assert_eq!(error.kind, EnvErrorKind::EmptyValue);
+    }
 }

@@ -3,13 +3,14 @@ use std::path::{Path, PathBuf};
 use crate::{
     domain::ServicePermissionRequirement,
     env::{
-        RELAY_KNOWLEDGE_DATA_DIR, RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS,
-        RELAY_KNOWLEDGE_WATCHER_ENABLED,
+        RELAY_KNOWLEDGE_DATA_DIR, RELAY_KNOWLEDGE_STORAGE_TOPOLOGY,
+        RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS, RELAY_KNOWLEDGE_WATCHER_ENABLED,
     },
     project::{
         LINUX_SERVICE_DEFINITION_FILE_NAME, MACOS_SERVICE_DEFINITION_FILE_NAME, PROJECT_NAME,
         WINDOWS_SERVICE_DEFINITION_FILE_NAME,
     },
+    storage::StorageTopology,
     watcher::WatcherConfig,
 };
 
@@ -70,11 +71,18 @@ pub(super) fn permission_requirements(platform: &str) -> Vec<ServicePermissionRe
     }
 }
 
-pub(super) fn render_definition(platform: &str, executable: &str, data_dir: &str) -> String {
+pub(super) fn render_definition(
+    platform: &str,
+    executable: &str,
+    data_dir: &str,
+    topology: StorageTopology,
+) -> String {
+    let topology_name = RELAY_KNOWLEDGE_STORAGE_TOPOLOGY;
+    let topology = topology.as_str();
     let reconcile_interval_ms = WatcherConfig::DEFAULT_COMMIT_RECONCILE_INTERVAL_MS;
     match platform {
         "windows" => format!(
-            "<service><id>{name}</id><name>{name}</name><executable>{executable}</executable><arguments>service run --web --mcp streamable-http</arguments><env name=\"{data_dir_name}\" value=\"{data_dir}\"/><env name=\"{watcher_enabled_name}\" value=\"true\"/><env name=\"{reconcile_name}\" value=\"{reconcile_interval_ms}\"/></service>\n",
+            "<service><id>{name}</id><name>{name}</name><executable>{executable}</executable><arguments>service run --web --mcp streamable-http</arguments><env name=\"{data_dir_name}\" value=\"{data_dir}\"/><env name=\"{topology_name}\" value=\"{topology}\"/><env name=\"{watcher_enabled_name}\" value=\"true\"/><env name=\"{reconcile_name}\" value=\"{reconcile_interval_ms}\"/></service>\n",
             name = PROJECT_NAME,
             executable = xml_escape(executable),
             data_dir_name = RELAY_KNOWLEDGE_DATA_DIR,
@@ -83,7 +91,7 @@ pub(super) fn render_definition(platform: &str, executable: &str, data_dir: &str
             reconcile_name = RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS,
         ),
         "macos" => format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>Label</key><string>{label}</string><key>ProgramArguments</key><array><string>{executable}</string><string>service</string><string>run</string><string>--web</string><string>--mcp</string><string>streamable-http</string></array><key>EnvironmentVariables</key><dict><key>{data_dir_name}</key><string>{data_dir}</string><key>{watcher_enabled_name}</key><string>true</string><key>{reconcile_name}</key><string>{reconcile_interval_ms}</string></dict><key>RunAtLoad</key><true/></dict></plist>\n",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>Label</key><string>{label}</string><key>ProgramArguments</key><array><string>{executable}</string><string>service</string><string>run</string><string>--web</string><string>--mcp</string><string>streamable-http</string></array><key>EnvironmentVariables</key><dict><key>{data_dir_name}</key><string>{data_dir}</string><key>{topology_name}</key><string>{topology}</string><key>{watcher_enabled_name}</key><string>true</string><key>{reconcile_name}</key><string>{reconcile_interval_ms}</string></dict><key>RunAtLoad</key><true/></dict></plist>\n",
             label = launchd_label(),
             executable = xml_escape(executable),
             data_dir_name = RELAY_KNOWLEDGE_DATA_DIR,
@@ -98,7 +106,7 @@ pub(super) fn render_definition(platform: &str, executable: &str, data_dir: &str
                 "{RELAY_KNOWLEDGE_WATCHER_COMMIT_RECONCILE_INTERVAL_MS}={reconcile_interval_ms}"
             );
             format!(
-                "[Unit]\nDescription=relay-knowledge background service\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} service run --web --mcp streamable-http\nEnvironment={data_environment}\nEnvironment={watcher_environment}\nEnvironment={reconcile_environment}\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n",
+                "[Unit]\nDescription=relay-knowledge background service\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} service run --web --mcp streamable-http\nEnvironment={data_environment}\nEnvironment={topology_name}={topology}\nEnvironment={watcher_environment}\nEnvironment={reconcile_environment}\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n",
                 executable = systemd_quote(executable),
                 data_environment = systemd_quote(&data_environment),
                 watcher_environment = systemd_quote(&watcher_environment),

@@ -317,6 +317,13 @@ relay-knowledge service run --web --mcp streamable-http
 
 ### 14.5.3 安装并启动 Windows Service
 
+服务固定 `D:\relay-knowledge\users\<user-sid>\data` 时会保留原账户的权限策略。
+LocalSystem 在每次服务进程启动后首次打开 SQLite 前重新检查 ACL 和 junction；
+安装时的目录预检不能代替启动校验。该布局由原账户或 LocalSystem 管理，
+其他自定义目录仍由操作者配置权限。已有 SQLite、WAL/SHM 和分片也必须通过文件 ACL 与
+链接校验。生命周期计划只读检查已有 catalog，拒绝 active 分片与 single_sqlite 配置冲突；
+数据库缺失不阻止规划或卸载。服务定义同时固定数据路径和存储拓扑。
+
 以管理员权限打开 PowerShell：
 
 ```powershell
@@ -806,7 +813,7 @@ relay-knowledge audit query --limit 50 --format json
 | 路径 | 默认值 |
 |------|--------|
 | config | `%APPDATA%/relay-knowledge` |
-| data | `%LOCALAPPDATA%/relay-knowledge/data` |
+| data | 新安装：`D:\relay-knowledge\users\<user-sid>\data`；升级保留已有 LocalAppData 数据目录；可用 `RELAY_KNOWLEDGE_DATA_DIR` 覆盖 |
 | state | `%LOCALAPPDATA%/relay-knowledge/state` |
 | cache | `%LOCALAPPDATA%/relay-knowledge/cache` |
 | logs | `%LOCALAPPDATA%/relay-knowledge/logs` |
