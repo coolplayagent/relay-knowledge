@@ -11,6 +11,7 @@ fn dense_configuration_files_fail_at_the_shared_fact_budget() {
     ] {
         let source = line.repeat(10_001);
         let result = extract(&FeatureFlagFileInput {
+            line_index: Default::default(),
             syntax_root: None,
             repository_id: "repo",
             source_scope: "scope",
@@ -54,6 +55,7 @@ fn properties_values_unicode_continuations_and_metadata_are_static_facts() {
 #[test]
 fn java_sdk_flags_survive_registry_extraction() {
     let rows = crate::code::feature_flags::extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -92,6 +94,7 @@ fn annotation_blank_lines_are_boundaries_for_all_natural_line_endings() {
     let annotation = |source: &str| {
         metadata(
             &FeatureFlagFileInput {
+                line_index: Default::default(),
                 syntax_root: None,
                 repository_id: "repo",
                 source_scope: "scope",
@@ -201,6 +204,7 @@ fn annotations_require_source_format_comments() {
 fn sdk_evaluations_reuse_adjacent_annotation_metadata() {
     let content = "class App { void run() {\nvar client = OpenFeature.getClient();\n// @config domain=payments hot-reload=true\nclient.getBooleanValue(\"checkout\", false);\n// @config domain=ignored\n\nclient.getBooleanValue(\"plain\", false);\n}}";
     let rows = crate::code::feature_flags::extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -227,6 +231,7 @@ fn sdk_evaluations_reuse_adjacent_annotation_metadata() {
 #[test]
 fn dotenv_assignments_preserve_nonboolean_and_unknown_definitions() {
     let rows = crate::code::feature_flags::extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",

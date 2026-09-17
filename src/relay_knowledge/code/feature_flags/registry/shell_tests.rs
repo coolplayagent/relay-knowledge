@@ -173,6 +173,7 @@ fn shell_scan_exhaustion_is_explicit_incomplete_analysis() {
         "echo ignored\n".repeat(1100)
     );
     let error = extract(&FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -308,6 +309,7 @@ fn shell_tilde_expansion_defaults_remain_unknown() {
 fn shell_prior_assignment_budget_exhaustion_is_explicit() {
     let source = format!("FLAG=value; {}export FLAG", "echo ignored; ".repeat(1100));
     let error = extract(&FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -654,6 +656,7 @@ fn quoted_set_option_matrix_preserves_allexport_state() {
 fn allexport_static_word_budget_errors_are_observable() {
     let source = format!("set -{}; FLAG=true", "\"a\"".repeat(1100));
     let error = extract(&FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",
@@ -824,6 +827,7 @@ fn loop_bindings_replace_inherited_values_only_inside_the_body() {
 fn export_command_word_budget_errors_remain_observable() {
     let source = format!("{} FLAG=true", "\"ex\"".repeat(1100));
     let error = extract(&FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",

@@ -5,8 +5,10 @@ use crate::domain::{CodeConfigMetadata, CodeFeatureFlagRecord, DomainError};
 mod dotenv;
 mod files;
 mod java;
+mod line_index;
 mod portable;
 mod shell;
+pub(super) use line_index::LineIndex;
 
 pub(super) fn extract(
     input: &FeatureFlagFileInput<'_>,
@@ -81,8 +83,8 @@ fn record(
     let range = ConfigRange {
         byte_start: start,
         byte_end: end,
-        line_start: line_number(&input.content[..start]),
-        line_end: line_number(&input.content[..end]),
+        line_start: input.line_number(start),
+        line_end: input.line_number(end),
     };
     feature_flag_record_from_range(
         input,
@@ -92,15 +94,6 @@ fn record(
         range,
         input.content[start..end].trim(),
     )
-}
-
-fn line_number(prefix: &str) -> usize {
-    let bytes = prefix.as_bytes();
-    1 + bytes
-        .iter()
-        .enumerate()
-        .filter(|(i, b)| **b == b'\r' || (**b == b'\n' && (*i == 0 || bytes[*i - 1] != b'\r')))
-        .count()
 }
 
 pub(super) fn metadata(input: &FeatureFlagFileInput<'_>, start: usize) -> CodeConfigMetadata {

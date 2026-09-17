@@ -47,6 +47,7 @@ async fn feature_flag_query_groups_config_sources_and_guarded_usage() {
     ));
     snapshot.feature_flags.extend(
         extract_feature_flags(FeatureFlagFileInput {
+            line_index: Default::default(),
             syntax_root: None,
             repository_id: "repo",
             source_scope: code_test_support::TEST_SOURCE_SCOPE,

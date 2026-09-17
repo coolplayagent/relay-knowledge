@@ -2,8 +2,19 @@ pub(super) fn find_pattern_with_quotes(
     line: &str,
     pattern: &str,
     start: usize,
-    quote_predicate: fn(char) -> bool,
+    quote_predicate: impl Fn(char) -> bool,
 ) -> Option<usize> {
+    // Most source lines contain none of the queried API names. Use the string
+    // searcher's byte scan before decoding characters and tracking quotes.
+    // `start` can point into a UTF-8 character (callers advance past ASCII
+    // delimiters), so round forward just as the character loop below does.
+    let mut search_start = start.min(line.len());
+    while !line.is_char_boundary(search_start) {
+        search_start += 1;
+    }
+    if start >= line.len() || !line[search_start..].contains(pattern) {
+        return None;
+    }
     let mut quote = None;
     let mut escaped = false;
     let mut index = 0usize;

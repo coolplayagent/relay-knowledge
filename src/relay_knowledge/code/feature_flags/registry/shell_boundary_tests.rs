@@ -25,6 +25,7 @@ fn shell_binding_depth_never_drops_an_enclosing_assignment_silently() {
         " };".repeat(130)
     );
     let input = FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root: None,
         repository_id: "repo",
         source_scope: "scope",

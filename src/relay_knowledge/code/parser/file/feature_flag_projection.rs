@@ -23,6 +23,7 @@ pub(super) fn record_feature_flags(
         }
     };
     let records = extract_feature_flags(FeatureFlagFileInput {
+        line_index: Default::default(),
         syntax_root,
         repository_id: &build.repository_id,
         source_scope: &build.source_scope,

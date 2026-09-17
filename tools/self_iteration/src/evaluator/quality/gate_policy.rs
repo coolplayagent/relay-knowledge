@@ -64,6 +64,19 @@ pub(super) fn quality_gate_stages(
             QualityGateStage::Parallel(vec![bm25_hierarchy_gate()]),
             QualityGateStage::Parallel(vec![code_index_persistence_performance_gate()]),
             QualityGateStage::Parallel(vec![quality_gate(
+                "configuration_scan_work_suite",
+                [
+                    "cargo",
+                    "test",
+                    "--lib",
+                    "--all-features",
+                    "configuration_scan_work_suite",
+                    "--",
+                    "--nocapture",
+                ],
+                120,
+            )]),
+            QualityGateStage::Parallel(vec![quality_gate(
                 "code_index_source_io_isolation_build",
                 [
                     "cargo",
@@ -347,6 +360,7 @@ pub(super) fn quality_budget_ms(name: &str) -> Option<f64> {
         "code_index_sqlite_lock_cases" => Some(60_000.0),
         "bm25_hierarchy_suite" => Some(30_000.0),
         "code_index_persistence_performance_suite" => Some(30_000.0),
+        "configuration_scan_work_suite" => Some(30_000.0),
         "self_iteration_cargo_check" => Some(30_000.0),
         "cargo_build_release" => Some(180_000.0),
         "self_iteration_cargo_build_release" => Some(60_000.0),
