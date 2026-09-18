@@ -223,6 +223,7 @@ pub(super) fn call_rows_to_hits(
                 )
                 .or_else(|| inferred_caller_name_from_excerpt(row.caller_excerpt.as_deref()))
                 .unwrap_or_else(|| "<module>".to_owned());
+                let resolved_callee = row.callee_symbol_snapshot_id.is_some();
                 let (symbol_snapshot_id, canonical_symbol_id) =
                     if request.code_query_kind == CodeQueryKind::Callees {
                         (
@@ -235,6 +236,21 @@ pub(super) fn call_rows_to_hits(
                             row.caller_canonical_symbol_id,
                         )
                     };
+                let display_callee = if resolved_callee {
+                    row.callee_name.as_str()
+                } else {
+                    row.target_hint.as_deref().unwrap_or(&row.callee_name)
+                };
+                let excerpt = if request.code_query_kind == CodeQueryKind::Callees {
+                    callee_excerpt(
+                        row.caller_excerpt.as_deref(),
+                        row.callee_excerpt.as_deref(),
+                        &caller,
+                        display_callee,
+                    )
+                } else {
+                    call_excerpt(row.caller_excerpt.as_deref(), &caller, display_callee)
+                };
                 hit_from_parts(
                     status,
                     HitParts {
@@ -252,16 +268,7 @@ pub(super) fn call_rows_to_hits(
                             + 1.25
                             + call_edge_confidence_bonus(row.confidence_basis_points),
                         is_generated: row.is_generated,
-                        excerpt: if request.code_query_kind == CodeQueryKind::Callees {
-                            callee_excerpt(
-                                row.caller_excerpt.as_deref(),
-                                row.callee_excerpt.as_deref(),
-                                &caller,
-                                &row.callee_name,
-                            )
-                        } else {
-                            call_excerpt(row.caller_excerpt.as_deref(), &caller, &row.callee_name)
-                        },
+                        excerpt,
                         degraded_reason: None,
                         edge_kind: Some("call".to_owned()),
                         edge_resolution_state: Some(row.resolution_state),

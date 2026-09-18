@@ -22,7 +22,7 @@
       "id": "java_class_member_callees", "repository": "java_class_calls",
       "query": "Processor", "kind": "callees", "guardrail": true,
       "limit": 5, "max_rank": 1, "degraded_reason": false,
-      "expected": [{"path": "src/Processor.java", "retrieval_layer": "call_graph", "excerpt_contains": "processItem calls println"}],
+      "expected": [{"path": "src/Processor.java", "retrieval_layer": "call_graph", "excerpt_contains": "processItem calls System.out.println"}],
       "case_group": "index_performance"
     }
   ]

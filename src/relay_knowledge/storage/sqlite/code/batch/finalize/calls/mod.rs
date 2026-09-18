@@ -8,7 +8,10 @@ use super::{
     search_documents,
     symbols::{self, SymbolKey},
 };
-use crate::{identity::stable_hash64, storage::StorageError};
+use crate::{
+    domain::code_call_targets::materialized_call_name, identity::stable_hash64,
+    storage::StorageError,
+};
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
@@ -69,10 +72,11 @@ pub(super) fn rebuild(
             .target_symbol_snapshot_id
             .as_deref()
             .and_then(|symbol_id| by_symbol_id.get(symbol_id).copied());
-        let callee_name = callee
-            .map(|symbol| symbol.name.as_str())
-            .or(reference.target_hint.as_deref())
-            .unwrap_or(reference.name.as_str());
+        let callee_name = materialized_call_name(
+            callee.map(|symbol| symbol.name.as_str()),
+            &reference.name,
+            reference.target_hint.as_deref(),
+        );
         let call_id = stable_id(
             "call",
             [

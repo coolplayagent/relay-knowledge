@@ -26,6 +26,27 @@ pub(crate) fn call_target_name_candidates(name: &str, path: &str) -> Vec<String>
     candidates
 }
 
+pub(crate) fn materialized_call_name<'a>(
+    resolved_name: Option<&'a str>,
+    reference_name: &'a str,
+    target_hint: Option<&'a str>,
+) -> &'a str {
+    if let Some(resolved_name) = resolved_name {
+        return resolved_name;
+    }
+    // A qualified lookup identity can prepend a package or namespace to the
+    // receiver written in source. Keep that source-facing name, while a field
+    // call's longer receiver expression remains only a target hint.
+    if let Some(hint) = target_hint
+        && !hint.is_empty()
+        && let Some(prefix) = reference_name.strip_suffix(hint)
+        && (prefix.ends_with('.') || prefix.ends_with("::"))
+    {
+        return hint;
+    }
+    reference_name
+}
+
 pub(crate) fn callable_target_symbol_kind(kind: &str) -> bool {
     matches!(
         kind,

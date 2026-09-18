@@ -412,7 +412,7 @@
       "guardrail": true,
       "limit": 500,
       "max_rank": 500,
-      "status_projection_schema_version": 8,
+      "status_projection_schema_version": 9,
       "status_ontology_version": "1.0.0",
       "status_completeness_basis_points_min": 10000,
       "expected": [

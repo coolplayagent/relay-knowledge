@@ -2,6 +2,9 @@
 
 use std::collections::BTreeMap;
 
+#[path = "member_call_tests.rs"]
+mod member_call_tests;
+
 use crate::{
     domain::{
         CodeImportRecord, CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession,

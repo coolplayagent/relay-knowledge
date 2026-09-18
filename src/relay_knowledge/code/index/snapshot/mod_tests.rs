@@ -55,6 +55,32 @@ fn call_materialization_keeps_scoped_hint_and_resolved_callee_name() {
 }
 
 #[test]
+fn unresolved_member_call_keeps_lookup_name_separate_from_receiver_hint() {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+            .expect("registration");
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree".to_owned(),
+        true,
+        1,
+        0,
+    );
+    let mut call = reference("indirect-call", "src/dispatch.c", "read", 2);
+    call.target_hint = Some("table[stage].read".to_owned());
+    call.confidence_tier = "extracted".to_owned();
+    build.references.push(call);
+
+    let snapshot = build.finish();
+    let call = snapshot.calls.first().expect("call should materialize");
+
+    assert_eq!(call.callee_name, "read");
+    assert_eq!(call.target_hint.as_deref(), Some("table[stage].read"));
+    assert_eq!(call.resolution_state, "unresolved");
+}
+
+#[test]
 fn indexed_workspace_descendant_scan_respects_directory_and_entry_limits() {
     let entries = (0..8)
         .map(|index| GitTreeEntry {

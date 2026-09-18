@@ -59,6 +59,8 @@ Hybrid source-surface refresh 在为既有 structured symbol range 选择代表 
 
 FTS 和 source-fallback candidate window 必须先应用 scope/path/language filter，再进入有界评分。高 fan-out caller/callee 查询需要按 edge score 和 line containment 截断，避免一条调用边被多个无关 chunk 放大。
 
+调用边的 `callee_name` 应保存解析器提取的可索引成员名；若索引身份只是在源码接收者前增加包名或命名空间，则保留 `target_hint` 中的源码接收者名。`target_hint` 继续保存完整接收者、下标或作用域表达式；已解析边使用目标 symbol 名作为调用名。这样函数指针字段和未解析成员调用仍能由精确调用名索引召回，同时向用户展示原始目标线索；不能以文本 fallback 代替已具备结构化事实的调用边。
+
 分层 Hybrid chunk 检索必须区分 probe precision 与最终 recall：structured、focused、lifecycle、compound 和 strict probe 保持 40 到 120 的窄候选窗口；最后的 broad OR-FTS fallback 使用既有的普通 Chunk 有界窗口 300 到 900，合并结果仍在该 broad 上限内去重、评分和截断。Exact-file filter 只有在查询是真正的 single-symbol identity 时才允许 symbol-only 提前返回；多词或 contextual query 必须执行有界 chunk 层。它们的 exact-path source fallback 只能在两个不同的结构化 identity anchor 共同指向不完整 source surface 时使用，不得只重新搜索一个已覆盖 identity。
 
 当 unresolved external import edge 的 import-graph excerpt 已包含 source-like statement，且解析出的 specifier 与 edge target 一致时，该 edge 已提供完整 source evidence。外部 package 源码缺失不是 source-text recall gap，因此这种完整 surface 不再物化 candidate blob，也不运行内部 grep。Relative import、dynamic-import intent、不完整 excerpt，以及完整/不完整混合结果集仍沿用既有受界 fallback 与授权校验。

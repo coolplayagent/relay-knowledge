@@ -7,10 +7,10 @@ what was checked at a particular revision; it does not certify later changes.
 For current release readiness, rerun the repository's active quality gates and
 record the exact commands, revision, environment, and any skipped checks.
 
-The current focused durable-indexing evidence is
+The current fast self-iteration case evidence is
+[Self-Iteration Failed-Case Verification 2026-09-18](18-self-iteration-failed-cases-2026-09-18.md).
+The earlier focused durable-indexing evidence remains in
 [Durable Worktree Delta and Pinned Query Verification 2026-08-31](15-durable-worktree-delta-and-pinned-query-2026-08-31.md).
-The preceding software-global ordering evidence remains in
-[Software-Global Evidence Priority Verification 2026-08-31](14-software-global-evidence-priority-2026-08-31.md).
 Overall release readiness remains governed by
 [Documentation and Self-Iteration Readiness Verification 2026-08-18](13-documentation-self-iteration-readiness-2026-08-18.md).
 The 2026-06-05 documentation audit remains a historical snapshot.
@@ -34,6 +34,7 @@ The 2026-06-05 documentation audit remains a historical snapshot.
 15. [Durable Worktree Delta and Pinned Query Verification 2026-08-31](15-durable-worktree-delta-and-pinned-query-2026-08-31.md)
 16. [Map and Graph Storage Acceptance 2026-09-07](16-map-graph-storage-acceptance-2026-09-07.md)
 17. [Lossless Cold-Index Verification 2026-09-17](17-lossless-cold-index-2026-09-17.md)
+18. [Self-Iteration Failed-Case Verification 2026-09-18](18-self-iteration-failed-cases-2026-09-18.md)
 
 Records 3 and 4 remain explicit positions in the chronological index even
 though their English translations are pending. This keeps record identity

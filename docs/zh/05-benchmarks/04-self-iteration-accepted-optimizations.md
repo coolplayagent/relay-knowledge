@@ -14,6 +14,12 @@
 tracked report，记录 revision/report digest、profile、product binary、selected/executed/skipped、
 预算、环境和结果，而不能把本机 patch cache 当作 acceptance 证明。
 
+## 已采纳：调用名与接收者线索分离及 schema guardrail 同步（2026-09-18）
+
+- 基线：远端 `main` 的 `fcedd99e` 在 release 产品二进制的本机 fast 评估中通过 396/399 gates、128/132 cases；C 函数指针 caller、Java 类成员 callee 与两个软件投影版本断言失败。项目别名查询 p95 为 353/150 ms，仍需复测。聚焦 C 复测再次返回空结果，证明该召回缺口可重复。
+- 算法与所有权：代码快照物化和 SQLite durable finalize 的调用边重建均将未解析调用的 `callee_name` 保持为 parser 提取的可索引成员名，接收者或下标表达式只保留在 `target_hint`；已解析调用仍取目标 symbol 名。C 的函数指针字段和 Java 成员调用因此可通过既有调用边查询，无需 grep 兜底、特殊路径或扩大候选窗口。两个软件 self-iteration guardrail 的 projection schema 断言从 8 同步到当前产品常量 9，仍要求完整 provenance、ontology 与 completeness。
+- 不变量、风险与验证：保留原始接收者提示、edge resolution/confidence、全部 reference/call/FTS 写入、任务租约、检查点、发布屏障和各项资源预算。全量测试发现 Java 未知类型的包限定 lookup 名需保留源码接收者显示，现以通用后缀关系处理；调用命中的 excerpt 仍使用未解析边的原始 `target_hint`，索引匹配使用 `callee_name`，避免改变 Java 与多语言成员调用的展示契约。Java self-iteration excerpt 断言同步到已有集成测试要求的源码表达式 `System.out.println`，仍要求第一名、精确路径与 call graph 层。软件依赖投影按包含 scope 的 opaque component ID 分页，十项事实在不同 scope 下没有稳定的前六名；其 guardrail 改为十项范围内的完整事实检查，保留 `expected_all`、生态、版本、证据路径及状态断言。完整 release 产品 fast 评估为 `would_accept`，399/399 gates、132/132 cases，项目别名 p95 56/150 ms；全量测试与最终代码 90.05443% 单元测试行覆盖率通过。状态 `accepted` 仅限本机 fast 范围，报告及 patch 摘要见[2026-09-18 验证记录](../06-verification/18-self-iteration-failed-cases-2026-09-18.md)，不代表高并发探索配置、full/exhaustive 或跨平台发版认证。
+
 ## 已采纳：冷索引配置扫描与全文写入的无损优化（2026-09-17）
 
 - 状态：`accepted`，仅限已完成的 focused A/B 和本地验证范围；以 `df331786` 为基线，八项耗时场景全部执行、无跳过。测量身份、原始报告摘要及质量验证见[2026-09-17 验证记录](../06-verification/17-lossless-cold-index-2026-09-17.md)，不等同于整轮 self-iteration evaluator 采纳或整体发版认证。

@@ -6,7 +6,7 @@ use crate::domain::{
     CodeCallRecord, CodeFrameworkEdgeRecord, CodeFrameworkNodeRecord, CodeIndexSnapshot,
     CodeMonorepoWorkspace, CodePathTombstone, CodeRepositoryRegistration, CodeRepositorySelector,
     CodeRouteRecord, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
-    code_snapshot_scope_id,
+    code_call_targets::materialized_call_name, code_snapshot_scope_id,
 };
 
 use super::{identity, ids::stable_id};
@@ -370,13 +370,17 @@ impl SnapshotBuild {
                     })
                     .unwrap_or((None, None));
 
-                let callee_name = reference
+                let resolved_name = reference
                     .target_symbol_snapshot_id
                     .as_deref()
                     .and_then(|symbol_id| symbols_by_id.get(symbol_id))
-                    .map(|symbol| symbol.name.clone())
-                    .or_else(|| reference.target_hint.clone())
-                    .unwrap_or_else(|| reference.name.clone());
+                    .map(|symbol| symbol.name.as_str());
+                let callee_name = materialized_call_name(
+                    resolved_name,
+                    &reference.name,
+                    reference.target_hint.as_deref(),
+                )
+                .to_owned();
 
                 CodeCallRecord {
                     byte_range: Some(reference.byte_range.clone()),

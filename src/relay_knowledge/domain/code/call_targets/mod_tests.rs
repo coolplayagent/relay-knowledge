@@ -3,6 +3,27 @@
 use super::*;
 
 #[test]
+fn call_materialization_keeps_source_receiver_without_using_complex_hint_as_lookup_name() {
+    assert_eq!(
+        materialized_call_name(None, "demo.Missing.process", Some("Missing.process")),
+        "Missing.process"
+    );
+    assert_eq!(
+        materialized_call_name(None, "read", Some("table[stage].read")),
+        "read"
+    );
+    assert_eq!(
+        materialized_call_name(None, "println", Some("System.out.println")),
+        "println"
+    );
+    assert_eq!(
+        materialized_call_name(Some("resolved"), "read", Some("table[stage].read")),
+        "resolved"
+    );
+    assert_eq!(materialized_call_name(None, "foo.", Some("")), "foo.");
+}
+
+#[test]
 fn cgo_and_ffi_surfaces_add_leaf_candidate() {
     assert_eq!(
         call_target_name_candidates("C.rk_c_decode", "bridge/go_bridge.go"),
