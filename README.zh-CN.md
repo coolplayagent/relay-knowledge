@@ -46,8 +46,10 @@ target/debug/relay-knowledge help --format json
 
 ## 安装发布版
 
-1.1.17 引入只保留最近 16 条历史的 Repository Map v4。迁移、备份与安装说明见
-[1.1.17 发布说明](pages/zh/releases/1.1.17.html)。
+1.1.18 改进代码调用检索和索引诊断，加入 Maven reactor 依赖证据，
+并加强 Windows SQLite 默认存储目录。安装、升级和回滚说明见
+[1.1.18 发布说明](pages/zh/releases/1.1.18.html)。Repository Map v4
+仍要求 1.1.17 或更新的 reader。
 
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)
 提供 Linux x64/ARM64、macOS Intel/Apple Silicon 和 Windows x64/ARM64

@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 3.14
-> 编制日期: 2026-08-30
+> 文档版本: 3.15
+> 编制日期: 2026-09-18
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -18,6 +18,8 @@
 - Release tag 使用 `vX.Y.Z`、`X.Y.Z` 或 `vX.Y.Z-rc.1` 这类 prerelease 形式；数字版本必须在推送 tag 前与 `Cargo.toml` 和 `Cargo.lock` 保持一致。手动 dry-run dispatch 复用同一版本契约，但不会发布 crates.io 或 GitHub release 产物；workflow 默认 dry-run tag 必须随每次 release 版本提升同步更新。
 - v1.1.17 release 将 `Cargo.toml`、`Cargo.lock`、CLI skill metadata 和 release workflow dry-run 默认值统一固定到 `1.1.17`；发布仍由 tag 驱动，只有推送 `v1.1.17` 或 `1.1.17` 到 GitHub 后才会开始。该版本引入 Repository Map v4 recent-only history contract。源码开发版本必须领先于 crates.io stable，禁止未发布行为与不兼容的已发布 binary 共用版本号。
 - v1.1.17 同步提供中英文 Pages 发布说明与首页入口。将已审查的发布提交推送到 `main` 触发 Pages，再将指向同一提交的 `v1.1.17` tag 推送到 GitHub 触发 Release。宣布完成前，必须核验两条 Actions、六个平台压缩包、CLI skill 包、checksums、crates.io 版本以及线上发布页面。
+- v1.1.18 将 manifest、lock、CLI skill metadata 与 workflow dry-run 默认值同步提升到 `1.1.18`，并新增对应的中英文 Pages 发布说明。将同一已审查提交推送到 `main` 并确认 Pages 成功，再运行 `v1.1.18` dry-run Actions；验证通过后推送指向该提交的 tag，等待 Release、crates.io 与 CLI skill 发布完成。核验六个平台压缩包、checksums、发布说明、两种语言的线上页面和版本链接。schema 9 Maven 投影、Windows 账户 SID 数据目录及降级备份要求见[1.1.18 发布说明](../../../pages/zh/releases/1.1.18.html)。
+- Release verify 的单元及集成测试仍覆盖全部 target 和 feature；测试编译限制为一个 Cargo job，并禁用测试二进制的调试信息，以控制大型 crate 在 hosted runner 上的编译峰值内存。该设置不跳过测试、不更改断言或产品 release 构建。
 - macOS x64 release job 必须使用仍可用的 Intel runner label，例如 `macos-15-intel`，不能继续依赖已退休的 `macos-13` 镜像。Artifact upload/download 和 attestation action 必须保持在兼容 Node 24 的版本，确保 GitHub-hosted runner runtime 迁移后 release workflow 仍可运行。
 - 仓库 Pages 站点必须由管理员一次性启用并设置 `build_type=workflow`。Pages workflow 使用兼容 Node 24 的 `configure-pages`、`upload-pages-artifact` 与 `deploy-pages` release，不得让权限受限的 `GITHUB_TOKEN` 在每次 push 时重复创建或启用站点。上传前必须从 `Cargo.toml` 推导当前 package version，并要求中英文 release page、首页入口、GitHub Release 链接和 crates.io 链接一致；页面仍停留在旧版本或只更新一种语言时必须拒绝部署，不能静默发布过期内容。
 - Linux GNU release job 必须在架构匹配的 GitHub-hosted runner 上，分别使用固定 digest 的 manylinux 2.28 x64 与 ARM64 容器原生构建 `x86_64-unknown-linux-gnu` 和 `aarch64-unknown-linux-gnu` 产物。容器必须在构建前断言实际 glibc 为 2.28，并在容器内启动新 binary；如果产出的 ELF 需要任何高于 2.28 的 `GLIBC_*` 符号，release 必须失败。CLI skill 内置的 Linux x64 asset 打包后也必须通过同一 ABI 检查。

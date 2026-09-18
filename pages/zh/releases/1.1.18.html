@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="relay-knowledge 1.1.18 发布说明：Maven reactor 证据、代码检索、索引诊断与 Windows SQLite 存储。"
+    />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.18 发布说明</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="页面导航">
+        <a href="../">中文文档</a>
+        <a href="../../en/releases/1.1.18.html">English</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.18">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.18 发布说明</h1>
+        <p>
+          1.1.18 增加 Maven reactor 依赖证据和下游影响查询，改进代码调用检索与索引诊断，
+          并加强 Windows SQLite 默认存储目录和校验。
+        </p>
+        <p>发布日期：2026 年 9 月 18 日。</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.18">发布与下载</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.18">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.18/checksums.txt">Checksums</a>
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>安装与验证</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.18 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json
+relay-knowledge service doctor --format json</code></pre>
+        <p>
+          Release 提供六个平台二进制压缩包。安装前用 <code>checksums.txt</code>
+          校验所选压缩包；独立的 CLI skill 包与二进制在同一个 GitHub Release 发布。
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>本版变化</h2>
+        <ul>
+          <li>Maven reactor 模块与关系成为按快照保存的事实，依赖和下游影响视图支持分页。</li>
+          <li>配置读取、跨语言类型调用、Java 类成员调用及未解析的 C 函数指针调用具有更完整的图谱证据。</li>
+          <li>索引诊断提供有界预览、明确的截断和内容完整性状态，并暴露源码 I/O 失败，不掩盖 stale 或 degraded scope。</li>
+          <li>冷索引减少配置扫描工作与全文检索参数的临时复制，仍保留持久检查点和检索文档。</li>
+          <li>Windows 新安装使用受保护 ACL 的账户 SID SQLite 数据目录；升级时继续选择已有 LocalAppData 存储。</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>升级与回滚</h2>
+        <p class="notice">
+          软件投影 schema 9 会使已有 Maven 投影进入 stale 状态，直到持久修复或重新索引完成。
+          查询 reactor 模块或下游影响前，应等待任务完成。升级前备份 runtime database 和全部分片。
+          降级前停止服务、等待或取消活动任务，再恢复一致的升级前数据库备份；不要手工修改
+          reactor marker 或 checkpoint。
+        </p>
+        <p>
+          Windows 新安装需预先配置 <code>D:\relay-knowledge\users\&lt;user-sid&gt;\data</code>
+          下的账户 SID 目录，或将 <code>RELAY_KNOWLEDGE_DATA_DIR</code> 指向绝对且可写的目录。
+          已有数据不会自动搬迁。替换常驻服务二进制前，先执行服务生命周期 dry-run 和
+          <code>service doctor</code>。Repository Map v4 仍要求 1.1.17 或更新的 reader；
+          使用更旧版本前，先从 Git 或备份恢复 map 文件。
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>发布产物</h2>
+        <ul>
+          <li>Linux x64 与 ARM64，在 glibc 2.28 基线上构建并启动验证</li>
+          <li>macOS Intel 与 Apple Silicon</li>
+          <li>Windows x64 与 ARM64</li>
+          <li>用于 agent CLI 工作流的 <code>relay-knowledge-cli-skill-v1.1.18.tar.gz</code></li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>进一步阅读</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.18/docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md">安装、发布与升级</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.18/docs/zh/03-architecture-specs/21-software-global-domain-modeling.md">软件全域模型</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.18/docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md">代码检索与影响</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

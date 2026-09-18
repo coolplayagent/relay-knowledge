@@ -10,7 +10,7 @@ on:
       dry_run_tag:
         description: Tag-like version to validate without creating a release.
         required: true
-        default: v1.1.17
+        default: v1.1.18
 
 permissions:
   contents: read
@@ -91,7 +91,9 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Unit and integration test suite
-        run: cargo test --all-targets --all-features
+        env:
+          CARGO_PROFILE_TEST_DEBUG: '0'
+        run: cargo test --jobs 1 --all-targets --all-features
 
       - name: Package crate
         run: cargo package
@@ -491,6 +493,27 @@ jobs:
         run: |
           set -euo pipefail
           cat > release-notes.md <<'NOTES'
+          ## Version 1.1.18
+
+          This release adds Maven reactor dependency evidence and downstream impact,
+          improves code-call retrieval and index diagnostics, and strengthens Windows
+          SQLite storage defaults and validation. Cold indexing reduces configuration
+          scanning and temporary full-text-search parameter copies while retaining
+          durable checkpoints and search documents.
+
+          ## Upgrade
+
+          Software projection schema 9 marks existing Maven projections stale until
+          durable repair or reindex finishes. Back up the runtime database and all
+          shards before upgrading; before downgrading, stop the service, drain or
+          cancel active tasks, and restore a consistent pre-upgrade backup. New
+          Windows installations require a provisioned account-SID data directory
+          or an explicit absolute writable `RELAY_KNOWLEDGE_DATA_DIR`. Existing
+          LocalAppData stores remain selected and are not moved automatically.
+          Repository Map v4 still requires a 1.1.17 or newer reader.
+
+          Full notes: https://coolplayagent.github.io/relay-knowledge/en/releases/1.1.18.html
+
           ## Install
 
           Download the archive for your platform from this release, verify it with `checksums.txt`, and place the `relay-knowledge` binary on your PATH.

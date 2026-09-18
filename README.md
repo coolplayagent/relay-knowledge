@@ -51,9 +51,11 @@ target/debug/relay-knowledge help --format json
 
 ## Installing Releases
 
-Version 1.1.17 introduces Repository Map v4 with the latest 16 history entries.
-See the [1.1.17 release notes](pages/en/releases/1.1.17.html) for migration,
-backup, and installation guidance.
+Version 1.1.18 improves code-call retrieval and index diagnostics, adds Maven
+reactor dependency evidence, and strengthens Windows SQLite storage defaults.
+See the [1.1.18 release notes](pages/en/releases/1.1.18.html) for installation,
+upgrade, and rollback guidance. Repository Map v4 still requires a 1.1.17 or
+newer reader.
 
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)
 provide prebuilt archives for Linux x64/ARM64, macOS Intel/Apple Silicon, and

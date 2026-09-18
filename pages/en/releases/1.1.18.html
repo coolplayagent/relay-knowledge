@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="relay-knowledge 1.1.18 release notes: Maven reactor evidence, code retrieval, index diagnostics, and Windows SQLite storage."
+    />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.18 release notes</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="Page navigation">
+        <a href="../">English documentation</a>
+        <a href="../../zh/releases/1.1.18.html">中文</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.18">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.18 release notes</h1>
+        <p>
+          Version 1.1.18 adds Maven reactor dependency evidence and downstream impact,
+          improves code-call retrieval and index diagnostics, and strengthens Windows
+          SQLite storage defaults and validation.
+        </p>
+        <p>Release date: September 18, 2026.</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.18">Release downloads</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.18">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.18/checksums.txt">Checksums</a>
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Install and verify</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.18 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json
+relay-knowledge service doctor --format json</code></pre>
+        <p>
+          Release archives contain six platform binaries. Verify the selected archive
+          against <code>checksums.txt</code> before installing it. The CLI skill archive
+          is distributed separately in the same GitHub Release.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>What changed</h2>
+        <ul>
+          <li>Maven reactor modules and relationships are indexed as snapshot-scoped facts, with paginated dependency and downstream-impact views.</li>
+          <li>Configuration reads, cross-language type calls, Java class-member calls, and unresolved C function-pointer calls have more complete graph evidence.</li>
+          <li>Index diagnostics expose bounded previews, explicit truncation, content-integrity state, and source I/O failures without hiding stale or degraded scopes.</li>
+          <li>Cold indexing reduces configuration-scan work and temporary full-text-search parameter copies while retaining durable checkpoints and search documents.</li>
+          <li>New Windows installations use an account-SID SQLite data path with protected ACLs; existing LocalAppData stores remain selected during upgrade.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Upgrade and rollback</h2>
+        <p class="notice">
+          Software projection schema 9 makes existing Maven projections stale until a
+          durable repair or reindex completes. Allow that work to finish before relying
+          on reactor modules or downstream impact. Back up the runtime database and all
+          shards before upgrade. Before downgrading, stop the service, drain or cancel
+          active tasks, and restore a consistent pre-upgrade database backup. Do not edit
+          reactor markers or checkpoints by hand.
+        </p>
+        <p>
+          On Windows, provision the account-SID directory under
+          <code>D:\relay-knowledge\users\&lt;user-sid&gt;\data</code> for new installs,
+          or set <code>RELAY_KNOWLEDGE_DATA_DIR</code> to an absolute writable directory.
+          Existing data is not moved automatically. Run the service lifecycle dry-run and
+          <code>service doctor</code> before replacing a resident binary. Repository Map
+          v4 still requires a 1.1.17 or newer reader; restore map files from Git or backup
+          before using an older reader.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Release packages</h2>
+        <ul>
+          <li>Linux x64 and ARM64, built and smoke-tested on a glibc 2.28 baseline</li>
+          <li>macOS Intel and Apple Silicon</li>
+          <li>Windows x64 and ARM64</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.18.tar.gz</code> for agent CLI workflows</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+
+      <section class="section">
+        <h2>Further reading</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.18/docs/en/03-architecture-specs/19-installation-release-and-upgrade.md">Installation, release, and upgrade</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.18/docs/en/03-architecture-specs/21-software-global-domain-modeling.md">Software-global domain model</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.18/docs/en/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md">Code retrieval and impact</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
