@@ -113,28 +113,33 @@ fn read_domains(
         let domain_id = row.get::<_, String>("domain_id")?;
         Ok((
             row.get::<_, usize>("authority_rank")?,
-            BusinessDomain {
-                identity: ontology_identity(
-                    &status.repository_id,
-                    &domain_id,
-                    &domain_id,
-                    OntologyEntityKind::BusinessDomain,
-                ),
-                entity_id: row.get("entity_id")?,
-                id: domain_id,
-                name: row.get("name")?,
-                description: row.get("description")?,
-                evidence: evidence_from_row(
-                    row,
-                    &status.resolved_commit_sha,
-                    &EvidenceColumns::BUSINESS_DOMAIN,
-                )?,
-            },
+            domain_id,
+            row.get::<_, String>("entity_id")?,
+            row.get::<_, String>("name")?,
+            row.get::<_, Option<String>>("description")?,
+            evidence_from_row(
+                row,
+                &status.resolved_commit_sha,
+                &EvidenceColumns::BUSINESS_DOMAIN,
+            )?,
         ))
     })?;
     let mut preferred = BTreeMap::new();
     for row in rows {
-        let (rank, domain) = row?;
+        let (rank, domain_id, entity_id, name, description, evidence) = row?;
+        let domain = BusinessDomain {
+            identity: ontology_identity(
+                &status.repository_id,
+                &domain_id,
+                &domain_id,
+                OntologyEntityKind::BusinessDomain,
+            )?,
+            entity_id,
+            id: domain_id,
+            name,
+            description,
+            evidence,
+        };
         preferred.entry(domain.id.clone()).or_insert((rank, domain));
     }
     Ok(preferred.into_values().map(|(_, domain)| domain).collect())
@@ -206,7 +211,7 @@ fn materialize_term(
             &preferred.domain_id,
             &preferred.term_id,
             OntologyEntityKind::BusinessTerm,
-        ),
+        )?,
         entity_id: preferred.entity_id.clone(),
         id: preferred.term_id.clone(),
         domain_id: preferred.domain_id.clone(),

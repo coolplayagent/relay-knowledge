@@ -176,14 +176,21 @@ pub(super) fn ontology_identity(
     domain_id: &str,
     entity_id: &str,
     kind: OntologyEntityKind,
-) -> OntologyIdentity {
+) -> Result<OntologyIdentity, StorageError> {
+    let source_scope = SourceScope::parse(repository_id).map_err(|error| {
+        StorageError::Invariant(format!("invalid stored business repository id: {error}"))
+    })?;
     OntologyIdentity::new(
-        SourceScope::parse(repository_id).expect("stored repository id must be valid"),
+        source_scope,
         domain_id.to_owned(),
         entity_id.to_owned(),
         kind,
     )
-    .expect("stored ontology identity must be valid")
+    .map_err(|error| {
+        StorageError::Invariant(format!(
+            "invalid stored business ontology identity: {error}"
+        ))
+    })
 }
 
 pub(super) fn parse_term_status(value: &str) -> Result<BusinessTermStatus, StorageError> {

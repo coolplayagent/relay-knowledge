@@ -100,6 +100,98 @@ async fn projection_preserves_homonyms_conflicts_and_unresolved_hints() {
     );
 }
 
+#[tokio::test]
+async fn projection_query_rejects_invalid_persisted_repository_id() {
+    let store = SqliteGraphStore::open_in_memory().expect("store");
+    store
+        .upsert_code_repository(registration())
+        .await
+        .expect("repository");
+    store
+        .replace_business_knowledge_projection(projection())
+        .await
+        .expect("projection");
+    store
+        .run(|connection| {
+            connection.execute(
+                "UPDATE business_knowledge_status SET repository_id = '' WHERE source_scope = 'scope-1'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("stored repository id should be corrupted");
+
+    let request = BusinessKnowledgeQueryRequest::new(
+        CodeRepositorySelector::new("repository-1", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        None,
+        None,
+        BusinessKnowledgeQueryKind::All,
+        FreshnessPolicy::AllowStale,
+        20,
+    )
+    .expect("request");
+    let error = store
+        .run_read_snapshot(move |connection| {
+            super::projection_for_scope(connection, "scope-1", request)
+        })
+        .await
+        .expect_err("invalid stored repository id should fail the query");
+
+    assert!(matches!(
+        error,
+        crate::storage::StorageError::Invariant(message)
+            if message.contains("invalid stored business repository id")
+    ));
+}
+
+#[tokio::test]
+async fn projection_query_rejects_invalid_persisted_domain_id() {
+    let store = SqliteGraphStore::open_in_memory().expect("store");
+    store
+        .upsert_code_repository(registration())
+        .await
+        .expect("repository");
+    store
+        .replace_business_knowledge_projection(projection())
+        .await
+        .expect("projection");
+    store
+        .run(|connection| {
+            connection.execute(
+                "UPDATE business_domains SET domain_id = '' WHERE source_scope = 'scope-1' AND domain_id = 'support'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("stored domain id should be corrupted");
+
+    let request = BusinessKnowledgeQueryRequest::new(
+        CodeRepositorySelector::new("repository-1", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        None,
+        None,
+        BusinessKnowledgeQueryKind::All,
+        FreshnessPolicy::AllowStale,
+        20,
+    )
+    .expect("request");
+    let error = store
+        .run_read_snapshot(move |connection| {
+            super::projection_for_scope(connection, "scope-1", request)
+        })
+        .await
+        .expect_err("invalid stored domain id should fail the query");
+
+    assert!(matches!(
+        error,
+        crate::storage::StorageError::Invariant(message)
+            if message.contains("invalid stored business ontology identity")
+    ));
+}
+
 pub(super) fn registration() -> crate::domain::CodeRepositoryRegistration {
     crate::domain::CodeRepositoryRegistration::new(
         "repository-1",
