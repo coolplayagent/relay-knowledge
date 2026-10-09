@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="relay-knowledge 1.1.19: atomic map batches, scoped research evidence and durable software feedback." />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.19 release notes</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="Page navigation">
+        <a href="../">English documentation</a>
+        <a href="../../zh/releases/1.1.19.html">中文</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.19">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.19 release notes</h1>
+        <p>Atomic map changes, scoped research evidence and durable software feedback now share the CLI and Web application services.</p>
+        <p>Release date: October 9, 2026.</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.19">Release downloads</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.19">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.19/checksums.txt">Checksums</a>
+        </p>
+      </section>
+      <section class="section">
+        <h2>Install and verify</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.19 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json
+relay-knowledge service doctor --format json</code></pre>
+        <p>Download the archive for your platform and verify its checksum and GitHub attestation before installation. The separate CLI skill archive includes the same version's Linux x64 and Windows x64 binaries.</p>
+      </section>
+      <section class="section">
+        <h2>What changed</h2>
+        <ul>
+          <li><code>map plan</code> and <code>map apply</code> validate up to 100 ordered source changes and publish one map version. Version/digest preconditions, bounded replay receipts and existing writer locks prevent partial batch publication.</li>
+          <li><code>sources audit</code> verifies explicitly declared local captures and extraction bindings. Authored evidence bundles support validation, scoped import/export, graph views and impact proposals while preserving source hashes and proposed fact status.</li>
+          <li><code>research status</code> reports archive, authored-graph and GraphRAG readiness separately. Fresh indexes, intact bytes and self-reported review claims do not establish that a research question is answered.</li>
+          <li>Nine feedback commands preserve private local reports, preview public payloads, deduplicate publication and reconcile uncertain sends. GitHub publication requires explicit policy; fix verification requires separately authorized runner evidence.</li>
+          <li>Feedback validation enforces UTF-8 byte bounds and final report size after correlation IDs are filled. Web status rejects invalid ID types, and GitHub rate-limit deadlines survive restart without early remote retries.</li>
+          <li>Invalid stored ontology identities receive explicit handling. The browser-test dependency lock updates urllib3 from 2.7.0 to 2.8.0.</li>
+        </ul>
+      </section>
+      <section class="section">
+        <h2>Upgrade and rollback</h2>
+        <p class="notice">Back up repository-owned maps, captured sources and evidence bundles, the runtime database and all shards, and the private runtime <code>feedback</code> directory. Stop resident services and drain or cancel active work before replacing binaries or restoring a consistent backup.</p>
+        <p>Batch receipts reuse Repository Map v4 and its existing 16-entry history; no map schema bump is required. Keep long-term transaction evidence in Git or backups. Research imports reuse existing graph storage and indexes, and imported facts remain proposed until reviewed through the existing lifecycle.</p>
+        <p>Feedback adds a separate bounded journal under the configured runtime data directory. Older binaries cannot reconcile pending feedback publications. Preserve nonce identities, send intent and retry deadlines when upgrading or rolling back; never discard an uncertain publication to force a second create. Publication remains disabled until explicitly configured.</p>
+        <p>Existing Windows account-SID path and ACL requirements remain unchanged. Repository Map v4 needs a 1.1.17 or newer reader. This release introduces no automatic downloads of research sources, new background service or automatic software upgrade.</p>
+      </section>
+      <section class="section">
+        <h2>Release packages</h2>
+        <ul>
+          <li>Linux x64 and ARM64 on the glibc 2.28 baseline</li>
+          <li>macOS Intel and Apple Silicon</li>
+          <li>Windows x64 and ARM64; ARM64 is cross-built</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.19.tar.gz</code> with agent instructions, schemas and bundled binaries</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+      <section class="section">
+        <h2>Further reading</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.19/docs/en/01-user-guide/14-research-workflow.md">Research workflow</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.19/docs/en/01-user-guide/10-workers-proposals-audit.md">Software feedback</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.19/docs/en/03-architecture-specs/19-installation-release-and-upgrade.md">Installation, release and upgrade</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 3.15
-> Date: 2026-09-18
+> Document version: 3.16
+> Date: 2026-10-09
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -19,6 +19,7 @@ Installation and release are part of product architecture. Stable releases are v
 - The v1.1.17 release pins `Cargo.toml`, `Cargo.lock`, CLI skill metadata, and the release workflow dry-run default to `1.1.17`; publishing remains tag-driven and starts only after pushing `v1.1.17` or `1.1.17` to GitHub. This version introduces the Repository Map v4 recent-only history contract. Keeping source development ahead of crates.io stable prevents unreleased behavior from sharing a version number with an incompatible published binary.
 - The v1.1.17 release includes matching English and Chinese Pages release notes and homepage links. Push the reviewed release commit to `main` to trigger Pages, then push `v1.1.17` at that same commit to trigger Release. Verify both Actions runs, the six platform archives, CLI skill archive, checksums, crates.io version, and deployed release pages before declaring publication complete.
 - The v1.1.18 release aligns the manifest, lockfile, CLI skill metadata, and workflow dry-run default at `1.1.18`, with matching English and Chinese Pages release notes. Push one reviewed commit to `main` and verify Pages, run the `v1.1.18` dry-run Actions, then push a tag at that same commit after validation. Verify Release, crates.io, CLI skill publication, six platform archives, checksums, release notes, and both deployed language pages. The [1.1.18 release notes](../../../pages/en/releases/1.1.18.html) cover schema 9 Maven projections, Windows account-SID data paths, and rollback backups.
+- The v1.1.19 release aligns Cargo, CLI skill metadata, workflow inputs and bilingual Pages with the atomic map/research and software-feedback capabilities. Run the existing local gates and publish dry run, then publish the same reviewed commit on main and as tag v1.1.19; the tag workflow verifies quality, packages six platforms, publishes crates.io, and emits checksums and attestations before GitHub Release publication. Verify both deployed language pages and the downloaded skill bundle. Preserve the private feedback journal and repository-owned research artifacts during upgrades and rollback; see the [1.1.19 release notes](../../../pages/en/releases/1.1.19.html).
 - Release verification still runs every test target and feature. Test compilation uses one Cargo job and omits test-binary debug information to bound peak compiler memory on hosted runners; it does not skip tests, change assertions, or alter the product release build.
 - macOS x64 release jobs must use an active Intel runner label, such as `macos-15-intel`, rather than retired `macos-13` images. Artifact upload/download and attestation actions must stay on Node 24-compatible releases so the release workflow remains runnable after GitHub-hosted runner runtime migrations.
 - The repository Pages site must be enabled once with `build_type=workflow` by an administrator. The Pages workflow uses Node 24-compatible `configure-pages`, `upload-pages-artifact`, and `deploy-pages` releases and must not ask its scoped `GITHUB_TOKEN` to create or enable the site on every push. Before uploading, it derives the package version from `Cargo.toml` and requires matching English and Chinese release pages, index links, GitHub Release links, and crates.io links; a stale or one-language-only release surface fails deployment instead of silently publishing an older version.

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="relay-knowledge 1.1.19：原子地图批处理、按范围绑定的研究证据及持久软件反馈。" />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.19 发布说明</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="页面导航">
+        <a href="../">中文文档</a>
+        <a href="../../en/releases/1.1.19.html">English</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.19">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.19 发布说明</h1>
+        <p>本版增加原子地图批处理、按范围绑定的研究证据工作流和持久软件反馈，CLI 与 Web 共享应用服务。</p>
+        <p>发布日期：2026 年 10 月 9 日。</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.19">发布与下载</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.19">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.19/checksums.txt">Checksums</a>
+        </p>
+      </section>
+      <section class="section">
+        <h2>安装与验证</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.19 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json
+relay-knowledge service doctor --format json</code></pre>
+        <p>下载适合平台的压缩包，安装前校验 checksum 和 GitHub attestation。独立 CLI Skill 压缩包包含同版本的 Linux x64 与 Windows x64 二进制。</p>
+      </section>
+      <section class="section">
+        <h2>本版变化</h2>
+        <ul>
+          <li><code>map plan</code> 与 <code>map apply</code> 校验最多 100 项有序来源变更，并只发布一个地图版本。版本与摘要前置条件、有界重放回执及既有 writer lock 防止只提交部分批次。</li>
+          <li><code>sources audit</code> 核验明确声明的本地采集材料与提取绑定；研究证据包支持校验、按范围导入导出、图视图和影响提案，保留来源哈希及 proposed 事实状态。</li>
+          <li><code>research status</code> 分别报告归档、作者图谱和 GraphRAG 就绪状态。索引新鲜、字节完整或自报审阅记录，都不能单独证明研究问题已得到回答。</li>
+          <li>九个反馈命令保存私有本地报告、预览公开内容、去重发布并核对不确定发送。GitHub 发布需要明确策略，验证修复需要独立授权的 runner 证据。</li>
+          <li>反馈校验覆盖 UTF-8 字节边界及补齐关联 ID 后的报告总大小；Web 状态接口拒绝错误 ID 类型，GitHub 限流期限在重启后仍有效，期限前不发起远端重试。</li>
+          <li>明确处理存储中的无效 ontology 身份；浏览器测试依赖 urllib3 从 2.7.0 更新为 2.8.0。</li>
+        </ul>
+      </section>
+      <section class="section">
+        <h2>升级与回滚</h2>
+        <p class="notice">备份仓库拥有的地图、采集原文与证据包、运行时数据库和全部分片，以及私有运行时 <code>feedback</code> 目录。替换二进制或恢复一致备份前，停止常驻服务并等待或取消活动任务。</p>
+        <p>批处理回执复用 Repository Map v4 及现有 16 项历史窗口，不提升 map schema。长期事务证据保存在 Git 或备份中。研究导入复用既有图存储与索引，导入事实保持 proposed，直到通过现有生命周期审阅。</p>
+        <p>反馈在配置的运行时数据目录下使用独立有界 journal。旧二进制无法核对待定反馈发布；升级和回滚必须保留 nonce 身份、发送意图及重试期限，不能删除不确定发布来强制再次创建 issue。发布默认关闭，必须明确配置授权。</p>
+        <p>Windows 账户 SID 路径与 ACL 要求保持不变。Repository Map v4 需要 1.1.17 或更新 reader。本版不增加研究来源自动下载、新后台服务或自动软件升级。</p>
+      </section>
+      <section class="section">
+        <h2>发布产物</h2>
+        <ul>
+          <li>Linux x64 与 ARM64，使用 glibc 2.28 基线</li>
+          <li>macOS Intel 与 Apple Silicon</li>
+          <li>Windows x64 与 ARM64；ARM64 采用交叉构建</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.19.tar.gz</code>，含 agent 指令、Schema 和内置二进制</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+      <section class="section">
+        <h2>进一步阅读</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.19/docs/zh/01-user-guide/17-research-workflow.md">研究工作流</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.19/docs/zh/01-user-guide/10-workers-proposals-audit.md">软件反馈</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.19/docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md">安装、发布与升级</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

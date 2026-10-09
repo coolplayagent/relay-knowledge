@@ -10,7 +10,7 @@ on:
       dry_run_tag:
         description: Tag-like version to validate without creating a release.
         required: true
-        default: v1.1.18
+        default: v1.1.19
 
 permissions:
   contents: read
@@ -493,26 +493,30 @@ jobs:
         run: |
           set -euo pipefail
           cat > release-notes.md <<'NOTES'
-          ## Version 1.1.18
+          ## Version 1.1.19
 
-          This release adds Maven reactor dependency evidence and downstream impact,
-          improves code-call retrieval and index diagnostics, and strengthens Windows
-          SQLite storage defaults and validation. Cold indexing reduces configuration
-          scanning and temporary full-text-search parameter copies while retaining
-          durable checkpoints and search documents.
+          This release adds atomic Knowledge Map batches, scoped research evidence
+          workflows, and durable software feedback shared by the CLI and Web.
+          Source audits and authored bundles preserve byte hashes, scope and proposed
+          fact status. Feedback stays private until explicit publication policy is
+          configured; remote issue closure does not establish a verified fix.
+          Validation fixes cover UTF-8 bounds, correlation IDs, Web status IDs and
+          GitHub rate-limit retry deadlines. Invalid stored ontology identities are
+          handled explicitly, and the browser dependency lock updates urllib3.
 
           ## Upgrade
 
-          Software projection schema 9 marks existing Maven projections stale until
-          durable repair or reindex finishes. Back up the runtime database and all
-          shards before upgrading; before downgrading, stop the service, drain or
-          cancel active tasks, and restore a consistent pre-upgrade backup. New
-          Windows installations require a provisioned account-SID data directory
-          or an explicit absolute writable `RELAY_KNOWLEDGE_DATA_DIR`. Existing
-          LocalAppData stores remain selected and are not moved automatically.
-          Repository Map v4 still requires a 1.1.17 or newer reader.
+          Back up repository-owned maps, captured sources, evidence bundles, the
+          runtime database and shards, and the private runtime feedback directory.
+          Batch receipts reuse Repository Map v4 and its 16-entry history; no map
+          schema bump is required. Research imports use existing graph storage and
+          indexes, and feedback uses a separate bounded journal. Preserve pending
+          publication identities and deadlines during upgrades; older binaries cannot
+          reconcile these reports. Before rollback, stop the service, drain or cancel
+          active work and restore a matching backup. Existing Windows path and ACL
+          requirements remain in effect. Repository Map v4 requires a 1.1.17 or newer reader.
 
-          Full notes: https://coolplayagent.github.io/relay-knowledge/en/releases/1.1.18.html
+          Full notes: https://coolplayagent.github.io/relay-knowledge/en/releases/1.1.19.html
 
           ## Install
 
