@@ -61,7 +61,9 @@ pub(crate) async fn run(
     context: RequestContext,
     format: OutputFormat,
 ) -> Result<String, CliError> {
-    let feedback = service.feedback_service().map_err(CliError::ApiFailed)?;
+    let feedback = service
+        .feedback_service()
+        .map_err(|error| CliError::api_failed(error, format))?;
     let result = match command {
         FeedbackCommand::Configure { input } => {
             let policy = read_input::<FeedbackPolicy>(&input, format).await?;
@@ -102,7 +104,7 @@ pub(crate) async fn run(
                 .map(|record| serde_json::json!({"feedback":public_record(&record)}))
         }
     }
-    .map_err(|message| CliError::invalid_api_argument(message, format))?;
+    .map_err(|error| CliError::api_failed(error, format))?;
     let metadata = ApiMetadata::graph_only(&context, GraphVersion::ZERO);
     let mut response = result;
     response["metadata"] = serde_json::to_value(&metadata)

@@ -347,6 +347,7 @@ Network entry points support connection budgets, request budgets, body limits, t
 
 ## 5. Code Quality Constraints
 
+- Local formatting must use the same current stable toolchain as CI. Test fixture macros that accept method signatures allow optional trailing argument commas so rustfmt's multiline normalization remains compilable; formatted fixtures still obey the 1000-line limit.
 - No tracked source, test, documentation, script, or workflow file may exceed 1000 lines. Generated release lockfiles required by locked builds, currently `Cargo.lock`, are exempt and must stay machine-generated.
 - Root README files are concise entry and navigation surfaces. Detailed implementation ownership and operational contracts belong in the responsibility-specific architecture, capability, or user-guide documents linked from those READMEs; README growth must not bypass the same 1000-line limit.
 - Do not add shallow functions; functions must validate, transform, isolate boundaries, manage resources, map errors, add observability, or coordinate real workflows.

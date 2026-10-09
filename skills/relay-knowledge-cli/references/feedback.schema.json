@@ -291,7 +291,11 @@
           "anyOf": [
             {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+              "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$",
+              "not": {
+                "pattern": "(^|/)\\.{1,2}(/|$)"
+              },
+              "description": "An owner/repository pair whose components contain 1..100 ASCII letters, digits, underscore, hyphen or dot; exact . and .. components are rejected, while ... remains allowed. This validates structure, not remote existence or permission."
             },
             {
               "type": "null"

@@ -80,7 +80,10 @@ relay-knowledge feedback preview <feedback-id> --format json
 
 The default `local-only` mode saves a durable draft without creating an issue.
 Preview shows the exact locally prepared public title/body and its digest, a
-separate raw report digest, and omission labels. A deduplicated issue can retain
+separate raw report digest, and fixed omission categories. Both evidence labels
+and contents remain private: `omitted_evidence` reports only generic categories
+such as `raw evidence`, never caller-supplied labels, including in CLI/Web status
+and preview responses. A deduplicated issue can retain
 another outbox's nonce, so this local payload is not a claim about the exact
 current remote body. Raw evidence, diagnostics and trace IDs never enter
 the issue. Sensitive public narrative becomes `evidence-insufficient`; supply a

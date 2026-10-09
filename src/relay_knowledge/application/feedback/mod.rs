@@ -11,12 +11,14 @@ mod test_support;
 use std::sync::Arc;
 
 use crate::{
-    api::RequestContext,
+    api::{ApiError, RequestContext},
     clock::system_now_millis,
     domain::feedback::*,
     ports::{
         feedback::FeedbackProvider,
-        feedback_store::{FeedbackStore, FeedbackTransaction},
+        feedback_store::{
+            FeedbackStore, FeedbackStoreError, FeedbackStoreErrorKind, FeedbackTransaction,
+        },
     },
 };
 
@@ -38,10 +40,10 @@ impl RelayKnowledgeService {
     }
 
     /// Gets the configured shared workflow without opening graph storage.
-    pub fn feedback_service(&self) -> Result<&FeedbackService, String> {
+    pub fn feedback_service(&self) -> Result<&FeedbackService, ApiError> {
         self.feedback
             .as_ref()
-            .ok_or_else(|| "feedback adapters are unavailable".into())
+            .ok_or_else(|| ApiError::storage_unavailable("feedback adapters are unavailable"))
     }
 }
 
@@ -60,21 +62,16 @@ impl FeedbackService {
     }
 
     /// Persists explicitly supplied publication authority without submitting drafts.
-    pub async fn configure(&self, mut policy: FeedbackPolicy) -> Result<FeedbackPolicy, String> {
-        policy.validate().map_err(|error| error.to_string())?;
+    pub async fn configure(&self, mut policy: FeedbackPolicy) -> Result<FeedbackPolicy, ApiError> {
+        policy
+            .validate()
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         if let Some(repository) = policy.target_repository.as_mut() {
             repository.make_ascii_lowercase();
         }
-        let mut transaction = self
-            .store
-            .begin()
-            .await
-            .map_err(|error| error.to_string())?;
+        let mut transaction = self.store.begin().await.map_err(store_error)?;
         transaction.snapshot_mut().policy = policy.clone();
-        transaction
-            .commit()
-            .await
-            .map_err(|error| error.to_string())?;
+        transaction.commit().await.map_err(store_error)?;
         Ok(policy)
     }
 
@@ -83,11 +80,13 @@ impl FeedbackService {
         &self,
         mut report: FeedbackReport,
         context: &RequestContext,
-    ) -> Result<FeedbackRecord, String> {
-        report.validate().map_err(|error| error.to_string())?;
+    ) -> Result<FeedbackRecord, ApiError> {
+        report
+            .validate()
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         let fingerprint = report
             .fingerprint(env!("CARGO_PKG_VERSION"))
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         report
             .trace_id
             .get_or_insert_with(|| context.trace_id.clone());
@@ -95,11 +94,7 @@ impl FeedbackService {
             .request_id
             .get_or_insert_with(|| context.request_id.clone());
         let now = now_ms()?;
-        let mut transaction = self
-            .store
-            .begin()
-            .await
-            .map_err(|error| error.to_string())?;
+        let mut transaction = self.store.begin().await.map_err(store_error)?;
         let journal = transaction.snapshot_mut();
         let index = if let Some(index) = journal
             .records
@@ -113,7 +108,7 @@ impl FeedbackService {
         } else {
             let mut nonce = [0u8; 16];
             getrandom::getrandom(&mut nonce)
-                .map_err(|_| "feedback random identity unavailable".to_owned())?;
+                .map_err(|_| ApiError::internal("feedback random identity unavailable"))?;
             let id = nonce
                 .iter()
                 .map(|byte| format!("{byte:02x}"))
@@ -142,7 +137,8 @@ impl FeedbackService {
                 fingerprint,
                 marker,
                 raw_report_digest: feedback_digest(
-                    &serde_json::to_vec(&report).map_err(|error| error.to_string())?,
+                    &serde_json::to_vec(&report)
+                        .map_err(|error| ApiError::internal(error.to_string()))?,
                 ),
                 report,
                 cli_version: env!("CARGO_PKG_VERSION").into(),
@@ -169,10 +165,7 @@ impl FeedbackService {
         };
         let record = journal.records[index].clone();
         let auto_submit = journal.policy.mode == FeedbackMode::AutoSubmit;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| error.to_string())?;
+        transaction.commit().await.map_err(store_error)?;
         drop(transaction);
         if auto_submit {
             // A failed acknowledgement may follow a committed send or even a
@@ -180,9 +173,9 @@ impl FeedbackService {
             match self.submit(&record.id).await {
                 Ok(submitted) => Ok(submitted),
                 Err(_) => {
-                    let recovered = self.store.begin().await.map_err(|_| format!(
+                    let recovered = self.store.begin().await.map_err(|_| ApiError::storage_unavailable(format!(
                         "feedback {} was saved; publication status is unavailable; run feedback status before retrying", record.id
-                    ))?;
+                    )))?;
                     let index = record_index(recovered.as_ref(), &record.id)?;
                     Ok(recovered.snapshot().records[index].clone())
                 }
@@ -193,12 +186,8 @@ impl FeedbackService {
     }
 
     /// Reads bounded status; private report bytes never appear in this view.
-    pub async fn status(&self, id: Option<&str>) -> Result<serde_json::Value, String> {
-        let transaction = self
-            .store
-            .begin()
-            .await
-            .map_err(|error| error.to_string())?;
+    pub async fn status(&self, id: Option<&str>) -> Result<serde_json::Value, ApiError> {
+        let transaction = self.store.begin().await.map_err(store_error)?;
         let journal = transaction.snapshot();
         if let Some(id) = id {
             let index = record_index(transaction.as_ref(), id)?;
@@ -210,12 +199,8 @@ impl FeedbackService {
     }
 
     /// Returns the exact immutable publication payload and local evidence bindings.
-    pub async fn preview(&self, id: &str) -> Result<serde_json::Value, String> {
-        let transaction = self
-            .store
-            .begin()
-            .await
-            .map_err(|error| error.to_string())?;
+    pub async fn preview(&self, id: &str) -> Result<serde_json::Value, ApiError> {
+        let transaction = self.store.begin().await.map_err(store_error)?;
         let index = record_index(transaction.as_ref(), id)?;
         let record = &transaction.snapshot().records[index];
         Ok(
@@ -237,15 +222,24 @@ pub fn public_record(record: &FeedbackRecord) -> serde_json::Value {
     })
 }
 
-fn record_index(transaction: &dyn FeedbackTransaction, id: &str) -> Result<usize, String> {
+fn record_index(transaction: &dyn FeedbackTransaction, id: &str) -> Result<usize, ApiError> {
     transaction
         .snapshot()
         .records
         .iter()
         .position(|record| record.id == id)
-        .ok_or_else(|| "feedback ID was not found".into())
+        .ok_or_else(|| ApiError::invalid_argument("feedback ID was not found"))
 }
 
-fn now_ms() -> Result<u64, String> {
-    system_now_millis().map_err(|error| error.to_string())
+fn now_ms() -> Result<u64, ApiError> {
+    system_now_millis().map_err(|error| ApiError::internal(error.to_string()))
+}
+
+fn store_error(error: FeedbackStoreError) -> ApiError {
+    match error.kind {
+        FeedbackStoreErrorKind::Busy => ApiError::qos_rejected(error.message),
+        FeedbackStoreErrorKind::Capacity
+        | FeedbackStoreErrorKind::InvalidData
+        | FeedbackStoreErrorKind::Io => ApiError::storage_unavailable(error.message),
+    }
 }

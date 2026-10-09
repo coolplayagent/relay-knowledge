@@ -1,6 +1,7 @@
 //! Serial, crash-recoverable publication; uncertain sends are never repeated.
 
 use crate::{
+    api::ApiError,
     domain::feedback::*,
     ports::{
         feedback::{FeedbackProviderError, FeedbackProviderErrorKind},
@@ -8,7 +9,7 @@ use crate::{
     },
 };
 
-use super::{FeedbackService, now_ms, record_index};
+use super::{FeedbackService, now_ms, record_index, store_error};
 
 const DAY_MS: u64 = 86_400_000;
 const MAX_ATTEMPTS: u32 = 5;
@@ -23,12 +24,8 @@ mod recovery_tests;
 
 impl FeedbackService {
     /// Runs one bounded attempt or reconciles an uncertain attempt using its nonce.
-    pub async fn submit(&self, id: &str) -> Result<FeedbackRecord, String> {
-        let mut transaction = self
-            .store
-            .begin()
-            .await
-            .map_err(|error| error.to_string())?;
+    pub async fn submit(&self, id: &str) -> Result<FeedbackRecord, ApiError> {
+        let mut transaction = self.store.begin().await.map_err(store_error)?;
         let index = record_index(transaction.as_ref(), id)?;
         let mut record = transaction.snapshot().records[index].clone();
         if record.publication.issue.is_some() || record.publication.payload.is_none() {
@@ -55,7 +52,7 @@ impl FeedbackService {
         }
         let target = policy
             .target_repository
-            .ok_or_else(|| "publication target is not configured".to_owned())?;
+            .ok_or_else(|| ApiError::invalid_argument("publication target is not configured"))?;
         if record
             .publication
             .target_repository
@@ -77,7 +74,7 @@ impl FeedbackService {
                 .publication
                 .payload
                 .as_ref()
-                .ok_or_else(|| "public payload is unavailable".to_owned())?
+                .ok_or_else(|| ApiError::internal("public payload is unavailable"))?
                 .dedup_marker
         };
         match self.provider.find_marker(&target, lookup_marker).await {
@@ -130,7 +127,7 @@ impl FeedbackService {
             .publication
             .payload
             .as_ref()
-            .ok_or_else(|| "public payload is unavailable".to_owned())?;
+            .ok_or_else(|| ApiError::internal("public payload is unavailable"))?;
         match self
             .provider
             .create_issue(&target, &payload.title, &payload.body)
@@ -148,28 +145,23 @@ impl FeedbackService {
     }
 
     /// Reads remote issue state without interpreting closure as a successful fix.
-    pub async fn track(&self, id: &str) -> Result<FeedbackRecord, String> {
-        let mut transaction = self
-            .store
-            .begin()
-            .await
-            .map_err(|error| error.to_string())?;
+    pub async fn track(&self, id: &str) -> Result<FeedbackRecord, ApiError> {
+        let mut transaction = self.store.begin().await.map_err(store_error)?;
         let index = record_index(transaction.as_ref(), id)?;
         let mut record = transaction.snapshot().records[index].clone();
-        let issue =
-            record.publication.issue.as_ref().ok_or_else(|| {
-                "feedback has no published issue; use retry to reconcile".to_owned()
-            })?;
+        let issue = record.publication.issue.as_ref().ok_or_else(|| {
+            ApiError::invalid_argument("feedback has no published issue; use retry to reconcile")
+        })?;
         let target = record
             .publication
             .target_repository
             .as_deref()
-            .ok_or_else(|| "published issue has no pinned repository".to_owned())?;
+            .ok_or_else(|| ApiError::internal("published issue has no pinned repository"))?;
         let updated = self
             .provider
             .read_issue(target, issue.number)
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
         record.publication.issue = Some(updated);
         save(transaction.as_mut(), index, record).await
     }
@@ -198,12 +190,9 @@ pub(super) async fn save(
     transaction: &mut dyn FeedbackTransaction,
     index: usize,
     mut record: FeedbackRecord,
-) -> Result<FeedbackRecord, String> {
+) -> Result<FeedbackRecord, ApiError> {
     record.updated_at_ms = now_ms()?;
     transaction.snapshot_mut().records[index] = record.clone();
-    transaction
-        .commit()
-        .await
-        .map_err(|error| error.to_string())?;
+    transaction.commit().await.map_err(store_error)?;
     Ok(record)
 }

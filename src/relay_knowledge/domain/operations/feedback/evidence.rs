@@ -104,11 +104,10 @@ pub fn prepare_payload(
     let digest = feedback_digest(
         &serde_json::to_vec(&(&title, &body)).map_err(|error| FeedbackError(error.to_string()))?,
     );
-    let mut omitted_evidence: Vec<String> = report
-        .evidence
-        .iter()
-        .map(|item| item.label.clone())
-        .collect();
+    let mut omitted_evidence = Vec::new();
+    if !report.evidence.is_empty() {
+        omitted_evidence.push("raw evidence".into());
+    }
     if report.diagnostics.is_some() {
         omitted_evidence.push("diagnostics".into());
     }

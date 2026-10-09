@@ -22,6 +22,9 @@ async fn cli_persists_and_previews_a_report_without_opening_graph_storage() {
         api::InterfaceKind,
         env::{EnvironmentConfig, PlatformKind},
         interfaces::cli::CliCommand,
+        paths::RuntimePaths,
+        ports::feedback_store::FeedbackStore,
+        storage::feedback::FileFeedbackStore,
     };
     let root = std::env::temp_dir().join(format!("feedback-cli-{}", std::process::id()));
     tokio::fs::create_dir_all(&root).await.unwrap();
@@ -94,6 +97,31 @@ async fn cli_persists_and_previews_a_report_without_opening_graph_storage() {
     .await
     .unwrap();
     assert!(submitted.contains("local-only policy"));
+    let paths = RuntimePaths::resolve(&environment.platform, &environment.paths).unwrap();
+    let store = FileFeedbackStore::new(&paths);
+    let transaction = store.begin().await.unwrap();
+    let context = RequestContext::with_ids(InterfaceKind::Cli, "request", "trace");
+    let busy = run(
+        &service,
+        FeedbackCommand::Status { id: None },
+        context.clone(),
+        OutputFormat::Json,
+    )
+    .await
+    .unwrap_err();
+    let diagnostic: serde_json::Value = serde_json::from_str(&busy.render_stderr()).unwrap();
+    assert_eq!(diagnostic["error_kind"], "qos_rejected");
+    assert!(diagnostic["message"].as_str().unwrap().contains("retry"));
+    let busy_text = run(
+        &service,
+        FeedbackCommand::Status { id: None },
+        context,
+        OutputFormat::Text,
+    )
+    .await
+    .unwrap_err();
+    assert!(busy_text.render_stderr().contains("retry"));
+    drop(transaction);
     tokio::fs::remove_dir_all(root).await.unwrap();
 }
 

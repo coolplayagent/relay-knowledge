@@ -139,7 +139,7 @@ pub struct FeedbackPayload {
     pub dedup_marker: String,
     /// Binds only the public title/body, never the raw private report.
     pub digest: String,
-    /// Local explanatory labels; these are not included in the issue body.
+    /// Fixed public omission categories, never caller-supplied evidence labels.
     pub omitted_evidence: Vec<String>,
 }
 

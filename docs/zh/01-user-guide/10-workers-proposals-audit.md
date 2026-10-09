@@ -65,7 +65,7 @@ relay-knowledge feedback status --format json
 relay-knowledge feedback preview <feedback-id> --format json
 ```
 
-默认 `local-only` 只保存持久草稿。preview 展示本地准备好的完整公开 title/body、公开 payload digest、独立原始 report digest 及省略证据标签。复用的远端 issue 可能保留另一个 outbox 的 nonce，因此本地 preview 不声明与当前远端正文逐字节一致。原始 evidence、diagnostics、trace ID 不进入 issue。公开叙述包含可识别凭据、邮箱、私人路径或不安全控制字符时进入 `evidence-insufficient`；需要重新提供可公开最小摘要，不能由模型豁免。扫描器不能判断任意自然语言是否属于私有知识，即使没有敏感模式，也不得把私有知识放入公开叙述。
+默认 `local-only` 只保存持久草稿。preview 展示本地准备好的完整公开 title/body、公开 payload digest、独立原始 report digest 及固定省略类别。证据标签和正文均保持私有；`omitted_evidence` 只输出 `raw evidence` 等通用类别，在 CLI/Web status 和 preview 响应中也不能复制调用者提供的标签。复用的远端 issue 可能保留另一个 outbox 的 nonce，因此本地 preview 不声明与当前远端正文逐字节一致。原始 evidence、diagnostics、trace ID 不进入 issue。公开叙述包含可识别凭据、邮箱、私人路径或不安全控制字符时进入 `evidence-insufficient`；需要重新提供可公开最小摘要，不能由模型豁免。扫描器不能判断任意自然语言是否属于私有知识，即使没有敏感模式，也不得把私有知识放入公开叙述。
 
 内容绑定的范围分别为：
 

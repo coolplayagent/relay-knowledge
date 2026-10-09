@@ -55,7 +55,11 @@ remote issue body.
 
 Only configure publication when the user or administrator has explicitly granted
 that scope. Save a policy like this, replacing the repository with the authorized
-target. The runner permission is separate and defaults to null.
+target. The runner permission is separate and defaults to null. Each target
+component accepts 1–100 ASCII letters, digits, underscores, hyphens or dots;
+exact `.` and `..` components are rejected in both the schema and runtime.
+Three-dot components such as `.../repo` or `owner/...` remain structurally
+valid; this does not establish that a remote repository exists or is authorized.
 
 ```json
 {

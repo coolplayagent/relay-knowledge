@@ -15,7 +15,7 @@ pub(super) async fn execute(
     payload: &Value,
     context: RequestContext,
 ) -> Result<(ApiMetadata, Value), WebError> {
-    let feedback = service.feedback_service().map_err(WebError::bad_request)?;
+    let feedback = service.feedback_service().map_err(WebError::from)?;
     let result = match operation {
         "feedback.report" => {
             let report: FeedbackReport = serde_json::from_value(payload.get("report").cloned().unwrap_or(Value::Null))
@@ -27,7 +27,7 @@ pub(super) async fn execute(
         "feedback.submit" | "feedback.retry" => feedback.submit(string_field(payload, "id")?).await.map(|record| json!({"feedback":public_record(&record)})),
         "feedback.track" => feedback.track(string_field(payload, "id")?).await.map(|record| json!({"feedback":public_record(&record)})),
         _ => return Err(WebError::bad_request("feedback policy and validation authority must be supplied through the local control plane".into())),
-    }.map_err(WebError::bad_request)?;
+    }.map_err(WebError::from)?;
     Ok((
         ApiMetadata::graph_only(&context, GraphVersion::ZERO),
         result,

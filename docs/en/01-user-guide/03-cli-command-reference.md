@@ -396,5 +396,11 @@ persisted policy. Configure, fix association and runner validation remain local
 CLI authority. The versioned JSON DTO is shared; this does not add dedicated
 MCP/ACP feedback tools. Agents can use the CLI.
 
+Web feedback failures preserve their typed categories: invalid input returns
+HTTP 400, busy storage admission returns 429, unavailable storage or provider
+operations return 503, and internal failures return 500. Publication outcomes
+such as `blocked` remain saved feedback states in a successful response; clients
+must inspect that state before treating an issue as submitted.
+
 See [software feedback, recovery and validation](10-workers-proposals-audit.md#106-software-experience-feedback)
 for states, permission boundaries and the external-runner evidence model.

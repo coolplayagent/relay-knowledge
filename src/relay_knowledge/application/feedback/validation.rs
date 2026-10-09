@@ -1,8 +1,8 @@
 //! Fix associations and scenario-bound evidence supplied by an authorized runner.
 
-use crate::domain::feedback::*;
+use crate::{api::ApiError, domain::feedback::*};
 
-use super::{FeedbackService, now_ms, publication::save, record_index};
+use super::{FeedbackService, now_ms, publication::save, record_index, store_error};
 
 #[cfg(test)]
 #[path = "validation_tests.rs"]
@@ -10,13 +10,10 @@ mod tests;
 
 impl FeedbackService {
     /// Links reviewed fix metadata; linking never establishes a regression verdict.
-    pub async fn link_fix(&self, id: &str, fix: FeedbackFix) -> Result<FeedbackRecord, String> {
-        fix.validate().map_err(|error| error.to_string())?;
-        let mut transaction = self
-            .store
-            .begin()
-            .await
-            .map_err(|error| error.to_string())?;
+    pub async fn link_fix(&self, id: &str, fix: FeedbackFix) -> Result<FeedbackRecord, ApiError> {
+        fix.validate()
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        let mut transaction = self.store.begin().await.map_err(store_error)?;
         let index = record_index(transaction.as_ref(), id)?;
         let mut record = transaction.snapshot().records[index].clone();
         if record.validation.fix.as_ref() == Some(&fix) {
@@ -33,22 +30,18 @@ impl FeedbackService {
         &self,
         id: &str,
         input: FeedbackValidation,
-    ) -> Result<FeedbackRecord, String> {
-        let mut transaction = self
-            .store
-            .begin()
-            .await
-            .map_err(|error| error.to_string())?;
+    ) -> Result<FeedbackRecord, ApiError> {
+        let mut transaction = self.store.begin().await.map_err(store_error)?;
         let index = record_index(transaction.as_ref(), id)?;
         let mut record = transaction.snapshot().records[index].clone();
-        let fix = record
-            .validation
-            .fix
-            .as_ref()
-            .ok_or_else(|| "link a fix before recording regression evidence".to_owned())?;
+        let fix = record.validation.fix.as_ref().ok_or_else(|| {
+            ApiError::invalid_argument("link a fix before recording regression evidence")
+        })?;
         if transaction.snapshot().policy.validation_runner.as_deref() != Some(input.runner.as_str())
         {
-            return Err("validation runner is not explicitly authorized; configure separate validation authority".into());
+            return Err(ApiError::invalid_argument(
+                "validation runner is not explicitly authorized; configure separate validation authority",
+            ));
         }
         if let Some(previous) = record
             .validation
@@ -59,15 +52,17 @@ impl FeedbackService {
             if previous.input == input {
                 return Ok(record);
             }
-            return Err("validation run ID is already bound to different evidence".into());
+            return Err(ApiError::invalid_argument(
+                "validation run ID is already bound to different evidence",
+            ));
         }
         if record.validation.runs.len() >= FEEDBACK_MAX_VALIDATION_RUNS {
-            return Err(
-                "validation history capacity reached; existing evidence is preserved".into(),
-            );
+            return Err(ApiError::storage_unavailable(
+                "validation history capacity reached; existing evidence is preserved",
+            ));
         }
         let result = validate_regression(&record.report, fix, input, now_ms()?)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         record.validation.state = if result.passed {
             FeedbackVerificationState::VerifiedFixed
         } else {

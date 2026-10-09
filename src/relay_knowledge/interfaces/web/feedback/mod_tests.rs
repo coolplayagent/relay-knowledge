@@ -21,12 +21,13 @@ use crate::{
     },
     env::{EnvironmentConfig, PlatformKind, RELAY_KNOWLEDGE_HOME},
     paths::RuntimePaths,
-    ports::feedback::{FeedbackProvider, FeedbackProviderFuture},
+    ports::feedback::{FeedbackProvider, FeedbackProviderError, FeedbackProviderFuture},
     storage::feedback::FileFeedbackStore,
 };
 
 struct Fixture {
     service: RelayKnowledgeService,
+    store: Arc<FileFeedbackStore>,
     provider: Arc<RecordingProvider>,
     root: PathBuf,
     _guard: MutexGuard<'static, ()>,
@@ -49,17 +50,15 @@ impl Fixture {
         .unwrap();
         let paths = RuntimePaths::resolve(&environment.platform, &environment.paths).unwrap();
         let provider = Arc::new(RecordingProvider::default());
-        let feedback = FeedbackService::new(
-            Arc::new(FileFeedbackStore::new(&paths)),
-            provider.clone(),
-            "test-host".into(),
-        );
+        let store = Arc::new(FileFeedbackStore::new(&paths));
+        let feedback = FeedbackService::new(store.clone(), provider.clone(), "test-host".into());
         let service = RelayKnowledgeService::from_environment(&environment)
             .await
             .unwrap()
             .with_feedback(feedback);
         Self {
             service,
+            store,
             provider,
             root,
             _guard: guard,
@@ -105,6 +104,7 @@ struct RecordingProvider {
     searches: AtomicUsize,
     creates: Mutex<Vec<(String, String, String)>>,
     reads: AtomicUsize,
+    read_error: Mutex<Option<FeedbackProviderError>>,
 }
 
 impl FeedbackProvider for RecordingProvider {
@@ -150,6 +150,9 @@ impl FeedbackProvider for RecordingProvider {
             assert_eq!(target, "acme/project");
             assert_eq!(number, 7);
             self.reads.fetch_add(1, Ordering::Relaxed);
+            if let Some(error) = self.read_error.lock().unwrap().clone() {
+                return Err(error);
+            }
             Ok(FeedbackIssue {
                 number,
                 url: format!("https://github.com/{target}/issues/{number}"),
@@ -327,9 +330,12 @@ async fn web_rejects_invalid_reports_and_missing_ids_before_provider_or_graph_ac
     let fixture = Fixture::new().await;
     let mut invalid = report();
     invalid["target_repository"] = "attacker/project".into();
+    let mut invalid_domain = report();
+    invalid_domain["intent"] = "".into();
     for payload in [
         json!({"operation":"feedback.report"}),
         json!({"operation":"feedback.report", "report":invalid}),
+        json!({"operation":"feedback.report", "report":invalid_domain}),
         json!({"operation":"feedback.preview"}),
         json!({"operation":"feedback.submit", "id":false}),
         json!({"operation":"feedback.status", "id":"unknown"}),
@@ -345,3 +351,6 @@ async fn web_rejects_invalid_reports_and_missing_ids_before_provider_or_graph_ac
     assert!(fixture.provider.creates.lock().unwrap().is_empty());
     assert!(!fixture.service.storage_is_ready());
 }
+
+#[path = "error_tests.rs"]
+mod error_tests;

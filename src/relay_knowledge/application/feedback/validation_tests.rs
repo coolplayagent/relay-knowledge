@@ -139,6 +139,7 @@ async fn publishing_authority_does_not_authorize_regression_attestation() {
             .validate(&record.id, run(&record))
             .await
             .expect_err("fix required")
+            .message
             .contains("fix")
     );
     fixture
@@ -152,6 +153,7 @@ async fn publishing_authority_does_not_authorize_regression_attestation() {
             .validate(&record.id, run(&record))
             .await
             .expect_err("runner permission required")
+            .message
             .contains("authorized")
     );
     let mut authorized = policy();
@@ -217,6 +219,7 @@ async fn changed_scenario_version_or_reused_run_id_cannot_establish_a_fix() {
             .validate(&record.id, input)
             .await
             .expect_err("run immutable")
+            .message
             .contains("different evidence")
     );
     let mut next_fix = fix();
@@ -266,6 +269,7 @@ async fn missing_original_quality_criterion_remains_awaiting_validation() {
             .validate(&record.id, run(&fallback_report))
             .await
             .expect_err("criterion absent")
+            .message
             .contains("no original scenario")
     );
     assert_eq!(

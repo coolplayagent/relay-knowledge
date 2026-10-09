@@ -24,6 +24,7 @@ fn public_projection_excludes_raw_knowledge_credentials_paths_and_trace_ids() {
         steps: Some(10),
     });
     let payload = prepare_payload(&source, "1.1.18", "linux-x86_64", MARKER).unwrap();
+    let public_json = serde_json::to_string(&payload).unwrap();
     for private in [
         "ghp_private",
         "person@example",
@@ -32,16 +33,55 @@ fn public_projection_excludes_raw_knowledge_credentials_paths_and_trace_ids() {
         "private-trace",
         "private-request",
         "private-host",
+        "private research",
     ] {
-        assert!(!payload.body.contains(private), "{private}");
+        assert!(!public_json.contains(private), "{private}");
     }
-    assert_eq!(payload.omitted_evidence.len(), 3);
+    assert_eq!(
+        payload.omitted_evidence,
+        ["raw evidence", "diagnostics", "trace/request identifiers"]
+    );
     assert!(payload.body.lines().any(|line| line == MARKER));
     let bound = serde_json::to_vec(&(&payload.title, &payload.body)).unwrap();
     assert_eq!(payload.digest, feedback_digest(&bound));
     assert_ne!(
         payload.digest,
         feedback_digest(&serde_json::to_vec(&source).unwrap())
+    );
+}
+
+#[test]
+fn arbitrary_private_evidence_labels_never_change_the_complete_public_payload() {
+    let mut source = report();
+    source.evidence.push(FeedbackEvidence {
+        label: "local attachment".into(),
+        content: "Local evidence content".into(),
+    });
+    let baseline = prepare_payload(&source, "1.1.18", "linux", MARKER).unwrap();
+    assert_eq!(baseline.omitted_evidence, ["raw evidence"]);
+
+    for label in [
+        "alice.private@example.com",
+        "ghp_0123456789abcdefghijklmnopqrstuvwxyz",
+        "/home/alice/customer-contracts/research.md",
+        r"C:\Users\Alice\CustomerContracts\research.md",
+        "unannounced customer acquisition codename Zephyr",
+    ] {
+        source.evidence[0].label = label.into();
+        let payload = prepare_payload(&source, "1.1.18", "linux", MARKER).unwrap();
+        assert_eq!(
+            payload, baseline,
+            "private labels must not affect any public payload field"
+        );
+    }
+
+    source.evidence.push(FeedbackEvidence {
+        label: "another confidential attachment".into(),
+        content: "Different private evidence".into(),
+    });
+    assert_eq!(
+        prepare_payload(&source, "1.1.18", "linux", MARKER).unwrap(),
+        baseline
     );
 }
 

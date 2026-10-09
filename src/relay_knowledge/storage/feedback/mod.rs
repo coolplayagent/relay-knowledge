@@ -164,4 +164,5 @@ fn io_error(error: std::io::Error) -> FeedbackStoreError {
 }
 
 #[cfg(test)]
+#[path = "mod_tests.rs"]
 mod tests;
