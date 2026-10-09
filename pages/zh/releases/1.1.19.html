@@ -44,6 +44,7 @@ relay-knowledge service doctor --format json</code></pre>
           <li>九个反馈命令保存私有本地报告、预览公开内容、去重发布并核对不确定发送。GitHub 发布需要明确策略，验证修复需要独立授权的 runner 证据。</li>
           <li>反馈校验覆盖 UTF-8 字节边界及补齐关联 ID 后的报告总大小；Web 状态接口拒绝错误 ID 类型，GitHub 限流期限在重启后仍有效，期限前不发起远端重试。</li>
           <li>明确处理存储中的无效 ontology 身份；浏览器测试依赖 urllib3 从 2.7.0 更新为 2.8.0。</li>
+          <li>TLS 依赖锁将 Rustls 更新至 0.23.45，修复 TLS 1.3 握手加密级别验证漏洞 <a href="https://github.com/rustls/rustls/security/advisories/GHSA-2mjx-qc3c-rqvc">GHSA-2mjx-qc3c-rqvc</a>。</li>
         </ul>
       </section>
       <section class="section">

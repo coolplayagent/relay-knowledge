@@ -503,6 +503,8 @@ jobs:
           Validation fixes cover UTF-8 bounds, correlation IDs, Web status IDs and
           GitHub rate-limit retry deadlines. Invalid stored ontology identities are
           handled explicitly, and the browser dependency lock updates urllib3.
+          The TLS dependency lock updates Rustls to 0.23.45 to fix
+          GHSA-2mjx-qc3c-rqvc (TLS 1.3 handshake encryption-level validation).
 
           ## Upgrade
 

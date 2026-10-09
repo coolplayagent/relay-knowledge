@@ -44,6 +44,7 @@ relay-knowledge service doctor --format json</code></pre>
           <li>Nine feedback commands preserve private local reports, preview public payloads, deduplicate publication and reconcile uncertain sends. GitHub publication requires explicit policy; fix verification requires separately authorized runner evidence.</li>
           <li>Feedback validation enforces UTF-8 byte bounds and final report size after correlation IDs are filled. Web status rejects invalid ID types, and GitHub rate-limit deadlines survive restart without early remote retries.</li>
           <li>Invalid stored ontology identities receive explicit handling. The browser-test dependency lock updates urllib3 from 2.7.0 to 2.8.0.</li>
+          <li>The TLS dependency lock updates Rustls to 0.23.45, fixing <a href="https://github.com/rustls/rustls/security/advisories/GHSA-2mjx-qc3c-rqvc">GHSA-2mjx-qc3c-rqvc</a> in TLS 1.3 handshake encryption-level validation.</li>
         </ul>
       </section>
       <section class="section">
