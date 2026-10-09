@@ -80,7 +80,7 @@ impl AuthoredEvidenceBundle {
             return Err(DomainError::invalid("schema_version", "must be 1"));
         }
         bounded_text(&self.id, "bundle.id", 128)?;
-        SourceScope::parse(&self.source_scope)?;
+        validate_scope(&self.source_scope)?;
         if self.graph.nodes.is_empty()
             || self.graph.nodes.len() > MAX_BUNDLE_NODES
             || self.graph.edges.len() > MAX_BUNDLE_EDGES
@@ -116,7 +116,7 @@ impl AuthoredEvidenceBundle {
         }
         for pin in &self.evidence {
             bounded_text(&pin.id, "evidence.id", 4096)?;
-            SourceScope::parse(&pin.source_scope)?;
+            validate_scope(&pin.source_scope)?;
             pin.artifact.validate()?;
             if let Some(span) = pin.span {
                 EvidenceSpan::new(
@@ -187,6 +187,17 @@ impl AuthoredEvidenceBundle {
             .collect();
         Ok((revision, affected))
     }
+}
+
+fn validate_scope(value: &str) -> Result<(), DomainError> {
+    bounded_text(value, "source_scope", 4096)?;
+    if SourceScope::parse(value)?.as_str() != value {
+        return Err(DomainError::invalid(
+            "source_scope",
+            "must already be normalized without surrounding whitespace",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

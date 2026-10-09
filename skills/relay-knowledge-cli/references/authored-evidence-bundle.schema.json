@@ -16,7 +16,8 @@
     "source_scope": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 4096
+      "maxLength": 4096,
+      "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
     },
     "graph": {
       "type": "object",
@@ -117,7 +118,8 @@
           "source_scope": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 4096
+            "maxLength": 4096,
+            "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
           },
           "artifact": {
             "type": "object",

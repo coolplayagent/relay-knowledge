@@ -15,6 +15,12 @@ fn rejects_schema_size_span_scope_and_alias_violations() {
     original.validate_shape().unwrap();
     let mut invalid = Vec::new();
     let mut value = original.clone();
+    value.source_scope = " research ".into();
+    invalid.push(value);
+    let mut value = original.clone();
+    value.evidence[0].source_scope = "research ".into();
+    invalid.push(value);
+    let mut value = original.clone();
     value.schema_version = 2;
     invalid.push(value);
     let mut value = original.clone();

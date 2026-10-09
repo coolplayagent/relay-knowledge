@@ -14,8 +14,9 @@ pub(super) fn ingest_request(loaded: &LoadedBundle) -> Result<IngestRequest, Api
     let document = document_id(&bundle.id, &bundle.source_scope, revision);
     let entity = |id: &str| {
         format!(
-            "{}:{id}",
-            document_id(&bundle.id, &bundle.source_scope, "node")
+            "{}:{}",
+            document_id(&bundle.id, &bundle.source_scope, "node"),
+            super::reader::digest(id.as_bytes())
         )
     };
     let pin_id = |id: &str| format!("{document}:pin:{}", super::reader::digest(id.as_bytes()));
@@ -122,3 +123,7 @@ pub(super) fn ingest_request(loaded: &LoadedBundle) -> Result<IngestRequest, Api
         events: Vec::new(),
     })
 }
+
+#[cfg(test)]
+#[path = "projection_tests.rs"]
+mod tests;

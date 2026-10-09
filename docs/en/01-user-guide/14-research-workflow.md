@@ -205,3 +205,7 @@ it checks line endings only, with no command checks or exclusions. It is not evi
 of team policy adoption and does not replace the existing Cargo, coverage, architecture,
 documentation, browser, Miri or sanitizer gates. Batch previews use four bounded workers
 and a 30-second deadline; cancellation before publication cannot write candidate state.
+
+Authorization scopes must already be normalized (no surrounding whitespace, at most
+4096 UTF-8 bytes). Runtime entity keys hash the exact authored node id, so ids which
+differ by whitespace remain distinct instead of collapsing during core normalization.
