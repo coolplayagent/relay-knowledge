@@ -70,3 +70,5 @@ Read Chapter 5 when using code repositories as retrieval sources. Read Chapter 6
 The examples use `relay-knowledge` to mean a built or installed binary. If it is not installed on `PATH`, replace it with `target/debug/relay-knowledge` or `target/release/relay-knowledge`. Prefer `--format json` for scripts; use default `text` for terminal checks and `markdown` for report-oriented commands.
 
 CLI, Web, MCP, ACP, workers, proposals, audit, and service operations all enter the core through the shared application service. During troubleshooting, preserve operation, metadata, degraded reason, freshness, audit correlation, and diagnostics fields from JSON responses.
+
+- [Research captures and map transactions](14-research-workflow.md)

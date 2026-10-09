@@ -6,6 +6,18 @@ use super::super::{StorageError, StorageFuture};
 
 /// Repository registration, lookup, and lifecycle capability.
 pub trait RepositoryCatalogStore: Send + Sync {
+    /// Looks up the canonical repository root without scanning unrelated aliases.
+    fn code_repository_at_root(
+        &self,
+        _root: String,
+    ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "repository root lookup is unavailable".into(),
+            ))
+        })
+    }
+
     fn upsert_code_repository(
         &self,
         registration: CodeRepositoryRegistration,

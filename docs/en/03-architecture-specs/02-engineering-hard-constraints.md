@@ -440,3 +440,8 @@ before recovery metadata, and the observed remote issue body digest. A deduplica
 issue may carry another publisher's nonce; `track` may refresh only the remote
 observation binding, without rewriting the original local evidence/payload or
 claiming their body bytes are identical.
+
+CLI metadata aggregation must retain both research and feedback command families.
+The shared Web dispatcher routes each family to its owning application service.
+Regression checks cover both complete command families together, so integrating
+one workflow preserves the other workflow's public operations.

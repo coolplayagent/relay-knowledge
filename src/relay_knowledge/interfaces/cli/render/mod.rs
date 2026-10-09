@@ -1,5 +1,17 @@
 mod preview;
 
+const STRUCTURED_TEXT_OPERATIONS: &[&str] = &[
+    "knowledge.map.plan",
+    "knowledge.map.apply",
+    "sources.audit",
+    "evidence.validate",
+    "evidence.import",
+    "evidence.export",
+    "evidence.view",
+    "evidence.impact",
+    "research.status",
+];
+
 use crate::{
     api::{ApiMetadata, ApiStreamEvent, ProjectStatusResponse, StreamEventKind},
     project::KNOWLEDGE_MAP_RELATIVE_PATH,
@@ -32,6 +44,11 @@ where
     match format {
         OutputFormat::Text => render_text(operation, response),
         OutputFormat::Json => serialize_line(response),
+        OutputFormat::Markdown if STRUCTURED_TEXT_OPERATIONS.contains(&operation) => {
+            let body = serde_json::to_string_pretty(response)
+                .map_err(|error| CliError::RenderFailed(error.to_string()))?;
+            Ok(format!("```json\n{body}\n```\n"))
+        }
         OutputFormat::Markdown => render_text(operation, response),
         OutputFormat::StreamingJson => render_streaming_response(operation, metadata, response),
     }
@@ -43,6 +60,11 @@ where
 {
     let value = serde_json::to_value(response)
         .map_err(|error| CliError::RenderFailed(error.to_string()))?;
+    if STRUCTURED_TEXT_OPERATIONS.contains(&operation) {
+        return serde_json::to_string_pretty(&value)
+            .map(|body| format!("{body}\n"))
+            .map_err(|error| CliError::RenderFailed(error.to_string()));
+    }
     let line = match operation {
         "project.status" => value["project_name"]
             .as_str()
@@ -561,3 +583,7 @@ where
 
     Ok(format!("{line}\n"))
 }
+
+#[cfg(test)]
+#[path = "research_tests.rs"]
+mod research_tests;

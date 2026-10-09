@@ -6,6 +6,7 @@ mod feedback;
 mod files;
 mod model_config;
 mod operation_request;
+mod research;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -216,6 +217,16 @@ async fn dispatch_operation(
         operation if operation.starts_with("feedback.") => {
             feedback::execute(service, operation, payload, context).await
         }
+
+        "knowledge.map.plan"
+        | "knowledge.map.apply"
+        | "sources.audit"
+        | "evidence.validate"
+        | "evidence.import"
+        | "evidence.export"
+        | "evidence.view"
+        | "evidence.impact"
+        | "research.status" => research::dispatch(service, payload, context).await,
         "knowledge.map.history" | "repository.map.history" => {
             let request = knowledge_map_history_page(payload)?;
             let root = service

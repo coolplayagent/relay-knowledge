@@ -9,6 +9,8 @@ mod operations;
 
 pub use operations::feedback;
 
+pub use knowledge::{map_batch, research};
+
 pub use business::{
     BUSINESS_GLOSSARY_MAX_BYTES, BUSINESS_GLOSSARY_MAX_DOMAINS, BUSINESS_GLOSSARY_MAX_TERMS,
     BUSINESS_GLOSSARY_SCHEMA_VERSION, BUSINESS_TERM_MAX_ALIASES, BUSINESS_TERM_MAX_MAPPINGS,
@@ -105,9 +107,9 @@ pub use graph::{
     FusionDiagnostics, GraphMutationBatch, GraphRelationRecord, GraphVersionRange, LayoutRegion,
     RECIPROCAL_RANK_FUSION_K, RankingSignal, RerankDiagnostics, RerankMode, RerankModeError,
     RerankSignal, RetrievalBackendState, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
-    RetrievalMode, RetrievedContextPack, RetrieverSource, TraversalProvenanceTrace,
-    TraversalRankingContribution, TraversalTraceEdge, TraversalTraceEvidence, TraversalTraceNode,
-    TraversalTraceNodeKind, TraversalTraceRedaction,
+    RetrievalMode, RetrievedContextPack, RetrieverSource, StoredEvidenceDocument,
+    TraversalProvenanceTrace, TraversalRankingContribution, TraversalTraceEdge,
+    TraversalTraceEvidence, TraversalTraceNode, TraversalTraceNodeKind, TraversalTraceRedaction,
 };
 pub(crate) use knowledge::validate_directory_collection;
 pub(crate) use knowledge::{

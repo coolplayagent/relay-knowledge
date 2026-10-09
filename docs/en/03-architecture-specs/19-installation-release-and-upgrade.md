@@ -589,3 +589,21 @@ validates allowed input shapes, unknown-field rejection, publication-policy
 bounds and runner evidence requirements; `--self-test` also detects weakened
 schema privacy boundaries. Rust tests parse the packaged example through the
 production DTO, so an example/schema refresh accompanies contract changes.
+
+## Local research artifact compatibility
+
+Research catalogs, authored evidence bundles and requirements manifests remain user-owned
+repository files; installation, upgrade and uninstall must not rewrite captured bytes or
+remove these artifacts. Bundle import uses the existing runtime graph database and proposed
+fact lifecycle; no new database schema, service, port or automatic indexing task is required.
+Back up the runtime graph before rollback. Older binaries retain imported evidence as normal
+graph records but cannot invoke the new bundle/audit/status commands. Map batch receipts use
+the existing v4 history summary string and survive old-writer round trips within normal history
+retention. Export a bundle before removing runtime state if a standalone deliverable is needed.
+CLI/Web queries share the same imported facts and indexes. See the
+[research workflow](../01-user-guide/14-research-workflow.md) for explicit version and review rules.
+
+The Web Research panel ships with the matching backend binary and reuses the existing
+operation endpoint and network policy. Archive access reuses configured file roots/scopes;
+no indexing or repository registration is required for those roots. Roll back Web assets
+and binary together, since older binaries do not recognize research operation payloads.

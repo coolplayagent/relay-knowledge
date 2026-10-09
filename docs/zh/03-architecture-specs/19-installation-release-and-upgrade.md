@@ -440,3 +440,15 @@ schema marker 10 和一次性 portable evidence 迁移将旧事实标记 stale�
 发布默认关闭，需本地策略明确启用。通过进程或托管服务环境安全提供 `RELAY_KNOWLEDGE_FEEDBACK_GITHUB_TOKEN`，升级时保留凭据管理；Token 不写入 policy 或 issue。配置变更不得重定向已尝试发布。卸载二进制保留反馈运行时数据；显式清理 runtime data 会同时删除私人证据和未决恢复身份，应先核对或备份。诊断使用 `feedback status`、`feedback preview` 与策略范围内的 retry。
 
 Skill 打包检查纳入严格 feedback 输入 Schema 与 #416 公开摩擦示例。`tools/release/update_skill_metadata_version.py --check` 验证输入形状、未知字段拒绝、发布策略预算和 runner 证据要求；`--self-test` 检查弱化隐私边界的 Schema 漂移。Rust 测试使用生产 DTO 解析打包示例，契约变更必须同步 Schema 与示例。
+
+## 本地研究工件兼容性
+
+研究 catalog、人工 evidence bundle 和 requirements manifest 属于用户仓库文件；安装、升级、卸载不得
+改写原始抓取字节或删除这些工件。Bundle 导入复用现有运行时图数据库与 proposed 事实生命周期，无新增
+数据库 schema、服务、端口或自动索引任务。回滚前备份运行时图；旧二进制仍可将导入记录作为普通图事实
+读取，但不能调用新的 bundle/audit/status 命令。地图批次收据沿用 v4 历史 summary 字符串，在既有历史
+保留窗口内可经旧写入器往返保留。若需独立交付，删除运行时状态前先导出 bundle。CLI/Web 共用导入事实
+与索引。具体版本绑定和审阅规则见[研究工作流](../01-user-guide/17-research-workflow.md)。
+
+Web Research 面板与后端二进制同版发布，复用现有操作端点和网络策略。归档访问复用已配置的文件根与范围，
+不要求为这些根注册仓库或索引。回滚时同步回滚 Web 静态资源和二进制，旧二进制无法识别新的研究操作请求。

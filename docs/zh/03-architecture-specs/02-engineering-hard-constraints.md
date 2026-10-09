@@ -421,3 +421,5 @@ Maven reactor 的模块身份、坐标匹配、持久化与有界反向遍历由
 远端去重可另使用最终公开叙述在加入恢复元数据前的稳定 digest；此公开 marker 不得混入原始 evidence、diagnostics、trace ID 或本地 report 指纹。相同公开报告可复用已有 issue 而不暴露私有输入，但不能为不同安装实例提供并发串行保证。
 
 内容绑定必须区分不可变私有原始 report digest、不可变本地完整 title/body payload digest、加入恢复元数据前的公开去重 marker，以及实际观察到的远端 issue body digest。去重复用的 issue 可能携带另一个发布者的 nonce；track 只刷新远端观察绑定，不能改写本地原始证据/payload，也不能宣称两者正文逐字节相同。
+
+CLI 元数据聚合必须同时保留研究与反馈命令族；共享 Web dispatcher 将各命令族路由到对应应用服务。回归检查应在同一目录中覆盖两个完整命令族，确保集成一个工作流时保留另一个工作流的公开操作。

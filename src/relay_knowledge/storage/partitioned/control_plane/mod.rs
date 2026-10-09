@@ -70,6 +70,14 @@ pub(super) fn list_code_repositories(
 }
 
 impl GraphStore for PartitionedSqliteKnowledgeStore {
+    fn evidence_document(
+        &self,
+        id: String,
+        source_scope: String,
+    ) -> StorageFuture<'_, Option<crate::domain::StoredEvidenceDocument>> {
+        self.control.evidence_document(id, source_scope)
+    }
+
     fn commit_mutation_batch(&self, batch: GraphMutationBatch) -> StorageFuture<'_, CommitReceipt> {
         self.control.commit_mutation_batch(batch)
     }

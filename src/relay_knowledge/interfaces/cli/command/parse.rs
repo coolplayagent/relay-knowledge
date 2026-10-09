@@ -195,6 +195,9 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
         "query" => knowledge::parse_query(&tokens[1..]),
         "files" => files::parse_files(&tokens[1..]),
         "map" => map::parse_map(&tokens[1..]),
+        "sources" | "evidence" | "research" => {
+            super::super::research::parse(&tokens[0], &tokens[1..])
+        }
         "repo" => repo::parse_repo(&tokens[1..]).map(CliAction::Repo),
         "repo-set" => repo_set::parse_repo_set(&tokens[1..]).map(CliAction::RepoSet),
         "graph" => knowledge::parse_graph(&tokens[1..]),

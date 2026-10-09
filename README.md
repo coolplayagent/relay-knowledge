@@ -309,3 +309,5 @@ candidate whose required rule currently checks line endings. It supplements the
 Cargo, documentation, coverage and architecture gates above. Bind final checks
 to the staged/delivered snapshot; `.gitattributes` intentionally gives Windows
 scripts CRLF working-tree files while Git stores their normalized content.
+
+Research workflows: [map transactions and local capture audits](docs/en/01-user-guide/14-research-workflow.md).

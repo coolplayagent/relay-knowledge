@@ -367,3 +367,9 @@ Web 通过 `POST /api/web/operations/execute` 调用相同服务。`operation` �
 Web 反馈错误保留类型：无效输入返回 HTTP 400，存储准入忙返回 429，存储或 provider 操作不可用返回 503，内部失败返回 500。`blocked` 等发布结果仍是成功响应中已保存的反馈状态；客户端必须检查状态，不能仅凭 HTTP 成功就认定 issue 已提交。
 
 状态、恢复与外部 runner 证据模型见[软件使用体验反馈](10-workers-proposals-audit.md#106-软件使用体验反馈)。
+
+## 研究材料与地图事务
+
+`map plan/apply --type knowledge --input <transaction.json>`; `sources audit --root <repository> --input <catalog.json>`.
+
+[研究材料与地图事务](17-research-workflow.md)

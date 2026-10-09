@@ -9,7 +9,7 @@ fn aggregate_specs_preserve_stable_order_and_unique_paths() {
         .map(|command| command.path.join(" "))
         .collect::<Vec<_>>();
 
-    assert_eq!(paths.len(), 74);
+    assert_eq!(paths.len(), 83);
     assert!(paths.iter().any(|path| path == "repo diagnostics"));
     assert_eq!(
         &paths[..7],
@@ -24,11 +24,18 @@ fn aggregate_specs_preserve_stable_order_and_unique_paths() {
         ]
     );
     assert_eq!(
-        &paths[26..30],
-        ["repo-set", "map init", "map show", "map history"]
+        &paths[26..32],
+        [
+            "repo-set",
+            "map init",
+            "map plan",
+            "map apply",
+            "map show",
+            "map history"
+        ]
     );
     assert_eq!(
-        &paths[40..44],
+        &paths[49..53],
         [
             "graph inspect",
             "index refresh",
@@ -37,13 +44,39 @@ fn aggregate_specs_preserve_stable_order_and_unique_paths() {
         ]
     );
     assert_eq!(
-        &paths[69..],
+        &paths[78..],
         [
             "setup doctor",
             "setup profile",
             "version",
             "version check",
             "help"
+        ]
+    );
+    assert_eq!(
+        &paths[42..49],
+        [
+            "sources audit",
+            "evidence validate",
+            "evidence import",
+            "evidence export",
+            "evidence view",
+            "evidence impact",
+            "research status"
+        ]
+    );
+    assert_eq!(
+        &paths[59..68],
+        [
+            "feedback configure",
+            "feedback report",
+            "feedback status",
+            "feedback preview",
+            "feedback submit",
+            "feedback retry",
+            "feedback track",
+            "feedback link-fix",
+            "feedback validate"
         ]
     );
     assert_eq!(

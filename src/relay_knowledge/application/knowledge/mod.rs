@@ -6,3 +6,5 @@ pub mod map;
 pub(super) mod multimodal;
 
 pub use file_index::DEFAULT_FILE_QUERY_LIMIT;
+
+pub mod research;

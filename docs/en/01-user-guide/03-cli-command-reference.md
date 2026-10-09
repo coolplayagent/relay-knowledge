@@ -404,3 +404,9 @@ must inspect that state before treating an issue as submitted.
 
 See [software feedback, recovery and validation](10-workers-proposals-audit.md#106-software-experience-feedback)
 for states, permission boundaries and the external-runner evidence model.
+
+## Research captures and map transactions
+
+`map plan/apply --type knowledge --input <transaction.json>`; `sources audit --root <repository> --input <catalog.json>`.
+
+[Research captures and map transactions](14-research-workflow.md)

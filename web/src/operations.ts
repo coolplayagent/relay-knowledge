@@ -1,3 +1,4 @@
+import { researchSnapshot } from "./research_operations.js";
 import type { HealthResponse, IndexStatus, ProjectStatusResponse } from "./api/contracts";
 
 export type OperationId =
@@ -5,6 +6,7 @@ export type OperationId =
   | "ingest"
   | "graph"
   | "map"
+  | "research"
   | "code"
   | "indexes"
   | "provider"
@@ -104,6 +106,7 @@ export const OPERATIONS: Array<{ id: OperationId; label: string }> = [
   { id: "ingest", label: "Ingest" },
   { id: "graph", label: "Graph" },
   { id: "map", label: "Map" },
+  { id: "research", label: "Research" },
   { id: "code", label: "Code" },
   { id: "indexes", label: "Indexes" },
   { id: "provider", label: "Provider" },
@@ -285,6 +288,8 @@ function operationCommandAndPayload(metadata: Record<string, unknown>): {
       return graphSnapshot(metadata);
     case "map":
       return mapHistorySnapshot(metadata);
+    case "research":
+      return researchSnapshot();
     case "code":
       return codeSnapshot(metadata);
     case "indexes":
