@@ -94,15 +94,7 @@ impl ResearchReader {
         artifact: &ResearchArtifact,
         input: &Path,
     ) -> Result<Vec<u8>, String> {
-        let path = match artifact.path_base {
-            ResearchPathBase::Repository => PathBuf::from(&artifact.path),
-            ResearchPathBase::Catalog => {
-                input.parent().unwrap_or(Path::new("")).join(&artifact.path)
-            }
-        };
-        // Validate each supplied component before joining: catalog-relative '../'
-        // is not a second spelling of repository authority.
-        confined_components(Path::new(&artifact.path))?;
+        let path = artifact_path(artifact, input)?;
         self.read(&path, MAX_FILE_BYTES)
     }
 
@@ -136,14 +128,20 @@ impl ResearchReader {
             .open_with(Path::new(name), &options)
             .map_err(|error| error.to_string())?;
         let opened = file.metadata().map_err(|error| error.to_string())?;
-        if !opened.is_file() || opened.len() > limit as u64 {
+        if !opened.is_file()
+            || opened.len() > limit as u64
+            || opened.len() > self.remaining_bytes as u64
+        {
             return Err("artifact exceeds file budget or is not regular".into());
         }
         let mut bytes = Vec::new();
         let mut buffer = [0; 65536];
         loop {
             self.check_budget()?;
-            let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
+            let read_limit = buffer.len().min(self.remaining_bytes.saturating_add(1));
+            let count = file
+                .read(&mut buffer[..read_limit])
+                .map_err(|error| error.to_string())?;
             if count == 0 {
                 break;
             }
@@ -167,14 +165,26 @@ impl ResearchReader {
     }
 
     fn check_budget(&self) -> Result<(), String> {
-        if self.cancelled.load(Ordering::Relaxed)
-            || Instant::now() >= self.deadline
-            || self.remaining_bytes == 0
-        {
+        if self.cancelled.load(Ordering::Relaxed) || Instant::now() >= self.deadline {
             return Err("research read cancelled or resource budget exhausted".into());
         }
         Ok(())
     }
+}
+
+/// Validate supplied POSIX components before converting a platform-native join back
+/// to the portable artifact representation (Windows joins introduce backslashes).
+pub(super) fn artifact_path(artifact: &ResearchArtifact, input: &Path) -> Result<PathBuf, String> {
+    confined_components(Path::new(&artifact.path))?;
+    let path = match artifact.path_base {
+        ResearchPathBase::Repository => PathBuf::from(&artifact.path),
+        ResearchPathBase::Catalog => {
+            confined_components(input)?;
+            input.parent().unwrap_or(Path::new("")).join(&artifact.path)
+        }
+    };
+    let text = path.to_str().ok_or("artifact path must be UTF-8")?;
+    Ok(PathBuf::from(text.replace('\\', "/")))
 }
 
 fn confined_components(path: &Path) -> Result<Vec<std::ffi::OsString>, String> {

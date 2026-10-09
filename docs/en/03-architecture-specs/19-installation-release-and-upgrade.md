@@ -564,3 +564,8 @@ the existing v4 history summary string and survive old-writer round trips within
 retention. Export a bundle before removing runtime state if a standalone deliverable is needed.
 CLI/Web queries share the same imported facts and indexes. See the
 [research workflow](../01-user-guide/14-research-workflow.md) for explicit version and review rules.
+
+The Web Research panel ships with the matching backend binary and reuses the existing
+operation endpoint and network policy. Archive access reuses configured file roots/scopes;
+no indexing or repository registration is required for those roots. Roll back Web assets
+and binary together, since older binaries do not recognize research operation payloads.

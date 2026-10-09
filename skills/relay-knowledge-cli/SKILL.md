@@ -602,3 +602,9 @@ catalog/bundle inputs to distinguish navigation, captured integrity, authored im
 retrieval readiness. The optional
 [requirements manifest](references/research-requirements.schema.json) binds declared
 criteria to exact artifacts; content completion remains unknown without trusted review.
+
+The equivalent Web workflow is Operations → Research, using registered repository aliases
+or exact server-configured file roots/scopes. Configured archives need no code indexing.
+Text/Markdown research results preserve structured states and diagnostics; inspect them even
+when the process exits successfully. Navigation errors remain independent of archive and
+authored-graph readiness; explicit requirement bindings must still validate.

@@ -7,7 +7,7 @@ use crate::{
 };
 use std::{path::PathBuf, sync::Arc};
 
-pub(super) static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(super) async fn fixture() -> (PathBuf, AuthoredEvidenceBundle, RelayKnowledgeService) {
     let mut nonce = [0; 16];

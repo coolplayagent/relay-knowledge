@@ -1,5 +1,7 @@
 //! Repository-owned research artifacts; navigation and derived indexes stay separate.
 
+mod access;
+pub use access::ResearchRootSelection;
 mod audit;
 mod bundle;
 mod import;
@@ -75,3 +77,6 @@ impl ResearchService {
 #[cfg(test)]
 #[path = "test_support.rs"]
 mod test_support;
+
+#[cfg(test)]
+pub(crate) use test_support::TEST_LOCK as RESEARCH_TEST_LOCK;

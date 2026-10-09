@@ -213,7 +213,9 @@ fn evaluate_readiness(response: &mut ResearchStatusResponse) {
             response.bundle.as_ref().is_some_and(|report| report.valid)
         }
         ResearchDelivery::Graphrag => {
-            if let Some(bundle) = &response.bundle {
+            if response.bundle_error.is_some() {
+                false
+            } else if let Some(bundle) = &response.bundle {
                 let indexes_fresh = IndexKind::ALL.iter().all(|kind| {
                     response.graph_indexes.iter().any(|index| {
                         index.kind == *kind
@@ -251,7 +253,7 @@ fn evaluate_readiness(response: &mut ResearchStatusResponse) {
             }
         }
     };
-    response.readiness = if ready && response.next_steps.is_empty() {
+    response.readiness = if ready {
         "ready_for_review"
     } else {
         "needs_action"

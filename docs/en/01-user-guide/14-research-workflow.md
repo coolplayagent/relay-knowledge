@@ -64,6 +64,8 @@ relay-knowledge sources audit --root . --input sources/catalog.json --format jso
 The input path is relative to the authorized repository root. Each raw, extraction
 or reference artifact declares path_base=repository or catalog, a path and the
 exact byte SHA-256. Catalog-relative paths start at the input JSON directory.
+Artifact paths use POSIX `/` separators on every platform, including Windows;
+native directory joins preserve this portable representation.
 Absolute paths, parent traversal and symlinks in any component are rejected.
 
 Sources retain id, original URL, optional transport, raw bytes, extraction,
@@ -209,3 +211,47 @@ and a 30-second deadline; cancellation before publication cannot write candidate
 Authorization scopes must already be normalized (no surrounding whitespace, at most
 4096 UTF-8 bytes). Runtime entity keys hash the exact authored node id, so ids which
 differ by whitespace remain distinct instead of collapsing during core normalization.
+
+## Web operations
+
+Open **Operations → Research** for capture audit, bundle validate/import/export/view/impact,
+research delivery status and map plan/apply. These adapters call the same application
+services as the CLI through POST /api/web/operations/execute. Results retain complete
+state and diagnostics; text CLI output uses readable JSON and Markdown uses fenced JSON.
+
+Select a registered repository alias, or an exact configured archive root and its scope.
+The latter reuses RELAY_KNOWLEDGE_FILE_INDEX_ROOTS (scope local-files); default document
+roots use user-documents. Selecting a configured root neither registers nor indexes it.
+Paths are relative to the selected **server** root, not the browser's computer. An
+arbitrary root, mismatching scope, traversal, symlink or unknown payload field fails closed.
+Imports remain proposed and concept clarification remains a dry-run proposal.
+
+A configured archive status request uses this existing operation envelope:
+
+```json
+{
+  "snapshot": {
+    "name": "Archive audit",
+    "command": "research status",
+    "payload": {
+      "operation": "research.status",
+      "target": {"kind": "configured", "path": "/srv/research", "source_scope": "local-files"},
+      "delivery": "archive",
+      "catalog": "sources/catalog.json"
+    }
+  }
+}
+```
+
+A repository target is {"kind":"repository","alias":"research"}. The operation-specific
+fields are input (audit/validate/import/view/impact), source_scope (bundle operations),
+focus (view), node/label (impact), id/source_scope/revision (export),
+delivery/catalog/bundle/source_scope/requirements (status), or transaction (map plan/apply).
+Map transactions are JSON objects following the same transaction Schema. Copy the planned
+transaction with its version/digest before applying it. Export needs no filesystem target.
+
+Navigation failures remain separately visible and do not block an otherwise valid archive
+or authored-graph deliverable. Optional unrelated-layer diagnostics do not redefine the
+selected delivery; explicit requirement-binding errors remain blocking. A malformed supplied
+GraphRAG bundle cannot fall back to an unrelated code index. Aggregate byte limits are
+inclusive: exact-budget EOF and empty artifacts are valid; additional nonempty bytes fail.

@@ -439,3 +439,6 @@ schema marker 10 和一次性 portable evidence 迁移将旧事实标记 stale�
 读取，但不能调用新的 bundle/audit/status 命令。地图批次收据沿用 v4 历史 summary 字符串，在既有历史
 保留窗口内可经旧写入器往返保留。若需独立交付，删除运行时状态前先导出 bundle。CLI/Web 共用导入事实
 与索引。具体版本绑定和审阅规则见[研究工作流](../01-user-guide/17-research-workflow.md)。
+
+Web Research 面板与后端二进制同版发布，复用现有操作端点和网络策略。归档访问复用已配置的文件根与范围，
+不要求为这些根注册仓库或索引。回滚时同步回滚 Web 静态资源和二进制，旧二进制无法识别新的研究操作请求。

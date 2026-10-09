@@ -163,19 +163,9 @@ pub(super) fn load_bundle(
                 "bundle evidence projection exceeds 2 MiB; use bounded spans",
             ));
         }
-        let source_path = match pin.artifact.path_base {
-            crate::domain::research::ResearchPathBase::Repository => {
-                std::path::PathBuf::from(&pin.artifact.path)
-            }
-            crate::domain::research::ResearchPathBase::Catalog => input
-                .parent()
-                .unwrap_or(Path::new(""))
-                .join(&pin.artifact.path),
-        };
-        source_paths.insert(
-            pin.id.clone(),
-            source_path.to_string_lossy().replace('\\', "/"),
-        );
+        let source_path = super::reader::artifact_path(&pin.artifact, input)
+            .map_err(ApiError::invalid_argument)?;
+        source_paths.insert(pin.id.clone(), source_path.to_string_lossy().into_owned());
         snippets.insert(pin.id.clone(), content);
     }
     let mut edge_ids = BTreeSet::new();

@@ -28,6 +28,7 @@ async fn rejects_symlink_special_files_and_file_budgets() {
     let root = std::env::temp_dir().join(format!("relay-research-reader-{}", digest(&nonce)));
     std::fs::create_dir_all(root.join("nested")).unwrap();
     std::fs::write(root.join("file"), b"bytes").unwrap();
+    std::fs::write(root.join("empty"), b"").unwrap();
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(root.join("file"), root.join("link")).unwrap();
@@ -44,6 +45,12 @@ async fn rejects_symlink_special_files_and_file_budgets() {
             assert!(reader.read(Path::new("link"), 100).is_err());
             assert!(reader.read(Path::new("dirlink/file"), 100).is_err());
         }
+        reader.remaining_bytes = 10;
+        assert_eq!(reader.read(Path::new("file"), 5).unwrap(), b"bytes");
+        assert_eq!(reader.read(Path::new("file"), 5).unwrap(), b"bytes");
+        assert_eq!(reader.remaining_bytes, 0);
+        assert!(reader.read(Path::new("empty"), 5).unwrap().is_empty());
+        assert!(reader.read(Path::new("file"), 5).is_err());
         reader.remaining_bytes = 1;
         assert!(reader.read(Path::new("file"), 100).is_err());
         reader.remaining_bytes = 100;

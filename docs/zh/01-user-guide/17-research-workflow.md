@@ -59,6 +59,7 @@ relay-knowledge sources audit --root . --input sources/catalog.json --format jso
 
 `--input` 相对授权仓库根；每个 raw、extraction.artifact 和 references 项明确指定
 `path_base=repository` 或 `catalog`。catalog 路径相对输入 JSON 所在目录。
+所有平台（包括 Windows）均使用 POSIX `/` 分隔符；原生目录拼接后仍保留这一可移植表示。
 绝对路径、父级穿越及任何层级 symlink 都拒绝。不会读取授权根以外的材料。
 
 每条 source 记录稳定 id、原始 URL、可选 transport、raw artifact、extraction、
@@ -172,3 +173,40 @@ content_verdict 保持 unknown，文件存在、哈希正确、章节标题齐�
 
 授权 scope 必须已规范化：不含首尾空白，最多 4096 UTF-8 字节。运行时实体键对作者节点 id 的原始值
 计算摘要，避免仅空白不同的稳定 id 在核心层规范化时被错误合并。
+
+## Web 操作
+
+在 **Operations → Research** 中使用原始抓取审计、bundle 校验/导入/导出/查看/影响、交付状态以及
+地图 plan/apply。适配器通过既有 POST /api/web/operations/execute 调用与 CLI 相同的应用服务。
+结果保留完整状态和诊断；CLI 默认文本输出使用可读 JSON，Markdown 使用 JSON 代码块，避免冲突或
+无效批次仅输出操作名称而被误认为成功。
+
+目标选择已注册 repository alias，或服务端明确配置的归档根及范围。后者复用
+RELAY_KNOWLEDGE_FILE_INDEX_ROOTS（scope 为 local-files）；默认文档目录使用 user-documents。
+选择配置根不会自动注册或索引。输入路径相对所选**服务端**根目录，不是浏览器所在电脑。
+任意未授权根、范围不匹配、路径越界、symlink 或未知请求字段都会拒绝。导入仍是 proposed，概念澄清只生成提案。
+
+```json
+{
+  "snapshot": {
+    "name": "Archive audit",
+    "command": "research status",
+    "payload": {
+      "operation": "research.status",
+      "target": {"kind": "configured", "path": "/srv/research", "source_scope": "local-files"},
+      "delivery": "archive",
+      "catalog": "sources/catalog.json"
+    }
+  }
+}
+```
+
+仓库目标为 {"kind":"repository","alias":"research"}。各操作字段为 input（audit/validate/import/view/impact）、
+source_scope（bundle 操作）、focus（view）、node/label（impact）、id/source_scope/revision（export）、
+delivery/catalog/bundle/source_scope/requirements（status），或 transaction（map plan/apply）。
+transaction 是同一 Schema 的 JSON 对象；先 plan，再复制返回的版本/摘要前置条件执行 apply。
+export 不需要文件系统目标。
+
+地图问题作为独立诊断保留，不阻断已满足要求的 archive/authored_graph 交付；无关层的可选诊断不改变所选交付
+要求，但显式 requirements 的绑定错误仍会阻断。GraphRAG 的显式 bundle 输入损坏时不能退回其他代码索引冒充
+就绪。总字节预算包含精确上界：预算恰好耗尽后的 EOF、空文件有效，继续出现非空字节才拒绝。

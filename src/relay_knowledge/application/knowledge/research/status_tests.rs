@@ -187,6 +187,12 @@ async fn matches_only_this_root_and_keeps_fresh_partial_and_stale_states_distinc
         "research-fixture"
     );
     assert_eq!(report.readiness, "ready_for_review");
+    // An explicitly selected malformed bundle must not fall back to an unrelated
+    // fresh code index when deciding GraphRAG readiness.
+    report.bundle_error = Some("invalid selected bundle".into());
+    evaluate_readiness(&mut report);
+    assert_eq!(report.readiness, "needs_action");
+    report.bundle_error = None;
     report
         .repository_index
         .served_scope
@@ -239,5 +245,41 @@ async fn malformed_optional_artifacts_are_reported_without_hiding_other_layers()
     assert!(report.requirements_error.is_some());
     assert_eq!(report.repository_index.state, "not_indexed");
     assert_eq!(report.readiness, "needs_action");
+    tokio::fs::remove_dir_all(root).await.unwrap();
+}
+
+#[tokio::test]
+async fn standalone_artifact_deliveries_do_not_require_navigation_maps() {
+    let _guard = TEST_LOCK.lock().await;
+    let (root, _, service) = fixture().await;
+    let context = RequestContext::for_interface(InterfaceKind::Cli);
+    let mut input = request(&root, ResearchDelivery::AuthoredGraph);
+    input.bundle = Some("bundle.json".into());
+    input.scope = Some("research".into());
+    let report = service
+        .research_status(input, context.clone())
+        .await
+        .unwrap();
+    assert!(!report.map.valid);
+    assert_eq!(report.readiness, "ready_for_review");
+    assert!(
+        report
+            .next_steps
+            .iter()
+            .any(|step| step.contains("navigation map"))
+    );
+    let catalog = serde_json::json!({"schema_version":1,"adapter":"relay-capture-v1","sources":[{"id":"raw","url":"https://example.org","raw":{"path_base":"repository","path":"a.txt","sha256":super::super::reader::digest(b"First\nSecond\n")}}]});
+    tokio::fs::write(
+        root.join("catalog.json"),
+        serde_json::to_vec(&catalog).unwrap(),
+    )
+    .await
+    .unwrap();
+    let mut input = request(&root, ResearchDelivery::Archive);
+    input.catalog = Some("catalog.json".into());
+    let report = service.research_status(input, context).await.unwrap();
+    assert!(!report.map.valid);
+    assert_eq!(report.readiness, "ready_for_review");
+    assert_eq!(report.repository_index.state, "not_indexed");
     tokio::fs::remove_dir_all(root).await.unwrap();
 }
