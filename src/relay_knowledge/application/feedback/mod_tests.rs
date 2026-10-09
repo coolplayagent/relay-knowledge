@@ -3,6 +3,55 @@ use std::sync::atomic::Ordering;
 use super::{test_support::*, *};
 
 #[tokio::test]
+async fn injected_correlation_ids_are_validated_before_journal_writes() {
+    let fixture = Fixture::new().await;
+    let mut input = report();
+    input.diagnostics.as_mut().unwrap().environment = Some(String::new());
+    let padding = FEEDBACK_MAX_REPORT_BYTES - serde_json::to_vec(&input).unwrap().len();
+    input.diagnostics.as_mut().unwrap().environment = Some("x".repeat(padding));
+    input.validate().expect("report fits before generated IDs");
+    let error = fixture
+        .service
+        .report(input.clone(), &context())
+        .await
+        .unwrap_err();
+    assert_eq!(error.error_kind, crate::api::ErrorKind::InvalidArgument);
+    assert!(error.message.contains("65536 bytes"));
+    assert_eq!(
+        fixture.service.status(None).await.unwrap()["feedback"],
+        serde_json::json!([])
+    );
+
+    input.trace_id = Some(context().trace_id);
+    input.request_id = Some(context().request_id);
+    let excess = serde_json::to_vec(&input).unwrap().len() - FEEDBACK_MAX_REPORT_BYTES;
+    input
+        .diagnostics
+        .as_mut()
+        .unwrap()
+        .environment
+        .as_mut()
+        .unwrap()
+        .truncate(padding - excess);
+    input.trace_id = None;
+    input.request_id = None;
+    let record = fixture
+        .service
+        .report(input, &context())
+        .await
+        .expect("exact final byte limit");
+    assert_eq!(
+        serde_json::to_vec(&record.report).unwrap().len(),
+        FEEDBACK_MAX_REPORT_BYTES
+    );
+    record
+        .report
+        .validate()
+        .expect("stored report remains valid");
+    assert_eq!(fixture.provider.creates.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
 async fn configured_repository_case_is_normalized_before_pinning_publication() {
     let fixture = Fixture::new().await;
     let mut mixed_case = policy();

@@ -146,6 +146,20 @@ not discard a saved report or alter a preceding knowledge-query result.
 `retryable-failed` can retry after its deadline; `blocked` requires resolving the
 reported policy, authentication or budget condition.
 
+GitHub 403 responses carrying `retry-after` or exhausted-rate-limit headers, and
+429 responses, are retryable; bounded provider messages also identify headerless
+primary/secondary rate limits. Their server deadline is persisted alongside the
+existing local backoff; malformed/missing timing hints fall back to one minute.
+Retry respects the later deadline, including after restart, without holding a
+sleeping request. Ordinary permission-related 403 responses remain blocked.
+
+Feedback Schema `x-maxUtf8Bytes` annotations are enforced by release contract
+validation for ASCII, CJK and emoji. Generic JSON Schema `maxLength` counts code
+points and does not enforce the extension. Runtime also validates the final
+65,536-byte report after inserting correlation IDs, rejecting oversized input
+before journal access. Web `feedback.status` accepts an omitted ID for listing;
+a present ID must be a nonempty string or the request returns HTTP 400.
+
 GitHub create-issue has no client idempotency key. An interrupted or ambiguous
 POST is therefore never automatically repeated. `retry` only reconciles its exact
 nonce; a match supplies the real URL. No match leaves `awaiting-reconciliation`,

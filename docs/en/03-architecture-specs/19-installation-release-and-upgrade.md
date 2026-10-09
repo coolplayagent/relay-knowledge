@@ -582,6 +582,10 @@ not retarget already attempted publications. A binary uninstall leaves feedback
 state with other runtime data; an explicit runtime-data purge removes private
 evidence and unresolved recovery identity too, so reconcile or back up first.
 For diagnosis, use `feedback status`, `feedback preview` and policy-scoped `retry`.
+Provider rate-limit deadlines reuse the existing `next_attempt_at_ms` journal
+field, survive restart and require no journal migration. Early retries perform
+no remote I/O. Upgrades reject reports that exceed their final encoded byte
+budget after correlation IDs are inserted, before writing runtime state.
 
 Skill packaging checks include the strict feedback input schema and the public
 #416 friction example. `tools/release/update_skill_metadata_version.py --check`

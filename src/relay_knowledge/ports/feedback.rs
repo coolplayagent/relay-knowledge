@@ -21,6 +21,8 @@ pub enum FeedbackProviderErrorKind {
 pub struct FeedbackProviderError {
     pub kind: FeedbackProviderErrorKind,
     pub message: String,
+    /// Provider's earliest safe retry time in Unix milliseconds; never sleeps in transport.
+    pub retry_not_before_ms: Option<u64>,
 }
 
 impl fmt::Display for FeedbackProviderError {

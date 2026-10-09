@@ -79,6 +79,14 @@ impl QosHttpResponse {
         self.inner.as_ref().expect("response is available").status()
     }
 
+    /// Borrows transport headers for retry policy while retaining the response's QoS permit.
+    pub fn headers(&self) -> &reqwest::header::HeaderMap {
+        self.inner
+            .as_ref()
+            .expect("response is available")
+            .headers()
+    }
+
     pub fn content_length(&self) -> Option<u64> {
         self.inner
             .as_ref()

@@ -22,7 +22,10 @@ pub(super) async fn execute(
                 .map_err(|_| WebError::bad_request("report does not match feedback schema v1".into()))?;
             feedback.report(report, &context).await.map(|record| json!({"feedback":public_record(&record)}))
         }
-        "feedback.status" => feedback.status(payload.get("id").and_then(Value::as_str)).await,
+        "feedback.status" => {
+            let id = payload.get("id").map(|_| string_field(payload, "id")).transpose()?;
+            feedback.status(id).await
+        }
         "feedback.preview" => feedback.preview(string_field(payload, "id")?).await,
         "feedback.submit" | "feedback.retry" => feedback.submit(string_field(payload, "id")?).await.map(|record| json!({"feedback":public_record(&record)})),
         "feedback.track" => feedback.track(string_field(payload, "id")?).await.map(|record| json!({"feedback":public_record(&record)})),

@@ -102,6 +102,7 @@ async fn web_tracking_timeout_and_provider_unavailability_return_503() {
         *fixture.provider.read_error.lock().unwrap() = Some(FeedbackProviderError {
             kind,
             message: message.into(),
+            retry_not_before_ms: None,
         });
         let (status, response) = fixture
             .request(json!({"operation": "feedback.track", "id": id}))

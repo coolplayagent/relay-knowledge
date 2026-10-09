@@ -181,6 +181,8 @@ def validate_schema_instance(
             raise ValueError(f"{location} is too short")
         if "maxLength" in schema and len(instance) > int(schema["maxLength"]):
             raise ValueError(f"{location} is too long")
+        if "x-maxUtf8Bytes" in schema and len(instance.encode("utf-8")) > int(schema["x-maxUtf8Bytes"]):
+            raise ValueError(f"{location} exceeds its UTF-8 byte budget")
         pattern = schema.get("pattern")
         if isinstance(pattern, str) and re.search(pattern, instance) is None:
             raise ValueError(f"{location} does not match pattern")

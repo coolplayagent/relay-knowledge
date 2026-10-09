@@ -8,9 +8,13 @@ causes. Missing external dependency sources, unauthorized scope and environment
 failures are not automatically defects.
 
 Use [feedback.schema.json](feedback.schema.json) to discover the report, policy,
-fix and validation document shapes. Runtime validation also enforces UTF-8 byte
-limits, whole-report size, nonblank strings and authorization; JSON Schema alone
-does not establish these semantic/privacy guarantees.
+fix and validation document shapes. Its `x-maxUtf8Bytes` extension declares each
+UTF-8 byte limit and the release contract validator enforces it, including CJK
+and emoji boundaries. Standard `maxLength` counts Unicode code points; generic
+JSON Schema validators can ignore the extension. Runtime validation additionally
+checks the 65,536-byte encoded report limit after filling correlation IDs,
+nonblank strings and authorization. Oversized final reports are invalid input
+and never enter the journal; JSON Schema alone does not establish all guarantees.
 
 ## Record and Preview
 
@@ -96,6 +100,17 @@ already-sanitized public title/body so an existing identical issue can be reused
 across outboxes. Quota limits create attempts in a durable
 24-hour window; per-record create attempts stop at five. Backoff and capacity
 failures expose their reasons. The journal is capped at 1,000 records/16 MiB.
+GitHub HTTP 403 with `retry-after` or an exhausted `x-ratelimit-remaining`, and
+HTTP 429, remain retryable. The persisted deadline is the later of local backoff
+and the provider's `retry-after` / exhausted-quota `x-ratelimit-reset` deadlines;
+missing or malformed timing headers use a one-minute fallback. Bounded GitHub
+error messages also identify headerless primary/secondary limits. Ordinary 403
+permission rejection remains blocked. No request sleeps through the deadline,
+and an early retry performs no remote lookup or create.
+
+Web `feedback.status` lists reports only when `id` is omitted. A supplied `id`
+must be a nonempty string; numbers, booleans, null, arrays and objects return
+HTTP 400 rather than falling back to the full list.
 
 ```bash
 relay-knowledge feedback retry <feedback-id> --format json

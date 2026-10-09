@@ -45,6 +45,34 @@ def check_feedback_schema(path: Path, example_path: Path) -> None:
     ], "validation evidence requirements")
     for field in ("observations", "evidence"):
         require_schema_value(path, schema_property(definitions["report"], field).get("maxItems"), 16, f"{field} budget")
+    byte_limits = {
+        "report": {"intent": 4096, "expected": 4096, "actual": 4096, "impact": 4096,
+                   "trace_id": 256, "request_id": 256},
+        "observation": {"text": 4096},
+        "evidence": {"label": 256, "content": 16384},
+        "reproduction": {"scenario": 4096, "expected": 4096},
+        "policy": {"validation_runner": 128},
+        "fix": {"reference": 1024, "target_version": 128},
+        "validation": {"runner": 128, "actual": 4096, "version": 128,
+                       "environment": 1024, "run_id": 256},
+    }
+    for definition, fields in byte_limits.items():
+        for field, limit in fields.items():
+            node = schema_property(definitions[definition], field)
+            if "anyOf" in node:
+                node = node["anyOf"][0]
+            require_schema_value(path, node.get("x-maxUtf8Bytes"), limit, f"{definition}.{field} UTF-8 budget")
+            # Exercise every byte bound with ASCII, CJK, astral and mixed-width text.
+            for character in ("a", "界", "😀"):
+                size = len(character.encode("utf-8"))
+                boundary = character * (limit // size) + "a" * (limit % size)
+                validate_schema_instance(node, boundary)
+                try:
+                    validate_schema_instance(node, boundary + "a")
+                except ValueError:
+                    pass
+                else:
+                    raise ValueError(f"{path} accepts oversized UTF-8 {definition}.{field}")
     require_schema_value(path, schema_property(definitions["policy"], "daily_quota").get("maximum"), 100, "quota maximum")
     example = load_schema(example_path)
     validate_schema_instance(schema, example)
@@ -67,6 +95,7 @@ def check_feedback_schema(path: Path, example_path: Path) -> None:
     invalid = [
         {**example, "target_repository": "attacker/repository"},
         {**example, "schema_version": 2},
+        {**example, "intent": "界" * 2000},
         {**example, "observations": [{"origin": "proven", "text": "claim"}]},
         {**example, "evidence": [{"label": "raw", "content": "x", "public": True}]},
         {**policy, "target_repository": None},
@@ -95,6 +124,8 @@ def self_test_feedback_schema(skill_root: Path) -> None:
         source = load_schema(path)
         privacy_drift = copy.deepcopy(source)
         privacy_drift["$defs"]["report"]["additionalProperties"] = True
+        missing_bytes = copy.deepcopy(source)
+        del missing_bytes["$defs"]["report"]["properties"]["intent"]["x-maxUtf8Bytes"]
         missing_guard = copy.deepcopy(source)
         del missing_guard["$defs"]["policy"]["properties"]["target_repository"]["anyOf"][0]["not"]
         overbroad_guard = copy.deepcopy(source)
@@ -103,6 +134,7 @@ def self_test_feedback_schema(skill_root: Path) -> None:
         }
         for name, drift, expected in (
             ("privacy", privacy_drift, "reject unknown feedback fields"),
+            ("missing-utf8-budget", missing_bytes, "UTF-8 budget"),
             ("missing-dot-guard", missing_guard, "accepts invalid feedback input"),
             ("overbroad-dot-guard", overbroad_guard, "oneOf"),
         ):

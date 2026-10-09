@@ -339,6 +339,11 @@ async fn web_rejects_invalid_reports_and_missing_ids_before_provider_or_graph_ac
         json!({"operation":"feedback.preview"}),
         json!({"operation":"feedback.submit", "id":false}),
         json!({"operation":"feedback.status", "id":"unknown"}),
+        json!({"operation":"feedback.status", "id":123}),
+        json!({"operation":"feedback.status", "id":false}),
+        json!({"operation":"feedback.status", "id":null}),
+        json!({"operation":"feedback.status", "id":[]}),
+        json!({"operation":"feedback.status", "id":{}}),
     ] {
         let (status, _) = fixture.request(payload).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);

@@ -225,6 +225,7 @@ fn failure(kind: FeedbackProviderErrorKind, message: &str) -> FeedbackProviderEr
     FeedbackProviderError {
         kind,
         message: message.to_owned(),
+        retry_not_before_ms: None,
     }
 }
 

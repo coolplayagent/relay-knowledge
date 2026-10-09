@@ -467,3 +467,40 @@ async fn closed_remote_issue_is_read_only_and_does_not_claim_a_fix() {
     assert_eq!(fixture.provider.creates.load(Ordering::Relaxed), 1);
     assert_eq!(fixture.provider.reads.load(Ordering::Relaxed), 1);
 }
+#[tokio::test]
+async fn provider_rate_limit_deadline_survives_storage_and_blocks_early_retry() {
+    for creating in [false, true] {
+        let fixture = Fixture::new().await;
+        fixture.service.configure(policy()).await.unwrap();
+        let deadline = now_ms().unwrap() + 3_600_000;
+        let mut error = failure(FeedbackProviderErrorKind::Retryable);
+        error.retry_not_before_ms = Some(deadline);
+        if creating {
+            fixture
+                .provider
+                .create_results
+                .lock()
+                .unwrap()
+                .push_back(Err(error));
+        } else {
+            fixture.provider.found.lock().unwrap().push_back(Err(error));
+        }
+        let record = fixture.service.report(report(), &context()).await.unwrap();
+        assert_eq!(
+            record.publication.state,
+            FeedbackPublicationState::RetryableFailed
+        );
+        assert_eq!(record.publication.next_attempt_at_ms, deadline);
+        let searches = fixture.provider.searches.load(Ordering::Relaxed);
+        let creates = fixture.provider.creates.load(Ordering::Relaxed);
+        let reopened = FeedbackService::new(
+            fixture.store.clone(),
+            fixture.provider.clone(),
+            "test-host".into(),
+        );
+        let deferred = reopened.submit(&record.id).await.unwrap();
+        assert_eq!(deferred.publication.next_attempt_at_ms, deadline);
+        assert_eq!(fixture.provider.searches.load(Ordering::Relaxed), searches);
+        assert_eq!(fixture.provider.creates.load(Ordering::Relaxed), creates);
+    }
+}

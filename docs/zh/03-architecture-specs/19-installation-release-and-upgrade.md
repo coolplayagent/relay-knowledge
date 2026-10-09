@@ -439,7 +439,9 @@ schema marker 10 和一次性 portable evidence 迁移将旧事实标记 stale�
 
 发布默认关闭，需本地策略明确启用。通过进程或托管服务环境安全提供 `RELAY_KNOWLEDGE_FEEDBACK_GITHUB_TOKEN`，升级时保留凭据管理；Token 不写入 policy 或 issue。配置变更不得重定向已尝试发布。卸载二进制保留反馈运行时数据；显式清理 runtime data 会同时删除私人证据和未决恢复身份，应先核对或备份。诊断使用 `feedback status`、`feedback preview` 与策略范围内的 retry。
 
-Skill 打包检查纳入严格 feedback 输入 Schema 与 #416 公开摩擦示例。`tools/release/update_skill_metadata_version.py --check` 验证输入形状、未知字段拒绝、发布策略预算和 runner 证据要求；`--self-test` 检查弱化隐私边界的 Schema 漂移。Rust 测试使用生产 DTO 解析打包示例，契约变更必须同步 Schema 与示例。
+服务端限流期限复用现有 journal 的 `next_attempt_at_ms` 字段，重启后保留，不需要迁移 journal；期限前重试不发起远端 I/O。升级后的运行时在补齐关联 ID 后检查报告最终字节预算，超限在写入前作为无效输入拒绝。
+
+Skill 打包检查纳入严格 feedback 输入 Schema 与 #416 公开摩擦示例。`tools/release/update_skill_metadata_version.py --check` 验证输入形状、未知字段拒绝、发布策略预算、UTF-8 字节边界和 runner 证据要求；`--self-test` 检查弱化隐私边界或遗漏字节约束的 Schema 漂移。Rust 测试使用生产 DTO 解析打包示例，契约变更必须同步 Schema 与示例。
 
 ## 本地研究工件兼容性
 

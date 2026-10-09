@@ -84,15 +84,16 @@ impl FeedbackService {
         report
             .validate()
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
-        let fingerprint = report
-            .fingerprint(env!("CARGO_PKG_VERSION"))
-            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         report
             .trace_id
             .get_or_insert_with(|| context.trace_id.clone());
         report
             .request_id
             .get_or_insert_with(|| context.request_id.clone());
+        // Fingerprinting validates the final persisted form, including injected IDs.
+        let fingerprint = report
+            .fingerprint(env!("CARGO_PKG_VERSION"))
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         let now = now_ms()?;
         let mut transaction = self.store.begin().await.map_err(store_error)?;
         let journal = transaction.snapshot_mut();

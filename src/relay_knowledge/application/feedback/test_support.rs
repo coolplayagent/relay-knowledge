@@ -226,6 +226,7 @@ pub(super) fn failure(kind: FeedbackProviderErrorKind) -> FeedbackProviderError 
     FeedbackProviderError {
         kind,
         message: "controlled provider failure".into(),
+        retry_not_before_ms: None,
     }
 }
 

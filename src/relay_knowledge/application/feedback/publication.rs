@@ -182,8 +182,9 @@ fn apply_error(
             FeedbackPublicationState::Blocked
         };
     record.publication.reason = Some(error.message);
-    record.publication.next_attempt_at_ms =
-        now.saturating_add(30_000u64.saturating_mul(1u64 << record.publication.attempts.min(5)));
+    record.publication.next_attempt_at_ms = now
+        .saturating_add(30_000u64.saturating_mul(1u64 << record.publication.attempts.min(5)))
+        .max(error.retry_not_before_ms.unwrap_or(0));
 }
 
 pub(super) async fn save(
