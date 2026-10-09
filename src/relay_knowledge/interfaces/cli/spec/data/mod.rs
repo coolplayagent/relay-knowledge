@@ -3,6 +3,7 @@
 mod core;
 mod map;
 mod operations;
+mod research;
 mod service;
 
 use super::{CliCommandSpec, files, repo, repo_set};
@@ -36,6 +37,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
         repo_set::repo_set(),
     ]);
     commands.extend(map::command_specs());
+    commands.extend(research::command_specs());
     commands.extend(core::graph_commands());
     commands.extend(operations::command_specs());
     commands.extend(core::diagnostic_commands());

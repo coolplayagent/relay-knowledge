@@ -1,6 +1,8 @@
 mod file_index;
 mod map;
+pub mod map_batch;
 mod map_directory;
+pub mod research;
 
 use super::core::{DomainError, SourceScope, error};
 

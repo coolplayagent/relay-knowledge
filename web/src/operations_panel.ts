@@ -1,3 +1,4 @@
+import { researchActions, researchState } from "./research_operations.js";
 import type { HealthResponse, ProjectStatusResponse, ServiceStatusResponse } from "./api/contracts";
 import {
   executeWebOperation,
@@ -127,6 +128,9 @@ function operationForm(callbacks: OperationsCallbacks): HTMLElement {
           appState.map.limit = Math.min(16, positiveInt(value, 16));
         }, 16)
       );
+      break;
+    case "research":
+      form.append(researchControls(callbacks));
       break;
     case "code":
       form.append(codeActionControls(callbacks));
@@ -529,6 +533,7 @@ function operationResultPanel(): HTMLElement {
 
 function isExecutableWebOperation(operation: unknown): boolean {
   return (
+    researchActions.some(([action]) => action === operation) ||
     operation === "retrieve.context" ||
     operation === "graph.ingest" ||
     operation === "graph.inspect" ||
@@ -569,6 +574,49 @@ function stagedOperations(): HTMLElement {
   panel.append(list);
 
   return panel;
+}
+
+function researchControls(callbacks: OperationsCallbacks): HTMLElement {
+  const controls = element("div", "research-controls");
+  const state = researchState;
+  controls.append(selectControl("Research action", state.action, researchActions, (value) => {
+    state.action = value;
+    callbacks.rerender();
+  }));
+  if (state.action !== "evidence.export") {
+    controls.append(selectControl("Root authority", state.targetKind,
+      [["repository", "Registered repository"], ["configured", "Configured archive root"]], (value) => {
+        state.targetKind = value; callbacks.rerender();
+      }), inputControl(state.targetKind === "repository" ? "Repository alias" : "Configured root path",
+        state.reference, (value) => { state.reference = value; }));
+  }
+  if (state.targetKind === "configured" || state.action.startsWith("evidence.") || state.action === "research.status") {
+    controls.append(inputControl("Source scope", state.scope, (value) => { state.scope = value; }));
+  }
+  if (state.action.startsWith("knowledge.map.")) {
+    controls.append(textareaControl("Transaction JSON", state.transaction, (value) => { state.transaction = value; }),
+      textElement("p", "muted-line", "Plan first, then paste the returned transaction with its version and digest before applying."));
+  } else if (state.action === "evidence.export") {
+    controls.append(inputControl("Bundle id", state.id, (value) => { state.id = value; }),
+      inputControl("Revision SHA-256", state.revision, (value) => { state.revision = value; }));
+  } else if (state.action === "research.status") {
+    controls.append(selectControl("Delivery", state.delivery,
+      [["archive", "Archive"], ["authored_graph", "Authored graph"], ["graphrag", "GraphRAG"]], (value) => { state.delivery = value; }),
+      inputControl("Catalog path", state.catalog, (value) => { state.catalog = value; }),
+      inputControl("Bundle path", state.bundle, (value) => { state.bundle = value; }),
+      inputControl("Requirements path", state.requirements, (value) => { state.requirements = value; }));
+  } else {
+    controls.append(inputControl("Input path", state.input, (value) => { state.input = value; }));
+    if (state.action === "evidence.view") {
+      controls.append(inputControl("Focus node", state.focus, (value) => { state.focus = value; }));
+    }
+    if (state.action === "evidence.impact") {
+      controls.append(inputControl("Stable node id", state.node, (value) => { state.node = value; }),
+        inputControl("New label", state.label, (value) => { state.label = value; }));
+    }
+  }
+  controls.append(textElement("p", "muted-line", "Paths refer to the selected server root. Archive roots need no code indexing. Imported claims remain proposed."));
+  return controls;
 }
 
 function inputControl(

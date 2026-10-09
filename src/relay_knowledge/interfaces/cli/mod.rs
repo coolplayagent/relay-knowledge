@@ -10,6 +10,7 @@ mod remote;
 mod render;
 mod repo;
 mod repo_set;
+mod research;
 mod runtime;
 mod service;
 mod setup;
@@ -101,6 +102,7 @@ pub enum CliAction {
         kinds: Vec<IndexKind>,
     },
     Map(map::MapCommand),
+    Research(research::ResearchCommand),
     WorkerStatus {
         kind: Option<WorkerKind>,
     },

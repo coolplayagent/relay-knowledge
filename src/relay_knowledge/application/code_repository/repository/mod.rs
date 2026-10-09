@@ -5,6 +5,7 @@ mod mod_tests;
 #[cfg(test)]
 #[path = "query_freshness_tests.rs"]
 mod query_freshness_tests;
+mod research_status;
 mod staleness;
 mod status;
 #[cfg(test)]

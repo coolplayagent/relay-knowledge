@@ -141,3 +141,5 @@
 - [附录 B.13 文档与自迭代准备度验证记录 2026-08-18](06-verification/13-documentation-self-iteration-readiness-2026-08-18.md)：记录当前已确认的 Rust/package/Web build/runtime/browser/coverage 证据、已通过的 focused-fast performance 报告、本地 `--with-deps` 环境限制、仍 pending 的 exhaustive/Kubernetes accuracy 证据，以及失败的 Kubernetes 210 秒性能 rail。
 - [附录 B.14 软件全域证据优先级验证记录 2026-08-31](06-verification/14-software-global-evidence-priority-2026-08-31.md)：记录 software-global typed evidence 排序的代码图分析、release-binary A/B、预算波动、owner tests、90.01% 覆盖率与未关闭边界。
 - [附录 B.15 Durable Worktree Delta 与固定身份查询验证记录 2026-08-31](06-verification/15-durable-worktree-delta-and-pinned-query-2026-08-31.md)：记录有界 delta batching、lease takeover、release 产品自迭代、全量测试与覆盖率、真实仓库回放和显式 auto-workspace 边界。
+
+- [研究材料与地图事务](01-user-guide/17-research-workflow.md)

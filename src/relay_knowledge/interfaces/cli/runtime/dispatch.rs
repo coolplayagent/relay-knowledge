@@ -36,6 +36,17 @@ pub(crate) async fn run_command(
     if let CliAction::ServiceRun { mcp, web } = command.action.clone() {
         return service::run_service(mcp, web, process).await;
     }
+    if let CliAction::Research(research_command) = command.action.clone()
+        && !research_command.needs_runtime()
+    {
+        return super::super::research::run(
+            research_command,
+            None,
+            RequestContext::for_interface(InterfaceKind::Cli),
+            command.format,
+        )
+        .await;
+    }
     if let CliAction::Map(map_command) = command.action.clone() {
         let context = RequestContext::for_interface(InterfaceKind::Cli);
         return map::run_map(map_command, knowledge_map_service, context, command.format).await;
@@ -215,6 +226,9 @@ pub async fn run_with_service(
                 &response,
                 format,
             )
+        }
+        CliAction::Research(command) => {
+            super::super::research::run(command, Some(service), context, format).await
         }
         CliAction::Map(command) => map::run_map(command, None, context, format).await,
         CliAction::Repo(command) => repo::run_repo(service, command, context, format).await,

@@ -10,7 +10,7 @@ pub use multimodal::{
 };
 pub use mutation::{
     ClaimRecord, CommitReceipt, ConfidenceScore, EventRecord, EvidenceRecord, EvidenceSpan,
-    FactStatus, GraphMutationBatch, GraphRelationRecord, GraphVersionRange,
+    FactStatus, GraphMutationBatch, GraphRelationRecord, GraphVersionRange, StoredEvidenceDocument,
 };
 pub use retrieval::{
     CodeGraphArtifact, CodeGraphArtifactKind, ContextEntity, ContextGraphFact,

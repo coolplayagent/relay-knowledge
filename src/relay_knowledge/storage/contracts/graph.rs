@@ -9,6 +9,19 @@ use super::{
 
 /// Graph fact persistence and query contract.
 pub trait GraphStore: Send + Sync {
+    /// Reads one exact id within an explicit source scope, capped at 2 MiB.
+    fn evidence_document(
+        &self,
+        _id: String,
+        _source_scope: String,
+    ) -> StorageFuture<'_, Option<crate::domain::StoredEvidenceDocument>> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "exact evidence lookup is unavailable".into(),
+            ))
+        })
+    }
+
     fn commit_mutation_batch(&self, batch: GraphMutationBatch) -> StorageFuture<'_, CommitReceipt>;
 
     fn inspect_graph(&self) -> StorageFuture<'_, GraphInspection>;

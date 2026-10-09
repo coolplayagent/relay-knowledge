@@ -33,6 +33,16 @@ use super::super::{
 use super::SqliteGraphStore;
 
 impl GraphStore for SqliteGraphStore {
+    fn evidence_document(
+        &self,
+        id: String,
+        source_scope: String,
+    ) -> StorageFuture<'_, Option<crate::domain::StoredEvidenceDocument>> {
+        self.run_read(move |connection| {
+            super::super::graph::evidence_document(connection, &id, &source_scope)
+        })
+    }
+
     fn commit_mutation_batch(&self, batch: GraphMutationBatch) -> StorageFuture<'_, CommitReceipt> {
         self.run(move |connection| commit_batch(connection, batch))
     }

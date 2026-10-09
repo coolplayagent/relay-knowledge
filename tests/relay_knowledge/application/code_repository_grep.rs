@@ -562,7 +562,7 @@ impl CodeGraphStore for CandidatePathUnavailableStore {
 }
 
 macro_rules! unsupported_code_repository_method {
-    ($name:ident($($arg:ident: $ty:ty),*) -> $ret:ty) => {
+    ($name:ident($($arg:ident: $ty:ty),* $(,)?) -> $ret:ty) => {
         fn $name(&self, $($arg: $ty),*) -> StorageFuture<'_, $ret> {
             $(let _ = $arg;)*
             unsupported("candidate fixture method is unavailable")
@@ -575,7 +575,9 @@ impl BusinessKnowledgeStore for CandidatePathUnavailableStore {}
 impl relay_knowledge::storage::FrameworkGraphStore for CandidatePathUnavailableStore {}
 
 impl RepositoryCatalogStore for CandidatePathUnavailableStore {
-    unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
+    unsupported_code_repository_method!(
+        upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus
+    );
 
     fn code_repository_status(
         &self,
@@ -598,11 +600,21 @@ impl RepositoryCatalogStore for CandidatePathUnavailableStore {
 }
 
 impl CodeIndexTaskStore for CandidatePathUnavailableStore {
-    unsupported_code_repository_method!(queue_code_index_task(task: CodeIndexTaskSeed) -> CodeIndexTaskRecord);
-    unsupported_code_repository_method!(claim_code_index_task(request: CodeIndexTaskClaimRequest) -> Option<CodeIndexTaskRecord>);
-    unsupported_code_repository_method!(complete_code_index_task(request: CodeIndexTaskCompletion) -> CodeIndexTaskRecord);
-    unsupported_code_repository_method!(fail_code_index_task(request: CodeIndexTaskFailure) -> CodeIndexTaskRecord);
-    unsupported_code_repository_method!(code_index_task(task_id: String) -> Option<CodeIndexTaskRecord>);
+    unsupported_code_repository_method!(
+        queue_code_index_task(task: CodeIndexTaskSeed) -> CodeIndexTaskRecord
+    );
+    unsupported_code_repository_method!(
+        claim_code_index_task(request: CodeIndexTaskClaimRequest) -> Option<CodeIndexTaskRecord>
+    );
+    unsupported_code_repository_method!(
+        complete_code_index_task(request: CodeIndexTaskCompletion) -> CodeIndexTaskRecord
+    );
+    unsupported_code_repository_method!(
+        fail_code_index_task(request: CodeIndexTaskFailure) -> CodeIndexTaskRecord
+    );
+    unsupported_code_repository_method!(
+        code_index_task(task_id: String) -> Option<CodeIndexTaskRecord>
+    );
     fn active_code_index_task(
         &self,
         _repository_id: String,
@@ -623,7 +635,11 @@ impl CodeIndexPublicationStore for CandidatePathUnavailableStore {
         Box::pin(async { Ok(None) })
     }
 
-    unsupported_code_repository_method!(apply_code_index_snapshot(snapshot: relay_knowledge::domain::CodeIndexSnapshot) -> CodeIndexSummary);
+    unsupported_code_repository_method!(
+        apply_code_index_snapshot(
+            snapshot: relay_knowledge::domain::CodeIndexSnapshot,
+        ) -> CodeIndexSummary
+    );
 }
 
 impl CodeScopeRetentionStore for CandidatePathUnavailableStore {
@@ -634,11 +650,17 @@ impl CodeScopeRetentionStore for CandidatePathUnavailableStore {
         Box::pin(async { Ok(CodeScopeRetentionSummary::default()) })
     }
 
-    unsupported_code_repository_method!(prune_code_repository_scopes(request: CodeScopeRetentionRequest) -> CodeScopeRetentionSummary);
+    unsupported_code_repository_method!(
+        prune_code_repository_scopes(
+            request: CodeScopeRetentionRequest,
+        ) -> CodeScopeRetentionSummary
+    );
 }
 
 impl CodeIndexSourceStore for CandidatePathUnavailableStore {
-    unsupported_code_repository_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
+    unsupported_code_repository_method!(
+        code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>
+    );
 }
 
 impl CodeQueryReadStore for CandidatePathUnavailableStore {
@@ -659,7 +681,12 @@ impl CodeQueryReadStore for CandidatePathUnavailableStore {
         Box::pin(async move { Ok(vec![structured_hit(&status)]) })
     }
 
-    unsupported_code_repository_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
+    unsupported_code_repository_method!(
+        analyze_code_impact(
+            request: CodeImpactRequest,
+            changes: CodeImpactChanges,
+        ) -> Vec<CodeRetrievalHit>
+    );
 }
 
 impl SoftwareProjectionStore for CandidatePathUnavailableStore {}

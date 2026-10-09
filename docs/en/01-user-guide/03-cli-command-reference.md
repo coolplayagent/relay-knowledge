@@ -349,3 +349,9 @@ HTTP: `GET /api/v1/code/repositories/{alias}/diagnostics`, with `ref`, JSON-arra
 The original content-integrity fields reuse existing diagnostic tables. Source I/O isolation additionally adds compatible diagnostic/checkpoint columns and a new fact identity; rebuild older scopes with the normal index command after upgrading. Update agents to inspect `content_integrity`; older versions can still report overall `degraded` for partial content. Stale versions, unfinished tasks and graph-only responses retain conservative handling. Out-of-scope external dependencies remain unresolved edge metadata rather than file parse degradation.
 
 Configuration source filters also accept the canonical code-language identifiers in the [language capability matrix](05-code-repository-graph-workflow.md#510-language-capability-matrix). `shell`, `ctmpl` and `dotenv` remain unchanged. The CLI help and MCP schema share the validated source-format inventory.
+
+## Research captures and map transactions
+
+`map plan/apply --type knowledge --input <transaction.json>`; `sources audit --root <repository> --input <catalog.json>`.
+
+[Research captures and map transactions](14-research-workflow.md)

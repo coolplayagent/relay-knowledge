@@ -151,3 +151,5 @@ their entry point is the [Chinese archive index](../zh/05-benchmarks/archive/REA
 
 Appendix B keeps one chronological identity across both editions. Entries B.3
 and B.4 therefore stay in sequence while their English translations are pending.
+
+- [Research captures and map transactions](01-user-guide/14-research-workflow.md)

@@ -19,6 +19,7 @@ use crate::{
 };
 
 mod artifact;
+mod batch;
 mod business_bootstrap;
 mod contracts;
 mod error;
@@ -180,11 +181,18 @@ impl KnowledgeMapService {
 
     async fn load_for_mutation(&self) -> Result<MutableKnowledgeMap, KnowledgeMapServiceError> {
         let content = self.read_root_content().await?;
-        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(&content)
+        self.load_mutation_snapshot(&content).await
+    }
+
+    async fn load_mutation_snapshot(
+        &self,
+        content: &str,
+    ) -> Result<MutableKnowledgeMap, KnowledgeMapServiceError> {
+        let probe = serde_norway::from_str::<KnowledgeMapSchemaProbe>(content)
             .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
         if probe.schema_version == 1 {
             self.require_knowledge_map("legacy map read")?;
-            let mut map = serde_norway::from_str::<KnowledgeMap>(&content)
+            let mut map = serde_norway::from_str::<KnowledgeMap>(content)
                 .map_err(|error| KnowledgeMapServiceError::Yaml(error.to_string()))?;
             map.schema_version = KnowledgeMap::SCHEMA_VERSION;
             let _normalized_legacy_builtin_sources = normalize_legacy_builtin_sources(&mut map);
@@ -208,7 +216,7 @@ impl KnowledgeMapService {
                 probe.schema_version
             )));
         }
-        let manifest = parse_manifest(&content)?;
+        let manifest = parse_manifest(content)?;
         let history_checkpoint = history_checkpoint(&manifest);
         self.validate_manifest_identity(&manifest)?;
         if probe.schema_version != ARTIFACT_SCHEMA_VERSION {

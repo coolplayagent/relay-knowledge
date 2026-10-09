@@ -218,6 +218,13 @@ fn ensure_queryable_code_scope(
 }
 
 impl RepositoryCatalogStore for SqliteGraphStore {
+    fn code_repository_at_root(
+        &self,
+        root: String,
+    ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
+        self.run_read_snapshot(move |connection| status::repository_at_root(connection, &root))
+    }
+
     fn upsert_code_repository(
         &self,
         registration: CodeRepositoryRegistration,
