@@ -551,3 +551,16 @@ The v56 portable-evidence update persists optional call byte ranges (legacy JSON
 The combined fact identity is `config-registry-v56-portable-evidence-source-io-isolation-v1`. Scopes produced with either earlier portable evidence or source I/O isolation alone must be rebuilt. Checkpoints retain both the ownership cursor and the processed-path count; legacy snapshot imports default absent call byte ranges and I/O diagnostics to unknown. Startup checks marker-table existence directly through the shared SQLite schema inspector, retaining the marker module's existing size budget.
 
 Schema marker 10 and the one-time portable evidence migration mark older facts stale for durable reindexing. After this migration, missing or incompatible binding tables, triggers or cleanup indexes cause an explicit startup error; startup does not silently create an empty projection over published facts or alter a writer's lease/checkpoint. Restore a matching runtime backup or index the authorized repositories in a new runtime home before switching service configuration. Binary rollback uses the corresponding pre-upgrade backup or a clean index rebuilt by the selected binary.
+
+## Local research artifact compatibility
+
+Research catalogs, authored evidence bundles and requirements manifests remain user-owned
+repository files; installation, upgrade and uninstall must not rewrite captured bytes or
+remove these artifacts. Bundle import uses the existing runtime graph database and proposed
+fact lifecycle; no new database schema, service, port or automatic indexing task is required.
+Back up the runtime graph before rollback. Older binaries retain imported evidence as normal
+graph records but cannot invoke the new bundle/audit/status commands. Map batch receipts use
+the existing v4 history summary string and survive old-writer round trips within normal history
+retention. Export a bundle before removing runtime state if a standalone deliverable is needed.
+CLI/Web queries share the same imported facts and indexes. See the
+[research workflow](../01-user-guide/14-research-workflow.md) for explicit version and review rules.

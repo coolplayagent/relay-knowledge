@@ -430,3 +430,12 @@ v56 portable-evidence 升级持久化可选的调用字节范围；旧 JSON 和 
 合并后的事实身份为 `config-registry-v56-portable-evidence-source-io-isolation-v1`。仅具有此前 portable evidence 或路径 I/O 隔离能力的作用域都必须重建。检查点同时保留类型归属游标和已处理路径计数；旧快照导入时缺失的调用字节范围与 I/O 诊断保持未知。启动检查直接调用共享 SQLite schema 检视函数确认 marker 表是否存在，保持 marker 模块既有的行数预算。
 
 schema marker 10 和一次性 portable evidence 迁移将旧事实标记 stale，通过持久化任务重建。迁移后若绑定表、触发器或清理索引缺失或不兼容，启动明确报错，不会在已发布事实之上静默创建空投影，也不会修改 writer 的租约和检查点。应恢复匹配的运行时备份，或在新运行时目录重新索引获准仓库后切换服务配置。二进制回滚使用相应升级前备份，或由所选版本在干净目录重建索引。
+
+## 本地研究工件兼容性
+
+研究 catalog、人工 evidence bundle 和 requirements manifest 属于用户仓库文件；安装、升级、卸载不得
+改写原始抓取字节或删除这些工件。Bundle 导入复用现有运行时图数据库与 proposed 事实生命周期，无新增
+数据库 schema、服务、端口或自动索引任务。回滚前备份运行时图；旧二进制仍可将导入记录作为普通图事实
+读取，但不能调用新的 bundle/audit/status 命令。地图批次收据沿用 v4 历史 summary 字符串，在既有历史
+保留窗口内可经旧写入器往返保留。若需独立交付，删除运行时状态前先导出 bundle。CLI/Web 共用导入事实
+与索引。具体版本绑定和审阅规则见[研究工作流](../01-user-guide/17-research-workflow.md)。

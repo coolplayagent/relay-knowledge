@@ -62,3 +62,5 @@ target/debug/relay-knowledge setup doctor --format json
 指南中的 `relay-knowledge` 表示已构建或已安装的二进制。未安装到系统路径时，用 `target/debug/relay-knowledge` 或 `target/release/relay-knowledge` 替换即可。脚本集成优先使用 `--format json`；人工检查可以使用默认 `text`，报告类命令可以使用 `markdown`。
 
 CLI、Web、MCP、ACP、worker、proposal、audit 和 service 都通过共享 application service 进入核心能力。排障时优先保留 JSON 响应里的 operation、metadata、degraded reason、freshness、audit correlation 和 diagnostics 字段。
+
+- [研究材料与地图事务](17-research-workflow.md)

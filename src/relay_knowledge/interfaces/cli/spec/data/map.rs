@@ -5,6 +5,8 @@ use super::super::{CliCommandSpec, CliOptionSpec, CommandEffect, arg, command_sy
 pub(super) fn command_specs() -> Vec<CliCommandSpec> {
     vec![
         map_init(),
+        map_batch(false),
+        map_batch(true),
         map_show(),
         map_history(),
         map_route(),
@@ -18,6 +20,47 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
         map_validate(),
         map_agent_snippet(),
     ]
+}
+
+fn map_batch(apply: bool) -> CliCommandSpec {
+    command!(
+        &["map", if apply { "apply" } else { "plan" }],
+        if apply {
+            "relay-knowledge map apply --type knowledge --input <transaction.json>"
+        } else {
+            "relay-knowledge map plan --type knowledge --input <transaction.json>"
+        },
+        "Validate an ordered source transaction and optionally publish it once.",
+        if apply {
+            "knowledge.map.apply"
+        } else {
+            "knowledge.map.plan"
+        },
+        if apply {
+            CommandEffect::WritesOperationalState
+        } else {
+            CommandEffect::ReadOnly
+        },
+        &[],
+        &[
+            map_type_option(true),
+            opt(
+                "--input",
+                Some("path"),
+                true,
+                false,
+                "Versioned JSON transaction; apply requires plan preconditions.",
+                None,
+                &[]
+            ),
+        ],
+        &[],
+        &[
+            "Planning returns the transaction with expected map version/digest, normalized differences, affected routes and diagnostics.",
+            "Apply publishes once under the existing writer locks. Exact replay within retained history does not publish; expired preconditions fail closed.",
+            "Inspect state and diagnostics; invalid/conflict responses do not publish. Cleanup preserves recovery roots and the 60-second reader grace.",
+        ],
+    )
 }
 
 fn map_init() -> CliCommandSpec {

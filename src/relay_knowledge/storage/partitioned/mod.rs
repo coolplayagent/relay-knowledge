@@ -55,6 +55,19 @@ impl PartitionedSqliteKnowledgeStore {
 }
 
 impl RepositoryCatalogStore for PartitionedSqliteKnowledgeStore {
+    fn code_repository_at_root(
+        &self,
+        root: String,
+    ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
+        let this = self.clone();
+        Box::pin(async move {
+            let Some(status) = this.control.code_repository_at_root(root).await? else {
+                return Ok(None);
+            };
+            repository::status(&this, status.repository_id).await
+        })
+    }
+
     fn upsert_code_repository(
         &self,
         registration: CodeRepositoryRegistration,

@@ -13,7 +13,7 @@ use crate::storage::StorageFuture;
 struct MinimalCodeRepositoryStore;
 
 macro_rules! required_code_repository_method {
-    ($name:ident($($argument:ident: $argument_type:ty),*) -> $return_type:ty) => {
+    ($name:ident($($argument:ident: $argument_type:ty),* $(,)?) -> $return_type:ty) => {
         fn $name(&self, $($argument: $argument_type),*) -> StorageFuture<'_, $return_type> {
             $(let _ = $argument;)*
             Box::pin(async { panic!("required method must not be called by default contract tests") })
@@ -24,37 +24,79 @@ macro_rules! required_code_repository_method {
 impl FrameworkGraphStore for MinimalCodeRepositoryStore {}
 
 impl RepositoryCatalogStore for MinimalCodeRepositoryStore {
-    required_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
-    required_code_repository_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
-    required_code_repository_method!(code_repository_scope_status(repository: String, resolved_commit_sha: String, path_filters: Vec<String>, language_filters: Vec<String>) -> Option<CodeRepositoryStatus>);
+    required_code_repository_method!(
+        upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus
+    );
+    required_code_repository_method!(
+        code_repository_status(repository: String) -> Option<CodeRepositoryStatus>
+    );
+    required_code_repository_method!(
+        code_repository_scope_status(
+            repository: String,
+            resolved_commit_sha: String,
+            path_filters: Vec<String>,
+            language_filters: Vec<String>,
+        ) -> Option<CodeRepositoryStatus>
+    );
 }
 
 impl CodeIndexTaskStore for MinimalCodeRepositoryStore {
-    required_code_repository_method!(queue_code_index_task(task: CodeIndexTaskSeed) -> CodeIndexTaskRecord);
-    required_code_repository_method!(claim_code_index_task(request: CodeIndexTaskClaimRequest) -> Option<CodeIndexTaskRecord>);
-    required_code_repository_method!(complete_code_index_task(request: CodeIndexTaskCompletion) -> CodeIndexTaskRecord);
-    required_code_repository_method!(fail_code_index_task(request: CodeIndexTaskFailure) -> CodeIndexTaskRecord);
-    required_code_repository_method!(code_index_task(task_id: String) -> Option<CodeIndexTaskRecord>);
-    required_code_repository_method!(active_code_index_task(repository_id: String) -> Option<CodeIndexTaskRecord>);
+    required_code_repository_method!(
+        queue_code_index_task(task: CodeIndexTaskSeed) -> CodeIndexTaskRecord
+    );
+    required_code_repository_method!(
+        claim_code_index_task(request: CodeIndexTaskClaimRequest) -> Option<CodeIndexTaskRecord>
+    );
+    required_code_repository_method!(
+        complete_code_index_task(request: CodeIndexTaskCompletion) -> CodeIndexTaskRecord
+    );
+    required_code_repository_method!(
+        fail_code_index_task(request: CodeIndexTaskFailure) -> CodeIndexTaskRecord
+    );
+    required_code_repository_method!(
+        code_index_task(task_id: String) -> Option<CodeIndexTaskRecord>
+    );
+    required_code_repository_method!(
+        active_code_index_task(repository_id: String) -> Option<CodeIndexTaskRecord>
+    );
 }
 
 impl CodeIndexPublicationStore for MinimalCodeRepositoryStore {
-    required_code_repository_method!(code_index_checkpoint(source_scope: String) -> Option<CodeIndexCheckpoint>);
-    required_code_repository_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+    required_code_repository_method!(
+        code_index_checkpoint(source_scope: String) -> Option<CodeIndexCheckpoint>
+    );
+    required_code_repository_method!(
+        apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary
+    );
 }
 
 impl CodeScopeRetentionStore for MinimalCodeRepositoryStore {
-    required_code_repository_method!(code_scope_retention(repository_id: String) -> CodeScopeRetentionSummary);
-    required_code_repository_method!(prune_code_repository_scopes(request: CodeScopeRetentionRequest) -> CodeScopeRetentionSummary);
+    required_code_repository_method!(
+        code_scope_retention(repository_id: String) -> CodeScopeRetentionSummary
+    );
+    required_code_repository_method!(
+        prune_code_repository_scopes(
+            request: CodeScopeRetentionRequest,
+        ) -> CodeScopeRetentionSummary
+    );
 }
 
 impl CodeIndexSourceStore for MinimalCodeRepositoryStore {
-    required_code_repository_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
+    required_code_repository_method!(
+        code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>
+    );
 }
 
 impl CodeQueryReadStore for MinimalCodeRepositoryStore {
-    required_code_repository_method!(search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>);
-    required_code_repository_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
+    required_code_repository_method!(
+        search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>
+    );
+    required_code_repository_method!(
+        analyze_code_impact(
+            request: CodeImpactRequest,
+            changes: CodeImpactChanges,
+        ) -> Vec<CodeRetrievalHit>
+    );
 }
 
 impl SoftwareProjectionStore for MinimalCodeRepositoryStore {}

@@ -574,3 +574,31 @@ filters, and `--kind`. Use `--kind hybrid` before narrowing. For stale graph
 results, use `--freshness wait-until-fresh` or run `index refresh` explicitly.
 
 For deeper command recipes, read `references/cli-workflows.md`.
+
+## Research archive verification
+
+Use `map plan --type knowledge --input request.json --format json` to obtain a
+version/digest-bound transaction; pass its `transaction` field to `map apply`.
+Read [map-transaction.schema.json](references/map-transaction.schema.json).
+Check response state and diagnostics; expired replay receipts fail through
+preconditions. Preserve the 16-entry window and 60-second reader grace.
+
+Use `sources audit --root . --input sources/catalog.json --format json` for
+explicit [source-catalog.schema.json](references/source-catalog.schema.json)
+inputs. Paths declare repository or catalog bases. Audits preserve raw bytes
+and perform no network or execution. Integrity, declared section coverage,
+self-reported review and index freshness remain separate; unknown is not
+completion. Never rewrite originals to satisfy authoring whitespace checks.
+
+For authored research graphs, use the explicit
+[authored evidence bundle schema](references/authored-evidence-bundle.schema.json).
+Run `evidence validate`, `evidence view`, then authorized `evidence import` with explicit
+`--root`, `--input` and `--scope`. Preserve graph metadata and pinned source bytes.
+Imports are proposed; author review labels and user scope confirmation never authorize
+acceptance. `evidence impact` returns a stable-id revision proposal and affected relations;
+`evidence export --id ID --scope SCOPE --revision SHA256` returns a lossless envelope.
+Use `research status --root ROOT --delivery archive|authored_graph|graphrag` with explicit
+catalog/bundle inputs to distinguish navigation, captured integrity, authored import and
+retrieval readiness. The optional
+[requirements manifest](references/research-requirements.schema.json) binds declared
+criteria to exact artifacts; content completion remains unknown without trusted review.

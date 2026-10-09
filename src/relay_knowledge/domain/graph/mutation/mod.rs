@@ -543,3 +543,11 @@ fn validate_unique_ids<'a>(
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+/// Bounded exact evidence lookup for versioned authored artifact round trips.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredEvidenceDocument {
+    pub content: String,
+    pub status: FactStatus,
+    pub graph_version: GraphVersion,
+}

@@ -754,7 +754,8 @@ impl KnowledgeMapHistoryEntry {
 }
 
 /// Optional source changes accepted by the update command.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KnowledgeMapChange {
     pub id: String,
     pub topic: Option<String>,

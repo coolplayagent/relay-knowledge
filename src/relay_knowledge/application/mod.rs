@@ -18,6 +18,7 @@ pub use knowledge::map::KnowledgeMapSourceAddRequest;
 pub(crate) use knowledge::map::{
     KnowledgeMapService, KnowledgeMapServiceError, MAX_HISTORY_PAGE_SIZE,
 };
+pub use knowledge::research;
 pub use runtime::{
     AgentRuntimeConfig, FileIndexRootConfig, FileIndexRuntimeConfig, ProcessRuntimeConfig,
     RetrievalRuntimeConfigError, RuntimeConfiguration, RuntimeConfigurationError,
