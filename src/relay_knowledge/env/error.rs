@@ -55,6 +55,7 @@ impl EnvError {
 pub enum EnvErrorKind {
     EmptyValue,
     InvalidUnicode,
+    InvalidSecret,
     InvalidInteger { value: String },
     InvalidBoolean { value: String },
     ZeroValue,
@@ -66,6 +67,13 @@ impl fmt::Display for EnvError {
             EnvErrorKind::EmptyValue => write!(formatter, "{} must not be empty", self.variable),
             EnvErrorKind::InvalidUnicode => {
                 write!(formatter, "{} must be valid UTF-8", self.variable)
+            }
+            EnvErrorKind::InvalidSecret => {
+                write!(
+                    formatter,
+                    "{} must be a bounded ASCII token without whitespace",
+                    self.variable
+                )
             }
             EnvErrorKind::InvalidInteger { value } => {
                 write!(

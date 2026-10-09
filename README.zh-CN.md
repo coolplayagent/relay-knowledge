@@ -91,6 +91,9 @@ relay-knowledge service doctor
 - CLI、Web、MCP Streamable HTTP 和本地 ACP 共享相同应用行为、scope policy、
   QoS、取消、审计和诊断。
 
+- [软件体验反馈](docs/zh/01-user-guide/10-workers-proposals-audit.md#106-软件使用体验反馈)
+  保存本地证据，经明确授权后通过持久 outbox 提交 GitHub issue，并记录恢复与回归证据。
+
 行为细节、限制和实现职责属于下列按职责组织的文档，不在这个导航页重复。
 
 ## 文档
@@ -257,3 +260,7 @@ uv run --extra dev pytest tests/browser
 可选本地 hook：`pre-commit install` 和
 `pre-commit run --all-files`。Rust 改动在 commit 前执行 `cargo check`、Clippy
 和 tests；test 命令通过 `--all-targets` 同时覆盖确定性 benchmark target。
+
+初始 [Qualitygate 策略](qualitygate.yaml) 是随 MR 审阅的生成候选，当前必需规则只检查
+行尾；Cargo、文档、覆盖率和架构门禁仍需独立执行。最终检查绑定 staged/实际交付快照；
+`.gitattributes` 会让 Windows 脚本工作树使用 CRLF，而 Git 保存规范化内容。

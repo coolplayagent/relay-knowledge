@@ -552,6 +552,48 @@ The combined fact identity is `config-registry-v56-portable-evidence-source-io-i
 
 Schema marker 10 and the one-time portable evidence migration mark older facts stale for durable reindexing. After this migration, missing or incompatible binding tables, triggers or cleanup indexes cause an explicit startup error; startup does not silently create an empty projection over published facts or alter a writer's lease/checkpoint. Restore a matching runtime backup or index the authorized repositories in a new runtime home before switching service configuration. Binary rollback uses the corresponding pre-upgrade backup or a clean index rebuilt by the selected binary.
 
+## Feedback Runtime State (#417)
+
+Software feedback adds an independent `feedback` directory under the selected
+runtime data directory. Its versioned JSON journal contains local reports/raw
+evidence, publication policy, quota and send intent, issue associations and
+regression evidence; the co-located lock and prepared recovery file are part of
+its persistence boundary. It does not alter graph database schema. Feedback
+filesystem work runs behind bounded blocking workers. POSIX directories/files
+are restricted to the owning account; preserve the selected runtime directory's
+Windows access controls as well. The journal is private state, not a release
+artifact, cache or repository file.
+
+Upgrade and rollback must retain this directory with runtime backups. Older
+binaries without feedback ignore it; they cannot reconcile an uncertain newer
+publication. Restore the matching journal before resuming feedback operations,
+and never delete send intent to bypass `awaiting-reconciliation`. Do not share
+or restore one journal into multiple independent publishing installations: the
+local process lock does not provide distributed coordination. Prepared-state
+recovery and capacity/corruption failures are explicit; do not edit journal
+bytes manually. No background service or new unmanaged loop is installed: report,
+submit, retry and track run bounded foreground workflows.
+
+Publishing remains disabled until local configuration explicitly enables it.
+Provision `RELAY_KNOWLEDGE_FEEDBACK_GITHUB_TOKEN` through the appropriate process
+or managed-service environment and preserve its secret handling during upgrade.
+The token is not written into policy or issue payloads. Configuration changes do
+not retarget already attempted publications. A binary uninstall leaves feedback
+state with other runtime data; an explicit runtime-data purge removes private
+evidence and unresolved recovery identity too, so reconcile or back up first.
+For diagnosis, use `feedback status`, `feedback preview` and policy-scoped `retry`.
+Provider rate-limit deadlines reuse the existing `next_attempt_at_ms` journal
+field, survive restart and require no journal migration. Early retries perform
+no remote I/O. Upgrades reject reports that exceed their final encoded byte
+budget after correlation IDs are inserted, before writing runtime state.
+
+Skill packaging checks include the strict feedback input schema and the public
+#416 friction example. `tools/release/update_skill_metadata_version.py --check`
+validates allowed input shapes, unknown-field rejection, publication-policy
+bounds and runner evidence requirements; `--self-test` also detects weakened
+schema privacy boundaries. Rust tests parse the packaged example through the
+production DTO, so an example/schema refresh accompanies contract changes.
+
 ## Local research artifact compatibility
 
 Research catalogs, authored evidence bundles and requirements manifests remain user-owned

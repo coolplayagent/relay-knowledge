@@ -39,6 +39,31 @@ pub fn outbound_json_client_with_policy(
     })
 }
 
+/// Builds a credential-bearing client with verified TLS and redirects disabled.
+pub(super) fn feedback_json_client(
+    config: &HttpConfig,
+) -> Result<reqwest::Client, OutboundClientError> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(config.request_timeout.min(Duration::from_secs(30)))
+        .connect_timeout(Duration::from_secs(10))
+        .no_proxy()
+        .retry(reqwest::retry::never())
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent(crate::project::PROJECT_NAME);
+    if let Some(proxy_url) = &config.proxy.proxy {
+        let no_proxy = reqwest::NoProxy::from_string(&config.proxy.no_proxy_rules.join(","));
+        let proxy = reqwest::Proxy::all(proxy_url)
+            .map_err(|_| OutboundClientError {
+                message: "invalid feedback proxy configuration".to_owned(),
+            })?
+            .no_proxy(no_proxy);
+        builder = builder.proxy(proxy);
+    }
+    builder.build().map_err(|_| OutboundClientError {
+        message: "feedback HTTP client could not be initialized".to_owned(),
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutboundClientError {
     pub message: String,

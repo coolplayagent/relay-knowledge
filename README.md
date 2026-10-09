@@ -86,6 +86,10 @@ a separate runtime home; the old reader requires its own materialized edges.
 
 ## Capability Snapshot
 
+- [Software experience feedback](docs/en/01-user-guide/10-workers-proposals-audit.md#106-software-experience-feedback)
+  keeps local evidence and, after explicit opt-in, submits GitHub issues through
+  a durable outbox with conservative crash recovery and regression evidence.
+
 - Hybrid GraphRAG context packs combine BM25, local or external semantic/vector
   retrieval, graph evidence, freshness, bounded context, and ranking
   explanations.
@@ -299,5 +303,11 @@ Optional local hooks: `pre-commit install` and
 `pre-commit run --all-files`. Rust changes run `cargo check`, Clippy, and tests
 before the commit is accepted; the test command includes the deterministic
 benchmark target through `--all-targets`.
+
+The initial [Qualitygate policy](qualitygate.yaml) is a reviewable generated
+candidate whose required rule currently checks line endings. It supplements the
+Cargo, documentation, coverage and architecture gates above. Bind final checks
+to the staged/delivered snapshot; `.gitattributes` intentionally gives Windows
+scripts CRLF working-tree files while Git stores their normalized content.
 
 Research workflows: [map transactions and local capture audits](docs/en/01-user-guide/14-research-workflow.md).

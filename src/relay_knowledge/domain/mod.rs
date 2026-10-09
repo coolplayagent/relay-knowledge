@@ -7,6 +7,8 @@ mod graph;
 mod knowledge;
 mod operations;
 
+pub use operations::feedback;
+
 pub use knowledge::{map_batch, research};
 
 pub use business::{

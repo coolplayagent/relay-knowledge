@@ -65,6 +65,22 @@ pub(super) fn first_string_var(
     Ok(None)
 }
 
+pub(super) fn secret_var(
+    values: &EnvironmentValues,
+    variable: &'static str,
+) -> Result<Option<String>, EnvError> {
+    let secret = string_var(values, variable)?;
+    if secret.as_deref().is_some_and(|value| {
+        value.len() > 1024 || !value.bytes().all(|byte| byte.is_ascii_graphic())
+    }) {
+        return Err(EnvError {
+            variable,
+            kind: super::EnvErrorKind::InvalidSecret,
+        });
+    }
+    Ok(secret)
+}
+
 pub(super) fn bool_var(
     values: &EnvironmentValues,
     variable: &'static str,

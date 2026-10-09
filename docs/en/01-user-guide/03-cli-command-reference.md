@@ -350,6 +350,61 @@ The original content-integrity fields reuse existing diagnostic tables. Source I
 
 Configuration source filters also accept the canonical code-language identifiers in the [language capability matrix](05-code-repository-graph-workflow.md#510-language-capability-matrix). `shell`, `ctmpl` and `dotenv` remain unchanged. The CLI help and MCP schema share the validated source-format inventory.
 
+## Software feedback (#417)
+
+`feedback report --input <json-file>` saves structured software feedback; the
+persisted policy controls whether it also creates a GitHub issue. `feedback
+configure --input <json-file>` is the local authority surface. Other commands are
+`status [id]`, `preview <id>`, `submit <id>`, `retry <id>`, `track <id>`,
+`link-fix <id> --input <json-file>` and `validate <id> --input <json-file>`.
+All support the normal output formats and machine-readable help. Input files
+are bounded to 64 KiB and reads to five seconds; report text is never executed.
+
+Structured API metadata includes an additive `feedback` handle with
+`schema_version`, `trace_id` and `request_id`. It requires no feedback I/O and
+preserves the primary operation result. Copy its identifiers into a report; the
+handle does not imply that raw logs were archived or can be recovered by ID.
+
+Web uses the same service through `POST /api/web/operations/execute`. The
+operation and report belong inside `snapshot.payload`; `name` and `command`
+are display labels, never executable instructions:
+
+```json
+{
+  "snapshot": {
+    "name": "Report software feedback",
+    "command": "feedback report",
+    "payload": {
+      "operation": "feedback.report",
+      "report": {
+        "schema_version": 1,
+        "kind": "workflow-friction",
+        "intent": "Update several map topics together",
+        "expected": "One validated batch operation",
+        "actual": "Each topic requires a separate invocation",
+        "impact": "Repeated setup and validation steps"
+      }
+    }
+  }
+}
+```
+
+The same envelope also supports
+`feedback.status` (optional `id`) and `feedback.preview`, `feedback.submit`,
+`feedback.retry`, `feedback.track` (required `id`). Publication obeys the locally
+persisted policy. Configure, fix association and runner validation remain local
+CLI authority. The versioned JSON DTO is shared; this does not add dedicated
+MCP/ACP feedback tools. Agents can use the CLI.
+
+Web feedback failures preserve their typed categories: invalid input returns
+HTTP 400, busy storage admission returns 429, unavailable storage or provider
+operations return 503, and internal failures return 500. Publication outcomes
+such as `blocked` remain saved feedback states in a successful response; clients
+must inspect that state before treating an issue as submitted.
+
+See [software feedback, recovery and validation](10-workers-proposals-audit.md#106-software-experience-feedback)
+for states, permission boundaries and the external-runner evidence model.
+
 ## Research captures and map transactions
 
 `map plan/apply --type knowledge --input <transaction.json>`; `sources audit --root <repository> --input <catalog.json>`.

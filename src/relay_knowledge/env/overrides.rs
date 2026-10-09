@@ -2,6 +2,22 @@
 
 use super::PlatformEnvironment;
 
+/// Explicit publishing credential captured once at process bootstrap.
+#[derive(Clone, PartialEq, Eq)]
+pub struct FeedbackGithubToken(pub(crate) Result<String, ()>);
+
+impl std::fmt::Debug for FeedbackGithubToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("FeedbackGithubToken([REDACTED])")
+    }
+}
+
+/// Optional feedback credential; its presence does not authorize publishing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FeedbackEnvOverrides {
+    pub github_token: Option<FeedbackGithubToken>,
+}
+
 /// Relay-specific path overrides read from environment variables.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PathEnvOverrides {
@@ -135,6 +151,7 @@ pub struct EnvironmentConfig {
     pub platform: PlatformEnvironment,
     pub paths: PathEnvOverrides,
     pub network: NetworkEnvOverrides,
+    pub feedback: FeedbackEnvOverrides,
     pub remote_cli: RemoteCliEnvOverrides,
     pub agent: AgentEnvOverrides,
     pub retrieval: RetrievalEnvOverrides,

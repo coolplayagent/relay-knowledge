@@ -22,6 +22,7 @@ use std::{
     time::Duration,
 };
 
+pub mod feedback;
 mod outbound;
 mod qos_admission;
 mod qos_client;

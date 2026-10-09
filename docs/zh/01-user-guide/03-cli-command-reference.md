@@ -334,6 +334,40 @@ HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包�
 
 配置来源过滤也接受[语言能力矩阵](05-code-repository-graph-workflow.md#510-语言能力矩阵)中的规范代码语言标识；`shell`、`ctmpl` 和 `dotenv` 保持不变。CLI help 与 MCP schema 复用同一份经过校验的来源清单。
 
+## 软件反馈（#417）
+
+`feedback report --input <json-file>` 保存结构化软件体验反馈，是否同时创建 GitHub issue 由持久策略控制。本地 `feedback configure --input <json-file>` 是授权入口。其余命令为 `status [id]`、`preview <id>`、`submit <id>`、`retry <id>`、`track <id>`、`link-fix <id> --input <json-file>` 和 `validate <id> --input <json-file>`，均支持常规输出格式与机器可读 help。输入文件最多 64 KiB，读取最多五秒，报告文本不执行。
+
+结构化 API metadata 新增 `feedback` handle，包含 `schema_version`、`trace_id`、`request_id`；生成 handle 不发生反馈 I/O，也不改变主操作结果。可复制身份到 report；handle 不表示已经归档原始日志，也不提供按 ID 恢复原始 trace 的承诺。
+
+Web 通过 `POST /api/web/operations/execute` 调用相同服务。`operation` 和 `report` 必须放在 `snapshot.payload` 内；`name` 和 `command` 仅为显示标签，不会执行：
+
+```json
+{
+  "snapshot": {
+    "name": "Report software feedback",
+    "command": "feedback report",
+    "payload": {
+      "operation": "feedback.report",
+      "report": {
+        "schema_version": 1,
+        "kind": "workflow-friction",
+        "intent": "Update several map topics together",
+        "expected": "One validated batch operation",
+        "actual": "Each topic requires a separate invocation",
+        "impact": "Repeated setup and validation steps"
+      }
+    }
+  }
+}
+```
+
+同一请求结构还支持 `feedback.status`（可选 id）及 `feedback.preview`、`feedback.submit`、`feedback.retry`、`feedback.track`（必需 id）。发布仍服从本地持久策略。configure、修复关联和 runner 验证仅保留本地 CLI 权限。版本化 DTO 共享，但本次不新增专门 MCP/ACP feedback tool，Agent 可使用 CLI。
+
+Web 反馈错误保留类型：无效输入返回 HTTP 400，存储准入忙返回 429，存储或 provider 操作不可用返回 503，内部失败返回 500。`blocked` 等发布结果仍是成功响应中已保存的反馈状态；客户端必须检查状态，不能仅凭 HTTP 成功就认定 issue 已提交。
+
+状态、恢复与外部 runner 证据模型见[软件使用体验反馈](10-workers-proposals-audit.md#106-软件使用体验反馈)。
+
 ## 研究材料与地图事务
 
 `map plan/apply --type knowledge --input <transaction.json>`; `sources audit --root <repository> --input <catalog.json>`.

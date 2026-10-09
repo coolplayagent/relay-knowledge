@@ -6,6 +6,7 @@
 #![allow(clippy::result_large_err)]
 
 mod code_repository;
+pub mod feedback;
 mod knowledge;
 mod model_provider;
 mod runtime;

@@ -1,0 +1,469 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Relay Knowledge Software Feedback v1",
+  "description": "Strict input contract for report, policy, fix and validation JSON documents. x-maxUtf8Bytes is an extension enforced by the packaged release validator alongside standard Unicode-code-point maxLength; generic JSON Schema validators may ignore this extension. Runtime validation remains authoritative for whole-document bounds after correlation-ID injection, nonblank strings, privacy checks, scenario bindings and authorization. Private evidence and diagnostics are never published.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/report"
+    },
+    {
+      "$ref": "#/$defs/policy"
+    },
+    {
+      "$ref": "#/$defs/fix"
+    },
+    {
+      "$ref": "#/$defs/validation"
+    }
+  ],
+  "$defs": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "bug",
+        "missing-capability",
+        "poor-result",
+        "workflow-friction",
+        "performance",
+        "documentation"
+      ]
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "type": "string",
+          "enum": [
+            "agent-observation",
+            "user-experience",
+            "cli-fact",
+            "hypothesis"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "x-maxUtf8Bytes": 4096
+        }
+      },
+      "required": [
+        "origin",
+        "text"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "x-maxUtf8Bytes": 256
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "x-maxUtf8Bytes": 16384
+        }
+      },
+      "required": [
+        "label",
+        "content"
+      ]
+    },
+    "reproduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scenario": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "x-maxUtf8Bytes": 4096
+        },
+        "expected": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "x-maxUtf8Bytes": 4096
+        }
+      },
+      "required": [
+        "scenario",
+        "expected"
+      ]
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exit_status": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 2147483647
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "freshness": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "content_integrity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "elapsed_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steps": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": []
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/kind"
+        },
+        "intent": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "x-maxUtf8Bytes": 4096
+        },
+        "expected": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "x-maxUtf8Bytes": 4096
+        },
+        "actual": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "x-maxUtf8Bytes": 4096
+        },
+        "impact": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "x-maxUtf8Bytes": 4096
+        },
+        "observations": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/observation"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "reproduction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/reproduction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "x-maxUtf8Bytes": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "x-maxUtf8Bytes": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diagnostics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/diagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "kind",
+        "intent",
+        "expected",
+        "actual",
+        "impact"
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "local-only",
+            "auto-submit"
+          ]
+        },
+        "target_repository": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$",
+              "not": {
+                "pattern": "(^|/)\\.{1,2}(/|$)"
+              },
+              "description": "An owner/repository pair whose components contain 1..100 ASCII letters, digits, underscore, hyphen or dot; exact . and .. components are rejected, while ... remains allowed. This validates structure, not remote existence or permission."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "allowed_kinds": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/kind"
+          }
+        },
+        "daily_quota": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "validation_runner": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-maxUtf8Bytes": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "mode",
+        "allowed_kinds",
+        "daily_quota"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "auto-submit"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "target_repository"
+            ],
+            "properties": {
+              "target_repository": {
+                "type": "string"
+              },
+              "allowed_kinds": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "fix": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "x-maxUtf8Bytes": 1024
+        },
+        "target_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-maxUtf8Bytes": 128
+        }
+      },
+      "required": [
+        "reference",
+        "target_version"
+      ]
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-maxUtf8Bytes": 128
+        },
+        "scenario_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "actual": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "x-maxUtf8Bytes": 4096
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-maxUtf8Bytes": 128
+        },
+        "environment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "x-maxUtf8Bytes": 1024
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "x-maxUtf8Bytes": 256
+        },
+        "elapsed_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steps": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "runner",
+        "scenario_digest",
+        "actual",
+        "version",
+        "environment",
+        "run_id"
+      ]
+    }
+  }
+}

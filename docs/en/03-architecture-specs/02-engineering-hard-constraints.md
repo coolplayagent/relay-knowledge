@@ -347,6 +347,7 @@ Network entry points support connection budgets, request budgets, body limits, t
 
 ## 5. Code Quality Constraints
 
+- Local formatting must use the same current stable toolchain as CI. Test fixture macros that accept method signatures allow optional trailing argument commas so rustfmt's multiline normalization remains compilable; formatted fixtures still obey the 1000-line limit.
 - No tracked source, test, documentation, script, or workflow file may exceed 1000 lines. Generated release lockfiles required by locked builds, currently `Cargo.lock`, are exempt and must stay machine-generated.
 - Root README files are concise entry and navigation surfaces. Detailed implementation ownership and operational contracts belong in the responsibility-specific architecture, capability, or user-guide documents linked from those READMEs; README growth must not bypass the same 1000-line limit.
 - Do not add shallow functions; functions must validate, transform, isolate boundaries, manage resources, map errors, add observability, or coordinate real workflows.
@@ -390,3 +391,57 @@ Maven reactor identities, coordinate resolution, persistence and bounded reverse
 Navigation: Previous: [1. Architecture Vision and Algorithm Map](01-architecture-vision-and-algorithm-map.md) | Next: [3. Foundational Runtime](03-foundational-runtime.md)
 
 Configuration registry extraction belongs to the existing code-index worker, with no query-time source scan or change to the callable graph. Queries resolve at most 1,000 symbolic identities over four expansion rounds, admit at most 10,000 usages and 16 MiB of fact text, and share a two-second / two-million SQLite-step budget. A metadata value is capped at 64 KiB. Exhaustion is an explicit incomplete-analysis error; it must not become an empty successful query or a false missing-key claim. Incremental copies retain metadata and read-to-guard identities. Tests must exercise real registration/index/query, cross-file bindings, ambiguity, filters, and stale/incremental behavior.
+
+## Software Feedback Ownership and Publication Safety
+
+Feedback contracts, bounded validation and public evidence projection belong to
+`domain::feedback`; `application::feedback` owns policy, deduplication, publication
+and regression transitions. The durable journal adapter belongs to
+`storage::feedback` behind `ports::feedback_store`; `net::http::feedback` implements
+`ports::feedback`. Paths, credentials and project filename constants remain in
+`paths`, `env` and `project`. Bootstrap captures platform metadata and injects it
+into the feedback service; application code does not read process state.
+No feedback transition writes accepted graph facts.
+
+Persistence uses bounded blocking-worker admission, an OS process lock and a
+prepared journal recovery record. The lock covers remote publication to serialize
+writers; cancellation releases resources while durable send intent preserves the
+unknown-outcome state. Outbox count/byte limits and bounded provider scans must
+never be removed to make a test pass. Persist intent, immutable payload/target
+and quota before remote POST. A transport ambiguity, malformed success response,
+or interrupted send requires read-only marker reconciliation, never another POST.
+A negative scan cannot prove safe retry of an uncertain write. Nonce markers must
+be random and unrelated to private content hashes.
+
+The last lock guard shared by the transaction and persistence worker must
+explicitly unlock; closing the descriptor alone can retain a lock through an
+unrelated concurrent fork/exec. A worker releases its guard reference before
+returning completion, while cancellation cannot unlock a worker still writing.
+Tests must retain a duplicated descriptor to verify immediate final-owner unlock
+and preserve exclusivity while a worker reference remains alive.
+
+Raw evidence/diagnostics never enter public issue payloads. Public narrative is
+an explicit minimal disclosure contract with fail-closed sensitive-data checks;
+there is no model-controlled redaction exemption. Provider targets come only from
+validated local policy. Feedback authorization and trusted validation-runner
+identity are independent. A closed issue is not regression evidence, and external
+validation inputs must bind the original scenario/criterion and selected version.
+No feedback field grants code execution or software-update authority.
+
+Remote duplicate lookup may additionally use a stable digest of the finalized
+public narrative before recovery metadata. This public-only marker must never
+include raw evidence, diagnostics, trace identifiers or local report fingerprints;
+identical public reports can reuse existing issues without exposing private
+inputs. It cannot serialize concurrent publishers on independent installations.
+
+Content binding must distinguish immutable private raw-report digest, immutable
+complete local title/body payload digest, stable public-only deduplication marker
+before recovery metadata, and the observed remote issue body digest. A deduplicated
+issue may carry another publisher's nonce; `track` may refresh only the remote
+observation binding, without rewriting the original local evidence/payload or
+claiming their body bytes are identical.
+
+CLI metadata aggregation must retain both research and feedback command families.
+The shared Web dispatcher routes each family to its owning application service.
+Regression checks cover both complete command families together, so integrating
+one workflow preserves the other workflow's public operations.

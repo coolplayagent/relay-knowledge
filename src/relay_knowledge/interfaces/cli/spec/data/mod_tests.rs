@@ -9,7 +9,7 @@ fn aggregate_specs_preserve_stable_order_and_unique_paths() {
         .map(|command| command.path.join(" "))
         .collect::<Vec<_>>();
 
-    assert_eq!(paths.len(), 74);
+    assert_eq!(paths.len(), 83);
     assert!(paths.iter().any(|path| path == "repo diagnostics"));
     assert_eq!(
         &paths[..7],
@@ -44,7 +44,7 @@ fn aggregate_specs_preserve_stable_order_and_unique_paths() {
         ]
     );
     assert_eq!(
-        &paths[69..],
+        &paths[78..],
         [
             "setup doctor",
             "setup profile",
@@ -63,6 +63,20 @@ fn aggregate_specs_preserve_stable_order_and_unique_paths() {
             "evidence view",
             "evidence impact",
             "research status"
+        ]
+    );
+    assert_eq!(
+        &paths[59..68],
+        [
+            "feedback configure",
+            "feedback report",
+            "feedback status",
+            "feedback preview",
+            "feedback submit",
+            "feedback retry",
+            "feedback track",
+            "feedback link-fix",
+            "feedback validate"
         ]
     );
     assert_eq!(
