@@ -299,3 +299,5 @@ Optional local hooks: `pre-commit install` and
 `pre-commit run --all-files`. Rust changes run `cargo check`, Clippy, and tests
 before the commit is accepted; the test command includes the deterministic
 benchmark target through `--all-targets`.
+
+Research workflows: [map transactions and local capture audits](docs/en/01-user-guide/14-research-workflow.md).

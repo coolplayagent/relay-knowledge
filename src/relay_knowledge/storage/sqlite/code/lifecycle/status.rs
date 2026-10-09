@@ -655,3 +655,24 @@ fn content_integrity(
         Ok(CodeContentIntegrity::default())
     }
 }
+
+/// Exact canonical-root lookup, retaining ambiguity instead of choosing another scope.
+pub(in crate::storage::sqlite::code) fn repository_at_root(
+    connection: &mut Connection,
+    root: &str,
+) -> Result<Option<CodeRepositoryStatus>, StorageError> {
+    let mut statement = connection.prepare("SELECT repository_id FROM code_repositories WHERE root_path = ?1 ORDER BY repository_id LIMIT 2")?;
+    let ids = statement
+        .query_map([root], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if ids.len() > 1 {
+        return Err(StorageError::InvalidInput(
+            "multiple registrations match the repository root".into(),
+        ));
+    }
+    drop(statement);
+    match ids.first() {
+        Some(id) => repository_status(connection, id),
+        None => Ok(None),
+    }
+}

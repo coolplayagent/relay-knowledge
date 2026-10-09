@@ -15,6 +15,10 @@ use super::{CliAction, CliError, OutputFormat, command::value_after};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MapCommand {
+    Batch {
+        input: std::path::PathBuf,
+        apply: bool,
+    },
     Init {
         selection: MapSelection,
     },
@@ -73,6 +77,23 @@ impl MapCommand {
 
 pub(super) fn parse_map(tokens: &[String]) -> Result<CliAction, CliError> {
     match tokens.first().map(String::as_str) {
+        Some(action @ ("plan" | "apply")) => {
+            let (selection, remaining) = extract_selection(&tokens[1..], true)?;
+            if selection != MapSelection::One(RepositoryMapType::Knowledge) {
+                return Err(CliError::UnexpectedArgument(
+                    "map batches require --type knowledge".into(),
+                ));
+            }
+            if remaining.len() != 2 || remaining[0] != "--input" {
+                return Err(CliError::UnexpectedArgument(
+                    "expected --input <transaction.json>".into(),
+                ));
+            }
+            Ok(CliAction::Map(MapCommand::Batch {
+                input: remaining[1].clone().into(),
+                apply: action == "apply",
+            }))
+        }
         Some("init") => {
             let (selection, remaining) = extract_selection(&tokens[1..], false)?;
             if !remaining.is_empty() {
@@ -107,6 +128,22 @@ pub(crate) async fn run_map(
     format: OutputFormat,
 ) -> Result<String, CliError> {
     match command {
+        MapCommand::Batch { input, apply } => {
+            let response = map_service(service, format)?
+                .batch_from_file(&context, &input, apply)
+                .await
+                .map_err(|error| map_error("map transaction failed", error, format))?;
+            super::render_response(
+                if apply {
+                    "knowledge.map.apply"
+                } else {
+                    "knowledge.map.plan"
+                },
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
         MapCommand::Init { selection } => {
             let service = map_service(service, format)?;
             let mut results = Vec::new();

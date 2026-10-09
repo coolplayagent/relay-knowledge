@@ -1,0 +1,22 @@
+schema_version: 1
+exclude: []
+languages:
+- c
+- python
+- rust
+- shell
+- typescript
+rulesets:
+- core
+rules:
+  line-ending:
+    enabled: true
+    required: true
+    severity: error
+    parameters: {}
+    source: null
+    depends_on: []
+checks: []
+profiles: {}
+custom_rules: null
+verification_assets: []

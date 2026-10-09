@@ -333,3 +333,9 @@ HTTP 入口为 `GET /api/v1/code/repositories/{alias}/diagnostics`，参数包�
 原有内容完整性字段复用现有诊断表。路径 I/O 隔离进一步增加兼容的诊断/checkpoint 列及新的事实身份；升级后使用正常索引命令重建旧快照。agent 的完整性判断应读取 `content_integrity`；旧版本仍可能对部分内容返回整体 `degraded`。版本过期、任务未完成及 graph-only 的保守处理保持有效。外部依赖不在授权索引范围内时仍使用 unresolved edge 元数据，不计入文件解析降级。
 
 配置来源过滤也接受[语言能力矩阵](05-code-repository-graph-workflow.md#510-语言能力矩阵)中的规范代码语言标识；`shell`、`ctmpl` 和 `dotenv` 保持不变。CLI help 与 MCP schema 复用同一份经过校验的来源清单。
+
+## 研究材料与地图事务
+
+`map plan/apply --type knowledge --input <transaction.json>`; `sources audit --root <repository> --input <catalog.json>`.
+
+[研究材料与地图事务](17-research-workflow.md)

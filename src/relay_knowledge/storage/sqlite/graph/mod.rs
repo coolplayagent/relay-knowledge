@@ -5,7 +5,9 @@ use std::{
 
 use rusqlite::Connection;
 
+mod evidence;
 mod mutation;
+pub(super) use evidence::evidence_document;
 mod version;
 
 pub(super) use mutation::commit_batch;
