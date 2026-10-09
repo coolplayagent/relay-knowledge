@@ -1,7 +1,7 @@
 use std::{error::Error, fmt, path::PathBuf};
 
 use crate::{
-    env::{EnvError, EnvironmentConfig},
+    env::{EnvError, EnvironmentConfig, FeedbackEnvOverrides},
     net::{NetworkConfig, NetworkConfigError, NetworkRuntime},
     observability::{ObservabilityRuntime, TelemetryConfig},
     paths::{PathError, RuntimePaths, windows_tasklist_command},
@@ -34,6 +34,7 @@ pub struct RuntimeConfiguration {
     pub paths: RuntimePaths,
     pub process: ProcessRuntimeConfig,
     pub network: NetworkRuntime,
+    pub feedback: FeedbackEnvOverrides,
     pub observability: ObservabilityRuntime,
     pub agent: AgentRuntimeConfig,
     pub retrieval: ReadModelBackendConfig,
@@ -82,6 +83,7 @@ impl RuntimeConfiguration {
                 .map_err(RuntimeConfigurationError::Paths)?,
             process,
             network: NetworkRuntime::from_config(network),
+            feedback: environment.feedback.clone(),
             observability,
             agent,
             retrieval,

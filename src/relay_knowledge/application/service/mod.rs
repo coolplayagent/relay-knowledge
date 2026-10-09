@@ -51,6 +51,7 @@ use super::{
 /// Shared application service used by CLI, Web, and future API adapters.
 #[derive(Clone)]
 pub struct RelayKnowledgeService {
+    pub(super) feedback: Option<super::feedback::FeedbackService>,
     pub(super) runtime: RuntimeConfiguration,
     pub(super) storage: StorageProvider,
     pub(super) health_cache: Arc<tokio::sync::RwLock<Option<HealthResponse>>>,
@@ -76,6 +77,7 @@ impl RelayKnowledgeService {
             code_retention_cursor: Arc::new(AtomicUsize::new(0)),
             embedding_provider,
             worker_outbound,
+            feedback: None,
         }
     }
 
@@ -94,6 +96,7 @@ impl RelayKnowledgeService {
             code_retention_cursor: Arc::new(AtomicUsize::new(0)),
             embedding_provider,
             worker_outbound,
+            feedback: None,
         }
     }
 

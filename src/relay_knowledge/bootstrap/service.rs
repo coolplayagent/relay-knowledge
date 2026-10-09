@@ -22,7 +22,13 @@ impl RelayKnowledgeService {
             runtime.storage.topology,
         ));
         let adapters = network_adapters(&runtime);
-        Self::with_runtime_adapters(runtime, storage, adapters.embedding, adapters.worker)
+        let feedback = feedback_adapter(&runtime);
+        let service =
+            Self::with_runtime_adapters(runtime, storage, adapters.embedding, adapters.worker);
+        match feedback {
+            Some(feedback) => service.with_feedback(feedback),
+            None => service,
+        }
     }
 
     /// Creates a service backed by an explicit store for deterministic tests.
@@ -72,6 +78,22 @@ pub(crate) async fn runtime_configuration_from_process_environment()
     );
 
     RuntimeConfiguration::from_environment_with_process(&environment, process).await
+}
+
+fn feedback_adapter(
+    runtime: &RuntimeConfiguration,
+) -> Option<crate::application::feedback::FeedbackService> {
+    let provider = crate::net::http::feedback::GithubFeedbackProvider::new(
+        runtime.network.clone(),
+        runtime.feedback.github_token.clone(),
+    );
+    Some(crate::application::feedback::FeedbackService::new(
+        Arc::new(crate::storage::feedback::FileFeedbackStore::new(
+            &runtime.paths,
+        )),
+        Arc::new(provider),
+        format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+    ))
 }
 
 struct RuntimeNetworkAdapters {

@@ -1,6 +1,7 @@
 //! Aggregates command metadata in stable CLI display order.
 
 mod core;
+mod feedback;
 mod map;
 mod operations;
 mod service;
@@ -38,6 +39,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
     commands.extend(map::command_specs());
     commands.extend(core::graph_commands());
     commands.extend(operations::command_specs());
+    commands.extend(feedback::command_specs());
     commands.extend(core::diagnostic_commands());
     commands.extend(service::command_specs());
     commands.extend(core::setup_and_meta_commands());

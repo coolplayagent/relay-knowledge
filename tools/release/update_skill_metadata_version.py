@@ -13,6 +13,13 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
+from skill_feedback_contracts import (
+    FEEDBACK_EXAMPLE,
+    FEEDBACK_SCHEMA,
+    check_feedback_schema,
+    self_test_feedback_schema,
+)
+
 from skill_schema_contracts import (
     check_business_glossary_schema,
     load_schema,
@@ -740,6 +747,7 @@ def check_skill_metadata(path: Path, expected: str) -> None:
     check_knowledge_map_schema(path.parent / KNOWLEDGE_MAP_SCHEMA)
     check_codespec_map_schema(path.parent / CODESPEC_MAP_SCHEMA)
     check_business_glossary_schema(path.parent / BUSINESS_GLOSSARY_SCHEMA)
+    check_feedback_schema(path.parent / FEEDBACK_SCHEMA, path.parent / FEEDBACK_EXAMPLE)
 
 
 def expect_value_error(action: Callable[[], object], expected: str) -> None:
@@ -900,6 +908,7 @@ def run_self_test() -> None:
         / BUSINESS_GLOSSARY_SCHEMA
     )
 
+    self_test_feedback_schema(Path(__file__).resolve().parents[2] / "skills/relay-knowledge-cli")
     print("self-test OK")
 
 

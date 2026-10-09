@@ -31,7 +31,7 @@ pub use file_index::{
     FileIndexFreshnessDiagnostics, FileIndexFreshnessState, FileIndexLag, FileIndexRequest,
     FileIndexResponse, FileQueryRequest, FileQueryResponse,
 };
-pub use metadata::ApiMetadata;
+pub use metadata::{ApiMetadata, FeedbackHandle};
 pub use service_plan::{ServicePlanRequest, ServicePlanResponse};
 pub use status::{ProjectStatusResponse, RuntimeStatus};
 pub use stream::{ApiStreamEvent, StreamEventKind};

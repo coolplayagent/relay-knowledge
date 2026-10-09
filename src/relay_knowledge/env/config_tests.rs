@@ -7,6 +7,64 @@ use crate::env::{
 };
 
 #[test]
+fn feedback_credential_is_explicit_and_debug_redacted() {
+    let secret = "github_pat_fixture_private_credential";
+    let config = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            (HOME, "/home/fixture"),
+            (RELAY_KNOWLEDGE_FEEDBACK_GITHUB_TOKEN, secret),
+        ],
+    )
+    .expect("valid credential snapshot");
+    assert_eq!(
+        config
+            .feedback
+            .github_token
+            .as_ref()
+            .expect("credential captured")
+            .0,
+        Ok(secret.to_owned())
+    );
+    let debug = format!("{config:?}");
+    assert!(!debug.contains(secret));
+    assert!(debug.contains("[REDACTED]"));
+    let config = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [(HOME, "/home/fixture"), ("GITHUB_TOKEN", secret)],
+    )
+    .expect("snapshot");
+    assert!(
+        config.feedback.github_token.is_none(),
+        "unrelated credentials do not grant feedback access"
+    );
+}
+
+#[test]
+fn invalid_feedback_credentials_do_not_break_primary_runtime_configuration_or_reveal_values() {
+    let secret = "secret\ncredential";
+    let config = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            (HOME, "/home/fixture"),
+            (RELAY_KNOWLEDGE_FEEDBACK_GITHUB_TOKEN, secret),
+        ],
+    )
+    .expect("invalid optional feedback token preserves ordinary commands");
+    assert!(
+        config
+            .feedback
+            .github_token
+            .as_ref()
+            .expect("invalid captured")
+            .0
+            .is_err()
+    );
+    assert!(!format!("{config:?}").contains(secret));
+    assert!(crate::net::NetworkConfig::from_overrides(&config.network).is_ok());
+}
+
+#[test]
 fn parses_platform_and_relay_overrides() {
     let config = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,

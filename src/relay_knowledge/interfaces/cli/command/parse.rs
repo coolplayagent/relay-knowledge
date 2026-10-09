@@ -167,6 +167,7 @@ fn is_command_word(token: &str) -> bool {
             | "graph"
             | "index"
             | "worker"
+            | "feedback"
             | "proposal"
             | "audit"
             | "provider"
@@ -199,6 +200,7 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
         "graph" => knowledge::parse_graph(&tokens[1..]),
         "index" => knowledge::parse_index(&tokens[1..]),
         "worker" => operations::parse_worker(&tokens[1..]),
+        "feedback" => operations::feedback::parse(&tokens[1..]),
         "proposal" => operations::parse_proposal(&tokens[1..]),
         "audit" => operations::parse_audit(&tokens[1..]),
         "provider" => parse_provider(&tokens[1..]),

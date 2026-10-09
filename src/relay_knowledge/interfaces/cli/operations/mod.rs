@@ -1,4 +1,6 @@
-//! Worker, proposal, audit, and installed-service CLI operations.
+pub(crate) mod feedback;
+
+// Worker, proposal, audit, and installed-service CLI operations.
 
 use crate::{
     api::{

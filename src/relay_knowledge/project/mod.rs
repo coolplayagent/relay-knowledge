@@ -9,6 +9,18 @@ pub const APP_DIR_NAME: &str = PROJECT_NAME;
 /// Default SQLite database filename stored under the resolved data directory.
 pub const DATABASE_FILE_NAME: &str = "relay-knowledge.sqlite";
 
+/// Private durable software-feedback directory under the runtime data directory.
+pub const FEEDBACK_DIRECTORY_NAME: &str = "feedback";
+
+/// Atomic journal containing feedback evidence, policy, and publication state.
+pub const FEEDBACK_JOURNAL_FILE_NAME: &str = "feedback.json";
+
+/// Stable interprocess lock; never removed or replaced while the store is active.
+pub const FEEDBACK_LOCK_FILE_NAME: &str = "feedback.lock";
+
+/// Same-directory prepared journal, discarded after interrupted publication.
+pub const FEEDBACK_PREPARED_FILE_NAME: &str = "feedback.prepared";
+
 /// Directory under the data directory that stores pluggable storage backends.
 pub const STORAGE_BACKENDS_DIR_NAME: &str = "stores";
 

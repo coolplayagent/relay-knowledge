@@ -66,6 +66,7 @@ pub struct CliCommand {
 /// CLI action after global options are removed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliAction {
+    Feedback(operations::feedback::FeedbackCommand),
     Status,
     Ingest {
         source_scope: String,

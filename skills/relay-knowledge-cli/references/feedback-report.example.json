@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "kind": "workflow-friction",
+  "intent": "Apply ten research-source changes as one logical map operation",
+  "expected": "One validated publication and one logical history entry",
+  "actual": "Ten separate source updates produce ten map publications",
+  "impact": "Consumes recent history and requires a coordinating script",
+  "observations": [
+    {
+      "origin": "agent-observation",
+      "text": "The available source-add workflow accepts one source per invocation"
+    },
+    {
+      "origin": "hypothesis",
+      "text": "A validated batch contract may reduce task steps without weakening consistency"
+    }
+  ],
+  "evidence": [],
+  "reproduction": {
+    "scenario": "On an isolated valid map, add ten independent sources as one logical operation",
+    "expected": "map version increases by one"
+  },
+  "trace_id": null,
+  "request_id": null,
+  "diagnostics": {
+    "command": "map source add",
+    "exit_status": 0,
+    "freshness": null,
+    "content_integrity": null,
+    "environment": "isolated research-source fixture; no production content",
+    "elapsed_ms": null,
+    "steps": 10
+  }
+}

@@ -10,6 +10,13 @@ diagnostics, installation checks, and upgrade checks. For large repositories,
 it tells agents to treat cold and incremental indexing as durable single-writer
 tasks so command-runner timeouts do not interrupt or obscure progress.
 
+For software experience gaps, the skill also documents the native
+[feedback workflow](references/feedback-workflows.md), a strict version 1
+[input schema](references/feedback.schema.json) and a public
+[example report](references/feedback-report.example.json). Publication requires
+explicit persisted opt-in; runner validation is separately authorized. These
+input DTOs reject unknown fields, unlike forward-compatible Knowledge Map readers.
+
 Repository bootstrap initializes or upgrades the
 `codespec/codespec-map.yaml`, `knowledge/knowledge-map.yaml`, and the code map as one recoverable
 workflow. The YAML contains stable `software-model` and `business-knowledge`

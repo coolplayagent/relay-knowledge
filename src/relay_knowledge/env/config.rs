@@ -4,13 +4,14 @@ use std::{env as process_env, ffi::OsString};
 
 pub use super::overrides::{EnvironmentConfig, RemoteCliEnvironmentConfig};
 use super::{
-    AgentEnvOverrides, EnvError, FileIndexEnvOverrides, NetworkEnvOverrides, PathEnvOverrides,
-    PlatformKind, RemoteCliEnvOverrides, RetrievalEnvOverrides, TelemetryEnvOverrides,
-    UpdateEnvOverrides, WatcherEnvOverrides, WorkerEnvOverrides,
+    AgentEnvOverrides, EnvError, FeedbackEnvOverrides, FeedbackGithubToken, FileIndexEnvOverrides,
+    NetworkEnvOverrides, PathEnvOverrides, PlatformKind, RemoteCliEnvOverrides,
+    RetrievalEnvOverrides, TelemetryEnvOverrides, UpdateEnvOverrides, WatcherEnvOverrides,
+    WorkerEnvOverrides,
     platform::{normalize_key, platform_environment},
     value_parser::{
         EnvironmentValues, bool_var, first_bool_var, first_string_var, path_var, positive_u64_var,
-        positive_usize_var, string_var,
+        positive_usize_var, secret_var, string_var,
     },
     variables::*,
 };
@@ -56,6 +57,14 @@ impl EnvironmentConfig {
             platform: platform_environment(&values, platform)?,
             paths: parse_path_overrides(&values)?,
             network: parse_network_overrides(&values)?,
+            feedback: FeedbackEnvOverrides {
+                // Feedback authentication is optional operational state. A bad
+                // credential must not prevent the original knowledge query.
+                github_token: match secret_var(&values, RELAY_KNOWLEDGE_FEEDBACK_GITHUB_TOKEN) {
+                    Ok(value) => value.map(|token| FeedbackGithubToken(Ok(token))),
+                    Err(_) => Some(FeedbackGithubToken(Err(()))),
+                },
+            },
             remote_cli: parse_remote_cli_overrides(&values)?,
             agent: parse_agent_overrides(&values)?,
             retrieval: parse_retrieval_overrides(&values)?,

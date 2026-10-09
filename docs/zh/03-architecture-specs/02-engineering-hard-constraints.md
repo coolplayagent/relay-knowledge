@@ -405,3 +405,17 @@ Maven reactor 的模块身份、坐标匹配、持久化与有界反向遍历由
 导航: 上一章: [1. 架构愿景与算法版图](01-architecture-vision-and-algorithm-map.md) | 下一章: [3. 基础运行时层](03-foundational-runtime.md)
 
 配置注册表抽取在既有代码索引 worker 中运行，查询阶段不得扫描源码或改变调用图。查询最多解析 1,000 个符号身份、执行四轮扩展，最多接纳 10,000 条使用关系和 16 MiB 事实文本，并共享两秒及两百万 SQLite 步预算；单条元数据限制为 64 KiB。超限必须返回明确的不完整分析错误，不能转换成空成功结果或错误的缺失键结论。增量复制保留元数据与 read-to-guard 身份。测试应覆盖真实注册、索引、查询、跨文件绑定、歧义、筛选及陈旧/增量行为。
+
+## 软件反馈所有权与发布安全
+
+`domain::feedback` 拥有契约、有界校验与公开证据投影，`application::feedback` 拥有策略、去重、发布及回归状态转换。`storage::feedback` 通过 `ports::feedback_store` 实现持久 journal，`net::http::feedback` 实现 `ports::feedback`。路径、凭据和文件名身份常量分别留在 `paths`、`env`、`project`。平台元数据由 bootstrap 捕获并注入反馈服务，应用层不读取进程状态。反馈转换不得写入已接受图事实。
+
+持久化使用有界 blocking worker 准入、OS 进程锁及 prepared journal 恢复记录。锁覆盖远端发布以串行写入；取消释放资源，已持久发送意图保留结果未决状态。不得为了通过测试去除 outbox 数量/字节或 provider 扫描上限。POST 前必须持久化发送意图、不可变 payload/目标和配额。传输结果不确定、成功响应无法解码或发送中断后，只能读取远端核对 nonce，不得重复 POST；负查询不能证明未决写入可安全重发。nonce 必须随机，不得由私有内容哈希派生。
+
+进程锁由事务与落盘 worker 共同持有的最后一个 guard 显式解锁；不能只依赖关闭文件描述符，否则并发 fork/exec 暂时继承的描述符会延长锁持有。worker 必须在返回完成结果前释放自己的 guard 引用，取消不能提前解锁仍在落盘的 worker。测试必须覆盖保留复制描述符时的即时解锁，以及 worker 引用存活时的排他性。
+
+原始 evidence/diagnostics 不进入 issue payload。公开叙述需要显式最小公开约定与遇敏感信息即阻断的检测，模型不可豁免。目标仅来自本地已校验策略。发布授权与可信 validation runner 身份独立；关闭 issue 不等于回归证据，外部验证必须绑定原场景/判据及目标版本。任何反馈字段不得授予代码执行或软件升级权。
+
+远端去重可另使用最终公开叙述在加入恢复元数据前的稳定 digest；此公开 marker 不得混入原始 evidence、diagnostics、trace ID 或本地 report 指纹。相同公开报告可复用已有 issue 而不暴露私有输入，但不能为不同安装实例提供并发串行保证。
+
+内容绑定必须区分不可变私有原始 report digest、不可变本地完整 title/body payload digest、加入恢复元数据前的公开去重 marker，以及实际观察到的远端 issue body digest。去重复用的 issue 可能携带另一个发布者的 nonce；track 只刷新远端观察绑定，不能改写本地原始证据/payload，也不能宣称两者正文逐字节相同。

@@ -121,6 +121,9 @@ pub async fn run_with_service(
         return Ok(output);
     }
     match command.action {
+        CliAction::Feedback(command) => {
+            operations::feedback::run(service, command, context, format).await
+        }
         CliAction::Status => {
             let response = service
                 .project_status(context)

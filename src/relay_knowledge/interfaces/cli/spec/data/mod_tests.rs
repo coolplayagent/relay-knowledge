@@ -9,7 +9,7 @@ fn aggregate_specs_preserve_stable_order_and_unique_paths() {
         .map(|command| command.path.join(" "))
         .collect::<Vec<_>>();
 
-    assert_eq!(paths.len(), 65);
+    assert_eq!(paths.len(), 74);
     assert!(paths.iter().any(|path| path == "repo diagnostics"));
     assert_eq!(
         &paths[..7],
@@ -37,7 +37,7 @@ fn aggregate_specs_preserve_stable_order_and_unique_paths() {
         ]
     );
     assert_eq!(
-        &paths[60..],
+        &paths[69..],
         [
             "setup doctor",
             "setup profile",

@@ -2,6 +2,7 @@
 
 mod assets;
 mod code;
+mod feedback;
 mod files;
 mod model_config;
 mod operation_request;
@@ -212,6 +213,9 @@ async fn dispatch_operation(
     context: RequestContext,
 ) -> Result<(crate::api::ApiMetadata, Value), WebError> {
     match operation {
+        operation if operation.starts_with("feedback.") => {
+            feedback::execute(service, operation, payload, context).await
+        }
         "knowledge.map.history" | "repository.map.history" => {
             let request = knowledge_map_history_page(payload)?;
             let root = service

@@ -111,7 +111,7 @@ def validate_schema_instance(
     root: dict[str, object] | None = None,
     location: str = "$",
 ) -> None:
-    """Validate the schema subset used by the two bundled skill contracts."""
+    """Validate the schema subset used by bundled skill contracts."""
     root = schema if root is None else root
     reference = schema.get("$ref")
     if isinstance(reference, str):
@@ -124,6 +124,22 @@ def validate_schema_instance(
             raise ValueError(f"{location} has unresolved schema reference {reference}")
         validate_schema_instance(target, instance, root, location)
         return
+
+    conjunction = schema.get("allOf")
+    if isinstance(conjunction, list):
+        for condition in conjunction:
+            if isinstance(condition, dict):
+                validate_schema_instance(condition, instance, root, location)
+    condition = schema.get("if")
+    if isinstance(condition, dict):
+        try:
+            validate_schema_instance(condition, instance, root, location)
+        except ValueError:
+            branch = schema.get("else")
+        else:
+            branch = schema.get("then")
+        if isinstance(branch, dict):
+            validate_schema_instance(branch, instance, root, location)
 
     for keyword, required_matches in (("oneOf", 1), ("anyOf", None)):
         alternatives = schema.get(keyword)

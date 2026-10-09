@@ -7,6 +7,8 @@ mod graph;
 mod knowledge;
 mod operations;
 
+pub use operations::feedback;
+
 pub use business::{
     BUSINESS_GLOSSARY_MAX_BYTES, BUSINESS_GLOSSARY_MAX_DOMAINS, BUSINESS_GLOSSARY_MAX_TERMS,
     BUSINESS_GLOSSARY_SCHEMA_VERSION, BUSINESS_TERM_MAX_ALIASES, BUSINESS_TERM_MAX_MAPPINGS,

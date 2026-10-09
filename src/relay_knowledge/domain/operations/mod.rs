@@ -1,4 +1,5 @@
 mod diagnostics;
+pub mod feedback;
 mod runtime;
 mod software;
 

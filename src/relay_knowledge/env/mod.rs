@@ -15,9 +15,9 @@ mod variables;
 pub use config::{EnvironmentConfig, RemoteCliEnvironmentConfig};
 pub use error::{EnvError, EnvErrorKind};
 pub use overrides::{
-    AgentEnvOverrides, FileIndexEnvOverrides, NetworkEnvOverrides, PathEnvOverrides,
-    RemoteCliEnvOverrides, RetrievalEnvOverrides, TelemetryEnvOverrides, UpdateEnvOverrides,
-    WatcherEnvOverrides, WorkerEnvOverrides,
+    AgentEnvOverrides, FeedbackEnvOverrides, FeedbackGithubToken, FileIndexEnvOverrides,
+    NetworkEnvOverrides, PathEnvOverrides, RemoteCliEnvOverrides, RetrievalEnvOverrides,
+    TelemetryEnvOverrides, UpdateEnvOverrides, WatcherEnvOverrides, WorkerEnvOverrides,
 };
 pub use platform::{PlatformEnvironment, PlatformKind};
 pub use variables::*;

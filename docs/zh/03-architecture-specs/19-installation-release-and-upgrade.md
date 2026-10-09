@@ -430,3 +430,13 @@ v56 portable-evidence 升级持久化可选的调用字节范围；旧 JSON 和 
 合并后的事实身份为 `config-registry-v56-portable-evidence-source-io-isolation-v1`。仅具有此前 portable evidence 或路径 I/O 隔离能力的作用域都必须重建。检查点同时保留类型归属游标和已处理路径计数；旧快照导入时缺失的调用字节范围与 I/O 诊断保持未知。启动检查直接调用共享 SQLite schema 检视函数确认 marker 表是否存在，保持 marker 模块既有的行数预算。
 
 schema marker 10 和一次性 portable evidence 迁移将旧事实标记 stale，通过持久化任务重建。迁移后若绑定表、触发器或清理索引缺失或不兼容，启动明确报错，不会在已发布事实之上静默创建空投影，也不会修改 writer 的租约和检查点。应恢复匹配的运行时备份，或在新运行时目录重新索引获准仓库后切换服务配置。二进制回滚使用相应升级前备份，或由所选版本在干净目录重建索引。
+
+## 反馈运行时状态（#417）
+
+软件反馈在所选 runtime data directory 下新增独立 `feedback` 目录。版本化 JSON journal 保存本地 report/原始证据、发布策略、配额、发送意图、issue 关联和回归证据；同目录锁与 prepared 恢复文件共同构成持久边界，不修改图数据库 Schema。文件系统工作在有界 blocking worker 内执行。POSIX 目录/文件限制当前账号访问；Windows 继续保留所选运行时目录访问控制。journal 属于私有运行时状态，不是发布包、cache 或仓库文件。
+
+升级与回滚时将此目录纳入运行时备份。不支持 feedback 的旧二进制会忽略它，也无法核对新版未决发布；恢复匹配 journal 后才能继续操作，不得删除发送意图绕过 `awaiting-reconciliation`。不要把同一 journal 分享或恢复成多个独立发布实例，本地锁不提供分布式协调。prepared 恢复、容量不足、损坏均有明确失败，不手工改写 journal。report/submit/retry/track 均为有界前台操作，不安装新后台服务或非托管循环。
+
+发布默认关闭，需本地策略明确启用。通过进程或托管服务环境安全提供 `RELAY_KNOWLEDGE_FEEDBACK_GITHUB_TOKEN`，升级时保留凭据管理；Token 不写入 policy 或 issue。配置变更不得重定向已尝试发布。卸载二进制保留反馈运行时数据；显式清理 runtime data 会同时删除私人证据和未决恢复身份，应先核对或备份。诊断使用 `feedback status`、`feedback preview` 与策略范围内的 retry。
+
+Skill 打包检查纳入严格 feedback 输入 Schema 与 #416 公开摩擦示例。`tools/release/update_skill_metadata_version.py --check` 验证输入形状、未知字段拒绝、发布策略预算和 runner 证据要求；`--self-test` 检查弱化隐私边界的 Schema 漂移。Rust 测试使用生产 DTO 解析打包示例，契约变更必须同步 Schema 与示例。

@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod database_access;
+mod feedback;
 mod repository_root;
 mod service_storage;
 mod windows_storage;
@@ -39,6 +40,7 @@ const DATA_DIRECTORY_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub use crate::project::APP_DIR_NAME;
 pub(crate) use database_access::managed_database_validation;
+pub use feedback::FeedbackStorePaths;
 pub use repository_root::{RepositoryRootDiscoveryError, discover_repository_root};
 
 /// Resolved runtime directories used by CLI, Web, services, and future workers.

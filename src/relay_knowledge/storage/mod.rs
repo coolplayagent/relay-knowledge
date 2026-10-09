@@ -7,6 +7,7 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 mod contracts;
+pub mod feedback;
 mod partitioned;
 mod sqlite;
 

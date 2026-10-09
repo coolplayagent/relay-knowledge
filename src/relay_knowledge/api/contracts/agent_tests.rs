@@ -25,6 +25,7 @@ fn truncates_retrieval_results_to_context_byte_budget() {
         + serialized_context_bytes(&items[1]);
     let response = crate::api::HybridRetrievalResponse {
         metadata: ApiMetadata {
+            feedback: None,
             trace_id: "trace".to_owned(),
             request_id: "req".to_owned(),
             graph_version: 1,
@@ -96,6 +97,7 @@ fn omits_backend_metadata_when_it_exceeds_agent_context_budget() {
     }];
     let response = crate::api::HybridRetrievalResponse {
         metadata: ApiMetadata {
+            feedback: None,
             trace_id: "trace".to_owned(),
             request_id: "req".to_owned(),
             graph_version: 1,
@@ -166,6 +168,7 @@ fn omits_trace_before_dropping_cited_results_when_context_budget_is_tight() {
         + serialized_context_bytes(&items[0]);
     let response = crate::api::HybridRetrievalResponse {
         metadata: ApiMetadata {
+            feedback: None,
             trace_id: "trace".to_owned(),
             request_id: "req".to_owned(),
             graph_version: 1,
@@ -245,6 +248,7 @@ fn reports_truncated_agent_result_when_trace_is_budgeted_but_retained() {
         + serialized_context_bytes(&budgeted_trace);
     let response = crate::api::HybridRetrievalResponse {
         metadata: ApiMetadata {
+            feedback: None,
             trace_id: "trace".to_owned(),
             request_id: "req".to_owned(),
             graph_version: 1,
@@ -321,6 +325,7 @@ fn reports_truncated_agent_result_when_trace_items_are_budgeted() {
     trace.mark_citations(["ev-1"]);
     let response = crate::api::HybridRetrievalResponse {
         metadata: ApiMetadata {
+            feedback: None,
             trace_id: "trace".to_owned(),
             request_id: "req".to_owned(),
             graph_version: 1,
@@ -408,6 +413,7 @@ fn filters_dropped_hits_from_agent_trace_before_byte_budget() {
         + serialized_context_bytes(&retained_trace);
     let response = crate::api::HybridRetrievalResponse {
         metadata: ApiMetadata {
+            feedback: None,
             trace_id: "trace".to_owned(),
             request_id: "req".to_owned(),
             graph_version: 1,
