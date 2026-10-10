@@ -26,6 +26,10 @@ fn storage_errors_preserve_boundary_messages() {
         "storage capacity exceeded: queue is full"
     );
     assert_eq!(
+        StorageError::ResourceBudgetExceeded("immutable input".into()).to_string(),
+        "resource budget exceeded: immutable input"
+    );
+    assert_eq!(
         StorageError::DurableStagingRequired("cross-scope publication".to_owned()).to_string(),
         "durable staging required: cross-scope publication"
     );

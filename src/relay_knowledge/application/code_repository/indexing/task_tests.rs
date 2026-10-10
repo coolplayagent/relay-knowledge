@@ -13,6 +13,43 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[test]
+fn code_index_task_failure_distinguishes_frozen_budget_from_transient_pressure() {
+    for attempt in [1, 2, 3] {
+        for (error, kind, limit) in [
+            (
+                ApiError::resource_budget_exceeded("indivisible fact owner"),
+                "resource_budget_exceeded",
+                attempt,
+            ),
+            (
+                ApiError::internal("invalid checkpoint"),
+                "checkpoint_invariant",
+                attempt,
+            ),
+            (
+                ApiError::qos_rejected("writer busy"),
+                "code_index",
+                CODE_INDEX_TASK_MAX_ATTEMPTS,
+            ),
+            (
+                ApiError::storage_unavailable("locked"),
+                "code_index",
+                CODE_INDEX_TASK_MAX_ATTEMPTS,
+            ),
+            (
+                ApiError::timeout("deadline"),
+                "code_index",
+                CODE_INDEX_TASK_MAX_ATTEMPTS,
+            ),
+        ] {
+            let failure = code_index_task_failure_disposition(&error, attempt);
+            assert_eq!(failure.error_kind, kind);
+            assert_eq!(failure.max_attempts, limit);
+        }
+    }
+}
+
 #[tokio::test]
 async fn worktree_recovery_reloads_the_durably_rebound_task_scope() {
     let sqlite = SqliteGraphStore::open_in_memory().expect("store should open");

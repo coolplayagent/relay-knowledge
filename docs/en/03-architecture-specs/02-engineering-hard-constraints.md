@@ -341,6 +341,8 @@ The self-iteration config, scoring, and history facades keep their facade contra
 
 The self-iteration Codex adapter attaches `command_tests`, `execution_tests`, `history_context_tests`, `prompt_tests`, `unattended_prompt_tests`, and `result_mapping_tests` from their exact production owners through explicit test-only `#[path]` declarations. Each test file contains test items directly; production-time `include!` expansion, facade-owned behavior tests, and same-named nested test modules are forbidden.
 
+Immutable delta owners that cannot fit the frozen writer byte/row budget must return a typed permanent resource-budget failure after deferred-edge admission is exhausted. The leased worker must dead-letter that attempt without raising budgets, deleting history, publishing partial facts, or blocking later valid targets. Transient queue/storage pressure retains bounded retries. The `code_index_task_` recovery gate must exercise permanent failure followed by successful publication of a repaired commit under the same budget.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.

@@ -354,6 +354,8 @@ Tracked-entry 路径规范化、entry/submodule 准入和 Git pathspec 投影统
 
 自迭代 Codex adapter 的 `command_tests`、`execution_tests`、`history_context_tests`、`prompt_tests`、`unattended_prompt_tests` 与 `result_mapping_tests` 必须由各自精确的生产 owner 通过显式 test-only `#[path]` 挂载，测试文件本身直接包含测试项。禁止生产期 `include!` 展开、facade 代管行为测试或在配对文件中再嵌套同名 test module。
 
+不可变 delta 单文件事实在 deferred-edge 准入后仍无法装入固定 writer byte/row 预算时，必须返回强类型永久预算错误。带租约 worker 应在该轮进入 dead letter，不得扩大预算、删除历史、发布部分事实或阻断后续合法目标。临时队列与存储压力仍有界重试。`code_index_task_` recovery gate 必须覆盖永久失败后，同预算修复提交成功发布。
+
 ## 4. HTTP 与 QoS
 
 HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 或 IOCP 经由成熟 async runtime 暴露。所有 inbound/outbound 网络工作在消耗资源前都必须经过 QoS policy。

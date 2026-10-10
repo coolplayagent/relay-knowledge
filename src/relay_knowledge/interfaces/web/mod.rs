@@ -530,6 +530,7 @@ pub(super) fn api_error_response(error: ApiError) -> Response {
         ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
         ErrorKind::StorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorKind::QosRejected => StatusCode::TOO_MANY_REQUESTS,
+        ErrorKind::ResourceBudgetExceeded => StatusCode::UNPROCESSABLE_ENTITY,
         ErrorKind::Timeout => StatusCode::REQUEST_TIMEOUT,
         ErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -593,6 +594,7 @@ impl From<ApiError> for WebError {
             ErrorKind::InvalidArgument => StatusCode::BAD_REQUEST,
             ErrorKind::StorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             ErrorKind::QosRejected => StatusCode::TOO_MANY_REQUESTS,
+            ErrorKind::ResourceBudgetExceeded => StatusCode::UNPROCESSABLE_ENTITY,
             ErrorKind::Timeout => StatusCode::GATEWAY_TIMEOUT,
             ErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         };

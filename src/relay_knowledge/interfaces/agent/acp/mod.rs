@@ -483,6 +483,7 @@ fn api_error_kind(kind: ErrorKind) -> AgentAdapterErrorKind {
         ErrorKind::InvalidArgument => AgentAdapterErrorKind::InvalidArgument,
         ErrorKind::StorageUnavailable => AgentAdapterErrorKind::StorageUnavailable,
         ErrorKind::QosRejected => AgentAdapterErrorKind::QosRejected,
+        ErrorKind::ResourceBudgetExceeded => AgentAdapterErrorKind::ResourceBudgetExceeded,
         ErrorKind::Timeout => AgentAdapterErrorKind::Timeout,
         ErrorKind::Internal => AgentAdapterErrorKind::Internal,
     }

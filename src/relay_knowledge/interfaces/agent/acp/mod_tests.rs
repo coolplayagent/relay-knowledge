@@ -396,6 +396,10 @@ async fn local_acp_prompt_reports_policy_qos_timeout_and_service_errors() {
 #[test]
 fn local_acp_helpers_cover_error_mapping_paths() {
     assert_eq!(
+        api_error_kind(ErrorKind::ResourceBudgetExceeded),
+        AgentAdapterErrorKind::ResourceBudgetExceeded
+    );
+    assert_eq!(
         api_error_kind(ErrorKind::InvalidArgument),
         AgentAdapterErrorKind::InvalidArgument
     );

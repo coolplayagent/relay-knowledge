@@ -43,3 +43,14 @@ fn tool_results_keep_text_and_structured_error_contracts_aligned() {
     assert_eq!(error["structuredContent"]["message"], "deadline reached");
     assert_eq!(error["isError"], true);
 }
+
+#[test]
+fn permanent_budget_error_preserves_its_protocol_category() {
+    let error = super::agent_error_kind(crate::api::ErrorKind::ResourceBudgetExceeded);
+    let result = tool_error_result(AgentAdapterError::new(error, "frozen input"));
+    assert_eq!(
+        result["structuredContent"]["error_kind"],
+        "resource_budget_exceeded"
+    );
+    assert_eq!(result["isError"], true);
+}

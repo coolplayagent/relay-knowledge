@@ -25,6 +25,15 @@ async fn default_router_can_be_constructed() {
 async fn api_error_response_maps_stable_status_codes() {
     let invalid = api_error_response(ApiError::invalid_argument("bad"));
     let storage = api_error_response(ApiError::storage_unavailable("down"));
+    let budget = ApiError::resource_budget_exceeded("frozen input");
+    assert_eq!(
+        api_error_response(budget.clone()).status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        WebError::from(budget).status,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
     let qos = api_error_response(ApiError::qos_rejected("busy"));
     let timeout = api_error_response(ApiError {
         error_kind: ErrorKind::Timeout,

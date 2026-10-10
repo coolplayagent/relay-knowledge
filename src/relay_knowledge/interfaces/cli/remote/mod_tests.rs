@@ -386,3 +386,9 @@ fn remote_urls_are_normalized_and_repository_segments_are_encoded() {
             .contains("remote repository alias must not be empty")
     );
 }
+
+#[test]
+fn status_error_maps_http_422_to_permanent_budget_failure() {
+    let error = status_error(StatusCode::UNPROCESSABLE_ENTITY, "frozen input".into());
+    assert_eq!(error.error_kind, ErrorKind::ResourceBudgetExceeded);
+}

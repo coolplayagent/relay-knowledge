@@ -36,9 +36,14 @@ pub(super) fn code_index_task_failure_disposition(
     error: &ApiError,
     attempt_count: u32,
 ) -> CodeIndexTaskFailureDisposition {
-    if error.error_kind == ErrorKind::Internal {
+    let terminal_kind = match error.error_kind {
+        ErrorKind::Internal => Some("checkpoint_invariant"),
+        ErrorKind::ResourceBudgetExceeded => Some("resource_budget_exceeded"),
+        _ => None,
+    };
+    if let Some(error_kind) = terminal_kind {
         return CodeIndexTaskFailureDisposition {
-            error_kind: "checkpoint_invariant",
+            error_kind,
             max_attempts: attempt_count,
         };
     }

@@ -37,7 +37,7 @@ impl<'a> DeltaBatchPlan<'a> {
         // written its first delta batch, so only that case can use staged-edge
         // accounting without changing an already committed batch's membership.
         match Self::partition(snapshot, budget, file_surfaces(snapshot, true)?) {
-            Err(StorageError::CapacityExceeded(_)) => {
+            Err(StorageError::ResourceBudgetExceeded(_)) => {
                 Self::partition(snapshot, budget, file_surfaces(snapshot, false)?)
             }
             result => result,
@@ -74,7 +74,7 @@ impl<'a> DeltaBatchPlan<'a> {
                     .ok_or_else(|| capacity(snapshot))?
                     > budget.max_rows_per_batch
             {
-                return Err(StorageError::CapacityExceeded(format!(
+                return Err(StorageError::ResourceBudgetExceeded(format!(
                     "durable delta file '{}' owned fact surface cannot fit one frozen writer quantum for scope '{}': {} fact bytes plus {} control bytes (limit {}), {} fact rows plus {} control rows (limit {})",
                     path,
                     snapshot.source_scope,
@@ -533,7 +533,7 @@ fn orphan(path: &str, snapshot: &CodeIndexSnapshot) -> StorageError {
 }
 
 fn capacity(snapshot: &CodeIndexSnapshot) -> StorageError {
-    StorageError::CapacityExceeded(format!(
+    StorageError::ResourceBudgetExceeded(format!(
         "durable delta batch plan for scope '{}' exceeds platform capacity",
         snapshot.source_scope
     ))

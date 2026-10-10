@@ -468,6 +468,155 @@ async fn queue_index_task(
         .expect("cold start should return task")
 }
 
+#[tokio::test]
+async fn code_index_task_permanent_delta_budget_failure_releases_the_next_commit() {
+    let repo = FixtureRepo::create("code-permanent-budget");
+    repo.write("src/lib.rs", "pub fn base() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let store = Arc::new(SqliteGraphStore::open_in_memory().unwrap());
+    let service = service_with_store(store.clone()).await;
+    register_fixture_repo(&service, &repo, "register-budget-failure").await;
+    let budget = CodeIndexResourceBudget::new(8, 16_384, 10_000).unwrap();
+    let base = queue_budgeted_index(&service, &store, None, budget).await;
+    service
+        .run_code_index_task_once(Some(base.task_id.clone()), context("base-budget-failure"))
+        .await
+        .unwrap()
+        .unwrap();
+    // Source bytes fit; its parsed, persisted fact surface does not. Both
+    // tasks use the same frozen budget, and neither skips the source file.
+    let document = (0..64)
+        .map(|index| format!("pub fn entry_{index}() -> usize {{ {index} }}\n"))
+        .collect::<String>();
+    assert!(document.len() < 16_384);
+    repo.write("src/lib.rs", &document);
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "oversized-facts"]);
+    let old = queue_budgeted_index(&service, &store, Some(&base.resolved_commit_sha), budget).await;
+    repo.write("src/lib.rs", "pub fn repaired() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "repair-facts"]);
+    let next =
+        queue_budgeted_index(&service, &store, Some(&base.resolved_commit_sha), budget).await;
+    assert_ne!(old.resolved_commit_sha, next.resolved_commit_sha);
+    let error = service
+        .run_code_index_task_once(Some(old.task_id.clone()), context("fail-budget"))
+        .await
+        .expect_err("the immutable oversized owner must fail");
+    assert_eq!(error.error_kind, ErrorKind::ResourceBudgetExceeded);
+    assert!(error.message.contains("frozen writer quantum"));
+    let failed = store
+        .code_index_task(old.task_id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed.state, CodeIndexTaskState::DeadLetter);
+    assert_eq!(failed.attempt_count, 1);
+    assert_eq!(
+        failed.last_error_kind.as_deref(),
+        Some("resource_budget_exceeded")
+    );
+    assert_eq!(failed.resource_budget, budget);
+    assert!(failed.lease_owner.is_none());
+    assert!(failed.lease_expires_at_ms.is_none());
+    assert_eq!(failed.resolved_commit_sha, old.resolved_commit_sha);
+    let retained = store
+        .code_repository_status(base.repository_id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        retained.last_indexed_commit.as_deref(),
+        Some(base.resolved_commit_sha.as_str())
+    );
+    let checkpoint = store
+        .code_index_checkpoint(old.source_scope.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(checkpoint.state, "completed");
+    assert_eq!(checkpoint.resource_budget, budget);
+    assert!(
+        service
+            .run_code_index_task_once(Some(old.task_id.clone()), context("no-retry-budget"))
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let completed = service
+        .run_code_index_task_once(Some(next.task_id.clone()), context("repair-budget"))
+        .await
+        .unwrap()
+        .expect("the next immutable target must be claimable");
+    assert_eq!(completed.state, CodeIndexTaskState::Succeeded);
+    assert_eq!(completed.resource_budget, budget);
+    let status = store
+        .code_repository_status(base.repository_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        status.last_indexed_commit.as_deref(),
+        Some(next.resolved_commit_sha.as_str())
+    );
+    assert_eq!(
+        status.last_indexed_scope_id.as_deref(),
+        Some(next.source_scope.as_str())
+    );
+    assert!(!status.stale);
+    assert_eq!(status.indexed_file_count, 1);
+    let failed = store.code_index_task(old.task_id).await.unwrap().unwrap();
+    assert_eq!(failed.state, CodeIndexTaskState::DeadLetter);
+    assert_eq!(failed.attempt_count, 1);
+    // Reset is recovery of unfinished work, not cancellation or dead-letter revival.
+    let reset = service
+        .reset_code_repository_index_tasks("fixture".into(), context("reset-budget"))
+        .await
+        .unwrap();
+    assert_eq!(reset.reset_task_count, 0);
+    fs::remove_dir_all(repo.path).unwrap();
+}
+
+async fn queue_budgeted_index(
+    service: &RelayKnowledgeService,
+    store: &SqliteGraphStore,
+    base: Option<&str>,
+    budget: CodeIndexResourceBudget,
+) -> relay_knowledge::domain::CodeIndexTaskRecord {
+    let preview = service
+        .preview_code_repository_scope(full_index_request(), context("budget-preview"))
+        .await
+        .unwrap();
+    let request = CodeIndexRequest {
+        repository: selector("fixture", &preview.preview.resolved_commit_sha),
+        mode: base.map_or(CodeIndexMode::Full, |base| CodeIndexMode::Incremental {
+            base_ref: base.to_owned(),
+            head_ref: preview.preview.resolved_commit_sha.clone(),
+        }),
+        ..full_index_request()
+    };
+    store
+        .queue_code_index_task(CodeIndexTaskSeed {
+            repository_id: preview.preview.repository_id,
+            alias: preview.preview.alias,
+            ref_selector: request.repository.ref_selector.clone(),
+            resolved_commit_sha: preview.preview.resolved_commit_sha,
+            tree_hash: preview.preview.tree_hash,
+            source_scope: preview.scope.scope_id.clone(),
+            path_filters: preview.scope.path_filters,
+            language_filters: preview.scope.language_filters,
+            mode: request.mode.clone(),
+            input_fingerprint: format!("permanent-budget:{}", preview.scope.scope_id),
+            resource_budget: budget,
+            payload_json: serde_json::to_string(&request).unwrap(),
+            now_ms: 1,
+        })
+        .await
+        .unwrap()
+}
+
 fn full_index_request() -> CodeIndexRequest {
     CodeIndexRequest {
         repository: selector("fixture", "HEAD"),

@@ -456,3 +456,15 @@ Skill 打包检查纳入严格 feedback 输入 Schema 与 #416 公开摩擦示�
 
 Web Research 面板与后端二进制同版发布，复用现有操作端点和网络策略。归档访问复用已配置的文件根与范围，
 不要求为这些根注册仓库或索引。回滚时同步回滚 Web 静态资源和二进制，旧二进制无法识别新的研究操作请求。
+
+## 固定 delta 预算失败恢复
+
+单文件事实无法装入任务固定 byte/row quantum 时，返回
+`resource_budget_exceeded`，并在该轮进入 dead letter。本次不增加 schema
+migration、运行时目录或预算。既有 queued/retrying 任务在下一次 fenced attempt
+中采用新分类；失败目标不会替换已发布事实。临时容量拒绝仍采用有界重试和退避。
+
+保留任务与 checkpoint 历史，在新提交中修复或拆分源文件，再跟踪精确 head 的任务。
+`repo index --reset` 只按原输入和预算重新排队未完成任务，不会取代旧目标或复活
+dead letter。旧二进制可能把永久超限报告为 `qos_rejected`，消耗剩余重试次数；
+已终结记录不会自动复活。升级或回滚不需要直接修改数据库，也不应并发运行新旧 worker。
