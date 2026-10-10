@@ -46,9 +46,9 @@ target/debug/relay-knowledge help --format json
 
 ## 安装发布版
 
-1.1.19 增加原子地图批处理、按范围绑定的研究证据工作流，以及需要明确发布和验证授权的
-持久软件反馈。安装、升级和回滚说明见
-[1.1.19 发布说明](pages/zh/releases/1.1.19.html)。升级时将私有反馈 journal 纳入运行时备份；
+1.1.20 修复可能阻止代码索引队列推进的持久 delta 准入问题，保留 checkpoint 重放，
+并补充队列恢复指引。安装、升级和回滚说明见
+[1.1.20 发布说明](pages/zh/releases/1.1.20.html)。升级时保留运行时任务和私有反馈 journal；
 Repository Map v4 仍要求 1.1.17 或更新的 reader。
 
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="relay-knowledge 1.1.20: durable delta admission and code-index queue recovery." />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.20 release notes</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="Page navigation">
+        <a href="../">English documentation</a>
+        <a href="../../zh/releases/1.1.20.html">中文</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.20">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.20 release notes</h1>
+        <p>This patch fixes delta admission that could prevent code-index tasks from advancing and documents bounded queue recovery.</p>
+        <p>Release date: October 10, 2026.</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.20">Release downloads</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.20">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.20/checksums.txt">Checksums</a>
+        </p>
+      </section>
+      <section class="section">
+        <h2>Install and verify</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.20 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json
+relay-knowledge service doctor --format json</code></pre>
+        <p>Download the archive for your platform and verify its checksum and GitHub attestation before installation. The separate CLI skill archive includes the same version's Linux x64 and Windows x64 binaries.</p>
+      </section>
+      <section class="section">
+        <h2>What changed</h2>
+        <ul>
+          <li>Previously admissible delta partitions retain their batch membership and replay cursor. Plans rejected for capacity can account for staged facts separately from deferred edges without changing an already committed batch.</li>
+          <li>Reference and import facts remain staged; call rows and edge search projections are built by separately budgeted finalization pages before the scope becomes queryable. Search writes and edge finalization remain required.</li>
+          <li>Symbol and chunk admission measure actual UTF-8 search text and metadata bytes, with explicit row/control overhead. Capacity errors expose fact/control bytes, rows and configured limits.</li>
+          <li>The CLI skill explains how to inspect full queues, follow managed task progress and run one bounded local worker attempt when the managed service is disabled. Recovery preserves leases, backoff, checkpoints and queue capacity.</li>
+          <li>Regression tests cover dense references, large UTF-8 search content, replay-stable partitions, truly oversized owners and end-to-end delta cloning.</li>
+        </ul>
+      </section>
+      <section class="section">
+        <h2>Upgrade and rollback</h2>
+        <p class="notice">Back up runtime databases and all shards, private feedback journals, and repository-owned maps and research artifacts. Stop resident services and drain or cancel active work before replacing binaries or restoring a consistent backup.</p>
+        <p>This patch introduces no database or map schema migration and no new runtime directory. Preserve task records, attempt leases, checkpoints and retry deadlines. Resume eligible work through the managed service; never delete task rows or reset leases to clear a queue.</p>
+        <p>On a local service host with the managed service disabled, inspect repo status and service doctor, run one index-worker attempt for the active task, then inspect progress again. Repeated capacity or invariant failures and dead-letter tasks need diagnosis.</p>
+        <p>After capacity becomes available, submit the latest immutable head once. Confirm last_indexed_commit equals that head and stale is false; also inspect content_integrity for parser or source-I/O gaps.</p>
+        <p>For rollback, stop all writers and restore a matching backup when needed. Version 1.1.19 can reproduce the original admission failure. Repository Map v4 still requires a 1.1.17 or newer reader; existing Windows account-SID and ACL requirements remain in effect.</p>
+      </section>
+      <section class="section">
+        <h2>Release packages</h2>
+        <ul>
+          <li>Linux x64 and ARM64 on the glibc 2.28 baseline</li>
+          <li>macOS Intel and Apple Silicon</li>
+          <li>Windows x64 and ARM64; ARM64 is cross-built</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.20.tar.gz</code> with agent instructions, schemas and bundled binaries</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+      <section class="section">
+        <h2>Further reading</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.20/skills/relay-knowledge-cli/references/cli-workflows.md#full-code-index-queue">Queue recovery workflow</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.20/codespec/design/durable-worktree-delta-batching.md">Durable delta batching</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.20/docs/en/03-architecture-specs/19-installation-release-and-upgrade.md">Installation, release and upgrade</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

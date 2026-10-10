@@ -10,7 +10,7 @@ on:
       dry_run_tag:
         description: Tag-like version to validate without creating a release.
         required: true
-        default: v1.1.19
+        default: v1.1.20
 
 permissions:
   contents: read
@@ -97,6 +97,9 @@ jobs:
 
       - name: Package crate
         run: cargo package
+
+      - name: Validate crates.io publication
+        run: cargo publish --dry-run --locked
 
       - name: Validate CLI skill bundle
         shell: bash
@@ -493,32 +496,31 @@ jobs:
         run: |
           set -euo pipefail
           cat > release-notes.md <<'NOTES'
-          ## Version 1.1.19
+          ## Version 1.1.20
 
-          This release adds atomic Knowledge Map batches, scoped research evidence
-          workflows, and durable software feedback shared by the CLI and Web.
-          Source audits and authored bundles preserve byte hashes, scope and proposed
-          fact status. Feedback stays private until explicit publication policy is
-          configured; remote issue closure does not establish a verified fix.
-          Validation fixes cover UTF-8 bounds, correlation IDs, Web status IDs and
-          GitHub rate-limit retry deadlines. Invalid stored ontology identities are
-          handled explicitly, and the browser dependency lock updates urllib3.
-          The TLS dependency lock updates Rustls to 0.23.45 to fix
-          GHSA-2mjx-qc3c-rqvc (TLS 1.3 handshake encryption-level validation).
+          This patch fixes durable delta admission that could leave code-index tasks
+          unable to advance when a file's deferred edge projections were charged to
+          its staging batch. Existing admissible partitions keep their replay cursor;
+          previously rejected plans use bounded staged-edge accounting and actual
+          UTF-8 search text sizes. Edge/search finalization still completes before
+          publication, with existing leases, checkpoints and queue budgets preserved.
+          Capacity errors now report fact/control bytes and rows with their limits.
+          The CLI skill documents how to diagnose and drain a full index queue.
 
           ## Upgrade
 
-          Back up repository-owned maps, captured sources, evidence bundles, the
-          runtime database and shards, and the private runtime feedback directory.
-          Batch receipts reuse Repository Map v4 and its 16-entry history; no map
-          schema bump is required. Research imports use existing graph storage and
-          indexes, and feedback uses a separate bounded journal. Preserve pending
-          publication identities and deadlines during upgrades; older binaries cannot
-          reconcile these reports. Before rollback, stop the service, drain or cancel
-          active work and restore a matching backup. Existing Windows path and ACL
-          requirements remain in effect. Repository Map v4 requires a 1.1.17 or newer reader.
+          Stop resident services and drain or cancel active work before replacing
+          binaries; back up runtime databases, shards, private feedback journals and
+          repository-owned maps and research artifacts. This patch adds no schema
+          migration or runtime directory. Resume eligible tasks through the managed
+          service, respecting leases and retry deadlines; do not delete tasks or
+          reset leases to clear capacity. Verify last_indexed_commit against the
+          requested head, stale=false, and content_integrity after recovery.
+          For rollback, stop writers and restore a consistent backup when needed;
+          1.1.19 may encounter the original admission error again. Repository Map v4
+          still requires a 1.1.17 or newer reader.
 
-          Full notes: https://coolplayagent.github.io/relay-knowledge/en/releases/1.1.19.html
+          Full notes: https://coolplayagent.github.io/relay-knowledge/en/releases/1.1.20.html
 
           ## Install
 

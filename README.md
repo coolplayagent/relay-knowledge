@@ -51,11 +51,11 @@ target/debug/relay-knowledge help --format json
 
 ## Installing Releases
 
-Version 1.1.19 adds atomic map batches, scoped research evidence workflows,
-and durable software feedback with explicit publication and validation authority.
-See the [1.1.19 release notes](pages/en/releases/1.1.19.html) for installation,
-upgrade, and rollback guidance. Back up the private feedback journal with runtime
-state; Repository Map v4 still requires a 1.1.17 or newer reader.
+Version 1.1.20 fixes durable delta admission that could prevent code-index queues
+from advancing, preserves checkpoint replay, and adds queue recovery guidance.
+See the [1.1.20 release notes](pages/en/releases/1.1.20.html) for installation,
+upgrade, and rollback guidance. Preserve runtime tasks and private feedback journals
+when upgrading; Repository Map v4 still requires a 1.1.17 or newer reader.
 
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)
 provide prebuilt archives for Linux x64/ARM64, macOS Intel/Apple Silicon, and

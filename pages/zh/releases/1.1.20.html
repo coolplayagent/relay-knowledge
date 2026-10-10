@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="relay-knowledge 1.1.20：持久 delta 准入修复与代码索引队列恢复。" />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.20 发布说明</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="页面导航">
+        <a href="../">中文文档</a>
+        <a href="../../en/releases/1.1.20.html">English</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.20">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.20 发布说明</h1>
+        <p>本补丁修复可能阻止代码索引任务推进的 delta 准入问题，并补充有界队列恢复指引。</p>
+        <p>发布日期：2026 年 10 月 10 日。</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.20">发布与下载</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.20">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.20/checksums.txt">Checksums</a>
+        </p>
+      </section>
+      <section class="section">
+        <h2>安装与验证</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.20 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json
+relay-knowledge service doctor --format json</code></pre>
+        <p>下载适合平台的压缩包，安装前校验 checksum 和 GitHub attestation。独立 CLI Skill 压缩包包含同版本的 Linux x64 与 Windows x64 二进制。</p>
+      </section>
+      <section class="section">
+        <h2>本版变化</h2>
+        <ul>
+          <li>原本可接受的 delta 分区保留批次成员和重放游标。因容量而被拒绝的计划可以分别核算暂存事实与延后写入的边，不改变已经提交批次的成员。</li>
+          <li>引用和导入事实继续暂存；调用行与边搜索投影由独立预算约束的 finalization 分页生成，完成后 scope 才能查询。搜索写入和边收尾仍是必经阶段。</li>
+          <li>符号与 chunk 准入按真实 UTF-8 搜索文本及 metadata 字节计费，并保留行和控制数据开销。容量错误明确报告事实与控制数据的字节数、行数和配置上限。</li>
+          <li>CLI Skill 补充满队列诊断、受管理任务进度跟踪，以及 service 关闭时执行一次有界本地 worker 的流程；恢复保留 lease、backoff、checkpoint 和队列容量。</li>
+          <li>回归测试覆盖密集引用、大型 UTF-8 搜索内容、稳定的分区重放、真正超限的文件事实，以及端到端 delta clone。</li>
+        </ul>
+      </section>
+      <section class="section">
+        <h2>升级与回滚</h2>
+        <p class="notice">备份运行时数据库及全部分片、私有反馈 journal、仓库拥有的地图和研究材料。替换二进制或恢复一致备份前，停止常驻服务并等待或取消活动任务。</p>
+        <p>本补丁不引入数据库或地图 schema migration，也不增加运行时目录。保留任务记录、attempt lease、checkpoint 和重试期限，通过受管理服务恢复符合条件的任务；不得删除任务行或重置 lease 来腾空队列。</p>
+        <p>在本地 service 主机且受管理服务关闭时，先检查 repo status 与 service doctor，对活动任务执行一次 index-worker，再读取进度。反复出现相同容量或 invariant 错误，以及 dead-letter 任务时，应继续诊断。</p>
+        <p>容量释放后，只提交一次最新不可变 head。确认 last_indexed_commit 等于该 head 且 stale 为 false，同时检查 content_integrity 中的 parser 或来源 I/O 缺口。</p>
+        <p>回滚前停止全部 writer，必要时恢复匹配备份。1.1.19 可能再次遇到原准入问题。Repository Map v4 仍要求 1.1.17 或更新 reader；既有 Windows 账户 SID 与 ACL 要求继续有效。</p>
+      </section>
+      <section class="section">
+        <h2>发布产物</h2>
+        <ul>
+          <li>Linux x64 与 ARM64，使用 glibc 2.28 基线</li>
+          <li>macOS Intel 与 Apple Silicon</li>
+          <li>Windows x64 与 ARM64；ARM64 采用交叉构建</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.20.tar.gz</code>，含 agent 指令、Schema 和内置二进制</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+      <section class="section">
+        <h2>进一步阅读</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.20/skills/relay-knowledge-cli/references/cli-workflows.md#full-code-index-queue">队列恢复工作流</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.20/codespec/design/durable-worktree-delta-batching.md">持久 delta 批处理</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.20/docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md">安装、发布与升级</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
