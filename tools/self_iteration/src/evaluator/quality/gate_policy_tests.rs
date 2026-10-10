@@ -69,7 +69,7 @@ fn full_profile_quality_gates_run_in_dependency_stages() {
 fn fast_profile_skips_full_quality_gates() {
     let stages = quality_gate_stages("fast", Some(ProductBinaryProfile::Release));
 
-    assert_eq!(stages.len(), 9);
+    assert_eq!(stages.len(), 10);
     let gate_names = stages
         .iter()
         .flat_map(|stage| match stage {
@@ -93,6 +93,7 @@ fn fast_profile_skips_full_quality_gates() {
     assert!(gate_names.contains(&"bm25_hierarchy_suite"));
     assert!(gate_names.contains(&"code_index_persistence_performance_suite"));
     assert!(gate_names.contains(&"configuration_scan_work_suite"));
+    assert!(gate_names.contains(&"impact_evidence_budget_suite"));
     assert!(gate_names.contains(&"self_iteration_cargo_check"));
     assert!(gate_names.contains(&"linux_glibc_compatibility_policy"));
     assert!(gate_names.contains(&"skill_metadata_policy_cases"));
@@ -152,6 +153,35 @@ fn fast_code_index_persistence_measurement_is_a_bounded_isolated_stage() {
         ]
     );
     assert_eq!(gate.timeout_seconds, 120);
+}
+
+#[test]
+fn impact_measurement_follows_library_build_and_selects_the_large_seed_suite() {
+    let stages = quality_gate_stages("fast", Some(ProductBinaryProfile::Release));
+    let build = stages
+        .iter()
+        .position(|stage| stage_has_gate(stage, "bm25_hierarchy_build"))
+        .unwrap();
+    let index = stages
+        .iter()
+        .position(|stage| stage_has_gate(stage, "impact_evidence_budget_suite"))
+        .unwrap();
+    assert!(index > build);
+    let gate = only_parallel_gate(&stages[index]);
+    assert_eq!(
+        gate.command,
+        [
+            "cargo",
+            "test",
+            "--lib",
+            "--all-features",
+            "impact_evidence_budget_suite",
+            "--",
+            "--nocapture"
+        ]
+    );
+    assert_eq!(gate.timeout_seconds, 120);
+    assert_eq!(quality_budget_ms(gate.name), Some(30_000.0));
 }
 
 #[test]

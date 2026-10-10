@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use rusqlite::Connection;
 
-use super::evidence::{callers_for_symbols, chunks_for_paths, importers_for_modules};
+use super::evidence_test_support::{callers_for_symbols, chunks_for_paths, importers_for_modules};
 use crate::domain::{CodeImpactRequest, CodeRepositorySelector, CodeRepositoryStatus};
 
 #[test]

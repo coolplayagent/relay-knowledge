@@ -5,15 +5,13 @@ use std::collections::BTreeSet;
 use rusqlite::{Connection, params_from_iter, types::Value};
 
 use crate::{
-    domain::{
-        CodeImpactRequest, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
-        RepositoryCodeRange,
-    },
+    domain::{CodeImpactRequest, CodeRepositoryStatus, CodeRetrievalLayer, RepositoryCodeRange},
     storage::StorageError,
 };
 
 use super::{
     super::query::{HitParts, chunk_layers, hit_from_parts, required_scope},
+    evidence_budget::ImpactHits,
     path_selection::{SQLITE_BIND_BATCH_SIZE, batched_path_values, impact_row_allowed},
     seed::module_import_matches,
 };
@@ -25,17 +23,18 @@ pub(super) fn chunks_for_paths(
     status: &CodeRepositoryStatus,
     paths: &BTreeSet<String>,
     request: &CodeImpactRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut hits = Vec::new();
+    hits: &mut ImpactHits,
+) -> Result<(), StorageError> {
     for batch in batched_path_values(paths) {
-        hits.extend(chunks_for_path_batch(
+        chunks_for_path_batch(
             connection,
             status,
             &batch.into_iter().collect(),
             request,
-        )?);
+            hits,
+        )?;
     }
-    Ok(hits)
+    Ok(())
 }
 
 fn chunks_for_path_batch(
@@ -43,7 +42,8 @@ fn chunks_for_path_batch(
     status: &CodeRepositoryStatus,
     paths: &BTreeSet<String>,
     request: &CodeImpactRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+    hits: &mut ImpactHits,
+) -> Result<(), StorageError> {
     let path_values = paths.iter().cloned().collect::<Vec<_>>();
     let path_clause = placeholders(path_values.len());
     let sql = format!(
@@ -86,38 +86,35 @@ fn chunks_for_path_batch(
             is_generated: row.get::<_, i64>(12)? != 0,
         })
     })?;
-    let rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    Ok(rows
-        .into_iter()
-        .filter(|row| impact_row_allowed(&row.path, &row.language_id, status, request))
-        .map(|row| {
-            hit_from_parts(
-                status,
-                HitParts {
-                    path: row.path,
-                    language_id: row.language_id,
-                    byte_range: row.byte_range,
-                    line_range: row.line_range,
-                    symbol_snapshot_id: row.symbol_snapshot_id,
-                    canonical_symbol_id: row.canonical_symbol_id,
-                    file_id: Some(row.file_id),
-                    retrieval_layers: chunk_layers(&row.parse_status),
-                    score: 4.0,
-                    excerpt: row.content,
-                    is_generated: row.is_generated,
-                    degraded_reason: row.degraded_reason,
-                    edge_kind: None,
-                    edge_resolution_state: None,
-                    edge_target_hint: None,
-                    edge_confidence_basis_points: None,
-                    edge_confidence_tier: None,
-                },
-            )
-        })
-        .collect())
+    for row in rows {
+        let row = row?;
+        if !impact_row_allowed(&row.path, &row.language_id, status, request) {
+            continue;
+        }
+        hits.push(hit_from_parts(
+            status,
+            HitParts {
+                path: row.path,
+                language_id: row.language_id,
+                byte_range: row.byte_range,
+                line_range: row.line_range,
+                symbol_snapshot_id: row.symbol_snapshot_id,
+                canonical_symbol_id: row.canonical_symbol_id,
+                file_id: Some(row.file_id),
+                retrieval_layers: chunk_layers(&row.parse_status),
+                score: 4.0,
+                excerpt: row.content,
+                is_generated: row.is_generated,
+                degraded_reason: row.degraded_reason,
+                edge_kind: None,
+                edge_resolution_state: None,
+                edge_target_hint: None,
+                edge_confidence_basis_points: None,
+                edge_confidence_tier: None,
+            },
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn callers_for_symbols(
@@ -126,29 +123,25 @@ pub(super) fn callers_for_symbols(
     symbol_ids: &[String],
     deleted_symbol_names: &[String],
     request: &CodeImpactRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut hits = Vec::new();
+    hits: &mut ImpactHits,
+) -> Result<(), StorageError> {
     // Resolved IDs and unresolved deleted names match disjoint call rows.
     // Deduplicate before batching to retain SQL IN set semantics across batches.
     for (resolved, seeds) in [(true, symbol_ids), (false, deleted_symbol_names)] {
         let unique = seeds.iter().cloned().collect::<BTreeSet<_>>();
         let values = unique.into_iter().collect::<Vec<_>>();
         for batch in values.chunks(SQLITE_BIND_BATCH_SIZE) {
-            hits.extend(callers_for_symbol_batch(
+            callers_for_symbol_batch(
                 connection,
                 status,
                 if resolved { batch } else { &[] },
                 if resolved { &[] } else { batch },
                 request,
-            )?);
+                hits,
+            )?;
         }
     }
-    hits.sort_by(|left, right| {
-        left.path
-            .cmp(&right.path)
-            .then_with(|| left.line_range.start.cmp(&right.line_range.start))
-    });
-    Ok(hits)
+    Ok(())
 }
 
 fn callers_for_symbol_batch(
@@ -157,7 +150,8 @@ fn callers_for_symbol_batch(
     symbol_ids: &[String],
     deleted_symbol_names: &[String],
     request: &CodeImpactRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+    hits: &mut ImpactHits,
+) -> Result<(), StorageError> {
     let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
     let mut filters = Vec::new();
     if !symbol_ids.is_empty() {
@@ -217,46 +211,43 @@ fn callers_for_symbol_batch(
     })?;
     let symbol_set = symbol_ids.iter().collect::<BTreeSet<_>>();
     let deleted_name_set = deleted_symbol_names.iter().collect::<BTreeSet<_>>();
-    let rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    Ok(rows
-        .into_iter()
-        .filter(|row| impact_row_allowed(&row.path, &row.language_id, status, request))
-        .filter(|row| {
-            row.callee_symbol_snapshot_id
+    for row in rows {
+        let row = row?;
+        if !impact_row_allowed(&row.path, &row.language_id, status, request)
+            || !(row
+                .callee_symbol_snapshot_id
                 .as_ref()
                 .is_some_and(|symbol_id| symbol_set.contains(symbol_id))
                 || (row.callee_symbol_snapshot_id.is_none()
-                    && deleted_name_set.contains(&row.callee_name))
-        })
-        .map(|row| {
-            let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
-            hit_from_parts(
-                status,
-                HitParts {
-                    path: row.path,
-                    language_id: row.language_id,
-                    byte_range: RepositoryCodeRange { start: 0, end: 0 },
-                    line_range: row.line_range,
-                    symbol_snapshot_id: row.caller_symbol_snapshot_id,
-                    canonical_symbol_id: row.caller_canonical_symbol_id,
-                    file_id: Some(row.file_id),
-                    retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
-                    score: 2.5,
-                    excerpt: format!("{caller} calls {}", row.callee_name),
-                    is_generated: row.is_generated,
-                    degraded_reason: None,
-                    edge_kind: Some("call".to_owned()),
-                    edge_resolution_state: Some(row.resolution_state),
-                    edge_target_hint: row.target_hint,
-                    edge_confidence_basis_points: Some(row.confidence_basis_points),
-                    edge_confidence_tier: Some(row.confidence_tier),
-                },
-            )
-        })
-        .collect())
+                    && deleted_name_set.contains(&row.callee_name)))
+        {
+            continue;
+        }
+        let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
+        hits.push(hit_from_parts(
+            status,
+            HitParts {
+                path: row.path,
+                language_id: row.language_id,
+                byte_range: RepositoryCodeRange { start: 0, end: 0 },
+                line_range: row.line_range,
+                symbol_snapshot_id: row.caller_symbol_snapshot_id,
+                canonical_symbol_id: row.caller_canonical_symbol_id,
+                file_id: Some(row.file_id),
+                retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
+                score: 2.5,
+                excerpt: format!("{caller} calls {}", row.callee_name),
+                is_generated: row.is_generated,
+                degraded_reason: None,
+                edge_kind: Some("call".to_owned()),
+                edge_resolution_state: Some(row.resolution_state),
+                edge_target_hint: row.target_hint,
+                edge_confidence_basis_points: Some(row.confidence_basis_points),
+                edge_confidence_tier: Some(row.confidence_tier),
+            },
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn importers_for_modules(
@@ -264,59 +255,25 @@ pub(super) fn importers_for_modules(
     status: &CodeRepositoryStatus,
     modules: &[String],
     request: &CodeImpactRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    if modules.is_empty() {
-        return Ok(Vec::new());
+    hits: &mut ImpactHits,
+) -> Result<(), StorageError> {
+    for batch in modules.chunks(SQLITE_EXPRESSION_BATCH_SIZE) {
+        import_hits_for_modules(connection, status, batch, request, hits)?;
     }
+    Ok(())
+}
+
+fn import_hits_for_modules(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    modules: &[String],
+    request: &CodeImpactRequest,
+    hits: &mut ImpactHits,
+) -> Result<(), StorageError> {
     let module_patterns = modules
         .iter()
         .map(|module| format!("%{module}%"))
         .collect::<Vec<_>>();
-    let mut rows = Vec::new();
-    for patterns in module_patterns.chunks(SQLITE_EXPRESSION_BATCH_SIZE) {
-        rows.extend(import_rows_for_patterns(connection, status, patterns)?);
-    }
-
-    Ok(rows
-        .into_iter()
-        .filter(|row| impact_row_allowed(&row.path, &row.language_id, status, request))
-        .filter(|row| {
-            modules
-                .iter()
-                .any(|module| module_import_matches(&row.module, module))
-        })
-        .map(|row| {
-            hit_from_parts(
-                status,
-                HitParts {
-                    path: row.path,
-                    language_id: row.language_id,
-                    byte_range: RepositoryCodeRange { start: 0, end: 0 },
-                    line_range: row.line_range,
-                    symbol_snapshot_id: None,
-                    canonical_symbol_id: None,
-                    file_id: Some(row.file_id),
-                    retrieval_layers: vec![CodeRetrievalLayer::ImportGraph],
-                    score: 2.0,
-                    excerpt: row.module,
-                    is_generated: row.is_generated,
-                    degraded_reason: None,
-                    edge_kind: Some("import".to_owned()),
-                    edge_resolution_state: Some(row.resolution_state),
-                    edge_target_hint: row.target_hint,
-                    edge_confidence_basis_points: Some(row.confidence_basis_points),
-                    edge_confidence_tier: Some(row.confidence_tier),
-                },
-            )
-        })
-        .collect())
-}
-
-fn import_rows_for_patterns(
-    connection: &Connection,
-    status: &CodeRepositoryStatus,
-    module_patterns: &[String],
-) -> Result<Vec<ImpactImportRow>, StorageError> {
     let module_clause = module_patterns
         .iter()
         .map(|_| "i.module LIKE ?")
@@ -355,8 +312,39 @@ fn import_rows_for_patterns(
             is_generated: row.get::<_, i64>(10)? != 0,
         })
     })?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
+    for row in rows {
+        let row = row?;
+        if !impact_row_allowed(&row.path, &row.language_id, status, request)
+            || !modules
+                .iter()
+                .any(|module| module_import_matches(&row.module, module))
+        {
+            continue;
+        }
+        hits.push(hit_from_parts(
+            status,
+            HitParts {
+                path: row.path,
+                language_id: row.language_id,
+                byte_range: RepositoryCodeRange { start: 0, end: 0 },
+                line_range: row.line_range,
+                symbol_snapshot_id: None,
+                canonical_symbol_id: None,
+                file_id: Some(row.file_id),
+                retrieval_layers: vec![CodeRetrievalLayer::ImportGraph],
+                score: 2.0,
+                excerpt: row.module,
+                is_generated: row.is_generated,
+                degraded_reason: None,
+                edge_kind: Some("import".to_owned()),
+                edge_resolution_state: Some(row.resolution_state),
+                edge_target_hint: row.target_hint,
+                edge_confidence_basis_points: Some(row.confidence_basis_points),
+                edge_confidence_tier: Some(row.confidence_tier),
+            },
+        ));
+    }
+    Ok(())
 }
 
 fn placeholders(count: usize) -> String {

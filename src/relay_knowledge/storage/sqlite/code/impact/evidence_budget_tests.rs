@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use rusqlite::{Connection, limits::Limit, params};
 
-use super::evidence::{callers_for_symbols, chunks_for_paths};
+use super::evidence_test_support::{callers_for_symbols, chunks_for_paths, importers_for_modules};
 use crate::domain::{CodeImpactRequest, CodeRepositorySelector, CodeRepositoryStatus};
 
 #[test]
@@ -145,6 +145,70 @@ fn chunk_evidence_batches_paths_and_preserves_order_scope_and_filters() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn dense_evidence_keeps_late_best_matches_with_a_one_result_budget() {
+    let connection = database();
+    connection
+        .execute_batch(
+            "INSERT INTO code_repository_files (source_scope,path,language_id,is_generated)
+         VALUES ('scope','src/a.rs','rust',0);
+         CREATE TABLE code_repository_imports (
+            source_scope TEXT,file_id TEXT,path TEXT,module TEXT,line_start INTEGER,
+            line_end INTEGER,target_hint TEXT,resolution_state TEXT,
+            confidence_basis_points INTEGER,confidence_tier TEXT);",
+        )
+        .unwrap();
+    let seeds = (0..1_101)
+        .map(|index| format!("seed-{index:04}"))
+        .collect::<Vec<_>>();
+    for (index, seed) in seeds.iter().enumerate() {
+        let path = if index == 1_100 {
+            "src/a.rs"
+        } else {
+            "src/lib.rs"
+        };
+        connection
+            .execute(
+                "INSERT INTO code_repository_calls VALUES (
+                'scope','file',?1,NULL,'caller',?2,'target',?3,?3,
+                'target','resolved',10000,'extracted')",
+                params![path, seed, index],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO code_repository_imports VALUES (
+                'scope','file',?1,?2,?3,?3,NULL,'resolved',10000,'extracted')",
+                params![path, seed, index],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO code_repository_chunks VALUES (
+                'scope','file','src/lib.rs','rust',?1,0,15,?2,?2,NULL)",
+                params![format!("fn example_{index}() {{}}"), index],
+            )
+            .unwrap();
+    }
+    let mut bounded = request();
+    bounded.limit = 1;
+    let callers = callers_for_symbols(&connection, &status(), &seeds, &[], &bounded).unwrap();
+    assert_eq!(callers.len(), 1);
+    assert_eq!(callers[0].path, "src/a.rs");
+    let importers = importers_for_modules(&connection, &status(), &seeds, &bounded).unwrap();
+    assert_eq!(importers.len(), 1);
+    assert_eq!(importers[0].path, "src/a.rs");
+    let chunks = chunks_for_paths(
+        &connection,
+        &status(),
+        &BTreeSet::from(["src/lib.rs".into()]),
+        &bounded,
+    )
+    .unwrap();
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks[0].line_range.start, 0);
 }
 
 fn database() -> Connection {

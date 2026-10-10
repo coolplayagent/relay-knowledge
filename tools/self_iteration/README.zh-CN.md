@@ -230,6 +230,7 @@ prompt 只注入有界摘要，长期迭代不会随历史长度线性填满 LLM
 
 | 护栏 | 保护点 |
 | --- | --- |
+| `impact_evidence_budget_suite` | 在库编译后的隔离 fast stage 运行，timeout 为 120 秒，key budget 为 30,000 ms。999 个 SQLite 参数上限覆盖超过 1,100 个路径、符号 ID 和删除名称，以及后续命中、重复种子和 scope 过滤。稠密调用、片段和导入夹具要求单条结果预算仍保留后续最优命中；合并缓冲区测试对照完整排序验证 payload 保留上限。 |
 | `skill_metadata_policy_cases` | 拒绝把 Windows 命令或资产示例放进 bash/POSIX code fence，保证 agent-facing 指令保持 shell-specific。 |
 | CLI contract case | 验证 agent 可见 help 暴露 `repo index-worker`，验证 idle worker 与 streaming worker 输出可解析 JSON，并保护强类型 CodeSpec/Knowledge map 的 help、校验、目录过滤、保留路由、有序 v4 shard 路由和 recent-only 历史边界。 |
 | `code_index_recovery_cases` | 同时验证不可分割的 delta 单文件在首轮进入 dead letter，且失败前或失败后提交的修复任务均在同一固定预算下发布，保留此前发布状态与失败审计。覆盖过期 task lease 恢复、旧 worker 完成拒绝、attempt-budget dead-letter、checkpoint batch 续租、每个 durable finalization step 的执行前后续租边界、有界 finalization-step 推导、query-index subphase 从下一 unit 恢复，以及 writer lock 获取后拒绝 caller 传入的陈旧续租观测时间。其 `code_index_task_` case 还要求超限 worktree overlay 先克隆不可变基线、把 dirty delta 划分为确定性的有界批次、在批次间 lease takeover 后精确续跑，并持久化准确的多批收据。同一 gate 继续冻结 v3 17-slot plan 与 grouped reference-search v2：cleanup/discover/build page count、occurrence-to-group 聚合、exact manifest、rollback/reopen replay、公平完整 occurrence expansion，以及带 v2 budget clamp 的 leased v1 restart。Retired query-index unit 1 不得重新创建或自动删除、既有同名 shape 继续严格校验、v1/v2 cursor 不得跳过物理 unit 1 且 token version 必须跨 writer quantum 保留，并且每个 fresh Restart 即使只有单 path，也只能在 empty owner 上预建 chunk unit 13/14、同时继续延后全部其他 heavy index。该 gate 在所有 non-smoke profile 中运行，包括 fast 与 performance-focused evaluation。 |
