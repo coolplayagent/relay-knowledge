@@ -468,3 +468,5 @@ migration、运行时目录或预算。既有 queued/retrying 任务在下一次
 `repo index --reset` 只按原输入和预算重新排队未完成任务，不会取代旧目标或复活
 dead letter。旧二进制可能把永久超限报告为 `qos_rejected`，消耗剩余重试次数；
 已终结记录不会自动复活。升级或回滚不需要直接修改数据库，也不应并发运行新旧 worker。
+
+队列准入必须通过规范化 incremental-clone checkpoint token 识别带 fence 的任务残留，即使终态任务审计已被有界清理。这类 token 只能在 durable publication fence 下写入，不能因为所属任务结束就变成直接 writer 的权限依据。准入最多扫描 64 个 scope 加一个溢出哨兵，保留 scope 容量与 retention 约束；真实 direct checkpoint 和畸形 token 仍须阻止抢占。恢复回归同时覆盖永久失败之前与之后提交后继任务。

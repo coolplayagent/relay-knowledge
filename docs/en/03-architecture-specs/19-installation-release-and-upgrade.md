@@ -630,3 +630,5 @@ supersedes old targets nor revives dead letters. Older binaries may report this
 permanent condition as `qos_rejected` and consume the remaining retry attempts;
 they do not automatically revive an already terminal record. No database edits
 or concurrent old/new workers are needed for upgrade or rollback.
+
+Queue admission must recognize canonical incremental-clone checkpoint tokens as fenced-task residue even after terminal task audit rows have been pruned. Such tokens are written only through the durable publication fence; they cannot become direct-writer authority merely because their task ended. Admission scans at most the 64-scope cap plus one overflow sentinel, leaves scope capacity and retention unchanged, and still rejects genuine direct checkpoints or malformed tokens. Recovery tests cover successors queued both before and after permanent failure.

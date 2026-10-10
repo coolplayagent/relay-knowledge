@@ -449,3 +449,5 @@ CLI metadata aggregation must retain both research and feedback command families
 The shared Web dispatcher routes each family to its owning application service.
 Regression checks cover both complete command families together, so integrating
 one workflow preserves the other workflow's public operations.
+
+Queue admission must recognize canonical incremental-clone checkpoint tokens as fenced-task residue even after terminal task audit rows have been pruned. Such tokens are written only through the durable publication fence; they cannot become direct-writer authority merely because their task ended. Admission scans at most the 64-scope cap plus one overflow sentinel, leaves scope capacity and retention unchanged, and still rejects genuine direct checkpoints or malformed tokens. Recovery tests cover successors queued both before and after permanent failure.

@@ -470,6 +470,12 @@ async fn queue_index_task(
 
 #[tokio::test]
 async fn code_index_task_permanent_delta_budget_failure_releases_the_next_commit() {
+    for queue_before_failure in [false, true] {
+        permanent_delta_budget_recovery(queue_before_failure).await;
+    }
+}
+
+async fn permanent_delta_budget_recovery(queue_before_failure: bool) {
     let repo = FixtureRepo::create("code-permanent-budget");
     repo.write("src/lib.rs", "pub fn base() {}\n");
     repo.git(["add", "."]);
@@ -497,9 +503,11 @@ async fn code_index_task_permanent_delta_budget_failure_releases_the_next_commit
     repo.write("src/lib.rs", "pub fn repaired() {}\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "repair-facts"]);
-    let next =
-        queue_budgeted_index(&service, &store, Some(&base.resolved_commit_sha), budget).await;
-    assert_ne!(old.resolved_commit_sha, next.resolved_commit_sha);
+    let queued_next = if queue_before_failure {
+        Some(queue_budgeted_index(&service, &store, Some(&base.resolved_commit_sha), budget).await)
+    } else {
+        None
+    };
     let error = service
         .run_code_index_task_once(Some(old.task_id.clone()), context("fail-budget"))
         .await
@@ -545,6 +553,13 @@ async fn code_index_task_permanent_delta_budget_failure_releases_the_next_commit
             .is_none()
     );
 
+    let next = match queued_next {
+        Some(task) => task,
+        None => {
+            queue_budgeted_index(&service, &store, Some(&base.resolved_commit_sha), budget).await
+        }
+    };
+    assert_ne!(old.resolved_commit_sha, next.resolved_commit_sha);
     let completed = service
         .run_code_index_task_once(Some(next.task_id.clone()), context("repair-budget"))
         .await

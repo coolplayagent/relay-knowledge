@@ -427,3 +427,5 @@ Maven reactor 的模块身份、坐标匹配、持久化与有界反向遍历由
 内容绑定必须区分不可变私有原始 report digest、不可变本地完整 title/body payload digest、加入恢复元数据前的公开去重 marker，以及实际观察到的远端 issue body digest。去重复用的 issue 可能携带另一个发布者的 nonce；track 只刷新远端观察绑定，不能改写本地原始证据/payload，也不能宣称两者正文逐字节相同。
 
 CLI 元数据聚合必须同时保留研究与反馈命令族；共享 Web dispatcher 将各命令族路由到对应应用服务。回归检查应在同一目录中覆盖两个完整命令族，确保集成一个工作流时保留另一个工作流的公开操作。
+
+队列准入必须通过规范化 incremental-clone checkpoint token 识别带 fence 的任务残留，即使终态任务审计已被有界清理。这类 token 只能在 durable publication fence 下写入，不能因为所属任务结束就变成直接 writer 的权限依据。准入最多扫描 64 个 scope 加一个溢出哨兵，保留 scope 容量与 retention 约束；真实 direct checkpoint 和畸形 token 仍须阻止抢占。恢复回归同时覆盖永久失败之前与之后提交后继任务。
