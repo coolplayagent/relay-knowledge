@@ -61,9 +61,105 @@ fn plan_rejects_an_owned_serialized_surface_even_when_source_bytes_fit() {
 }
 
 #[test]
+fn code_index_task_delta_admits_reference_facts_before_paged_search_finalization() {
+    let mut snapshot = snapshot(&["references.rs"]);
+    snapshot.references = (0..100)
+        .map(|index| reference("references.rs", index))
+        .collect();
+    let budget = CodeIndexResourceBudget::new(8, 1_000_000, 110).unwrap();
+    let plan = DeltaBatchPlan::new(&snapshot, budget)
+        .expect("unpublished reference facts fit without future search rows");
+    assert_eq!(plan.len(), 1);
+    assert_eq!(plan.batch(0, 1).unwrap().references, snapshot.references);
+
+    let too_small = CodeIndexResourceBudget::new(8, 1_000_000, 100).unwrap();
+    assert!(DeltaBatchPlan::new(&snapshot, too_small).is_err());
+    let byte_limited = CodeIndexResourceBudget::new(8, 1_024, 110).unwrap();
+    assert!(DeltaBatchPlan::new(&snapshot, byte_limited).is_err());
+}
+
+#[test]
+fn code_index_task_delta_admits_large_documents_by_their_persisted_projection() {
+    let mut delta = snapshot(&["document.json"]);
+    let mut symbol = symbol("document.json");
+    symbol.signature = "json document value ".repeat(10_000);
+    let mut content = chunk("document.json");
+    content.content = symbol.signature.clone();
+    delta.symbols.push(symbol);
+    delta.chunks.push(content);
+    let budget = CodeIndexResourceBudget::new(8, 1_000_000, 100).unwrap();
+    let plan =
+        DeltaBatchPlan::new(&delta, budget).expect("actual projection fits the original budget");
+    assert_eq!(plan.len(), 1);
+    let batch = plan.batch(0, 1).unwrap();
+    assert_eq!(batch.symbols, delta.symbols);
+    assert_eq!(batch.chunks, delta.chunks);
+    let too_small = CodeIndexResourceBudget::new(8, 100_000, 100).unwrap();
+    assert!(DeltaBatchPlan::new(&delta, too_small).is_err());
+}
+
+fn reference(path: &str, index: usize) -> crate::domain::RepositoryCodeReferenceRecord {
+    crate::domain::RepositoryCodeReferenceRecord {
+        repository_id: "repo".into(),
+        source_scope: "scope".into(),
+        reference_id: format!("reference:{index}"),
+        file_id: format!("file:{path}"),
+        path: path.into(),
+        name: format!("target_{index}"),
+        kind: "usage".into(),
+        target_symbol_snapshot_id: None,
+        target_hint: None,
+        resolution_state: "unresolved".into(),
+        confidence_basis_points: 0,
+        confidence_tier: "unknown".into(),
+        byte_range: range(),
+        line_range: range(),
+    }
+}
+
+#[test]
+fn code_index_task_delta_keeps_legacy_membership_and_validates_deferred_call_owners() {
+    let mut delta = snapshot(&["a.rs", "b.rs"]);
+    delta.references = (0..20)
+        .flat_map(|i| [reference("a.rs", i), reference("b.rs", i)])
+        .collect();
+    let budget = CodeIndexResourceBudget::new(8, 1_000_000, 100).unwrap();
+    let plan = DeltaBatchPlan::new(&delta, budget).unwrap();
+    assert_eq!(plan.len(), 2, "do not regroup a previously accepted plan");
+    assert_eq!(plan.batch(0, 2).unwrap().files[0].path, "a.rs");
+    assert_eq!(plan.batch(1, 3).unwrap().files[0].path, "b.rs");
+
+    delta.calls = (0..200)
+        .map(|i| crate::domain::CodeCallRecord {
+            byte_range: Some(range()),
+            repository_id: "repo".into(),
+            source_scope: "scope".into(),
+            call_id: format!("call:{i}"),
+            file_id: "file:a.rs".into(),
+            path: "a.rs".into(),
+            caller_symbol_snapshot_id: None,
+            caller_name: None,
+            callee_symbol_snapshot_id: None,
+            callee_name: "callee".into(),
+            target_hint: None,
+            resolution_state: "unresolved".into(),
+            confidence_basis_points: 0,
+            confidence_tier: "unknown".into(),
+            line_range: range(),
+        })
+        .collect();
+    let plan = DeltaBatchPlan::new(&delta, budget).unwrap();
+    assert_eq!(plan.len(), 1, "call rows are built by bounded finalization");
+    assert_eq!(plan.batch(0, 1).unwrap().references.len(), 40);
+    delta.calls[0].path = "orphan.rs".into();
+    let error = DeltaBatchPlan::new(&delta, budget).err().unwrap();
+    assert!(error.to_string().contains("no file owner"));
+}
+
+#[test]
 fn plan_reserves_every_mandatory_control_row_and_its_bytes() {
     let snapshot = snapshot(&["owned.rs"]);
-    let surface = file_surfaces(&snapshot)
+    let surface = file_surfaces(&snapshot, true)
         .expect("surface should measure")
         .remove("owned.rs")
         .expect("file should own one surface");

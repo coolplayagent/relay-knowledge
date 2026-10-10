@@ -27,29 +27,39 @@ pub(super) fn insert_records(
     }
     let mut search_documents = SearchDocumentInserter::new(transaction)?;
     for symbol in records {
-        let (role_kind, role_url, role_method) = symbol_role_search_fields(&symbol.symbol_role);
-        search_documents.insert(
-            &symbol.source_scope,
-            "symbol",
-            &symbol.symbol_snapshot_id,
-            &symbol.path,
-            &symbol.language_id,
-            [
-                symbol.name.as_str(),
-                symbol.qualified_name.as_str(),
-                symbol.kind.as_str(),
-                symbol.signature.as_str(),
-                symbol.doc_comment.as_deref().unwrap_or_default(),
-                symbol.path.as_str(),
-                role_kind.as_str(),
-                role_url.as_str(),
-                role_method.as_str(),
-            ],
-        )?;
+        with_search_fields(symbol, |fields| {
+            search_documents.insert(
+                &symbol.source_scope,
+                "symbol",
+                &symbol.symbol_snapshot_id,
+                &symbol.path,
+                &symbol.language_id,
+                fields,
+            )
+        })?;
     }
     search_documents.finish()?;
 
     Ok(())
+}
+
+/// One projection contract shared by persistence and bounded delta admission.
+pub(in crate::storage::sqlite::code) fn with_search_fields<T>(
+    symbol: &RepositoryCodeSymbolRecord,
+    apply: impl FnOnce([&str; 9]) -> T,
+) -> T {
+    let (role_kind, role_url, role_method) = symbol_role_search_fields(&symbol.symbol_role);
+    apply([
+        symbol.name.as_str(),
+        symbol.qualified_name.as_str(),
+        symbol.kind.as_str(),
+        symbol.signature.as_str(),
+        symbol.doc_comment.as_deref().unwrap_or_default(),
+        symbol.path.as_str(),
+        role_kind.as_str(),
+        role_url.as_str(),
+        role_method.as_str(),
+    ])
 }
 
 fn insert_symbol_facts(

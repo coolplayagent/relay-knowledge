@@ -422,16 +422,23 @@ fn insert_chunks(
             &chunk.chunk_id,
             &chunk.path,
             &chunk.language_id,
-            [
-                chunk.content.as_str(),
-                chunk.symbol_snapshot_id.as_deref().unwrap_or_default(),
-                chunk.path.as_str(),
-            ],
+            chunk_search_fields(chunk),
         )?;
     }
     search_documents.finish()?;
 
     Ok(())
+}
+
+/// Canonical chunk projection fields shared with bounded delta admission.
+pub(in crate::storage::sqlite::code) fn chunk_search_fields(
+    chunk: &RepositoryCodeChunkRecord,
+) -> [&str; 3] {
+    [
+        chunk.content.as_str(),
+        chunk.symbol_snapshot_id.as_deref().unwrap_or_default(),
+        chunk.path.as_str(),
+    ]
 }
 
 fn insert_chunk_facts(

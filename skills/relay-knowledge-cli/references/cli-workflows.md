@@ -445,6 +445,26 @@ commit event. It shares the durable task path with managed reconciliation. A
 local invocation may drain one bounded worker attempt; remote mode may return a
 queued task for the service to drain.
 
+### Full code-index queue
+
+On `qos_rejected` for unfinished code-index tasks, capture `repo status <alias>`
+and `service doctor`. The per-repository and global capacities remain enforced;
+repeated `repo update` calls do not make an existing task advance.
+
+If the managed service is running, follow its task/checkpoint progress. On the
+local service host with the service disabled, run one `repo index-worker
+--task-id <active-task-id> --format json` attempt, then re-read status. Respect
+lease expiry and retry backoff. Continue only when a checkpoint advances or a
+task finishes; diagnose repeated identical capacity/invariant errors and
+dead-letter tasks. Do not delete task rows, reset leases, enlarge budgets, or
+remove the repository registration to empty the queue.
+
+After capacity is available, submit the latest immutable head once and follow
+that task until `last_indexed_commit` equals the requested head and `stale` is
+false. Also inspect `content_integrity`: a current commit can still contain
+reported parser or source-I/O gaps. A historical scope's `fresh` flag alone
+does not establish that the requested head was indexed.
+
 ### Ref resolution contract
 
 The normal form is:

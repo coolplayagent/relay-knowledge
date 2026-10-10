@@ -94,6 +94,15 @@ async fn direct_full_base_without_a_fact_proof_requests_full_staging_before_targ
 
 #[tokio::test]
 async fn oversized_worktree_code_index_task_delta_batches_and_recovers_between_leases() {
+    exercise_worktree_delta_recovery(40).await;
+}
+
+#[tokio::test]
+async fn code_index_task_reference_heavy_delta_recovers_and_finalizes_search() {
+    exercise_worktree_delta_recovery(100).await;
+}
+
+async fn exercise_worktree_delta_recovery(reference_count: usize) {
     let store = SqliteGraphStore::open_in_memory().expect("database should open");
     store
         .upsert_code_repository(
@@ -138,7 +147,7 @@ async fn oversized_worktree_code_index_task_delta_batches_and_recovers_between_l
         chunk(&actual_scope, 0, "targetcontent0"),
         chunk(&actual_scope, 1, "targetcontent1"),
     ];
-    snapshot.references = (0..40)
+    snapshot.references = (0..reference_count)
         .map(|ordinal| {
             let file_index = ordinal % 2;
             let mut record =
@@ -253,8 +262,19 @@ async fn oversized_worktree_code_index_task_delta_batches_and_recovers_between_l
                     .expect("batched delta should persist its handoff receipt");
                 assert_eq!(receipt.batch_count, 2);
                 assert_eq!(receipt.parsed_file_count, 2);
-                assert_eq!(receipt.sqlite_write_count, 44);
+                assert_eq!(receipt.sqlite_write_count, reference_count + 4);
                 assert!(reclaimed_between_delta_batches);
+                let mut session = target_session(&actual_scope, &actual_tree, budget);
+                session.resolved_commit_sha = actual_commit;
+                session.changed_path_count = 2;
+                session.skipped_unchanged_count = FILE_COUNT - 2;
+                assert_finalized_reference_search(
+                    &store,
+                    session,
+                    publication_fence,
+                    reference_count + FILE_COUNT - 2,
+                )
+                .await;
                 return;
             }
             Ok(_) => panic!("durable worktree clone must expose its finalization handoff"),
@@ -262,6 +282,44 @@ async fn oversized_worktree_code_index_task_delta_batches_and_recovers_between_l
         }
     }
     panic!("durable worktree clone exceeded its bounded call proof");
+}
+
+async fn assert_finalized_reference_search(
+    store: &SqliteGraphStore,
+    session: CodeIndexSession,
+    fence: CodeIndexPublicationFence,
+    expected: usize,
+) {
+    for _ in 0..256 {
+        let step = store
+            .advance_code_index_session_with_fence(session.clone(), fence.clone())
+            .await
+            .expect("all paged finalizers must run");
+        if let CodeIndexFinalizationStep::Ready(summary) = step {
+            assert_eq!(summary.reference_count, expected);
+            let scope = session.source_scope;
+            let searchable = store
+                .run(move |connection| {
+                    connection
+                        .query_row(
+                            "SELECT count(*) FROM code_repository_search_metadata metadata
+                     JOIN code_repository_search search ON search.rowid = metadata.search_rowid
+                     WHERE metadata.source_scope = ?1 AND metadata.document_kind = 'reference'
+                       AND search.source_scope = metadata.source_scope
+                       AND search.document_kind = metadata.document_kind
+                       AND search.record_id = metadata.record_id AND search.path = metadata.path",
+                            [scope],
+                            |row| row.get::<_, usize>(0),
+                        )
+                        .map_err(StorageError::from)
+                })
+                .await
+                .expect("exact search owners must survive finalization");
+            assert_eq!(searchable, expected);
+            return;
+        }
+    }
+    panic!("reference finalization exceeded the fixture step bound");
 }
 
 #[tokio::test]

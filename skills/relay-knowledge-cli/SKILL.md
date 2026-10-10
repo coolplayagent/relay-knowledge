@@ -32,6 +32,12 @@ task, let the remote managed service drain it; only a local/service-host client
 may run bounded single-shot `repo index-worker --task-id <task-id> --format
 json` attempts before re-checking status. Do not replace leases with loops.
 
+A full queue is not evidence that a worker is running. Inspect `service doctor`
+and the oldest active task before submitting more commit updates. With no
+managed service, use the existing task's bounded worker path and verify actual
+checkpoint progress; repeated deterministic errors require diagnosis instead
+of more submissions. See [queue recovery](references/cli-workflows.md#full-code-index-queue).
+
 Prefer the bundled `assets` binary for the current operating system, CPU, and
 active command runner whenever it exists and `version --format json` succeeds.
 GitHub Release skill archives include Linux x64 and Windows x64 binaries at
