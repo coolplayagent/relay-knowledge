@@ -545,7 +545,11 @@ printf '%s' "$status_json" | jq -e --arg head "$pinned_head" \
 
 Repeat the bounded status/worker sequence only while the task is queued or
 retrying. Stop and diagnose failed/dead-letter state. Once the exact target is
-fresh, use the already pinned pair directly. Run impact first, then build coding
+fresh, use the already pinned pair directly. Impact queries batch path and symbol
+seeds under SQLite's bind limit while retaining all batches before final ranking.
+A `too many SQL variables` error is a query defect; increasing the indexing queue
+or resubmitting the completed update cannot repair it. Keep the pinned pair and
+retry impact after an authorized runtime fix. Run impact first, then build coding
 context at the immutable head:
 
 ```bash

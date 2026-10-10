@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     super::query::{HitParts, chunk_layers, hit_from_parts, required_scope},
-    path_selection::impact_row_allowed,
+    path_selection::{SQLITE_BIND_BATCH_SIZE, batched_path_values, impact_row_allowed},
     seed::module_import_matches,
 };
 
@@ -26,9 +26,24 @@ pub(super) fn chunks_for_paths(
     paths: &BTreeSet<String>,
     request: &CodeImpactRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    if paths.is_empty() {
-        return Ok(Vec::new());
+    let mut hits = Vec::new();
+    for batch in batched_path_values(paths) {
+        hits.extend(chunks_for_path_batch(
+            connection,
+            status,
+            &batch.into_iter().collect(),
+            request,
+        )?);
     }
+    Ok(hits)
+}
+
+fn chunks_for_path_batch(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    paths: &BTreeSet<String>,
+    request: &CodeImpactRequest,
+) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let path_values = paths.iter().cloned().collect::<Vec<_>>();
     let path_clause = placeholders(path_values.len());
     let sql = format!(
@@ -112,9 +127,37 @@ pub(super) fn callers_for_symbols(
     deleted_symbol_names: &[String],
     request: &CodeImpactRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    if symbol_ids.is_empty() && deleted_symbol_names.is_empty() {
-        return Ok(Vec::new());
+    let mut hits = Vec::new();
+    // Resolved IDs and unresolved deleted names match disjoint call rows.
+    // Deduplicate before batching to retain SQL IN set semantics across batches.
+    for (resolved, seeds) in [(true, symbol_ids), (false, deleted_symbol_names)] {
+        let unique = seeds.iter().cloned().collect::<BTreeSet<_>>();
+        let values = unique.into_iter().collect::<Vec<_>>();
+        for batch in values.chunks(SQLITE_BIND_BATCH_SIZE) {
+            hits.extend(callers_for_symbol_batch(
+                connection,
+                status,
+                if resolved { batch } else { &[] },
+                if resolved { &[] } else { batch },
+                request,
+            )?);
+        }
     }
+    hits.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.line_range.start.cmp(&right.line_range.start))
+    });
+    Ok(hits)
+}
+
+fn callers_for_symbol_batch(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    symbol_ids: &[String],
+    deleted_symbol_names: &[String],
+    request: &CodeImpactRequest,
+) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
     let mut filters = Vec::new();
     if !symbol_ids.is_empty() {

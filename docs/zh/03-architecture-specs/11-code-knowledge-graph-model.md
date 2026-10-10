@@ -44,6 +44,11 @@
 
 代码事实绑定 repository snapshot 或 changeset scope。相同文件路径在不同 tree hash 下是不同事实实例；worktree overlay 必须显式标注。
 
+影响证据查询把变更路径、已解析符号 ID 和已删除符号名分别拆成每批最多 500 个绑定值，另加快照 scope 参数。
+全部批次均参与最终排序，响应条数限制不能提前丢弃后续种子批次。
+调用种子在分批前去重，已删除符号名只能匹配未解析调用；快照、路径和语言过滤仍然生效。
+大变更集不依赖提高 SQLite 参数上限，也不通过截断受影响证据规避限制。
+
 ## 6. 验收标准
 
 - 检索结果区分 canonical symbol 与 snapshot symbol。

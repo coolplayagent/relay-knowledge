@@ -6,6 +6,8 @@ mod reactor;
 mod seed;
 
 #[cfg(test)]
+mod evidence_budget_tests;
+#[cfg(test)]
 mod evidence_tests;
 #[cfg(test)]
 mod path_selection_tests;
