@@ -65,8 +65,22 @@ duplicate storage phase logic.
   file owner is an invariant error. Every indivisible file and all of its owned
   facts must fit one frozen byte/row writer quantum; an oversized file is
   rejected before any delta batch is written.
-- Calls are rebuilt from call-shaped references during finalization, but their
-  eventual rows are still charged to the owner file's delta batch.
+- Preserve the legacy plan when its conservative all-phase reservation fits:
+  persisted `batch_count` must continue to identify exactly the same files.
+  If that plan rejects an indivisible owner before any delta batch can be
+  written, retry admission using the unpublished batch's actual phases.
+  Reference and import facts remain charged; their search projections and
+  regenerated calls belong to separately budgeted finalization pages. All
+  symbol/chunk search text is measured through the same projection fields and
+  identifier expansion used by persistence, including both FTS and metadata
+  identities. Serialized fact bounds, row overhead, other search reservations
+  and control rows remain charged. Validate call ownership even though calls are regenerated rather than inserted by
+  the batch. Oversized current-phase facts still fail before delta writes.
+- The fallback does not change the frozen budget, snapshot identity, task or
+  publication fence. A previously accepted legacy plan is never regrouped.
+  Older binaries reject a fallback-only plan instead of misreading its cursor.
+  The unpublished target remains unavailable until every finalization and
+  projection phase completes.
 - The terminal quantum jointly accounts for affected-path/progress cleanup,
   tombstones, fixed checkpoint/fence control rows, and the encoded receipt.
 - Receipt `batch_count` measures parsed-file delta batches. Deleted paths remain
@@ -103,6 +117,12 @@ must include the worktree end-to-end test:
 ```bash
 cargo test --all-targets --all-features code_index_task_ -- --nocapture
 ```
+
+This filter also covers a reference-heavy owner whose legacy combined-phase
+reservation exceeds the budget. Its current-phase facts must remain bounded,
+resume between delta batches after lease takeover, and produce every exact
+reference search owner through the ordinary finalizers. Row and byte overflow
+of the actual batch must still be rejected.
 
 The real repository must also complete a product-binary worktree index and a
 subsequent context query at the pinned synthetic identity. Final acceptance

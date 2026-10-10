@@ -13,6 +13,45 @@ use super::{
 static SEARCH_SQL_TRACE: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 #[test]
+fn code_index_task_search_admission_measures_actual_utf8_owner_columns() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    super::super::schema::initialize_code_schema(&connection).unwrap();
+    let long_text = "带有空白 documentation \"quoted\" ".repeat(2_000);
+    for kind in ["symbol", "chunk"] {
+        let fields = [
+            "NewHTTPClient",
+            "配置::NewHTTPClient",
+            long_text.as_str(),
+            "src/文件.rs",
+        ];
+        let expected =
+            super::search_document_text_bytes("scope", kind, kind, "src/文件.rs", "rust", fields)
+                .unwrap();
+        let transaction = connection.transaction().unwrap();
+        let mut writer = SearchDocumentInserter::new(&transaction).unwrap();
+        writer
+            .insert("scope", kind, kind, "src/文件.rs", "rust", fields)
+            .unwrap();
+        writer.finish().unwrap();
+        transaction.commit().unwrap();
+        let stored = connection.query_row(
+            "SELECT length(CAST(s.source_scope AS BLOB)) + length(CAST(s.document_kind AS BLOB))
+                  + length(CAST(s.record_id AS BLOB)) + length(CAST(s.path AS BLOB))
+                  + length(CAST(s.language_id AS BLOB)) + length(CAST(s.content AS BLOB))
+                  + length(CAST(m.source_scope AS BLOB)) + length(CAST(m.document_kind AS BLOB))
+                  + length(CAST(m.record_id AS BLOB)) + length(CAST(m.path AS BLOB))
+             FROM code_repository_search s JOIN code_repository_search_metadata m
+               ON s.rowid = m.search_rowid WHERE s.record_id = ?1",
+            [kind], |row| row.get::<_, usize>(0),
+        ).unwrap();
+        assert_eq!(
+            expected, stored,
+            "account for the persisted text, including identifier expansion"
+        );
+    }
+}
+
+#[test]
 fn symbol_search_content_preserves_identifier_expansion() {
     let content = search_document_content(
         "symbol",

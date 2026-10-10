@@ -384,6 +384,29 @@ pub(in crate::storage::sqlite::code) fn search_document_content<'a>(
     content
 }
 
+/// Exact UTF-8 text bytes across one FTS row and its metadata owner.
+/// Callers separately reserve row/control overhead and numeric columns.
+pub(in crate::storage::sqlite::code) fn search_document_text_bytes<'a>(
+    source_scope: &str,
+    document_kind: &str,
+    record_id: &str,
+    path: &str,
+    language_id: &str,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> Option<usize> {
+    let content = search_document_content(document_kind, fields);
+    [
+        source_scope.len().checked_mul(2)?,
+        document_kind.len().checked_mul(2)?,
+        record_id.len().checked_mul(2)?,
+        path.len().checked_mul(2)?,
+        language_id.len(),
+        content.len(),
+    ]
+    .into_iter()
+    .try_fold(0usize, usize::checked_add)
+}
+
 /// Text fields persisted by one grouped reference owner across its group, FTS, and metadata rows.
 pub(in crate::storage::sqlite::code) struct ReferenceSearchGroupStorage<'value> {
     pub source_scope: &'value str,

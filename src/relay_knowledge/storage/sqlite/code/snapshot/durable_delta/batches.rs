@@ -32,7 +32,23 @@ impl<'a> DeltaBatchPlan<'a> {
         snapshot: &'a CodeIndexSnapshot,
         budget: CodeIndexResourceBudget,
     ) -> Result<Self, StorageError> {
-        let surfaces = file_surfaces(snapshot)?;
+        // Preserve every previously admissible plan: batch_count is its durable
+        // replay cursor. A legacy plan with an oversized owner could never have
+        // written its first delta batch, so only that case can use staged-edge
+        // accounting without changing an already committed batch's membership.
+        match Self::partition(snapshot, budget, file_surfaces(snapshot, true)?) {
+            Err(StorageError::CapacityExceeded(_)) => {
+                Self::partition(snapshot, budget, file_surfaces(snapshot, false)?)
+            }
+            result => result,
+        }
+    }
+
+    fn partition(
+        snapshot: &'a CodeIndexSnapshot,
+        budget: CodeIndexResourceBudget,
+        surfaces: BTreeMap<&'a str, FileSurface>,
+    ) -> Result<Self, StorageError> {
         let paths = surfaces.keys().copied().collect::<Vec<_>>();
         let control_bytes = batch_control_bytes(snapshot)?;
         let mut ranges = Vec::new();
@@ -59,8 +75,15 @@ impl<'a> DeltaBatchPlan<'a> {
                     > budget.max_rows_per_batch
             {
                 return Err(StorageError::CapacityExceeded(format!(
-                    "durable delta file '{}' owned fact surface cannot fit one frozen writer quantum for scope '{}'",
-                    path, snapshot.source_scope
+                    "durable delta file '{}' owned fact surface cannot fit one frozen writer quantum for scope '{}': {} fact bytes plus {} control bytes (limit {}), {} fact rows plus {} control rows (limit {})",
+                    path,
+                    snapshot.source_scope,
+                    file_bytes,
+                    control_bytes,
+                    budget.max_bytes_per_batch,
+                    file_rows,
+                    DURABLE_BATCH_CONTROL_ROW_COUNT,
+                    budget.max_rows_per_batch
                 )));
             }
             let next_files = files.checked_add(1).ok_or_else(|| capacity(snapshot))?;
@@ -220,6 +243,7 @@ struct FileSurface {
 
 fn file_surfaces(
     snapshot: &CodeIndexSnapshot,
+    include_deferred_edges: bool,
 ) -> Result<BTreeMap<&str, FileSurface>, StorageError> {
     let mut surfaces = BTreeMap::new();
     for file in &snapshot.files {
@@ -245,6 +269,7 @@ fn file_surfaces(
             .iter()
             .map(|record| (record.path.as_str(), record)),
         SEARCH_DOCUMENT_ROW_COUNT,
+        (!include_deferred_edges).then_some(symbol_search_bytes),
         snapshot,
     )?;
     add_records(
@@ -253,7 +278,12 @@ fn file_surfaces(
             .references
             .iter()
             .map(|record| (record.path.as_str(), record)),
-        REFERENCE_SEARCH_ROW_COUNT,
+        if include_deferred_edges {
+            REFERENCE_SEARCH_ROW_COUNT
+        } else {
+            0
+        },
+        None,
         snapshot,
     )?;
     add_records(
@@ -262,7 +292,12 @@ fn file_surfaces(
             .imports
             .iter()
             .map(|record| (record.path.as_str(), record)),
-        SEARCH_DOCUMENT_ROW_COUNT,
+        if include_deferred_edges {
+            SEARCH_DOCUMENT_ROW_COUNT
+        } else {
+            0
+        },
+        None,
         snapshot,
     )?;
     add_records(
@@ -272,6 +307,7 @@ fn file_surfaces(
             .iter()
             .map(|record| (record.path.as_str(), record)),
         SEARCH_DOCUMENT_ROW_COUNT,
+        None,
         snapshot,
     )?;
     add_records(
@@ -281,6 +317,7 @@ fn file_surfaces(
             .iter()
             .map(|record| (record.path.as_str(), record)),
         SEARCH_DOCUMENT_ROW_COUNT,
+        None,
         snapshot,
     )?;
     add_records(
@@ -290,6 +327,7 @@ fn file_surfaces(
             .iter()
             .map(|record| (record.path.as_str(), record)),
         SEARCH_DOCUMENT_ROW_COUNT,
+        None,
         snapshot,
     )?;
     add_records(
@@ -299,6 +337,7 @@ fn file_surfaces(
             .iter()
             .map(|record| (record.path.as_str(), record)),
         SEARCH_DOCUMENT_ROW_COUNT,
+        None,
         snapshot,
     )?;
     add_records(
@@ -308,6 +347,7 @@ fn file_surfaces(
             .iter()
             .map(|record| (record.path.as_str(), record)),
         SEARCH_DOCUMENT_ROW_COUNT,
+        None,
         snapshot,
     )?;
     add_records(
@@ -317,6 +357,7 @@ fn file_surfaces(
             .iter()
             .map(|record| (record.path.as_str(), record)),
         SEARCH_DOCUMENT_ROW_COUNT,
+        (!include_deferred_edges).then_some(chunk_search_bytes),
         snapshot,
     )?;
     for diagnostic in snapshot
@@ -333,20 +374,31 @@ fn file_surfaces(
             .iter()
             .map(|record| (record.path.as_str(), record)),
         0,
+        None,
         snapshot,
     )?;
-    // Calls are regenerated from call-shaped references during finalization,
-    // but their eventual rows and search projection still consume the owning
-    // file's frozen writer budget.
-    add_records(
-        &mut surfaces,
-        snapshot
-            .calls
-            .iter()
-            .map(|record| (record.path.as_str(), record)),
-        SEARCH_DOCUMENT_ROW_COUNT,
-        snapshot,
-    )?;
+    // The clone protocol validates that the target is unpublished. Its batch
+    // writer stores reference/import facts, but no edge search or call rows.
+    // Those are built by separately budgeted finalization pages, before the
+    // scope can become queryable. Keep legacy reservations when they fit.
+    if include_deferred_edges {
+        add_records(
+            &mut surfaces,
+            snapshot
+                .calls
+                .iter()
+                .map(|record| (record.path.as_str(), record)),
+            SEARCH_DOCUMENT_ROW_COUNT,
+            None,
+            snapshot,
+        )?;
+    } else {
+        for record in &snapshot.calls {
+            if !surfaces.contains_key(record.path.as_str()) {
+                return Err(orphan(&record.path, snapshot));
+            }
+        }
+    }
     Ok(surfaces)
 }
 
@@ -354,6 +406,7 @@ fn add_records<'path, 'record, T: Serialize + 'record>(
     surfaces: &mut BTreeMap<&'path str, FileSurface>,
     records: impl IntoIterator<Item = (&'path str, &'record T)>,
     derived_row_count: usize,
+    measured_search: Option<fn(&T) -> Option<usize>>,
     snapshot: &CodeIndexSnapshot,
 ) -> Result<(), StorageError> {
     for (path, record) in records {
@@ -366,12 +419,47 @@ fn add_records<'path, 'record, T: Serialize + 'record>(
             .checked_add(1)
             .and_then(|rows| rows.checked_add(derived_row_count))
             .ok_or_else(|| capacity(snapshot))?;
+        let bytes = if let Some(measure) = measured_search {
+            let overhead = super::super::admission::ROW_STORAGE_OVERHEAD_BYTES
+                .checked_mul(derived_row_count + 1)
+                .ok_or_else(|| capacity(snapshot))?;
+            serialized
+                .checked_add(measure(record).ok_or_else(|| capacity(snapshot))?)
+                .and_then(|bytes| bytes.checked_add(overhead))
+                .ok_or_else(|| capacity(snapshot))?
+        } else {
+            persisted_bytes(serialized, derived_row_count, snapshot)?
+        };
         surface.bytes = surface
             .bytes
-            .checked_add(persisted_bytes(serialized, derived_row_count, snapshot)?)
+            .checked_add(bytes)
             .ok_or_else(|| capacity(snapshot))?;
     }
     Ok(())
+}
+
+fn symbol_search_bytes(record: &crate::domain::RepositoryCodeSymbolRecord) -> Option<usize> {
+    crate::storage::sqlite::code::symbols::with_search_fields(record, |fields| {
+        crate::storage::sqlite::code::search::search_document_text_bytes(
+            &record.source_scope,
+            "symbol",
+            &record.symbol_snapshot_id,
+            &record.path,
+            &record.language_id,
+            fields,
+        )
+    })
+}
+
+fn chunk_search_bytes(record: &crate::domain::RepositoryCodeChunkRecord) -> Option<usize> {
+    crate::storage::sqlite::code::search::search_document_text_bytes(
+        &record.source_scope,
+        "chunk",
+        &record.chunk_id,
+        &record.path,
+        &record.language_id,
+        crate::storage::sqlite::code::batch::chunk_search_fields(record),
+    )
 }
 
 fn serialized_bytes<T: Serialize>(
