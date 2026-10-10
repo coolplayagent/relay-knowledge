@@ -9,6 +9,8 @@ pub enum ErrorKind {
     InvalidArgument,
     StorageUnavailable,
     QosRejected,
+    /// Immutable input cannot fit a fixed budget; retrying it cannot help.
+    ResourceBudgetExceeded,
     Timeout,
     Internal,
 }
@@ -45,6 +47,15 @@ impl ApiError {
     pub fn qos_rejected(message: impl Into<String>) -> Self {
         Self {
             error_kind: ErrorKind::QosRejected,
+            message: message.into(),
+            metadata: None,
+        }
+    }
+
+    /// Reports input that cannot fit an operation's immutable resource budget.
+    pub fn resource_budget_exceeded(message: impl Into<String>) -> Self {
+        Self {
+            error_kind: ErrorKind::ResourceBudgetExceeded,
             message: message.into(),
             metadata: None,
         }

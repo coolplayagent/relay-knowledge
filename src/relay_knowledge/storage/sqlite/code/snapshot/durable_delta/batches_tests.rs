@@ -36,6 +36,10 @@ fn plan_rejects_an_indivisible_file_outside_the_frozen_byte_or_row_budget() {
         .expect("one oversized file must fail byte admission");
     assert!(byte_error.to_string().contains("large.rs"));
     assert!(byte_error.to_string().contains("frozen writer quantum"));
+    assert!(matches!(
+        byte_error,
+        crate::storage::StorageError::ResourceBudgetExceeded(_)
+    ));
 
     snapshot.files[0].byte_len = 8;
     let row_budget = CodeIndexResourceBudget::new(8, 1_024, 2).expect("row budget");
@@ -44,6 +48,10 @@ fn plan_rejects_an_indivisible_file_outside_the_frozen_byte_or_row_budget() {
         .expect("one oversized file must fail row admission");
     assert!(row_error.to_string().contains("large.rs"));
     assert!(row_error.to_string().contains("frozen writer quantum"));
+    assert!(matches!(
+        row_error,
+        crate::storage::StorageError::ResourceBudgetExceeded(_)
+    ));
 }
 
 #[test]

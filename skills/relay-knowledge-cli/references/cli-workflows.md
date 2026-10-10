@@ -465,6 +465,28 @@ false. Also inspect `content_integrity`: a current commit can still contain
 reported parser or source-I/O gaps. A historical scope's `fresh` flag alone
 does not establish that the requested head was indexed.
 
+### Permanent frozen-budget failures
+
+`resource_budget_exceeded` means an immutable delta file's owned facts cannot
+fit one frozen writer quantum, even after deferred edge accounting. This is
+not queue pressure. The worker records `last_error_kind=resource_budget_exceeded`
+and moves that attempt directly to `dead_letter`, releases its lease, and
+preserves the last published scope plus bounded failure history. Canonical
+incremental-clone checkpoints retain their durable origin after failure and
+audit pruning; they must not be mistaken for unfinished direct writers when a
+new target is submitted. Genuine direct checkpoints still require resume or
+adoption. Confirm the terminal state with `repo status` before following a
+newer task.
+
+Repair or split the oversized source artifact in a new commit while preserving
+its content and provenance, then submit that immutable head once. A task already
+pinned to the old commit cannot benefit from edits in the current worktree.
+`repo index <alias> --reset` only requeues unfinished tasks; it does not cancel
+or supersede their pinned input, change budgets, or revive dead letters. Do not
+use it for this error. On older binaries that report the same condition as
+`qos_rejected`, update the runtime before one bounded attempt of the existing
+task, then verify the terminal record. Do not drain unrelated repository tasks.
+
 ### Ref resolution contract
 
 The normal form is:

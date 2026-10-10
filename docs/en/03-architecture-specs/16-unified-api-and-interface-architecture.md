@@ -33,6 +33,8 @@ New control-plane capabilities first define shared `api` request/response types 
 
 Errors use stable classes: invalid input, unauthorized scope, not found, stale index, timeout, cancelled, overloaded, degraded backend, storage unavailable, and internal. Interface layers may translate wording but not semantics.
 
+`resource_budget_exceeded` identifies immutable input that cannot fit a frozen operation budget. Durable delta planning emits it only after both legacy and deferred-edge accounting reject the file-owned surface. CLI JSON, MCP and ACP preserve this category; HTTP returns 422 and the remote CLI preserves it. It is distinct from retryable `qos_rejected` (HTTP 429). The code-index worker immediately records a dead letter with the typed category, while transient queue pressure, busy storage, and timeout retain their bounded retry policy.
+
 ## 6. Streaming and Cancellation
 
 Long queries, indexing, impact analysis, and agent requests support progress events and cancellation. Cancellation is not an abnormal crash; it releases budgets, stops follow-up worker scheduling, and writes audit/metrics.

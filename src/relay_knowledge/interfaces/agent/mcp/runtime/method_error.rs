@@ -43,6 +43,7 @@ impl McpMethodError {
                 ErrorKind::InvalidArgument => "invalid_argument",
                 ErrorKind::StorageUnavailable => "storage_unavailable",
                 ErrorKind::QosRejected => "qos_rejected",
+                ErrorKind::ResourceBudgetExceeded => "resource_budget_exceeded",
                 ErrorKind::Timeout => "timeout",
                 ErrorKind::Internal => "internal",
             },

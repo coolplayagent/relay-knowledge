@@ -33,6 +33,8 @@
 
 错误必须稳定分类：invalid input、unauthorized scope、not found、stale index、timeout、cancelled、overloaded、degraded backend、storage unavailable、internal。接口层可以翻译文案，但不能改变语义。
 
+`resource_budget_exceeded` 表示不可变输入无法装入操作的固定预算。持久 delta 规划只有在 legacy 与 deferred-edge 两种记账均无法容纳单文件事实时才返回它。CLI JSON、MCP 和 ACP 保留该类型，HTTP 返回 422，remote CLI 保留映射。它与可重试的 `qos_rejected`（HTTP 429）不同：code-index worker 立即记录该类型的 dead letter；临时队列压力、存储 busy 和 timeout 仍保留有界重试策略。
+
 ## 6. Streaming 与取消
 
 长查询、索引、impact analysis 和 agent 请求支持 progress event 和 cancellation。取消不是异常退出；它必须释放预算、停止后续 worker 调度，并写 audit/metric。

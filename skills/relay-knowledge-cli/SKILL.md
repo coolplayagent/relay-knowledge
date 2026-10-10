@@ -36,7 +36,8 @@ A full queue is not evidence that a worker is running. Inspect `service doctor`
 and the oldest active task before submitting more commit updates. With no
 managed service, use the existing task's bounded worker path and verify actual
 checkpoint progress; repeated deterministic errors require diagnosis instead
-of more submissions. See [queue recovery](references/cli-workflows.md#full-code-index-queue).
+of more submissions. A frozen single-file `resource_budget_exceeded` is
+terminal; `--reset` cannot replace its pinned input. See [queue recovery](references/cli-workflows.md#full-code-index-queue).
 
 Prefer the bundled `assets` binary for the current operating system, CPU, and
 active command runner whenever it exists and `version --format json` succeeds.

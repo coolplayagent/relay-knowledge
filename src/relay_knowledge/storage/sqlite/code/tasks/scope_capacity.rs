@@ -4,7 +4,10 @@ use std::collections::BTreeSet;
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-use crate::{domain::CodeIndexMode, storage::StorageError};
+use crate::{
+    domain::{CodeIndexMode, code_incremental_clone},
+    storage::StorageError,
+};
 
 /// Bounds published scopes, partial checkpoints, and unfinished publications.
 pub(in crate::storage) const MAX_SCOPE_SLOTS_PER_REPOSITORY: usize = 64;
@@ -29,14 +32,16 @@ pub(super) fn enforce_new_target(
 
 /// Prevents a newly queued target from overtaking a crash-resumable direct
 /// checkpoint that has no unfinished durable task owner.
+/// Canonical incremental-clone tokens can only be written under a task fence.
+/// They remain durable-task residue after failure or bounded audit pruning,
+/// rather than becoming resumable direct writers when their owner terminates.
 pub(super) fn reject_unowned_checkpoint_conflict(
     transaction: &Transaction<'_>,
     repository_id: &str,
     target_scope: &str,
 ) -> Result<(), StorageError> {
-    let conflict = transaction
-        .query_row(
-            "SELECT checkpoint.source_scope, checkpoint.state
+    let mut statement = transaction.prepare(
+        "SELECT checkpoint.source_scope, checkpoint.state
              FROM code_repository_index_checkpoints checkpoint
              WHERE checkpoint.repository_id = ?1
                AND checkpoint.source_scope <> ?2
@@ -49,17 +54,30 @@ pub(super) fn reject_unowned_checkpoint_conflict(
                      AND owner.state IN ('queued', 'running', 'retrying')
                )
              ORDER BY checkpoint.updated_at_ms ASC, checkpoint.source_scope ASC
-             LIMIT 1",
-            params![repository_id, target_scope],
+             LIMIT ?3",
+    )?;
+    let candidates = statement
+        .query_map(
+            params![
+                repository_id,
+                target_scope,
+                MAX_SCOPE_SLOTS_PER_REPOSITORY + 1
+            ],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()?;
-    let Some((source_scope, state)) = conflict else {
-        return Ok(());
-    };
-    Err(StorageError::InvalidInput(format!(
-        "code repository '{repository_id}' has an unfinished direct checkpoint '{source_scope}' in state '{state}'; resume or adopt that scope before queueing target '{target_scope}'"
-    )))
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    if candidates.len() > MAX_SCOPE_SLOTS_PER_REPOSITORY {
+        return Err(capacity_error(repository_id, candidates.len()));
+    }
+    for (source_scope, state) in candidates {
+        if code_incremental_clone(&state).is_some() {
+            continue;
+        }
+        return Err(StorageError::InvalidInput(format!(
+            "code repository '{repository_id}' has an unfinished direct checkpoint '{source_scope}' in state '{state}'; resume or adopt that scope before queueing target '{target_scope}'"
+        )));
+    }
+    Ok(())
 }
 
 /// Bounds direct storage publications that do not carry a durable task fence.
@@ -297,3 +315,7 @@ fn capacity_error(repository_id: &str, occupied: usize) -> StorageError {
         "code index scope backlog for repository '{repository_id}' has {occupied} published or pending scopes (capacity {MAX_SCOPE_SLOTS_PER_REPOSITORY}); wait for managed scope maintenance before indexing another commit"
     ))
 }
+
+#[cfg(test)]
+#[path = "scope_capacity_tests.rs"]
+mod tests;

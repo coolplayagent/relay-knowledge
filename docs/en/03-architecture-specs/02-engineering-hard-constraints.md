@@ -341,6 +341,8 @@ The self-iteration config, scoring, and history facades keep their facade contra
 
 The self-iteration Codex adapter attaches `command_tests`, `execution_tests`, `history_context_tests`, `prompt_tests`, `unattended_prompt_tests`, and `result_mapping_tests` from their exact production owners through explicit test-only `#[path]` declarations. Each test file contains test items directly; production-time `include!` expansion, facade-owned behavior tests, and same-named nested test modules are forbidden.
 
+Immutable delta owners that cannot fit the frozen writer byte/row budget must return a typed permanent resource-budget failure after deferred-edge admission is exhausted. The leased worker must dead-letter that attempt without raising budgets, deleting history, publishing partial facts, or blocking later valid targets. Transient queue/storage pressure retains bounded retries. The `code_index_task_` recovery gate must exercise permanent failure followed by successful publication of a repaired commit under the same budget.
+
 ## 4. HTTP and QoS
 
 HTTP is implemented over non-blocking operating-system event mechanisms, such as epoll, kqueue, or IOCP through a mature async runtime. All inbound and outbound network work passes through QoS policy before consuming resources.
@@ -447,3 +449,5 @@ CLI metadata aggregation must retain both research and feedback command families
 The shared Web dispatcher routes each family to its owning application service.
 Regression checks cover both complete command families together, so integrating
 one workflow preserves the other workflow's public operations.
+
+Queue admission must recognize canonical incremental-clone checkpoint tokens as fenced-task residue even after terminal task audit rows have been pruned. Such tokens are written only through the durable publication fence; they cannot become direct-writer authority merely because their task ended. Admission scans at most the 64-scope cap plus one overflow sentinel, leaves scope capacity and retention unchanged, and still rejects genuine direct checkpoints or malformed tokens. Recovery tests cover successors queued both before and after permanent failure.

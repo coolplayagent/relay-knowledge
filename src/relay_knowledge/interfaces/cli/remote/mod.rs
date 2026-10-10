@@ -897,6 +897,7 @@ fn status_error(status: StatusCode, body: std::borrow::Cow<'_, str>) -> ApiError
     let error_kind = match status {
         StatusCode::BAD_REQUEST => ErrorKind::InvalidArgument,
         StatusCode::TOO_MANY_REQUESTS => ErrorKind::QosRejected,
+        StatusCode::UNPROCESSABLE_ENTITY => ErrorKind::ResourceBudgetExceeded,
         StatusCode::REQUEST_TIMEOUT | StatusCode::GATEWAY_TIMEOUT => ErrorKind::Timeout,
         StatusCode::SERVICE_UNAVAILABLE => ErrorKind::StorageUnavailable,
         _ => ErrorKind::Internal,

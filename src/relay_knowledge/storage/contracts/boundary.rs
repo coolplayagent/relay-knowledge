@@ -11,6 +11,8 @@ pub enum StorageError {
     LockPoisoned,
     Busy(String),
     CapacityExceeded(String),
+    /// Immutable input cannot fit the operation's frozen resource budget.
+    ResourceBudgetExceeded(String),
     DurableStagingRequired(String),
     DurableStagingPending {
         completed_steps: usize,
@@ -33,6 +35,9 @@ impl fmt::Display for StorageError {
             Self::Busy(message) => write!(formatter, "storage busy: {message}"),
             Self::CapacityExceeded(message) => {
                 write!(formatter, "storage capacity exceeded: {message}")
+            }
+            Self::ResourceBudgetExceeded(message) => {
+                write!(formatter, "resource budget exceeded: {message}")
             }
             Self::DurableStagingRequired(message) => {
                 write!(formatter, "durable staging required: {message}")
