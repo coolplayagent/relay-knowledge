@@ -44,6 +44,17 @@ Reference, call, and import resolution may be uncertain. Results expose target h
 
 Code facts bind to repository snapshot or changeset scope. The same path at different tree hashes is a different fact instance; worktree overlays are explicitly marked.
 
+Impact evidence queries split changed paths, resolved symbol IDs, and deleted
+symbol names into batches of at most 500 bind values plus the snapshot scope.
+Every batch participates in the final ranking; the response limit does not
+discard late seed batches. Caller seeds are deduplicated before batching, and
+deleted names match only unresolved calls. Snapshot, path, and language filters
+remain enforced. Large changesets therefore do not depend on raising SQLite's
+variable limit or truncating the seed traversal. SQLite evidence rows stream into
+a deduplicating top-k merge, with at most twice the request limit retained per
+merge buffer. Later batches can replace earlier results; traversal still scales
+with eligible facts, but matching excerpts and calls are not all materialized.
+
 ## 6. Acceptance Criteria
 
 - Retrieval results distinguish canonical symbols from snapshot symbols.

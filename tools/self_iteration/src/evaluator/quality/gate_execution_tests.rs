@@ -53,6 +53,32 @@ fn code_index_persistence_measurement_is_reported_as_a_key_budgeted_metric() {
 }
 
 #[test]
+fn impact_measurement_enforces_the_key_latency_budget() {
+    for (duration_ms, failed) in [(30_000, false), (30_001, true)] {
+        let stages = vec![QualityGateStage::Parallel(vec![gate(
+            "impact_evidence_budget_suite",
+        )])];
+        let mut commands = Vec::new();
+        let mut gates = Vec::new();
+        let mut metrics = Vec::new();
+        assert!(run_quality_gate_plan(
+            stages,
+            |stage| {
+                let mut results = stage_results(stage, 0);
+                results[0].duration_ms = duration_ms;
+                results
+            },
+            &mut commands,
+            &mut gates,
+            &mut metrics
+        ));
+        assert_eq!(metrics.len(), 1);
+        assert!(metrics[0].key);
+        assert_eq!(metrics[0].key_budget_failed(), failed);
+    }
+}
+
+#[test]
 fn source_io_measurement_over_sixty_seconds_is_a_hard_budget_failure() {
     for (duration_ms, failed) in [(60_000, false), (60_001, true)] {
         let stages = vec![QualityGateStage::Parallel(vec![gate(
