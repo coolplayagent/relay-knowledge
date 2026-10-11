@@ -62,6 +62,7 @@ pub use index::{
 };
 pub use registration::register_repository;
 pub use scope::partition_changed_paths_for_selector;
+pub(crate) use scope::{intersect_path_filters, path_filter_allows};
 pub(crate) use source::git::{
     first_parent_ancestors_bounded, repository_worktree_observation_bounded,
     resolve_git_ref_bounded, resolve_git_tree_bounded,

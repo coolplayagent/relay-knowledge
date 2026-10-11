@@ -12,10 +12,8 @@ pub(super) fn merged_path_filters(left: &[String], right: &[String]) -> Vec<Stri
     merged
 }
 
-pub(in crate::code) fn intersect_path_filters(
-    left: &[String],
-    right: &[String],
-) -> Option<Vec<String>> {
+/// Intersects two OR groups; `None` is disjoint, while an empty vector is unrestricted.
+pub(crate) fn intersect_path_filters(left: &[String], right: &[String]) -> Option<Vec<String>> {
     let left = normalized_path_filters(left);
     let right = normalized_path_filters(right);
     if left.is_empty() {
@@ -149,7 +147,7 @@ fn path_filter_covers(filter: &str, path: &str) -> bool {
     filter == "." || path_matches_filter(path, filter)
 }
 
-fn path_filter_allows(path: &str, filters: &[String]) -> bool {
+pub(crate) fn path_filter_allows(path: &str, filters: &[String]) -> bool {
     filters.is_empty()
         || filters
             .iter()

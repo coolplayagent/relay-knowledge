@@ -1,5 +1,8 @@
 use crate::{
-    code::{SourceGrepKind, SourceGrepRequest, bounded_source_grep_candidate_match_limit},
+    code::{
+        SourceGrepKind, SourceGrepRequest, bounded_source_grep_candidate_match_limit,
+        intersect_path_filters, path_filter_allows,
+    },
     domain::{
         CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
         CodeRetrievalRequest,
@@ -8,7 +11,7 @@ use crate::{
 
 use super::super::source_surface::hit_has_complete_source_surface;
 use super::{
-    filters::{merged_filters, query_language_filters},
+    filters::query_language_filters,
     identity::{
         definition_identity, definition_source_candidate_paths, exact_file_filter,
         hybrid_results_cover_identity, normalize_filter_path, reference_grep_query,
@@ -71,7 +74,8 @@ pub(super) fn plan_code_grep_fallback(
     if !request.query_kind_filters.is_empty() {
         return None;
     }
-    let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
+    let path_filters =
+        intersect_path_filters(&status.path_filters, &request.repository.path_filters)?;
     let language_filters = query_language_filters(
         crate::domain::code_scope_language_filters(
             &status.language_filters,
@@ -79,7 +83,7 @@ pub(super) fn plan_code_grep_fallback(
         ),
         &request.query_language_filters,
     );
-    match request.code_query_kind {
+    let mut plan = match request.code_query_kind {
         CodeQueryKind::Definition => {
             let identity = definition_identity(&request.query)?;
             if results_define_identity(results, &identity)
@@ -93,7 +97,8 @@ pub(super) fn plan_code_grep_fallback(
             {
                 return None;
             }
-            let paths = definition_source_candidate_paths(request, results, &identity);
+            let paths =
+                definition_source_candidate_paths(request, results, &identity, &path_filters);
             Some(CodeGrepFallbackPlan {
                 commit: commit.commit.clone(),
                 query: identity.clone(),
@@ -166,8 +171,10 @@ pub(super) fn plan_code_grep_fallback(
             })
         }
         CodeQueryKind::Hybrid => {
-            if let Some((query, paths)) = hybrid_exact_path_source_fallback(request, results) {
-                return Some(CodeGrepFallbackPlan {
+            if let Some((query, paths)) = hybrid_exact_path_source_fallback(request, results)
+                .or_else(|| hybrid_source_surface_fallback(request, results))
+            {
+                Some(CodeGrepFallbackPlan {
                     commit: commit.commit.clone(),
                     query,
                     paths,
@@ -179,50 +186,40 @@ pub(super) fn plan_code_grep_fallback(
                     exclude_generated: request.exclude_generated,
                     read_worktree_overlay: commit.read_worktree_overlay,
                     needs_scope_paths: false,
-                });
-            }
-            if let Some((identity, paths)) = hybrid_source_surface_fallback(request, results) {
-                return Some(CodeGrepFallbackPlan {
+                })
+            } else {
+                if results.len() >= request.limit {
+                    return None;
+                }
+                let identity = source_grep_identity(&request.query)?;
+                if hybrid_results_cover_identity(results, &identity) {
+                    return None;
+                }
+                let paths = path_filters
+                    .iter()
+                    .filter(|path| exact_file_filter(path))
+                    .map(|path| normalize_filter_path(path).to_owned())
+                    .collect::<Vec<_>>();
+                let needs_scope_paths = paths.is_empty();
+                Some(CodeGrepFallbackPlan {
                     commit: commit.commit.clone(),
                     query: identity,
                     paths,
                     path_filters,
                     language_filters,
-                    limit: request.limit,
+                    limit: request.limit.saturating_sub(results.len()).max(1),
                     kind: SourceGrepKind::Hybrid,
                     identity: None,
                     exclude_generated: request.exclude_generated,
                     read_worktree_overlay: commit.read_worktree_overlay,
-                    needs_scope_paths: false,
-                });
+                    needs_scope_paths,
+                })
             }
-            if results.len() >= request.limit {
-                return None;
-            }
-            let identity = source_grep_identity(&request.query)?;
-            if hybrid_results_cover_identity(results, &identity) {
-                return None;
-            }
-            let paths = path_filters
-                .iter()
-                .filter(|path| exact_file_filter(path))
-                .map(|path| normalize_filter_path(path).to_owned())
-                .collect::<Vec<_>>();
-            let needs_scope_paths = paths.is_empty();
-            Some(CodeGrepFallbackPlan {
-                commit: commit.commit.clone(),
-                query: identity,
-                paths,
-                path_filters,
-                language_filters,
-                limit: request.limit.saturating_sub(results.len()).max(1),
-                kind: SourceGrepKind::Hybrid,
-                identity: None,
-                exclude_generated: request.exclude_generated,
-                read_worktree_overlay: commit.read_worktree_overlay,
-                needs_scope_paths,
-            })
         }
         _ => None,
-    }
+    }?;
+    // Constrain explicit candidates before publication admission, budgets, and source reads.
+    plan.paths
+        .retain(|path| path_filter_allows(path, &plan.path_filters));
+    Some(plan)
 }

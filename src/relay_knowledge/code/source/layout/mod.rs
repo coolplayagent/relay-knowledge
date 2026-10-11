@@ -12,9 +12,10 @@ pub(in crate::code) use self::discovery::{
 pub use self::impact_partition::partition_changed_paths_for_selector;
 #[cfg(test)]
 pub(in crate::code) use self::path_scope::path_scope_allows;
+pub(crate) use self::path_scope::{intersect_path_filters, path_filter_allows};
 pub(in crate::code) use self::path_scope::{
-    intersect_path_filters, path_overlaps_any_filter, path_scope_overlaps,
-    submodule_child_scope_filters, submodule_child_scope_filters_from_filters,
+    path_overlaps_any_filter, path_scope_overlaps, submodule_child_scope_filters,
+    submodule_child_scope_filters_from_filters,
 };
 pub(in crate::code) use self::preview::preview_repository_layout;
 pub(in crate::code) use self::scoped_snapshot::{

@@ -1,5 +1,5 @@
 use crate::{
-    code::{simple_source_identifier, source_line_defines_identity},
+    code::{path_filter_allows, simple_source_identifier, source_line_defines_identity},
     domain::{CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest},
 };
 
@@ -35,15 +35,16 @@ pub(super) fn definition_source_candidate_paths(
     request: &CodeRetrievalRequest,
     results: &[CodeRetrievalHit],
     identity: &str,
+    path_filters: &[String],
 ) -> Vec<String> {
     let mut paths = Vec::new();
     for hit in results {
-        if hit_mentions_identity(hit, identity) {
+        if path_filter_allows(&hit.path, path_filters) && hit_mentions_identity(hit, identity) {
             push_candidate_path(&mut paths, &hit.path);
         }
     }
     for path in &request.repository.path_filters {
-        if exact_file_filter(path) {
+        if path_filter_allows(path, path_filters) && exact_file_filter(path) {
             push_candidate_path(&mut paths, path);
         }
     }

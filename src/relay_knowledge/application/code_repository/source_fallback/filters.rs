@@ -1,4 +1,7 @@
-use crate::domain::CodeRetrievalRequest;
+use crate::{
+    code::path_filter_allows,
+    domain::{CodeRepositoryStatus, CodeRetrievalRequest},
+};
 
 pub(super) fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     let mut merged = Vec::new();
@@ -55,11 +58,14 @@ fn c_cpp_header_language_overlap(base_filter: &str, query_filter: &str) -> bool 
 }
 
 pub(super) fn query_field_filters_allow_match(
+    status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
     path: &str,
     excerpt: &str,
 ) -> bool {
-    request.query_kind_filters.is_empty()
+    path_filter_allows(path, &status.path_filters)
+        && path_filter_allows(path, &request.repository.path_filters)
+        && request.query_kind_filters.is_empty()
         && filters_match_text(&request.query_path_substrings, path)
         && source_fallback_name_filters_match(request, excerpt)
 }
