@@ -12,10 +12,16 @@ pub(super) fn merged_path_filters(left: &[String], right: &[String]) -> Vec<Stri
     merged
 }
 
-/// Intersects two OR groups; `None` is disjoint, while an empty vector is unrestricted.
+/// Intersects two OR groups; an omitted group uses an empty unrestricted sentinel.
+/// A nonempty group that normalizes to no prefixes is disjoint (`None`).
 pub(crate) fn intersect_path_filters(left: &[String], right: &[String]) -> Option<Vec<String>> {
+    let left_restricted = !left.is_empty();
+    let right_restricted = !right.is_empty();
     let left = normalized_path_filters(left);
     let right = normalized_path_filters(right);
+    if (left_restricted && left.is_empty()) || (right_restricted && right.is_empty()) {
+        return None;
+    }
     if left.is_empty() {
         return Some(right);
     }

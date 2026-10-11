@@ -5,6 +5,37 @@ use super::*;
 use crate::domain::RepositoryCodeRange;
 
 #[test]
+fn slash_only_groups_disable_fallback_before_candidate_discovery() {
+    for filter in ["/", "///", "\\", "/\\/"] {
+        for kind in [
+            CodeQueryKind::Definition,
+            CodeQueryKind::References,
+            CodeQueryKind::Imports,
+            CodeQueryKind::Hybrid,
+        ] {
+            let request = request("ScopeNeedle", kind, vec![filter.to_owned()]);
+            assert!(
+                plan_code_grep_fallback(&status(), &request, &[]).is_none(),
+                "a nonmatching request group must stop before discovery and materialization"
+            );
+        }
+        let mut restricted_status = status();
+        restricted_status.path_filters = vec![filter.to_owned()];
+        let unrestricted_request = request("ScopeNeedle", CodeQueryKind::Hybrid, Vec::new());
+        assert!(plan_code_grep_fallback(&restricted_status, &unrestricted_request, &[]).is_none());
+        restricted_status.path_filters.push("include".to_owned());
+        let mixed_request = request(
+            "ScopeNeedle",
+            CodeQueryKind::Hybrid,
+            vec![filter.to_owned(), "./include/api/".to_owned()],
+        );
+        let plan = plan_code_grep_fallback(&restricted_status, &mixed_request, &[]).unwrap();
+        assert_eq!(plan.path_filters, ["include/api"]);
+        assert!(plan.needs_scope_paths());
+    }
+}
+
+#[test]
 fn fallback_plan_intersects_prefix_groups_without_unrestricting_disjoint_scopes() {
     for (base, requested, expected) in [
         (vec![], vec![], Some(vec![])),
