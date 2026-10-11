@@ -916,7 +916,11 @@ fn fallback_plan_reads_dirty_worktree_overlay_from_live_worktree() {
     assert!(plan.read_worktree_overlay);
 }
 
-fn request(query: &str, kind: CodeQueryKind, path_filters: Vec<String>) -> CodeRetrievalRequest {
+pub(super) fn request(
+    query: &str,
+    kind: CodeQueryKind,
+    path_filters: Vec<String>,
+) -> CodeRetrievalRequest {
     let selector = crate::domain::CodeRepositorySelector::new(
         "repo",
         "commit",
@@ -934,7 +938,7 @@ fn request(query: &str, kind: CodeQueryKind, path_filters: Vec<String>) -> CodeR
     .expect("request should validate")
 }
 
-fn status() -> CodeRepositoryStatus {
+pub(super) fn status() -> CodeRepositoryStatus {
     CodeRepositoryStatus {
         content_integrity: Default::default(),
         repository_id: "repo".to_owned(),
@@ -955,7 +959,7 @@ fn status() -> CodeRepositoryStatus {
     }
 }
 
-fn hit(path: &str, excerpt: &str) -> CodeRetrievalHit {
+pub(super) fn hit(path: &str, excerpt: &str) -> CodeRetrievalHit {
     CodeRetrievalHit {
         query_degraded: false,
         repository_id: "repo".to_owned(),

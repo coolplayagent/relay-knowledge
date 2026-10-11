@@ -17,6 +17,9 @@ use relay_knowledge::{
     storage::SqliteGraphStore,
 };
 
+#[path = "code_repository_fallback_path_scope.rs"]
+mod fallback_path_scope;
+
 #[tokio::test]
 async fn queries_can_narrow_a_full_repository_index_by_path_or_language() {
     let repo = FixtureRepo::create("code-query-filter-narrowing");

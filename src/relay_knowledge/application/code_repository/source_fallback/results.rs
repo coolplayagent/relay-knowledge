@@ -32,7 +32,7 @@ pub(super) fn append_code_grep_fallback(
     let base_fallback_score = grep_score(plan.kind, score_bounds);
     let metadata = path_metadata(results);
     for matched in outcome.matches {
-        if !query_field_filters_allow_match(request, &matched.path, &matched.excerpt) {
+        if !query_field_filters_allow_match(status, request, &matched.path, &matched.excerpt) {
             continue;
         }
         let fallback_score = generated_adjusted_fallback_score(
@@ -112,7 +112,12 @@ pub(super) fn append_definition_source_fallback(
     let best_score = results.first().map_or(0.0, |hit| hit.score);
     let metadata = path_metadata(results);
     for declaration in declarations {
-        if !query_field_filters_allow_match(request, &declaration.path, &declaration.excerpt) {
+        if !query_field_filters_allow_match(
+            status,
+            request,
+            &declaration.path,
+            &declaration.excerpt,
+        ) {
             continue;
         }
         let declaration_score =

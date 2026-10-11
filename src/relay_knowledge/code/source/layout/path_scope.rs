@@ -12,12 +12,16 @@ pub(super) fn merged_path_filters(left: &[String], right: &[String]) -> Vec<Stri
     merged
 }
 
-pub(in crate::code) fn intersect_path_filters(
-    left: &[String],
-    right: &[String],
-) -> Option<Vec<String>> {
+/// Intersects two OR groups; an omitted group uses an empty unrestricted sentinel.
+/// A nonempty group that normalizes to no prefixes is disjoint (`None`).
+pub(crate) fn intersect_path_filters(left: &[String], right: &[String]) -> Option<Vec<String>> {
+    let left_restricted = !left.is_empty();
+    let right_restricted = !right.is_empty();
     let left = normalized_path_filters(left);
     let right = normalized_path_filters(right);
+    if (left_restricted && left.is_empty()) || (right_restricted && right.is_empty()) {
+        return None;
+    }
     if left.is_empty() {
         return Some(right);
     }
@@ -149,7 +153,7 @@ fn path_filter_covers(filter: &str, path: &str) -> bool {
     filter == "." || path_matches_filter(path, filter)
 }
 
-fn path_filter_allows(path: &str, filters: &[String]) -> bool {
+pub(crate) fn path_filter_allows(path: &str, filters: &[String]) -> bool {
     filters.is_empty()
         || filters
             .iter()

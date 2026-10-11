@@ -32,6 +32,9 @@ mod filter_tests;
 #[path = "generated_tests.rs"]
 mod generated_tests;
 #[cfg(test)]
+#[path = "path_scope_tests.rs"]
+mod path_scope_tests;
+#[cfg(test)]
 #[path = "pipeline_tests.rs"]
 mod pipeline_tests;
 #[cfg(test)]

@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use crate::domain::{CodeRepositoryRegistration, CodeRepositorySelector};
 
 use super::path_scope::{
-    intersect_path_filters, merged_path_filters, normalize_path_filter, normalized_path_filters,
-    path_matches_filter, path_overlaps_filter, push_filter_if_uncovered,
+    intersect_path_filters, merged_path_filters, normalize_path_filter, path_matches_filter,
+    path_overlaps_filter, push_filter_if_uncovered,
 };
 use crate::code::source::{
     changes::GitTreeEntry,
@@ -97,7 +97,7 @@ pub(in crate::code) fn effective_path_filter_intersections_for_layouts(
     selector: &CodeRepositorySelector,
     source_layouts: &[&SourceLayoutDiscovery],
 ) -> Option<Vec<String>> {
-    let mut filters = normalized_path_filters(&registration.path_filters);
+    let mut filters = intersect_path_filters(&registration.path_filters, &[])?;
     if registration_scope_can_discover_source_roots(&registration.path_filters) {
         for source_layout in source_layouts {
             for root in &source_layout.source_roots {
