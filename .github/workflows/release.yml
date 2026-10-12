@@ -10,7 +10,7 @@ on:
       dry_run_tag:
         description: Tag-like version to validate without creating a release.
         required: true
-        default: v1.1.20
+        default: v1.1.21
 
 permissions:
   contents: read
@@ -496,31 +496,32 @@ jobs:
         run: |
           set -euo pipefail
           cat > release-notes.md <<'NOTES'
-          ## Version 1.1.20
+          ## Version 1.1.21
 
-          This patch fixes durable delta admission that could leave code-index tasks
-          unable to advance when a file's deferred edge projections were charged to
-          its staging batch. Existing admissible partitions keep their replay cursor;
-          previously rejected plans use bounded staged-edge accounting and actual
-          UTF-8 search text sizes. Edge/search finalization still completes before
-          publication, with existing leases, checkpoints and queue budgets preserved.
-          Capacity errors now report fact/control bytes and rows with their limits.
-          The CLI skill documents how to diagnose and drain a full index queue.
+          This patch fixes permanent index-task recovery, large impact queries,
+          and source-fallback path filtering:
+
+          - Immutable delta owners exceeding their frozen budget become dead letters
+            with resource_budget_exceeded; terminal clone checkpoints no longer block
+            later valid targets. Leases, failure history and published facts remain intact.
+          - Impact evidence batches path and symbol seeds within SQLite's bind limit
+            and streams every batch through a bounded, deduplicating top-k merge.
+          - Source fallback intersects registered and requested path scopes before
+            discovery and reads, preserving complete-segment matching and empty scopes.
 
           ## Upgrade
 
           Stop resident services and drain or cancel active work before replacing
           binaries; back up runtime databases, shards, private feedback journals and
-          repository-owned maps and research artifacts. This patch adds no schema
-          migration or runtime directory. Resume eligible tasks through the managed
-          service, respecting leases and retry deadlines; do not delete tasks or
-          reset leases to clear capacity. Verify last_indexed_commit against the
-          requested head, stale=false, and content_integrity after recovery.
-          For rollback, stop writers and restore a consistent backup when needed;
-          1.1.19 may encounter the original admission error again. Repository Map v4
-          still requires a 1.1.17 or newer reader.
+          repository-owned maps and research artifacts. No schema migration or runtime
+          directory is added. Preserve tasks, leases, checkpoints and retry deadlines.
+          Repair oversized source artifacts in a new commit and submit that immutable
+          head once; repo index --reset does not revive dead letters or change inputs.
+          Verify last_indexed_commit, stale=false and content_integrity after recovery.
+          Stop writers before rollback and restore a consistent backup when needed;
+          1.1.20 may reproduce the fixed failures. Repository Map v4 requires 1.1.17+.
 
-          Full notes: https://coolplayagent.github.io/relay-knowledge/en/releases/1.1.20.html
+          Full notes: https://coolplayagent.github.io/relay-knowledge/en/releases/1.1.21.html
 
           ## Install
 

@@ -51,9 +51,9 @@ target/debug/relay-knowledge help --format json
 
 ## Installing Releases
 
-Version 1.1.20 fixes durable delta admission that could prevent code-index queues
-from advancing, preserves checkpoint replay, and adds queue recovery guidance.
-See the [1.1.20 release notes](pages/en/releases/1.1.20.html) for installation,
+Version 1.1.21 fixes permanent index-task failures, bounds large impact queries
+within SQLite limits, and keeps source fallback within intersected path scopes.
+See the [1.1.21 release notes](pages/en/releases/1.1.21.html) for installation,
 upgrade, and rollback guidance. Preserve runtime tasks and private feedback journals
 when upgrading; Repository Map v4 still requires a 1.1.17 or newer reader.
 

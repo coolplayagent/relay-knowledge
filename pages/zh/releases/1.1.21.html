@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="relay-knowledge 1.1.21：索引任务永久失败恢复、有界影响分析与精确路径范围。" />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.21 发布说明</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="页面导航">
+        <a href="../">中文文档</a>
+        <a href="../../en/releases/1.1.21.html">English</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.21">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.21 发布说明</h1>
+        <p>本补丁修复索引任务永久失败恢复，使大型影响分析遵守 SQLite 与内存预算，并将来源回退限制在请求的路径范围内。</p>
+        <p>发布日期：2026 年 10 月 12 日。</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.21">发布与下载</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.21">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.21/checksums.txt">Checksums</a>
+        </p>
+      </section>
+      <section class="section">
+        <h2>安装与验证</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.21 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json
+relay-knowledge service doctor --format json</code></pre>
+        <p>下载适合平台的压缩包，安装前校验 checksum 和 GitHub attestation。独立 CLI Skill 压缩包包含同版本的 Linux x64 与 Windows x64 二进制。</p>
+      </section>
+      <section class="section">
+        <h2>本版变化</h2>
+        <ul>
+          <li>不可变 delta 文件超过冻结的字节或行预算时，返回 <code>resource_budget_exceeded</code> 并在该次尝试进入 dead letter。临时容量压力继续有界重试；失败目标不会替换已发布事实。</li>
+          <li>终态任务审计被裁剪后，规范的 incremental-clone checkpoint 仍保留持久任务来源，不再作为未完成的直接写入阻塞后续有效目标。真正的直接写入 checkpoint 仍须恢复或收养。</li>
+          <li>影响分析将路径与符号种子拆成每批最多 500 个绑定参数及 snapshot scope；所有批次参与去重的有界 top-k 合并，保留过滤条件与后续批次参与排名的机会。</li>
+          <li>来源回退在候选发现和来源读取前，求已注册与请求路径前缀组的交集。完整路径段、不相交及纯分隔符范围、显式文件、词法与声明结果统一遵守该范围收窄。</li>
+          <li>回归覆盖超限文件修复后的新提交恢复、终态失败后的后继任务准入、大型影响分析种子与保留证据，以及路径范围交集。</li>
+        </ul>
+      </section>
+      <section class="section">
+        <h2>升级与回滚</h2>
+        <p class="notice">备份运行时数据库及全部分片、私有反馈 journal、仓库拥有的地图和研究材料。替换二进制或恢复一致备份前，停止常驻服务并等待或取消活动任务。</p>
+        <p>本补丁不引入数据库或地图 schema migration，也不增加运行时目录。保留任务记录、attempt lease、checkpoint 和重试期限。既有排队或重试任务在下次受 fence 保护的尝试中获得新的永久失败分类。</p>
+        <p>遇到 <code>resource_budget_exceeded</code> 时，在新提交中修复或拆分来源文件，只提交一次该不可变 head。<code>repo index --reset</code> 仅按原输入和预算重排未完成任务，不会复活 dead letter。不得删除任务历史或重置 lease。</p>
+        <p>确认 last_indexed_commit 等于请求 head 且 stale 为 false，同时检查 content_integrity 中的 parser 或来源 I/O 缺口。大型影响分析保留固定的 base/head 对，升级运行时后重试。</p>
+        <p>回滚前停止全部 writer，必要时恢复匹配备份。1.1.20 可能重现本次修复的失败、查询和过滤行为，也不会自动复活终态任务。Repository Map v4 仍要求 1.1.17 或更新 reader；既有 Windows 账户 SID 与 ACL 要求继续有效。</p>
+      </section>
+      <section class="section">
+        <h2>发布产物</h2>
+        <ul>
+          <li>Linux x64 与 ARM64，使用 glibc 2.28 基线</li>
+          <li>macOS Intel 与 Apple Silicon</li>
+          <li>Windows x64 与 ARM64；ARM64 采用交叉构建</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.21.tar.gz</code>，含 agent 指令、Schema 和内置二进制</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+      <section class="section">
+        <h2>进一步阅读</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.21/skills/relay-knowledge-cli/references/cli-workflows.md#full-code-index-queue">队列恢复工作流</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.21/codespec/design/durable-worktree-delta-batching.md">持久 delta 批处理</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.21/docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md">安装、发布与升级</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

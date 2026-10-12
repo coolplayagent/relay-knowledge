@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="relay-knowledge 1.1.21: permanent index-task recovery, bounded impact queries and precise path scopes." />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.21 release notes</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="Page navigation">
+        <a href="../">English documentation</a>
+        <a href="../../zh/releases/1.1.21.html">中文</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.21">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.21 release notes</h1>
+        <p>This patch fixes permanent index-task recovery, keeps large impact queries within SQLite and memory budgets, and narrows source fallback to the requested path scope.</p>
+        <p>Release date: October 12, 2026.</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.21">Release downloads</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.21">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.21/checksums.txt">Checksums</a>
+        </p>
+      </section>
+      <section class="section">
+        <h2>Install and verify</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.21 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json
+relay-knowledge service doctor --format json</code></pre>
+        <p>Download the archive for your platform and verify its checksum and GitHub attestation before installation. The separate CLI skill archive includes the same version's Linux x64 and Windows x64 binaries.</p>
+      </section>
+      <section class="section">
+        <h2>What changed</h2>
+        <ul>
+          <li>Immutable delta files that exceed their frozen byte or row budget return <code>resource_budget_exceeded</code> and become dead letters on that attempt. Transient capacity pressure retains bounded retries; failed targets do not replace published facts.</li>
+          <li>Canonical incremental-clone checkpoints retain their durable origin after terminal task audit pruning, so later valid targets are not blocked as unfinished direct writes. Genuine direct checkpoints still require resume or adoption.</li>
+          <li>Impact evidence splits path and symbol seeds into at most 500 bind values plus snapshot scope per batch. Every batch participates in a deduplicating top-k merge with bounded retained rows, preserving filters and late-batch ranking.</li>
+          <li>Source fallback intersects registered and requested path-prefix groups before discovering candidates or reading source. Complete path segments, disjoint and separator-only scopes, explicit files, and lexical and declaration results share the same narrowing.</li>
+          <li>Regression coverage includes oversized-owner recovery to a repaired commit, successor admission after terminal failure, large impact seed sets and retained evidence, and path-scope intersections.</li>
+        </ul>
+      </section>
+      <section class="section">
+        <h2>Upgrade and rollback</h2>
+        <p class="notice">Back up runtime databases and all shards, private feedback journals, and repository-owned maps and research artifacts. Stop resident services and drain or cancel active work before replacing binaries or restoring a consistent backup.</p>
+        <p>This patch introduces no database or map schema migration and no new runtime directory. Preserve task records, attempt leases, checkpoints and retry deadlines. Existing queued or retrying tasks receive the new permanent-failure classification on their next fenced attempt.</p>
+        <p>For <code>resource_budget_exceeded</code>, repair or split the source artifact in a new commit and submit that immutable head once. <code>repo index --reset</code> only requeues unfinished tasks with their original inputs and budgets; it does not revive dead letters. Do not delete task history or reset leases.</p>
+        <p>Confirm last_indexed_commit equals the requested head and stale is false; inspect content_integrity for parser or source-I/O gaps. For large impact queries, retain the pinned base/head pair and retry with the updated runtime.</p>
+        <p>For rollback, stop all writers and restore a matching backup when needed. Version 1.1.20 can reproduce the fixed failure, query and filtering behavior; it does not automatically revive terminal tasks. Repository Map v4 still requires a 1.1.17 or newer reader; existing Windows account-SID and ACL requirements remain in effect.</p>
+      </section>
+      <section class="section">
+        <h2>Release packages</h2>
+        <ul>
+          <li>Linux x64 and ARM64 on the glibc 2.28 baseline</li>
+          <li>macOS Intel and Apple Silicon</li>
+          <li>Windows x64 and ARM64; ARM64 is cross-built</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.21.tar.gz</code> with agent instructions, schemas and bundled binaries</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+      <section class="section">
+        <h2>Further reading</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.21/skills/relay-knowledge-cli/references/cli-workflows.md#full-code-index-queue">Queue recovery workflow</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.21/codespec/design/durable-worktree-delta-batching.md">Durable delta batching</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.21/docs/en/03-architecture-specs/19-installation-release-and-upgrade.md">Installation, release and upgrade</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

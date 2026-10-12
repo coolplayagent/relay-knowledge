@@ -46,9 +46,9 @@ target/debug/relay-knowledge help --format json
 
 ## 安装发布版
 
-1.1.20 修复可能阻止代码索引队列推进的持久 delta 准入问题，保留 checkpoint 重放，
-并补充队列恢复指引。安装、升级和回滚说明见
-[1.1.20 发布说明](pages/zh/releases/1.1.20.html)。升级时保留运行时任务和私有反馈 journal；
+1.1.21 修复索引任务永久失败处理，使大型影响分析遵守 SQLite 参数与内存限制，
+并确保来源回退遵守路径范围交集。安装、升级和回滚说明见
+[1.1.21 发布说明](pages/zh/releases/1.1.21.html)。升级时保留运行时任务和私有反馈 journal；
 Repository Map v4 仍要求 1.1.17 或更新的 reader。
 
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)
