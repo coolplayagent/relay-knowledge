@@ -69,6 +69,10 @@ CLI、Web 和 service mode 共享同一组 application services。启动顺序�
 
 `status`、`health`、`service doctor`、Web diagnostics 和 MCP resources 读取同一份 runtime snapshot。诊断必须说明配置来源、脱敏值、目录、服务状态、QoS budget、index freshness 和 degraded reason。
 
+`net::http` 规范化 Windows 风格 `host:port` 代理，非法环境代理以脱敏 warning 回退直连；outbound client 禁止再次隐式读取环境代理。`env` 捕获 `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS`，`application::runtime::storage` 校验 1–30000ms（默认 500ms）；health owner 统一使用该预算并投影维护建议。SQLite store 的诊断读 worker 在 future 取消后通过 progress handler 中断 SQL，并在释放连接前清除 handler。配置、取消、慢快照、缓存降级和本地 CLI 可用性由直接 owner UT 与 CLI integration 回归保护。
+
+Windows CI 另外运行代理与本地诊断的二进制集成用例，覆盖 Windows 子进程环境传递及直连降级。
+
 ## 7. 验收标准
 
 - 仓库内只有 `env` 读取环境变量，只有 `paths` 构造运行时路径，只有 `net` 创建网络能力。

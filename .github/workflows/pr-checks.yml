@@ -134,6 +134,12 @@ jobs:
           storage::partitioned::catalog::path_access_tests
           storage::sqlite::code::snapshot::repository_import::path_tests
 
+      - name: Windows proxy and local diagnostics regression gate
+        run: >-
+          cargo test --test relay_knowledge --all-features --
+          binary_local_diagnostics_accept_windows_proxy_and_report_invalid_proxy
+          binary_remote_request_does_not_reload_ignored_environment_proxy
+
       - name: Windows legacy SQLite upgrade integration gate
         run: cargo test --test relay_knowledge --all-features windows_upgrade_reopens_existing_graph_for_cli_web_and_pinned_service
 

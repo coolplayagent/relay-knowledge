@@ -105,3 +105,7 @@ pub const NO_PROXY: &str = "NO_PROXY";
 pub const NO_PROXY_LOWER: &str = "no_proxy";
 pub const SSL_VERIFY: &str = "SSL_VERIFY";
 pub const SSL_VERIFY_LOWER: &str = "ssl_verify";
+
+/// Bounded storage snapshot wait used by health diagnostics.
+pub const RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS: &str =
+    "RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS";

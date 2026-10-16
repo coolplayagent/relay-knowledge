@@ -471,3 +471,5 @@ dead letter。旧二进制可能把永久超限报告为 `qos_rejected`，消耗
 已终结记录不会自动复活。升级或回滚不需要直接修改数据库，也不应并发运行新旧 worker。
 
 队列准入必须通过规范化 incremental-clone checkpoint token 识别带 fence 的任务残留，即使终态任务审计已被有界清理。这类 token 只能在 durable publication fence 下写入，不能因为所属任务结束就变成直接 writer 的权限依据。准入最多扫描 64 个 scope 加一个溢出哨兵，保留 scope 容量与 retention 约束；真实 direct checkpoint 和畸形 token 仍须阻止抢占。恢复回归同时覆盖永久失败之前与之后提交后继任务。
+
+代理兼容与 health 预算修复不改变数据目录或 schema。升级后 `host:port` 代理自动规范化，非法代理以 `invalid_proxy` warning 回退直连；要求强制代理的服务须修正 warning 后再恢复出站工作。服务管理器可注入 `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS=5000`（1–30000ms，默认 500ms），修改后重启托管服务并核对 `status`/`health` 的生效值。回滚前将代理写为完整 HTTP(S) URL，旧版本仍使用固定 500ms 且不识别新 warning/建议字段。health 的维护建议为只读诊断；checkpoint 应安排在维护窗口，禁止删除 WAL 以规避健康超时。详见[高级配置](../01-user-guide/12-advanced-configuration.md)。

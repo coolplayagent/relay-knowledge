@@ -127,7 +127,21 @@ RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS
 RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
 ```
 
-代理和证书验证继承 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 和 `SSL_VERIFY`。业务模块不直接读取进程环境。
+代理按 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 的顺序选取（各自同时支持小写形式），并继承 `NO_PROXY` 和 `SSL_VERIFY`。`host:port`、IPv4 和 `[IPv6]:port` 自动补齐 `http://`；已有 HTTP(S) URL 保留。非法代理（例如 `http://`、非法端口或不支持的 scheme）会被忽略并回退直连，TLS 验证策略保持不变。`status`/`health` 的 `runtime.http_proxy_warning` 和 `setup doctor` 的 `http_proxy` warning 提供不含原始地址或凭据的 `invalid_proxy` 诊断。本地命令仍可启动；出站请求使用已解析策略，不会再次从环境读取被忽略的代理。需要强制代理的部署应在诊断出现该 warning 时修正配置。业务模块不直接读取进程环境。
+
+`RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` 控制健康存储快照预算，默认 500ms，允许 1–30000ms。大库可先设为 5000；`runtime.health_storage_budget_ms` 返回生效值。它覆盖快照及 topology 读取，包括 legacy fallback；初次数据库打开和 schema 初始化仍属于启动流程。超时仍返回 `healthy=false`、`metadata.stale=true` 和 `storage_busy`，SQLite 诊断查询会随请求取消释放读连接，不扩大 SQLite busy timeout。
+
+```powershell
+$env:HTTPS_PROXY = "proxy.example:8080"
+$env:RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS = "5000"
+relay-knowledge health --format json
+```
+
+```bash
+RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS=5000 relay-knowledge health --format json
+```
+
+`health.storage_recommendations` 会对已观察到的至少 256MiB WAL、超过七天的维护记录或维护失败提供 checkpoint/服务排查建议。无快照或超时时只建议检查，不能把超时归因于 WAL；缓存数据仍标记 stale。可先运行 `relay-knowledge service doctor --format json` 并检查托管服务维护日志，再安排维护窗口进行 WAL checkpoint；健康检查本身不执行 checkpoint 或删除 WAL。连接器应分别读取 `runtime.http_proxy_warning`（配置降级）和 `degraded_reason` 的 `storage_busy`/`storage_cold`（存储暂不可用），避免将两者合并为配置加载失败。
 
 版本提示也使用 `net::http`，并将结果缓存到 runtime cache:
 

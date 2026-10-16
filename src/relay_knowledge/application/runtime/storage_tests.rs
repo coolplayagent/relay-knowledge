@@ -49,3 +49,56 @@ fn storage_topology_test_environment(topology: Option<&str>) -> EnvironmentConfi
 
     EnvironmentConfig::from_pairs(PlatformKind::current(), pairs).expect("environment should parse")
 }
+
+#[test]
+fn validates_health_snapshot_budget_and_environment_errors() {
+    use crate::env::RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS;
+    let mut environment = storage_topology_test_environment(None);
+    assert_eq!(
+        StorageRuntimeConfig::from_environment(&environment)
+            .unwrap()
+            .health_budget,
+        Duration::from_millis(500)
+    );
+    for millis in [1, 5000, 30000] {
+        environment.health_storage_budget_ms = Some(millis);
+        assert_eq!(
+            StorageRuntimeConfig::from_environment(&environment)
+                .unwrap()
+                .health_budget,
+            Duration::from_millis(millis)
+        );
+    }
+    for millis in [0, 30001, u64::MAX] {
+        environment.health_storage_budget_ms = Some(millis);
+        assert_eq!(
+            StorageRuntimeConfig::from_environment(&environment).unwrap_err(),
+            StorageRuntimeConfigError::InvalidHealthBudget
+        );
+    }
+    for value in ["0", "-1", "invalid", "18446744073709551616"] {
+        assert!(
+            EnvironmentConfig::from_pairs(
+                PlatformKind::current(),
+                [(RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS, value)]
+            )
+            .is_err()
+        );
+    }
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [(RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS, "5000")],
+    )
+    .unwrap();
+    assert_eq!(
+        StorageRuntimeConfig::from_environment(&environment)
+            .unwrap()
+            .health_budget,
+        Duration::from_secs(5)
+    );
+    assert!(
+        StorageRuntimeConfigError::InvalidHealthBudget
+            .to_string()
+            .contains("30000")
+    );
+}

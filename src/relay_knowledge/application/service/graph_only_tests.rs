@@ -80,6 +80,33 @@ async fn health_timeout_covers_legacy_snapshot_fallback() {
 }
 
 #[tokio::test]
+async fn health_budget_allows_slow_snapshot_and_keeps_cached_timeout_explicit() {
+    let mut service = service_with_store(Arc::new(SlowLegacyHealthStore)).await;
+    service.runtime.storage.health_budget = Duration::from_secs(3);
+    let context = || RequestContext::for_interface(InterfaceKind::Cli);
+    let response = service.health(context()).await.unwrap();
+    assert!(response.healthy);
+    assert_eq!(response.runtime.health_storage_budget_ms, 3000);
+    assert!(response.storage_recommendations.is_empty());
+    service.runtime.storage.health_budget = Duration::from_millis(10);
+    let response = service.health(context()).await.unwrap();
+    assert!(!response.healthy);
+    assert!(response.metadata.stale);
+    assert!(
+        response
+            .degraded_reason
+            .unwrap()
+            .starts_with("storage_busy:")
+    );
+    assert!(
+        response
+            .storage_recommendations
+            .iter()
+            .any(|advice| advice.contains("cached values may be stale"))
+    );
+}
+
+#[tokio::test]
 async fn service_plan_metadata_uses_current_graph_version() {
     let service = service_with_store(Arc::new(GraphOnlySearchStore)).await;
 
@@ -719,6 +746,10 @@ impl CodeIndexSourceStore for SlowLegacyHealthStore {
 }
 
 impl CodeQueryReadStore for SlowLegacyHealthStore {
+    fn code_repository_totals(&self) -> StorageFuture<'_, crate::domain::CodeRepositoryTotals> {
+        Box::pin(async { Ok(Default::default()) })
+    }
+
     unsupported_code_repository_method!(
         search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>
     );

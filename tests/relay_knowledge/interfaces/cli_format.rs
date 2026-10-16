@@ -525,6 +525,114 @@ fn binary_reports_health_and_service_status() {
 }
 
 #[test]
+fn binary_local_diagnostics_accept_windows_proxy_and_report_invalid_proxy() {
+    for proxy in [
+        "proxy.example:8080",
+        "http://user:private-password@:8080",
+        "http://",
+        "",
+    ] {
+        let home = isolated_home("proxy-health-regression");
+        for args in [vec!["health"], vec!["status"], vec!["setup", "doctor"]] {
+            let output = relay_command()
+                .env(RELAY_KNOWLEDGE_HOME, &home)
+                .env(HTTP_PROXY, proxy)
+                .env(HTTPS_PROXY, proxy)
+                .env("RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS", "5000")
+                .args(&args)
+                .args(["--format", "json"])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("private-password"));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains("private-password"));
+            let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let invalid = proxy != "proxy.example:8080";
+            if args[0] == "setup" {
+                let checks = response["checks"].as_array().unwrap();
+                assert_eq!(
+                    checks
+                        .iter()
+                        .any(|check| check["name"] == "http_proxy" && check["state"] == "warning"),
+                    invalid
+                );
+                assert_eq!(response["live_health_checked"], false);
+            } else {
+                assert_eq!(response["runtime"]["http_proxy_configured"], !invalid);
+                assert_eq!(
+                    response["runtime"]["http_proxy_warning"].is_string(),
+                    invalid
+                );
+                assert_eq!(response["runtime"]["health_storage_budget_ms"], 5000);
+            }
+        }
+        let _ = std::fs::remove_dir_all(home);
+    }
+}
+
+#[tokio::test]
+async fn binary_remote_request_does_not_reload_ignored_environment_proxy() {
+    use relay_knowledge::{
+        api::{ApiMetadata, CodeRepositoryListResponse, InterfaceKind, RequestContext},
+        domain::GraphVersion,
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) =
+            tokio::time::timeout(std::time::Duration::from_secs(10), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+        let mut buffer = [0; 4096];
+        let count = stream.read(&mut buffer).await.unwrap();
+        assert!(
+            String::from_utf8_lossy(&buffer[..count]).starts_with("GET /api/v1/code/repositories")
+        );
+        let body = serde_json::to_string(&CodeRepositoryListResponse {
+            metadata: ApiMetadata::graph_only(
+                &RequestContext::for_interface(InterfaceKind::Web),
+                GraphVersion::ZERO,
+            ),
+            repositories: Vec::new(),
+        })
+        .unwrap();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+    let output = tokio::task::spawn_blocking(move || {
+        relay_command()
+            .env(HTTPS_PROXY, "http://")
+            .env(HTTP_PROXY, "http://127.0.0.1:1")
+            .env(
+                "RELAY_KNOWLEDGE_REMOTE_BASE_URL",
+                format!("http://{address}"),
+            )
+            .args(["repo", "list", "--format", "json"])
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["repositories"], serde_json::json!([]));
+    server.await.unwrap();
+}
+
+#[test]
 fn binary_reports_setup_doctor_and_profiles() {
     let home = isolated_home("binary-setup");
 
@@ -709,6 +817,7 @@ fn relay_command() -> Command {
         RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS,
         RELAY_KNOWLEDGE_HTTP_SHUTDOWN_TIMEOUT_MS,
         RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES,
+        relay_knowledge::env::RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS,
         RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED,
         RELAY_KNOWLEDGE_MCP_ENDPOINT,
         RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS,

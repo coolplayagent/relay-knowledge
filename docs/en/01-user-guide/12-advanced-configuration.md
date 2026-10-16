@@ -144,7 +144,21 @@ RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS
 RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
 ```
 
-Proxy and certificate verification settings inherit `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, and `SSL_VERIFY`. Business modules do not read process environment directly.
+Proxy selection checks `HTTPS_PROXY`, `HTTP_PROXY`, then `ALL_PROXY` (including their lowercase forms), and inherits `NO_PROXY` and `SSL_VERIFY`. Authorities such as `host:port`, IPv4 addresses, and `[IPv6]:port` receive an `http://` prefix; existing HTTP(S) URLs are preserved. Invalid proxies (for example `http://`, invalid ports, or unsupported schemes) are ignored and connections go directly, with TLS verification policy preserved. `runtime.http_proxy_warning` in status/health and the `http_proxy` warning in setup doctor expose an `invalid_proxy` diagnostic without the original address or credentials. Local commands remain available. Outbound clients use the resolved policy without reading the rejected environment proxy again. Deployments requiring a proxy should correct configuration whenever this warning appears. Business modules do not read process environment directly.
+
+`RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` controls the health storage snapshot budget: 500ms by default, with a supported range of 1–30000ms. Try 5000 for a large database; `runtime.health_storage_budget_ms` reports the effective value. The budget covers snapshot and topology reads, including legacy fallback; initial database open and schema initialization remain startup work. Timeout responses retain `healthy=false`, `metadata.stale=true`, and `storage_busy`. Cancelled SQLite diagnostic queries release their read connections without increasing SQLite busy timeouts.
+
+```powershell
+$env:HTTPS_PROXY = "proxy.example:8080"
+$env:RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS = "5000"
+relay-knowledge health --format json
+```
+
+```bash
+RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS=5000 relay-knowledge health --format json
+```
+
+`health.storage_recommendations` suggests checkpoint or service investigation for an observed WAL of at least 256MiB, maintenance older than seven days, or a recorded maintenance failure. Missing or timed-out snapshots only produce inspection advice; a timeout does not establish WAL pressure, and cached values remain stale. Start with `relay-knowledge service doctor --format json` and managed-service maintenance logs, then schedule a maintenance window for a WAL checkpoint. Health checks never run checkpoints or delete WAL files. Connectors should distinguish `runtime.http_proxy_warning` (configuration degradation) from `storage_busy`/`storage_cold` in `degraded_reason` (unavailable storage).
 
 Version notices also use `net::http` and cache results under the runtime cache:
 

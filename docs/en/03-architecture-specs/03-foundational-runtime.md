@@ -69,6 +69,10 @@ Any entry point that bypasses this order is an architecture defect.
 
 `status`, `health`, `service doctor`, Web diagnostics, and MCP resources read the same runtime snapshot. Diagnostics explain configuration sources, redacted values, directories, service state, QoS budgets, index freshness, and degraded reasons.
 
+`net::http` normalizes Windows-style `host:port` proxies and falls back to direct connections with a redacted warning for invalid environment proxies; outbound clients cannot implicitly read environment proxies again. `env` captures `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS`, and `application::runtime::storage` validates 1–30000ms (default 500ms). The health owner applies that budget and projects maintenance advice. SQLite diagnostic read workers interrupt SQL through a progress handler when the future is cancelled and remove the handler before releasing the connection. Direct owner unit tests and CLI integration tests cover configuration, cancellation, slow snapshots, cached degradation, and local command availability.
+
+Windows CI also runs the proxy and local-diagnostics binary integration cases to cover native child-process environment handling and direct fallback.
+
 ## 7. Acceptance Criteria
 
 - Only `env` reads environment variables, only `paths` constructs runtime paths, and only `net` creates network capabilities.

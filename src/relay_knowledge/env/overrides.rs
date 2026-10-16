@@ -161,6 +161,7 @@ pub struct EnvironmentConfig {
     pub telemetry: TelemetryEnvOverrides,
     pub watcher: WatcherEnvOverrides,
     pub storage_topology: Option<String>,
+    pub health_storage_budget_ms: Option<u64>,
 }
 
 /// Environment subset needed before a remote CLI command can dispatch over HTTP.

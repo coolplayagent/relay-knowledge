@@ -74,6 +74,10 @@ impl EnvironmentConfig {
             telemetry: parse_telemetry_overrides(&values)?,
             watcher: parse_watcher_overrides(&values)?,
             storage_topology: string_var(&values, RELAY_KNOWLEDGE_STORAGE_TOPOLOGY)?,
+            health_storage_budget_ms: positive_u64_var(
+                &values,
+                RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS,
+            )?,
         })
     }
 }
@@ -123,7 +127,10 @@ fn parse_network_overrides(values: &EnvironmentValues) -> Result<NetworkEnvOverr
                 ALL_PROXY,
                 ALL_PROXY_LOWER,
             ],
-        )?,
+        )
+        // Preserve invalid optional proxy input for the HTTP boundary's redacted
+        // warning/fallback, including empty or non-Unicode process values.
+        .unwrap_or_else(|_| Some(String::new())),
         no_proxy: first_string_var(values, &[NO_PROXY, NO_PROXY_LOWER])?,
         ssl_verify: first_bool_var(values, &[SSL_VERIFY, SSL_VERIFY_LOWER])?,
         qos_max_connections: positive_usize_var(values, RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS)?,

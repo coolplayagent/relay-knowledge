@@ -1,10 +1,11 @@
 //! Health snapshot assembly and bounded storage fallback policy.
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use crate::{
     api::{ApiError, ApiMetadata, HealthResponse, RequestContext, StorageTopologyDiagnostics},
     domain::{CodeRepositoryTotals, GraphVersion},
+    project::PROJECT_NAME,
     storage::{
         FileIndexDiagnostics, GraphInspection, HealthStorageSnapshot, IndexRefreshDiagnostics,
         KnowledgeStore, StorageError,
@@ -22,7 +23,8 @@ use crate::application::{
     runtime::runtime_status_with_model_profiles,
 };
 
-const HEALTH_STORAGE_BUDGET: Duration = Duration::from_millis(500);
+const LARGE_WAL_BYTES: u64 = 256 * 1024 * 1024;
+const MAINTENANCE_AGE_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
 struct HealthStorageReport {
     snapshot: HealthStorageSnapshot,
@@ -34,7 +36,11 @@ impl RelayKnowledgeService {
     /// Returns liveness-safe service and data health diagnostics.
     pub async fn health(&self, context: RequestContext) -> Result<HealthResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
-        match tokio::time::timeout(HEALTH_STORAGE_BUDGET, self.health_storage_report(&store)).await
+        match tokio::time::timeout(
+            self.runtime.storage.health_budget,
+            self.health_storage_report(&store),
+        )
+        .await
         {
             Ok(Ok(report)) => {
                 let response = self.health_from_storage_report(context, report).await;
@@ -66,7 +72,7 @@ impl RelayKnowledgeService {
         }
 
         match tokio::time::timeout(
-            HEALTH_STORAGE_BUDGET,
+            self.runtime.storage.health_budget,
             self.storage_free_health(context.clone()),
         )
         .await
@@ -80,13 +86,14 @@ impl RelayKnowledgeService {
 
     async fn storage_free_health(&self, context: RequestContext) -> HealthResponse {
         let storage = self
-            .storage_topology_diagnostics_with_budget(HEALTH_STORAGE_BUDGET)
+            .storage_topology_diagnostics_with_budget(self.runtime.storage.health_budget)
             .await;
         let degraded_reason = storage.degraded_reason.clone();
 
         HealthResponse {
             metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
             healthy: degraded_reason.is_none(),
+            storage_recommendations: Vec::new(),
             degraded_reason,
             storage,
             graph: GraphInspection::default(),
@@ -116,7 +123,9 @@ impl RelayKnowledgeService {
                 return Err(StorageError::Busy(message));
             }
             Err(error) => {
-                let storage = self.storage_topology_diagnostics().await;
+                let storage = self
+                    .storage_topology_diagnostics_with_budget(self.runtime.storage.health_budget)
+                    .await;
                 if storage.missing_shard_count == 0 {
                     return Err(error);
                 }
@@ -132,7 +141,9 @@ impl RelayKnowledgeService {
                 });
             }
         };
-        let storage = self.storage_topology_diagnostics().await;
+        let storage = self
+            .storage_topology_diagnostics_with_budget(self.runtime.storage.health_budget)
+            .await;
 
         Ok(HealthStorageReport {
             snapshot,
@@ -193,6 +204,11 @@ impl RelayKnowledgeService {
         HealthResponse {
             metadata: metadata_for_indexes(&context, graph.graph_version, &outcome.indexes),
             healthy,
+            storage_recommendations: storage_recommendations(
+                &graph.sqlite,
+                current_time_millis(),
+                false,
+            ),
             degraded_reason,
             storage,
             graph,
@@ -254,13 +270,26 @@ impl RelayKnowledgeService {
             response.metadata.request_id = context.request_id;
             response.metadata.stale = true;
             response.healthy = false;
+            response.storage_recommendations =
+                storage_recommendations(&response.graph.sqlite, current_time_millis(), true);
             response.degraded_reason = Some(degraded_reason);
+            response.runtime = runtime_status_with_model_profiles(
+                &self.runtime,
+                self.model_provider_config()
+                    .profile_summary(&self.runtime.retrieval)
+                    .await,
+            );
             return response;
         }
 
         HealthResponse {
             metadata: ApiMetadata::indexed(&context, GraphVersion::ZERO, None, None, true),
             healthy: false,
+            storage_recommendations: storage_recommendations(
+                &Default::default(),
+                current_time_millis(),
+                true,
+            ),
             degraded_reason: Some(degraded_reason),
             storage: self.storage_diagnostics_from_snapshot(Default::default(), None),
             graph: GraphInspection::default(),
@@ -292,3 +321,32 @@ async fn legacy_file_index_diagnostics_or_default(
         Err(error) => Err(error),
     }
 }
+
+fn storage_recommendations(
+    sqlite: &crate::storage::SqliteStorageDiagnostics,
+    now_ms: u64,
+    unavailable: bool,
+) -> Vec<String> {
+    let mut advice = Vec::new();
+    if sqlite
+        .wal_size_bytes
+        .is_some_and(|bytes| bytes >= LARGE_WAL_BYTES)
+    {
+        advice.push("Large SQLite WAL observed; check long-lived readers and schedule a WAL checkpoint in a maintenance window.".to_owned());
+    }
+    if sqlite.last_maintenance_error.is_some()
+        || sqlite
+            .last_maintenance_at_ms
+            .is_some_and(|at| now_ms.saturating_sub(at) >= MAINTENANCE_AGE_MS)
+    {
+        advice.push(format!("SQLite maintenance is overdue or failed; run {PROJECT_NAME} service doctor --format json and check the managed service maintenance logs."));
+    }
+    if unavailable {
+        advice.push(format!("Storage snapshot unavailable; inspect WAL size and maintenance history (cached values may be stale), run {PROJECT_NAME} service doctor --format json, and consider RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS (1..30000). If WAL pressure or overdue maintenance is confirmed, schedule a checkpoint in a maintenance window. A timeout alone does not establish a WAL problem."));
+    }
+    advice
+}
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;
