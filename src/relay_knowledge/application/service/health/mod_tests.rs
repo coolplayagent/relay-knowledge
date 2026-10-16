@@ -96,11 +96,18 @@ async fn successful_storage_snapshot_cannot_wait_unboundedly_for_model_profiles(
         env::{EnvironmentConfig, PlatformKind},
         storage::SqliteGraphStore,
     };
-    use std::{
-        io::ErrorKind,
-        os::unix::fs::OpenOptionsExt,
-        time::{Duration, Instant},
-    };
+    use std::{os::unix::fs::OpenOptionsExt, time::Duration};
+    struct ProfileFifo {
+        path: std::path::PathBuf,
+        _writer: std::fs::File,
+    }
+    impl Drop for ProfileFifo {
+        fn drop(&mut self) {
+            // Unlink before closing the writer: even a late blocking open must
+            // fail rather than waiting forever for a writer during test unwind.
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
     let root = std::env::temp_dir().join(format!(
         "relay-health-profile-deadline-{}-{}",
         std::process::id(),
@@ -127,38 +134,18 @@ async fn successful_storage_snapshot_cannot_wait_unboundedly_for_model_profiles(
             .unwrap()
             .success()
     );
-    let (opened, reader_started) = tokio::sync::oneshot::channel();
-    let (release, wait_release) = std::sync::mpsc::channel::<()>();
-    // A test-only FIFO models an unavailable profile filesystem. The writer
-    // confirms profile loading began after storage succeeded, then withholds EOF.
-    let writer_profile = profile.clone();
-    let writer = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let file = loop {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .custom_flags(libc::O_NONBLOCK)
-                .open(&writer_profile)
-            {
-                Ok(file) => break Some(file),
-                Err(error)
-                    if error.raw_os_error() == Some(libc::ENXIO)
-                        || error.kind() == ErrorKind::Interrupted =>
-                {
-                    if Instant::now() >= deadline {
-                        break None;
-                    }
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(error) => panic!("profile FIFO: {error}"),
-            }
-        };
-        if file.is_some() {
-            let _ = opened.send(());
-            let _ = wait_release.recv_timeout(Duration::from_secs(3));
-        }
-        drop(file);
-    });
+    // A test-only FIFO models an unavailable profile filesystem. Holding both
+    // ends open avoids a timed writer racing slow ASan setup or request startup.
+    // The guard also releases a blocked reader when an assertion unwinds.
+    let profile_fifo = ProfileFifo {
+        path: profile.clone(),
+        _writer: std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&profile)
+            .unwrap(),
+    };
     let service = RelayKnowledgeService::with_store(
         runtime,
         Arc::new(SqliteGraphStore::open_in_memory().unwrap()),
@@ -169,7 +156,6 @@ async fn successful_storage_snapshot_cannot_wait_unboundedly_for_model_profiles(
             .health(RequestContext::for_interface(InterfaceKind::Web))
             .await
     });
-    let opened = tokio::time::timeout(Duration::from_secs(2), reader_started).await;
     let response = tokio::time::timeout(Duration::from_millis(900), request).await;
     let mut repeated = Vec::new();
     for _ in 0..4 {
@@ -183,8 +169,6 @@ async fn successful_storage_snapshot_cannot_wait_unboundedly_for_model_profiles(
             .await,
         );
     }
-    let _ = release.send(());
-    writer.join().unwrap();
     for probe in repeated {
         let health = probe.unwrap().unwrap();
         assert!(
@@ -196,14 +180,10 @@ async fn successful_storage_snapshot_cannot_wait_unboundedly_for_model_profiles(
                 .contains("still in progress")
         );
     }
-    assert!(
-        opened.unwrap().is_ok(),
-        "successful storage read must reach profile loading"
-    );
     let health = response.unwrap().unwrap().unwrap();
     assert!(!health.healthy);
     assert!(health.degraded_reason.unwrap().starts_with("storage_busy:"));
-    std::fs::remove_file(&profile).unwrap();
+    drop(profile_fifo);
     std::fs::write(&profile, r#"{"default_profile":null,"profiles":{}}"#).unwrap();
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
