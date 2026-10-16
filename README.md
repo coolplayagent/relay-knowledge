@@ -49,15 +49,16 @@ target/debug/relay-knowledge health --format json
 target/debug/relay-knowledge help --format json
 ```
 
-代理支持 `host:port`；非法代理会在诊断中提示并回退直连。大库健康快照可通过 `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` 调整有界等待，详见[高级配置与维护诊断](docs/zh/01-user-guide/12-advanced-configuration.md#125-网络与-qos)。
+Proxies accept `host:port`; invalid values produce a diagnostic warning and fall back to a direct connection. Configure the bounded health wait with `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS`; see [advanced configuration and maintenance diagnostics](docs/en/01-user-guide/12-advanced-configuration.md#125-network-and-qos).
 
 ## Installing Releases
 
-Version 1.1.21 fixes permanent index-task failures, bounds large impact queries
-within SQLite limits, and keeps source fallback within intersected path scopes.
-See the [1.1.21 release notes](pages/en/releases/1.1.21.html) for installation,
-upgrade, and rollback guidance. Preserve runtime tasks and private feedback journals
-when upgrading; Repository Map v4 still requires a 1.1.17 or newer reader.
+Version 1.1.22 accepts Windows-style proxy authorities and keeps local diagnostics
+available with explicit warnings for invalid proxies. Health checks have configurable,
+cancellable deadlines and expose maintenance advice in CLI and Web responses.
+See the [1.1.22 release notes](pages/en/releases/1.1.22.html) for installation,
+upgrade, and rollback guidance. Restart managed services after changing their health
+budget; preserve runtime state and use full HTTP(S) proxy URLs before rollback.
 
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)
 provide prebuilt archives for Linux x64/ARM64, macOS Intel/Apple Silicon, and

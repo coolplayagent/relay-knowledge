@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="relay-knowledge 1.1.22: Windows proxy compatibility and bounded health diagnostics." />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.22 release notes</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="Page navigation">
+        <a href="../">English documentation</a>
+        <a href="../../zh/releases/1.1.22.html">中文</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.22">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.22 release notes</h1>
+        <p>This patch accepts Windows-style proxy addresses, keeps local diagnostics available when a proxy is invalid, and gives health checks cancellable deadlines with actionable maintenance advice.</p>
+        <p>Release date: October 16, 2026.</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.22">Release downloads</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.22">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.22/checksums.txt">Checksums</a>
+        </p>
+      </section>
+      <section class="section">
+        <h2>Install and verify</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.22 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json
+relay-knowledge service doctor --format json</code></pre>
+        <p>Download the archive for your platform and verify its checksum and GitHub attestation before installation. The separate CLI skill archive includes the same version's Linux x64 and Windows x64 binaries.</p>
+      </section>
+      <section class="section">
+        <h2>What changed</h2>
+        <ul>
+          <li>HTTP(S) proxies accept <code>host:port</code>, IPv4 and bracketed IPv6 authorities. Invalid, empty or non-Unicode environment proxy values fall back to a direct connection with a credential-free <code>runtime.http_proxy_warning</code>; TLS verification and NO_PROXY policy remain in effect.</li>
+          <li><code>RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS</code> defaults to 500 ms and accepts 1–30000 ms. The effective budget reserves time before the shortest issued HTTP request deadline and covers storage snapshots, model-profile loading and response assembly.</li>
+          <li>Health SQLite reads use nonblocking admission and observe request cancellation, including partition catalog and totals reads. A timeout retains explicit <code>storage_busy</code>, stale and unhealthy state without increasing SQLite busy timeouts.</li>
+          <li>All service clones share at most one profile-read worker with no waiting queue. Its permit lasts until the filesystem read finishes, even after request cancellation. Repeated probes return cached or uninspected summaries with pending/stale diagnostics; fallback responses do not reload profile files.</li>
+          <li>CLI and Web Runtime diagnostics expose proxy warnings, effective budgets, degradation reasons and maintenance advice. Partitioned maintenance timestamps preserve the oldest record; missing or unreadable history remains unknown.</li>
+          <li>Observed large WAL files, overdue or failed maintenance, and missing history receive inspection advice. Timeout alone does not establish WAL pressure. Health probes do not perform checkpoints or delete WAL files; setup doctor proxy warnings do not block configuration readiness.</li>
+        </ul>
+      </section>
+      <section class="section">
+        <h2>Upgrade and rollback</h2>
+        <p class="notice">Back up runtime databases and all shards, private feedback journals, and repository-owned maps and research artifacts. Stop resident services and drain or cancel active work before replacing binaries or restoring a consistent backup.</p>
+        <p>This patch adds no database or map schema migration and no runtime directory. Preserve runtime configuration, databases, shards, task leases, checkpoints and retry deadlines. Existing Repository Map v4 and Windows SID/ACL requirements remain unchanged.</p>
+        <p>For slow stores, configure the managed service environment with a health budget such as 5000 ms, then restart the service. <code>runtime.health_storage_budget_ms</code> reports the effective value, which remains below the shortest issued HTTP timeout. Raising that ceiling also requires a restart; initial database opening and schema initialization remain startup work.</p>
+        <p>Inspect <code>runtime.http_proxy_warning</code> separately from <code>storage_busy</code> or <code>storage_cold</code>. Deployments that require a proxy must correct any direct-fallback warning. Run <code>service doctor</code> and review managed-service maintenance logs before scheduling a checkpoint; retain WAL files and runtime state.</p>
+        <p>Before rollback, stop all writers, retain or restore a consistent backup, and set complete HTTP(S) proxy URLs. Version 1.1.21 lacks the configurable health budget and may reproduce the fixed proxy or timeout behavior. Uninstalling the binary must preserve runtime data and repository-owned artifacts unless deletion is explicitly requested.</p>
+      </section>
+      <section class="section">
+        <h2>Check the effective budget</h2>
+        <p>The following is a POSIX shell example for one CLI invocation. Configure the equivalent environment in your platform service manager for background operation.</p>
+        <pre><code class="language-bash">RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS=5000 relay-knowledge health --format json
+relay-knowledge setup doctor --format json
+relay-knowledge service doctor --format json</code></pre>
+      </section>
+      <section class="section">
+        <h2>Release packages</h2>
+        <ul>
+          <li>Linux x64 and ARM64 on the glibc 2.28 baseline</li>
+          <li>macOS Intel and Apple Silicon</li>
+          <li>Windows x64 and ARM64; ARM64 is cross-built</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.22.tar.gz</code> with agent instructions, schemas and bundled binaries</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+      <section class="section">
+        <h2>Further reading</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.22/docs/en/01-user-guide/12-advanced-configuration.md">Proxy and health configuration</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.22/docs/en/01-user-guide/06-web-workspace.md">Web Runtime diagnostics</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.22/docs/en/03-architecture-specs/19-installation-release-and-upgrade.md">Installation, release and upgrade</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

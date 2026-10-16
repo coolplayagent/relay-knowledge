@@ -46,10 +46,10 @@ target/debug/relay-knowledge help --format json
 
 ## 安装发布版
 
-1.1.21 修复索引任务永久失败处理，使大型影响分析遵守 SQLite 参数与内存限制，
-并确保来源回退遵守路径范围交集。安装、升级和回滚说明见
-[1.1.21 发布说明](pages/zh/releases/1.1.21.html)。升级时保留运行时任务和私有反馈 journal；
-Repository Map v4 仍要求 1.1.17 或更新的 reader。
+1.1.22 支持 Windows 风格的代理地址，非法代理以显式警告降级，保持本地诊断可用。
+健康检查支持可配置、可取消的截止时间，并在 CLI 与 Web 中显示维护建议。
+安装、升级和回滚说明见 [1.1.22 发布说明](pages/zh/releases/1.1.22.html)。
+更改健康预算后重启托管服务；保留运行时状态，回滚前使用完整 HTTP(S) 代理 URL。
 
 [GitHub Releases](https://github.com/coolplayagent/relay-knowledge/releases)
 提供 Linux x64/ARM64、macOS Intel/Apple Silicon 和 Windows x64/ARM64

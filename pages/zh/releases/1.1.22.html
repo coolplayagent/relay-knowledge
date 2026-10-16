@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="relay-knowledge 1.1.22：Windows 代理兼容与有界健康诊断。" />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+    <title>relay-knowledge 1.1.22 发布说明</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="../">relay-knowledge</a>
+      <nav aria-label="页面导航">
+        <a href="../">中文文档</a>
+        <a href="../../en/releases/1.1.22.html">English</a>
+        <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.22">GitHub Release</a>
+      </nav>
+    </header>
+    <main class="page release-note">
+      <section class="section">
+        <h1>relay-knowledge 1.1.22 发布说明</h1>
+        <p>本补丁支持 Windows 风格的代理地址，在代理无效时保留本地诊断，并为健康检查提供可取消的截止时间及维护建议。</p>
+        <p>发布日期：2026 年 10 月 16 日。</p>
+        <p class="links">
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/tag/v1.1.22">发布与下载</a>
+          <a href="https://crates.io/crates/relay-knowledge/1.1.22">crates.io</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/releases/download/v1.1.22/checksums.txt">Checksums</a>
+        </p>
+      </section>
+      <section class="section">
+        <h2>安装与验证</h2>
+        <pre><code>cargo install relay-knowledge --version 1.1.22 --locked
+relay-knowledge version --format json
+relay-knowledge map validate --type all --format json
+relay-knowledge service doctor --format json</code></pre>
+        <p>下载适合平台的压缩包，安装前校验 checksum 和 GitHub attestation。独立 CLI Skill 压缩包包含同版本的 Linux x64 与 Windows x64 二进制。</p>
+      </section>
+      <section class="section">
+        <h2>本版变化</h2>
+        <ul>
+          <li>HTTP(S) 代理支持 <code>host:port</code>、IPv4 和带方括号的 IPv6 地址。非法、空或非 Unicode 环境代理回退直连，并通过 <code>runtime.http_proxy_warning</code> 提供不含凭据的警告；TLS 验证与 NO_PROXY 策略继续生效。</li>
+          <li><code>RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS</code> 默认 500ms，范围为 1–30000ms。生效预算在历次已发布 HTTP request timeout 的最小值之前预留时间，同时覆盖存储快照、model profile 读取与响应组装。</li>
+          <li>健康 SQLite 读取采用非阻塞准入并响应请求取消，包含分片目录与 totals 读取。超时保留显式 <code>storage_busy</code>、stale 和不健康状态，不增加 SQLite busy timeout。</li>
+          <li>所有服务克隆共享最多一个 profile 读取 worker，无等待队列；即使请求取消，准入令牌也保留到实际文件读取结束。重复探测返回带 pending/stale 说明的缓存或未检查摘要，降级响应不会重新读取 profile 文件。</li>
+          <li>CLI 与 Web Runtime 诊断展示代理警告、生效预算、降级原因及维护建议。分片维护时间取最旧记录；任何记录缺失或不可读时保留未知状态。</li>
+          <li>对已观察到的大 WAL、过期或失败维护、缺失维护历史给出排查建议。超时本身不证明 WAL 压力；健康检查不执行 checkpoint，也不删除 WAL。setup doctor 的代理警告不阻断配置 readiness。</li>
+        </ul>
+      </section>
+      <section class="section">
+        <h2>升级与回滚</h2>
+        <p class="notice">备份运行时数据库及全部分片、私有反馈 journal、仓库拥有的地图和研究材料。替换二进制或恢复一致备份前，停止常驻服务并等待或取消活动任务。</p>
+        <p>本补丁不增加数据库或地图 schema migration，也不增加运行时目录。保留运行时配置、数据库、全部分片、任务 lease、checkpoint 和重试期限。既有 Repository Map v4 与 Windows SID/ACL 要求继续有效。</p>
+        <p>慢存储可先在托管服务环境中设置 5000ms 健康预算，然后重启服务。<code>runtime.health_storage_budget_ms</code> 返回生效值，仍受历次已发布 HTTP timeout 最小值限制；提高该上限也需要重启。初次数据库打开和 schema 初始化仍属于启动流程。</p>
+        <p>分别检查 <code>runtime.http_proxy_warning</code> 与 <code>storage_busy</code>/<code>storage_cold</code>。要求强制代理的部署必须修正直连降级警告。安排 checkpoint 前先运行 <code>service doctor</code> 并检查托管服务维护日志；保留 WAL 文件与运行时状态。</p>
+        <p>回滚前停止全部 writer，保留或恢复一致备份，并设置完整 HTTP(S) 代理 URL。1.1.21 没有可配置健康预算，可能重现已修复的代理或超时行为。卸载二进制时应保留运行时数据及仓库拥有的材料，除非明确请求删除。</p>
+      </section>
+      <section class="section">
+        <h2>检查生效预算</h2>
+        <p>以下为单次 CLI 调用的 POSIX shell 示例。后台运行时应在平台服务管理器中配置对应环境变量。</p>
+        <pre><code class="language-bash">RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS=5000 relay-knowledge health --format json
+relay-knowledge setup doctor --format json
+relay-knowledge service doctor --format json</code></pre>
+      </section>
+      <section class="section">
+        <h2>发布产物</h2>
+        <ul>
+          <li>Linux x64 与 ARM64，使用 glibc 2.28 基线</li>
+          <li>macOS Intel 与 Apple Silicon</li>
+          <li>Windows x64 与 ARM64；ARM64 采用交叉构建</li>
+          <li><code>relay-knowledge-cli-skill-v1.1.22.tar.gz</code>，含 agent 指令、Schema 和内置二进制</li>
+        </ul>
+        <pre><code>sha256sum -c checksums.txt
+gh attestation verify &lt;artifact&gt; -R coolplayagent/relay-knowledge</code></pre>
+      </section>
+      <section class="section">
+        <h2>进一步阅读</h2>
+        <div class="link-grid">
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.22/docs/zh/01-user-guide/12-advanced-configuration.md">代理与健康诊断配置</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.22/docs/zh/01-user-guide/06-web-workspace.md">Web Runtime 诊断</a>
+          <a href="https://github.com/coolplayagent/relay-knowledge/blob/v1.1.22/docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md">安装、发布与升级</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

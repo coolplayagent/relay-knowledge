@@ -10,7 +10,7 @@ on:
       dry_run_tag:
         description: Tag-like version to validate without creating a release.
         required: true
-        default: v1.1.21
+        default: v1.1.22
 
 permissions:
   contents: read
@@ -496,32 +496,40 @@ jobs:
         run: |
           set -euo pipefail
           cat > release-notes.md <<'NOTES'
-          ## Version 1.1.21
+          ## Version 1.1.22
 
-          This patch fixes permanent index-task recovery, large impact queries,
-          and source-fallback path filtering:
+          This patch fixes Windows proxy compatibility and bounds health diagnostics:
 
-          - Immutable delta owners exceeding their frozen budget become dead letters
-            with resource_budget_exceeded; terminal clone checkpoints no longer block
-            later valid targets. Leases, failure history and published facts remain intact.
-          - Impact evidence batches path and symbol seeds within SQLite's bind limit
-            and streams every batch through a bounded, deduplicating top-k merge.
-          - Source fallback intersects registered and requested path scopes before
-            discovery and reads, preserving complete-segment matching and empty scopes.
+          - HTTP(S) proxies accept host:port and bracketed IPv6 authorities. Invalid
+            proxies fall back to direct connections with credential-free warnings;
+            local status, health and setup doctor remain available.
+          - RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS configures a 1-30000 ms budget
+            (default 500 ms), capped below the shortest issued HTTP deadline. The
+            budget includes storage reads, profile loading and response assembly.
+          - Health SQLite reads use nonblocking admission and cancellation. Profile
+            reads share one worker without a queue; timed-out callers cannot spawn
+            more reads, and pending probes return explicit cached/uninspected state.
+          - CLI and Web diagnostics expose observed WAL/maintenance advice and the
+            oldest partition maintenance time. Timeout alone is not a WAL diagnosis;
+            health probes never perform checkpoints or delete WAL files.
 
           ## Upgrade
 
-          Stop resident services and drain or cancel active work before replacing
+          Stop managed services and drain or cancel active work before replacing
           binaries; back up runtime databases, shards, private feedback journals and
           repository-owned maps and research artifacts. No schema migration or runtime
           directory is added. Preserve tasks, leases, checkpoints and retry deadlines.
-          Repair oversized source artifacts in a new commit and submit that immutable
-          head once; repo index --reset does not revive dead letters or change inputs.
-          Verify last_indexed_commit, stale=false and content_integrity after recovery.
-          Stop writers before rollback and restore a consistent backup when needed;
-          1.1.20 may reproduce the fixed failures. Repository Map v4 requires 1.1.17+.
+          Configure the managed service environment and restart to change its health
+          budget or raise the HTTP deadline ceiling. A 5000 ms health budget is a
+          starting point for slow stores, subject to the effective HTTP deadline.
+          Check runtime.http_proxy_warning separately from storage_busy/storage_cold.
+          Deployments requiring a proxy must correct any direct-fallback warning.
+          Use complete HTTP(S) proxy URLs before rolling back to 1.1.21; the older
+          binary does not provide this health budget and may reproduce the failures.
+          Repository Map v4 still requires a 1.1.17 or newer reader.
 
-          Full notes: https://coolplayagent.github.io/relay-knowledge/en/releases/1.1.21.html
+          Full notes: https://coolplayagent.github.io/relay-knowledge/en/releases/1.1.22.html
+          中文: https://coolplayagent.github.io/relay-knowledge/zh/releases/1.1.22.html
 
           ## Install
 

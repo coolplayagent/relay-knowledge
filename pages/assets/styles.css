@@ -112,6 +112,11 @@ p {
   margin-top: 8px;
 }
 
+.release-note p,
+.release-note li {
+  overflow-wrap: anywhere;
+}
+
 .release-note code {
   padding: 2px 5px;
   border-radius: 4px;
