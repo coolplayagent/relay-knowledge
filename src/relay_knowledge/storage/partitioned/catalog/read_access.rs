@@ -9,7 +9,7 @@ impl SqliteShardCatalog {
     pub(in crate::storage::partitioned) async fn cached_health_shards(
         &self,
     ) -> Result<Vec<(String, Arc<SqliteGraphStore>)>, StorageError> {
-        let ids = self.repository_ids().await?;
+        let ids = self.diagnostic_repository_ids().await?;
         let cache = self.cache.try_lock().map_err(|error| match error {
             std::sync::TryLockError::Poisoned(_) => StorageError::LockPoisoned,
             std::sync::TryLockError::WouldBlock => {
@@ -47,7 +47,7 @@ impl SqliteShardCatalog {
     pub(in crate::storage::partitioned) async fn diagnostic_repository_ids(
         &self,
     ) -> Result<Vec<String>, StorageError> {
-        self.control.run_read(|connection| {
+        self.control.try_run_read(|connection| {
             let limit = crate::storage::sqlite::MAX_SQLITE_DIAGNOSTIC_SHARDS;
             let mut statement = connection.prepare("SELECT repository_id FROM storage_repository_shards WHERE state = 'active' ORDER BY repository_id ASC LIMIT ?1")?;
             let ids = statement.query_map([limit + 1], |row| row.get::<_, String>(0))?

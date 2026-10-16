@@ -73,6 +73,8 @@ Any entry point that bypasses this order is an architecture defect.
 
 Windows CI also runs the proxy and local-diagnostics binary integration cases to cover native child-process environment handling and direct fallback.
 
+Health storage budgets shrink against the current HTTP timeout, reserving up to 100ms for response assembly (half the timeout for short deadlines). Partitioned health catalog, totals, and SQLite diagnostic reads all use bounded, cancellable admission without queueing; the catalog admits at most 1,024 active shards. Degraded fallback never reads profile files: it uses the cached summary or an explicit uninspected state.
+
 ## 7. Acceptance Criteria
 
 - Only `env` reads environment variables, only `paths` constructs runtime paths, and only `net` creates network capabilities.

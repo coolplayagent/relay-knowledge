@@ -107,6 +107,40 @@ async fn health_budget_allows_slow_snapshot_and_keeps_cached_timeout_explicit() 
 }
 
 #[tokio::test]
+async fn health_returns_storage_busy_before_a_short_http_deadline() {
+    let mut service = service_with_store(Arc::new(SlowLegacyHealthStore)).await;
+    service.runtime.storage.health_budget = Duration::from_secs(30);
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::current(),
+        [
+            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS", "200"),
+        ],
+    )
+    .unwrap();
+    service
+        .refresh_network_from_environment(&environment)
+        .await
+        .unwrap();
+    let response = tokio::time::timeout(
+        Duration::from_millis(200),
+        service.health(RequestContext::for_interface(InterfaceKind::Web)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(!response.healthy);
+    assert!(response.metadata.stale);
+    assert_eq!(response.runtime.health_storage_budget_ms, 100);
+    assert!(
+        response
+            .degraded_reason
+            .unwrap()
+            .starts_with("storage_busy:")
+    );
+}
+
+#[tokio::test]
 async fn service_plan_metadata_uses_current_graph_version() {
     let service = service_with_store(Arc::new(GraphOnlySearchStore)).await;
 

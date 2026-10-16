@@ -242,7 +242,9 @@ fn setup_doctor(service: &RelayKnowledgeService, context: RequestContext) -> Set
         ),
     });
 
-    let configuration_ready = checks.iter().all(|check| check.state == "ok");
+    let configuration_ready = checks
+        .iter()
+        .all(|check| matches!(check.state, "ok" | "warning"));
 
     actions.push(SetupAction {
         command: "relay-knowledge health --format json",

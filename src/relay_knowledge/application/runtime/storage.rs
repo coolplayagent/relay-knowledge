@@ -10,6 +10,16 @@ pub struct StorageRuntimeConfig {
 }
 
 impl StorageRuntimeConfig {
+    /// Reserves response time below even a dynamically shortened HTTP deadline.
+    pub(in crate::application) fn health_budget_for_request(
+        &self,
+        request_timeout: Duration,
+    ) -> Duration {
+        let reserve = Duration::from_millis(100).min(request_timeout / 2);
+        self.health_budget
+            .min(request_timeout.saturating_sub(reserve))
+    }
+
     pub fn from_environment(
         environment: &EnvironmentConfig,
     ) -> Result<Self, StorageRuntimeConfigError> {

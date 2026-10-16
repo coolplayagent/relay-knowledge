@@ -37,7 +37,9 @@ impl RelayKnowledgeService {
     pub async fn health(&self, context: RequestContext) -> Result<HealthResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
         match tokio::time::timeout(
-            self.runtime.storage.health_budget,
+            self.runtime
+                .storage
+                .health_budget_for_request(self.runtime.network.current().http.request_timeout),
             self.health_storage_report(&store),
         )
         .await
@@ -72,7 +74,9 @@ impl RelayKnowledgeService {
         }
 
         match tokio::time::timeout(
-            self.runtime.storage.health_budget,
+            self.runtime
+                .storage
+                .health_budget_for_request(self.runtime.network.current().http.request_timeout),
             self.storage_free_health(context.clone()),
         )
         .await
@@ -86,7 +90,11 @@ impl RelayKnowledgeService {
 
     async fn storage_free_health(&self, context: RequestContext) -> HealthResponse {
         let storage = self
-            .storage_topology_diagnostics_with_budget(self.runtime.storage.health_budget)
+            .storage_topology_diagnostics_with_budget(
+                self.runtime
+                    .storage
+                    .health_budget_for_request(self.runtime.network.current().http.request_timeout),
+            )
             .await;
         let degraded_reason = storage.degraded_reason.clone();
 
@@ -124,7 +132,11 @@ impl RelayKnowledgeService {
             }
             Err(error) => {
                 let storage = self
-                    .storage_topology_diagnostics_with_budget(self.runtime.storage.health_budget)
+                    .storage_topology_diagnostics_with_budget(
+                        self.runtime.storage.health_budget_for_request(
+                            self.runtime.network.current().http.request_timeout,
+                        ),
+                    )
                     .await;
                 if storage.missing_shard_count == 0 {
                     return Err(error);
@@ -142,7 +154,11 @@ impl RelayKnowledgeService {
             }
         };
         let storage = self
-            .storage_topology_diagnostics_with_budget(self.runtime.storage.health_budget)
+            .storage_topology_diagnostics_with_budget(
+                self.runtime
+                    .storage
+                    .health_budget_for_request(self.runtime.network.current().http.request_timeout),
+            )
             .await;
 
         Ok(HealthStorageReport {
@@ -275,9 +291,7 @@ impl RelayKnowledgeService {
             response.degraded_reason = Some(degraded_reason);
             response.runtime = runtime_status_with_model_profiles(
                 &self.runtime,
-                self.model_provider_config()
-                    .profile_summary(&self.runtime.retrieval)
-                    .await,
+                response.runtime.model_profiles.clone(),
             );
             return response;
         }
@@ -300,9 +314,15 @@ impl RelayKnowledgeService {
             file_index: FileIndexDiagnostics::default(),
             runtime: runtime_status_with_model_profiles(
                 &self.runtime,
-                self.model_provider_config()
-                    .profile_summary(&self.runtime.retrieval)
-                    .await,
+                crate::model_provider::ModelProfileRuntimeSummary {
+                    loaded: false,
+                    profile_count: 0,
+                    default_profile: None,
+                    error: Some(
+                        "model profiles were not inspected during degraded health fallback"
+                            .to_owned(),
+                    ),
+                },
             ),
         }
     }

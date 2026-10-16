@@ -73,6 +73,8 @@ CLI、Web 和 service mode 共享同一组 application services。启动顺序�
 
 Windows CI 另外运行代理与本地诊断的二进制集成用例，覆盖 Windows 子进程环境传递及直连降级。
 
+健康存储预算会按当前 HTTP timeout 缩短，为响应保留最多 100ms（短 timeout 使用一半）。分片健康查询的目录、totals 和 SQLite 诊断均使用有界、可取消且不排队的读准入；目录最多接纳 1,024 个活跃分片。降级缓存不读取 profile 文件，使用已缓存 summary 或明确未检查状态。
+
 ## 7. 验收标准
 
 - 仓库内只有 `env` 读取环境变量，只有 `paths` 构造运行时路径，只有 `net` 创建网络能力。

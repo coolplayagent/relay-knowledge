@@ -148,6 +148,8 @@ Proxy selection checks `HTTPS_PROXY`, `HTTP_PROXY`, then `ALL_PROXY` (including 
 
 `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` controls the health storage snapshot budget: 500ms by default, with a supported range of 1–30000ms. Try 5000 for a large database; `runtime.health_storage_budget_ms` reports the effective value. The budget covers snapshot and topology reads, including legacy fallback; initial database open and schema initialization remain startup work. Timeout responses retain `healthy=false`, `metadata.stale=true`, and `storage_busy`. Cancelled SQLite diagnostic queries release their read connections without increasing SQLite busy timeouts.
 
+The effective budget is the smaller of the configured value and `HTTP request timeout - min(100ms, request timeout / 2)`, including after network configuration refresh, leaving time for fallback JSON. Cached fallback reuses its model-profile summary; uncached fallback marks profiles as uninspected, without reading files. Catalog discovery and control/shard totals also use cancellable SQLite reads. Proxy warnings do not block setup doctor `configuration_ready`.
+
 ```powershell
 $env:HTTPS_PROXY = "proxy.example:8080"
 $env:RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS = "5000"

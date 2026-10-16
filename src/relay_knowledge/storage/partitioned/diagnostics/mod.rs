@@ -6,8 +6,8 @@ use std::path::Path;
 use crate::paths::RuntimePaths;
 use crate::storage::sqlite::read_only_shard_diagnostics;
 use crate::storage::{
-    CodeQueryReadStore, GraphInspection, GraphStore, HealthStorageSnapshot,
-    SqliteStorageDiagnostics, StorageError, StorageTopologySnapshot,
+    GraphInspection, GraphStore, HealthStorageSnapshot, SqliteStorageDiagnostics, StorageError,
+    StorageTopologySnapshot,
 };
 
 use super::{
@@ -77,7 +77,7 @@ pub(super) async fn health_snapshot(
     let mut snapshot = store.control.health_snapshot(now_ms).await?;
     snapshot.repository_code_totals = store
         .control
-        .code_repository_totals_excluding(shards.iter().map(|(id, _)| id.clone()).collect())
+        .health_repository_totals(shards.iter().map(|(id, _)| id.clone()).collect())
         .await?;
     let mut aggregate = SqliteDiagnosticsAggregate::new();
     aggregate.push("control", snapshot.graph.sqlite);
@@ -91,7 +91,7 @@ pub(super) async fn health_snapshot(
         }
         super::totals::add_code_repository_totals(
             &mut snapshot.repository_code_totals,
-            shard.code_repository_totals().await?,
+            shard.health_repository_totals(Vec::new()).await?,
         );
     }
     snapshot.graph.sqlite = aggregate.finish();

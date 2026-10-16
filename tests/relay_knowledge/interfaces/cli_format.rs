@@ -561,6 +561,7 @@ fn binary_local_diagnostics_accept_windows_proxy_and_report_invalid_proxy() {
                     invalid
                 );
                 assert_eq!(response["live_health_checked"], false);
+                assert_eq!(response["configuration_ready"], true);
             } else {
                 assert_eq!(response["runtime"]["http_proxy_configured"], !invalid);
                 assert_eq!(

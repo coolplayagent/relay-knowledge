@@ -4,13 +4,18 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde_json::json;
+use axum::http::StatusCode;
+use serde_json::{Value, json};
+
+use super::test_support::SlowSearchStore;
 
 use super::tests::{
-    call_mcp_with_session, initialize_session, server_and_service, tool_call, tool_names,
+    call_mcp, call_mcp_with_session, initialize_session, raw_custom_request, server_and_service,
+    server_and_service_with_store, tool_call, tool_names,
 };
 use super::*;
 use crate::{
@@ -18,6 +23,7 @@ use crate::{
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{CodeIndexMode, CodeIndexRequest, CodeRepositorySelector, FreshnessPolicy},
     env::{EnvironmentConfig, PlatformKind},
+    interfaces::agent::AgentAuditStatus,
 };
 
 #[tokio::test]
@@ -281,4 +287,123 @@ fn unique_temp_dir(name: &str) -> PathBuf {
     ));
     let _ = fs::remove_dir_all(&path);
     path
+}
+
+#[tokio::test]
+async fn tool_timeout_returns_json_rpc_tool_error() {
+    let store = Arc::new(SlowSearchStore);
+    let (server, _service) = server_and_service_with_store(
+        [
+            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+            ("RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS", "10"),
+        ],
+        store,
+    )
+    .await;
+    let mut router = server.router();
+
+    let response = tool_call(
+        &mut router,
+        "slow-search",
+        "relay_retrieve_context",
+        json!({"query": "slow", "source_scope": "docs"}),
+    )
+    .await;
+
+    assert_eq!(response["result"]["isError"], true);
+    assert_eq!(
+        response["result"]["structuredContent"]["error_kind"],
+        "timeout"
+    );
+}
+
+#[tokio::test]
+async fn resources_and_metrics_respect_runtime_timeout() {
+    let store = Arc::new(SlowSearchStore);
+    let (mut server, _service) = server_and_service_with_store(
+        [
+            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+            ("RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS", "1000"),
+        ],
+        store,
+    )
+    .await;
+    // Keep the adapter deadline shorter than the storage budget so this test
+    // exercises transport cancellation instead of a successful degraded health read.
+    server.agent.access_policy.max_runtime_ms = 10;
+    let mut router = server.clone().router();
+
+    let resource = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "slow-health-resource",
+            "method": "resources/read",
+            "params": {"uri": "relay://service/health"}
+        }),
+    )
+    .await;
+    let metrics = raw_custom_request(&mut router, "GET", "/mcp/metrics", "", []).await;
+
+    assert_eq!(resource["error"]["code"], -32000);
+    assert!(
+        resource["error"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("max_runtime_ms")
+    );
+    assert_eq!(metrics.0, StatusCode::REQUEST_TIMEOUT);
+    assert_eq!(server.qos_snapshot().in_flight_requests, 0);
+
+    let audit = server.audit_snapshot();
+    let resource_audit = audit
+        .iter()
+        .find(|event| event.operation == "resources/read")
+        .expect("resources/read audit event");
+    assert_eq!(resource_audit.status, AgentAuditStatus::Failed);
+    assert_eq!(resource_audit.error_kind.as_deref(), Some("timeout"));
+}
+
+#[tokio::test]
+async fn health_resource_and_metrics_return_before_the_shared_request_deadline() {
+    let (server, _service) = server_and_service_with_store(
+        [("RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS", "100")],
+        Arc::new(SlowSearchStore),
+    )
+    .await;
+    let mut router = server.clone().router();
+    let resource = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "degraded-health-resource",
+            "method": "resources/read",
+            "params": {"uri": "relay://service/health"}
+        }),
+    )
+    .await;
+    let health: Value = serde_json::from_str(
+        resource["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("health resource remains readable"),
+    )
+    .expect("health JSON");
+    assert_eq!(health["healthy"], false);
+    assert!(
+        health["degraded_reason"]
+            .as_str()
+            .unwrap()
+            .starts_with("storage_busy:")
+    );
+    assert_eq!(health["runtime"]["health_storage_budget_ms"], 50);
+    let metrics = raw_custom_request(&mut router, "GET", "/mcp/metrics", "", []).await;
+    assert_eq!(metrics.0, StatusCode::OK);
+    assert_eq!(server.qos_snapshot().in_flight_requests, 0);
+    let audit = server.audit_snapshot();
+    let resource_audit = audit
+        .iter()
+        .find(|event| event.operation == "resources/read")
+        .expect("resources/read audit event");
+    assert_eq!(resource_audit.status, AgentAuditStatus::Completed);
+    assert_eq!(resource_audit.error_kind, None);
 }

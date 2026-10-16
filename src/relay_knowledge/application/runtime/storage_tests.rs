@@ -102,3 +102,23 @@ fn validates_health_snapshot_budget_and_environment_errors() {
             .contains("30000")
     );
 }
+
+#[test]
+fn health_budget_reserves_time_for_http_fallback_assembly() {
+    let mut config =
+        StorageRuntimeConfig::from_environment(&storage_topology_test_environment(None)).unwrap();
+    assert_eq!(
+        config.health_budget_for_request(Duration::from_secs(30)),
+        Duration::from_millis(500)
+    );
+    config.health_budget = Duration::from_secs(30);
+    for (request, expected) in [(30_000, 29_900), (1000, 900), (100, 50), (10, 5)] {
+        let budget = config.health_budget_for_request(Duration::from_millis(request));
+        assert_eq!(budget, Duration::from_millis(expected));
+        assert!(budget < Duration::from_millis(request));
+    }
+    assert_eq!(
+        config.health_budget_for_request(Duration::from_millis(1)),
+        Duration::from_micros(500)
+    );
+}

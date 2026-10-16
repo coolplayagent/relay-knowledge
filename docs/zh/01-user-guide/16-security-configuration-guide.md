@@ -457,7 +457,7 @@ OIDC/token 身份网关加 ACL，或完整 mTLS：验证受信任的客户端证
 | `NO_PROXY` / `no_proxy` | 不走代理的域名/IP（逗号分隔） |
 | `SSL_VERIFY` / `ssl_verify` | 出站 HTTPS 证书验证，默认 `true` |
 
-代理 URL 必须为 `http://` 或 `https://` 协议且包含有效的主机名，否则 `HttpConfigError::InvalidProxyUrl`。
+代理支持有效的 HTTP(S) URL 或自动补 `http://` 的 `host:port`（含 IPv4、带方括号的 IPv6）。非法、空或非 Unicode 环境代理被忽略并回退直连，TLS 验证策略不变；`runtime.http_proxy_warning` 和 setup doctor 给出脱敏 `invalid_proxy` warning，warning 不阻断本地 readiness。客户端不会重新读取被忽略的环境代理；强制代理的部署应在发现 warning 时修正配置。显式编程接口 `HttpProxyConfig::new` 对非法地址仍返回 `HttpConfigError::InvalidProxyUrl`。
 
 ### 16.6.3 防火墙规则
 
@@ -492,6 +492,7 @@ iptables -A INPUT -p tcp --dport 8791 -j DROP
 | --- | --- | --- | --- |
 | `RELAY_KNOWLEDGE_HTTP_BIND` | `host:port` | `127.0.0.1:8791` | HTTP 监听地址 |
 | `RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS` | 正整数 (ms) | `30000` | 单次 HTTP 请求超时（含 MCP tool call 的最大执行时间） |
+| `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` | 正整数 (1–30000ms) | `500` | health 存储预算；实际值在 HTTP deadline 前预留最多 100ms，由 `runtime.health_storage_budget_ms` 报告 |
 | `RELAY_KNOWLEDGE_HTTP_SHUTDOWN_TIMEOUT_MS` | 正整数 (ms) | `10000` | 优雅关闭超时 |
 | `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` | 正整数 | `1048576` | HTTP 请求体最大字节数（1 MiB） |
 | `RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS` | 正整数 | `1024` | QoS 最大并发连接数 |
@@ -522,9 +523,9 @@ iptables -A INPUT -p tcp --dport 8791 -j DROP
 
 | 环境变量 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `HTTPS_PROXY` / `https_proxy` | URL | 空 | HTTPS 出站代理（优先于 `HTTP_PROXY`） |
-| `HTTP_PROXY` / `http_proxy` | URL | 空 | HTTP 出站代理 |
-| `ALL_PROXY` / `all_proxy` | URL | 空 | 通用代理回退 |
+| `HTTPS_PROXY` / `https_proxy` | URL / host:port | 空 | HTTPS 出站代理（优先于 `HTTP_PROXY`） |
+| `HTTP_PROXY` / `http_proxy` | URL / host:port | 空 | HTTP 出站代理 |
+| `ALL_PROXY` / `all_proxy` | URL / host:port | 空 | 通用代理回退 |
 | `NO_PROXY` / `no_proxy` | CSV | 空 | 不走代理的域名/IP |
 | `SSL_VERIFY` / `ssl_verify` | bool | `true` | 出站 HTTPS 证书验证 |
 

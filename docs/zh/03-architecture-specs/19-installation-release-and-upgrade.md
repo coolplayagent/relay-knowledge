@@ -132,7 +132,7 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 超过任一限制都明确失败。每个分片首次打开还会在现有 blocking worker 中通过有界异步
 子进程检查具体路径、父目录和 sidecar，由独立的 `catalog::store_access` 模块负责，
 缓存句柄不重复启动校验，安全检查期间不持有共享 cache 锁。同步分片入口先以 open-or-create 策略校验 control 路径，再创建目录、打开 SQLite 和迁移 schema。新建分片诊断连接前
-在完整图谱诊断中统一批量校验数据树。500 毫秒健康检查改用保留的 control 连接池及已校验分片句柄，
+在完整图谱诊断中统一批量校验数据树。有界健康检查（默认 500ms，可由 `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` 配置）改用保留的 control 连接池及已校验分片句柄，
 为已打开的分片保留 WAL 汇总、维护状态和仓库统计，不在每次轮询时扫描全树。
 任何 active 分片尚无缓存句柄时，健康检查返回 stale、unhealthy 的 `storage_cold` 状态，
 不启动 ACL 校验、可写打开或完整图谱诊断回退。业务请求负责校验和打开冷分片，

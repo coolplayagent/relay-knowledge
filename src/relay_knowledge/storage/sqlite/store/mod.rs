@@ -205,7 +205,7 @@ impl SqliteGraphStore {
         })
     }
 
-    pub(super) fn try_run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
+    pub(in crate::storage) fn try_run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
@@ -244,6 +244,16 @@ impl SqliteGraphStore {
                 &repository_id,
                 source_scope.as_deref(),
             )
+        })
+    }
+
+    /// Reads health totals with nonblocking admission and request cancellation.
+    pub(in crate::storage) fn health_repository_totals(
+        &self,
+        excluded_repository_ids: Vec<String>,
+    ) -> StorageFuture<'_, crate::domain::CodeRepositoryTotals> {
+        self.try_run_read(move |connection| {
+            code::repository_totals_excluding(connection, &excluded_repository_ids)
         })
     }
 

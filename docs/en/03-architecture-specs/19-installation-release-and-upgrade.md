@@ -141,7 +141,8 @@ ACL checks; LocalSystem legacy/custom trees receive bounded reparse checks.
 The result never authorizes another request or writable open. Missing shards
 remain labeled errors and are never created. Cancellation terminates an active
 security child or stops before the next shard; only one SQLite reader is open
-at a time. The 500 ms health path instead
+at a time. The bounded health path (500ms by default, configurable through
+`RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS`) instead
 reads the retained control pool and cached shard handles, preserving aggregate WAL,
 maintenance diagnostics and repository totals for warm shards. If any active shard
 has no cached handle, health returns stale, unhealthy `storage_cold` diagnostics
