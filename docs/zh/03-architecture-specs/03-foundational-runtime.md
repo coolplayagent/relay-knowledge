@@ -73,6 +73,8 @@ CLI、Web 和 service mode 共享同一组 application services。启动顺序�
 
 健康响应组装（含 profile 文件读取）与成功存储快照共用同一截止时间。`NetworkRuntime` 保存历次已发布 request timeout 的最小值，刷新不得使健康预算超过旧监听器的 deadline；重启创建新 runtime 后才可提高上限。分片维护诊断按最旧时间汇总，缺失或读取失败不会被其他分片的较新记录覆盖。
 
+`application::service::health::profiles` 独占健康 profile 读取准入与摘要缓存。每个服务实例（所有克隆共享）最多一个进行中的读取，无排队任务；worker 持有令牌直至实际读取完成，不能在请求 timeout 时提前释放。正在读取时只返回带显式 stale/pending 说明的缓存或未检查状态。该边界没有后台轮询。
+
 Windows CI 另外运行代理与本地诊断的二进制集成用例，覆盖 Windows 子进程环境传递及直连降级。
 
 健康存储预算会按当前 HTTP timeout 缩短，为响应保留最多 100ms（短 timeout 使用一半）。分片健康查询的目录、totals 和 SQLite 诊断均使用有界、可取消且不排队的读准入；目录最多接纳 1,024 个活跃分片。降级缓存不读取 profile 文件，使用已缓存 summary 或明确未检查状态。

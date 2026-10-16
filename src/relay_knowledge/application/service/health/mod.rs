@@ -1,5 +1,7 @@
 //! Health snapshot assembly and bounded storage fallback policy.
 
+pub(super) mod profiles;
+
 use std::sync::Arc;
 
 use crate::{
@@ -116,8 +118,8 @@ impl RelayKnowledgeService {
             file_index: FileIndexDiagnostics::default(),
             runtime: runtime_status_with_model_profiles(
                 &self.runtime,
-                self.model_provider_config()
-                    .profile_summary(&self.runtime.retrieval)
+                self.health_profiles
+                    .summary(self.model_provider_config(), self.runtime.retrieval.clone())
                     .await,
             ),
         }
@@ -239,8 +241,8 @@ impl RelayKnowledgeService {
             file_index,
             runtime: runtime_status_with_model_profiles(
                 &self.runtime,
-                self.model_provider_config()
-                    .profile_summary(&self.runtime.retrieval)
+                self.health_profiles
+                    .summary(self.model_provider_config(), self.runtime.retrieval.clone())
                     .await,
             ),
         }

@@ -150,6 +150,8 @@ Proxy selection checks `HTTPS_PROXY`, `HTTP_PROXY`, then `ALL_PROXY` (including 
 
 The health budget also covers model-profile loading and response assembly after a successful storage snapshot. After hot refresh, it uses the shortest HTTP request timeout ever issued by that network runtime to protect listeners retaining older configurations; restart the managed service to raise this ceiling. For partitioned storage, `last_maintenance_at_ms` is the oldest database maintenance time; missing history or a failed read makes it absent and produces inspection advice. The Web Runtime page displays proxy warnings, the effective budget, degradation reasons, and maintenance recommendations.
 
+Health profile reads share one worker across the service and its clones, with no pending queue. After a response timeout, the worker retains admission until the underlying file read actually returns. Later probes use cached or uninspected summaries and mark the in-progress read and possible staleness in `runtime.model_profiles.error`. Completion updates the cache and releases admission. For a persistently hung read, inspect the mount/filesystem and restart through the service manager; repeated probes do not start additional reads.
+
 The effective budget is the smaller of the configured value and `HTTP request timeout - min(100ms, request timeout / 2)`, including after network configuration refresh, leaving time for fallback JSON. Cached fallback reuses its model-profile summary; uncached fallback marks profiles as uninspected, without reading files. Catalog discovery and control/shard totals also use cancellable SQLite reads. Proxy warnings do not block setup doctor `configuration_ready`.
 
 ```powershell

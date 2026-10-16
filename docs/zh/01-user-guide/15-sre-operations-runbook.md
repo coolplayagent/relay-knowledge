@@ -91,7 +91,7 @@ curl http://localhost:8791/api/service/status
 
 核心健康检查 API（参见 `src/relay_knowledge/application/service/health/mod.rs`）：
 
-- 底层存储健康快照默认预算为 **500ms**；`RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` 可配置 1–30000ms。预算包含成功快照后的 profile 读取和响应组装，并在 network runtime 历次已发布 HTTP request timeout 的最小值之前预留 `min(100ms, request_timeout / 2)`，`runtime.health_storage_budget_ms` 暴露生效值；热刷新不能放宽旧监听器的时限，需重启托管服务。分片维护时间取最旧记录，任一缺失或读取失败均保留未知状态；Web Runtime 面板显示警告与维护建议。
+- 底层存储健康快照默认预算为 **500ms**；`RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` 可配置 1–30000ms。预算包含成功快照后的 profile 读取和响应组装，并在 network runtime 历次已发布 HTTP request timeout 的最小值之前预留 `min(100ms, request_timeout / 2)`，`runtime.health_storage_budget_ms` 暴露生效值；热刷新不能放宽旧监听器的时限，需重启托管服务。分片维护时间取最旧记录，任一缺失或读取失败均保留未知状态；Web Runtime 面板显示警告与维护建议。profile worker 单槽且无排队，超时不释放仍在读取的槽位；重复探测使用带 pending/stale 说明的缓存或未检查状态，文件恢复后自动释放，持续挂起需排查文件系统并重启托管服务。
 - 超时则返回缓存的健康状态（`degraded_cached_health`），标记 `healthy: false`
 - 存储 busy 时同样返回降级缓存结果。降级路径不读取模型配置文件：已缓存时复用其 model profile summary，否则明确报告未检查。分片目录、control/shard totals 与 SQLite 诊断读取均采用可取消且不排队的读准入；health 不打开冷分片。
 - `storage_recommendations` 对大 WAL、过期或失败维护给出只读建议；只有在确认压力后才安排 checkpoint，不由 health 自动执行。

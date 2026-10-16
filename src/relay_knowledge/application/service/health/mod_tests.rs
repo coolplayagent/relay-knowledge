@@ -131,13 +131,14 @@ async fn successful_storage_snapshot_cannot_wait_unboundedly_for_model_profiles(
     let (release, wait_release) = std::sync::mpsc::channel::<()>();
     // A test-only FIFO models an unavailable profile filesystem. The writer
     // confirms profile loading began after storage succeeded, then withholds EOF.
+    let writer_profile = profile.clone();
     let writer = std::thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(3);
         let file = loop {
             match std::fs::OpenOptions::new()
                 .write(true)
                 .custom_flags(libc::O_NONBLOCK)
-                .open(&profile)
+                .open(&writer_profile)
             {
                 Ok(file) => break Some(file),
                 Err(error)
@@ -162,15 +163,39 @@ async fn successful_storage_snapshot_cannot_wait_unboundedly_for_model_profiles(
         runtime,
         Arc::new(SqliteGraphStore::open_in_memory().unwrap()),
     );
+    let first_probe = service.clone();
     let request = tokio::spawn(async move {
-        service
+        first_probe
             .health(RequestContext::for_interface(InterfaceKind::Web))
             .await
     });
     let opened = tokio::time::timeout(Duration::from_secs(2), reader_started).await;
     let response = tokio::time::timeout(Duration::from_millis(900), request).await;
+    let mut repeated = Vec::new();
+    for _ in 0..4 {
+        repeated.push(
+            tokio::time::timeout(
+                Duration::from_millis(200),
+                service
+                    .clone()
+                    .health(RequestContext::for_interface(InterfaceKind::Web)),
+            )
+            .await,
+        );
+    }
     let _ = release.send(());
     writer.join().unwrap();
+    for probe in repeated {
+        let health = probe.unwrap().unwrap();
+        assert!(
+            health
+                .runtime
+                .model_profiles
+                .error
+                .unwrap()
+                .contains("still in progress")
+        );
+    }
     assert!(
         opened.unwrap().is_ok(),
         "successful storage read must reach profile loading"
@@ -178,5 +203,22 @@ async fn successful_storage_snapshot_cannot_wait_unboundedly_for_model_profiles(
     let health = response.unwrap().unwrap().unwrap();
     assert!(!health.healthy);
     assert!(health.degraded_reason.unwrap().starts_with("storage_busy:"));
+    std::fs::remove_file(&profile).unwrap();
+    std::fs::write(&profile, r#"{"default_profile":null,"profiles":{}}"#).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let health = service
+                .health(RequestContext::for_interface(InterfaceKind::Web))
+                .await
+                .unwrap();
+            if health.runtime.model_profiles.loaded && health.runtime.model_profiles.error.is_none()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the reader must recover after the filesystem read completes");
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -133,6 +133,8 @@ RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
 
 健康预算同时覆盖成功快照后的 model profile 读取和响应组装。热刷新后采用该 network runtime 历次配置中最短的 HTTP request timeout，保护仍沿用旧配置的监听器；放宽该上限需重启托管服务。分片 `last_maintenance_at_ms` 返回所有数据库中最旧的维护时间，任一记录缺失或读取失败则为空并给出检查建议。Web 的 Runtime 页面展示代理 warning、生效预算、降级原因和维护建议。
 
+健康诊断的 profile 读取由服务及其克隆共享的单读取 worker 管理，不排队。响应超时后，准入令牌仍由 worker 持有，直到底层文件读取真正结束；后续探测返回缓存（或未检查状态），并在 `runtime.model_profiles.error` 标记读取进行中及缓存可能过期。文件恢复后 worker 更新缓存并释放准入；持续挂起时应检查挂载/文件系统，再通过服务管理器重启，不能靠重复健康探测启动更多读取。
+
 有效预算取配置值与 `HTTP request timeout - min(100ms, request timeout / 2)` 的较小值，网络配置热刷新后同样生效，为降级 JSON 留出时间。缓存降级复用 model profile summary，无缓存时标记模型配置未检查，均不读取文件；目录发现和 control/shard totals 也通过可取消的 SQLite 读入口。setup doctor 的代理 warning 不阻断 `configuration_ready`。
 
 ```powershell

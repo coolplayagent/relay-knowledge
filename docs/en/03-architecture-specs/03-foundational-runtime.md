@@ -73,6 +73,8 @@ Any entry point that bypasses this order is an architecture defect.
 
 Health response assembly, including profile-file reads, shares the storage snapshot deadline. `NetworkRuntime` retains the minimum request timeout across issued configurations so refresh cannot extend diagnostics beyond an older listener deadline; a new runtime after restart can raise that ceiling. Partitioned maintenance diagnostics preserve the oldest time and never mask missing history or read failures with a newer shard timestamp.
 
+`application::service::health::profiles` owns health-profile admission and summary caching. A service and all its clones allow one in-flight read and no queued work. The worker retains its permit until the actual read finishes, including after request timeout. Busy probes return cached or uninspected state with explicit pending/stale diagnostics. This boundary has no background polling loop.
+
 Windows CI also runs the proxy and local-diagnostics binary integration cases to cover native child-process environment handling and direct fallback.
 
 Health storage budgets shrink against the current HTTP timeout, reserving up to 100ms for response assembly (half the timeout for short deadlines). Partitioned health catalog, totals, and SQLite diagnostic reads all use bounded, cancellable admission without queueing; the catalog admits at most 1,024 active shards. Degraded fallback never reads profile files: it uses the cached summary or an explicit uninspected state.
