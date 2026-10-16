@@ -42,3 +42,34 @@ fn refreshes_runtime_network_config_from_environment_snapshot() {
     assert!(!config.http.proxy.ssl_verify);
     assert_eq!(config.qos.max_connections, 8);
 }
+
+#[test]
+fn refresh_keeps_the_shortest_issued_listener_deadline_until_restart() {
+    let runtime = NetworkRuntime::from_overrides(&NetworkEnvOverrides::default()).unwrap();
+    let clone = runtime.clone();
+    for (timeout_ms, expected_ms) in [(200, 200), (5000, 200), (100, 100), (30000, 100)] {
+        runtime
+            .refresh_from_overrides(&NetworkEnvOverrides {
+                http_request_timeout_ms: Some(timeout_ms),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            runtime.current().http.request_timeout,
+            Duration::from_millis(timeout_ms)
+        );
+        assert_eq!(
+            clone.request_timeout_floor(),
+            Duration::from_millis(expected_ms)
+        );
+    }
+    assert!(
+        runtime
+            .refresh_from_overrides(&NetworkEnvOverrides {
+                http_request_timeout_ms: Some(0),
+                ..Default::default()
+            })
+            .is_err()
+    );
+    assert_eq!(runtime.request_timeout_floor(), Duration::from_millis(100));
+}

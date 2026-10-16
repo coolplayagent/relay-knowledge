@@ -131,6 +131,8 @@ RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
 
 `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` 控制健康存储快照预算，默认 500ms，允许 1–30000ms。大库可先设为 5000；`runtime.health_storage_budget_ms` 返回生效值。它覆盖快照及 topology 读取，包括 legacy fallback；初次数据库打开和 schema 初始化仍属于启动流程。超时仍返回 `healthy=false`、`metadata.stale=true` 和 `storage_busy`，SQLite 诊断查询会随请求取消释放读连接，不扩大 SQLite busy timeout。
 
+健康预算同时覆盖成功快照后的 model profile 读取和响应组装。热刷新后采用该 network runtime 历次配置中最短的 HTTP request timeout，保护仍沿用旧配置的监听器；放宽该上限需重启托管服务。分片 `last_maintenance_at_ms` 返回所有数据库中最旧的维护时间，任一记录缺失或读取失败则为空并给出检查建议。Web 的 Runtime 页面展示代理 warning、生效预算、降级原因和维护建议。
+
 有效预算取配置值与 `HTTP request timeout - min(100ms, request timeout / 2)` 的较小值，网络配置热刷新后同样生效，为降级 JSON 留出时间。缓存降级复用 model profile summary，无缓存时标记模型配置未检查，均不读取文件；目录发现和 control/shard totals 也通过可取消的 SQLite 读入口。setup doctor 的代理 warning 不阻断 `configuration_ready`。
 
 ```powershell

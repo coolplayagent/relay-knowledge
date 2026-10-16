@@ -336,7 +336,8 @@ async fn partitioned_sqlite_graph_diagnostics_include_shard_maintenance() {
 
     assert_eq!(graph.sqlite.journal_mode, "wal");
     assert!(graph.sqlite.wal_size_bytes.is_some());
-    assert!(graph.sqlite.last_maintenance_at_ms.is_some());
+    // The control database has no maintenance history; a maintained shard cannot mask it.
+    assert_eq!(graph.sqlite.last_maintenance_at_ms, None);
     assert_eq!(graph.sqlite.last_maintenance_error, None);
     assert_eq!(
         health.graph.sqlite.last_maintenance_at_ms,

@@ -492,7 +492,7 @@ iptables -A INPUT -p tcp --dport 8791 -j DROP
 | --- | --- | --- | --- |
 | `RELAY_KNOWLEDGE_HTTP_BIND` | `host:port` | `127.0.0.1:8791` | HTTP 监听地址 |
 | `RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS` | 正整数 (ms) | `30000` | 单次 HTTP 请求超时（含 MCP tool call 的最大执行时间） |
-| `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` | 正整数 (1–30000ms) | `500` | health 存储预算；实际值在 HTTP deadline 前预留最多 100ms，由 `runtime.health_storage_budget_ms` 报告 |
+| `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` | 正整数 (1–30000ms) | `500` | health 存储预算；包含 profile 读取；实际值在历次已发布 HTTP deadline 最小值前预留最多 100ms，由 `runtime.health_storage_budget_ms` 报告 |
 | `RELAY_KNOWLEDGE_HTTP_SHUTDOWN_TIMEOUT_MS` | 正整数 (ms) | `10000` | 优雅关闭超时 |
 | `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` | 正整数 | `1048576` | HTTP 请求体最大字节数（1 MiB） |
 | `RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS` | 正整数 | `1024` | QoS 最大并发连接数 |

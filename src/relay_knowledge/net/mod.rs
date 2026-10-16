@@ -11,6 +11,7 @@ use std::{
     error::Error,
     fmt,
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
 use crate::env::{EnvironmentConfig, NetworkEnvOverrides};
@@ -39,6 +40,7 @@ impl NetworkConfig {
 #[derive(Debug, Clone)]
 pub struct NetworkRuntime {
     inner: Arc<RwLock<NetworkConfig>>,
+    request_timeout_floor: Arc<RwLock<Duration>>,
     qos: qos::QosRuntime,
 }
 
@@ -46,6 +48,7 @@ impl NetworkRuntime {
     /// Creates a refreshable handle from validated network configuration.
     pub fn from_config(config: NetworkConfig) -> Self {
         Self {
+            request_timeout_floor: Arc::new(RwLock::new(config.http.request_timeout)),
             inner: Arc::new(RwLock::new(config)),
             qos: qos::QosRuntime::default(),
         }
@@ -69,12 +72,29 @@ impl NetworkRuntime {
         self.qos.clone()
     }
 
+    /// Bounds diagnostics by every listener configuration issued by this runtime.
+    /// A refresh cannot extend a deadline retained by an already running listener.
+    pub fn request_timeout_floor(&self) -> Duration {
+        *self
+            .request_timeout_floor
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
     /// Replaces the active network configuration after validating overrides.
     pub fn refresh_from_overrides(
         &self,
         overrides: &NetworkEnvOverrides,
     ) -> Result<NetworkConfig, NetworkConfigError> {
         let config = NetworkConfig::from_overrides(overrides)?;
+
+        {
+            let mut floor = self
+                .request_timeout_floor
+                .write()
+                .unwrap_or_else(|error| error.into_inner());
+            *floor = (*floor).min(config.http.request_timeout);
+        }
 
         *self
             .inner

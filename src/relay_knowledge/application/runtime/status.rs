@@ -49,7 +49,7 @@ pub(in crate::application) fn runtime_status_with_model_profiles(
         health_storage_budget_ms: duration_millis(
             runtime
                 .storage
-                .health_budget_for_request(network.http.request_timeout),
+                .health_budget_for_request(runtime.network.request_timeout_floor()),
         ),
         http_no_proxy_rules: network.http.proxy.no_proxy_rules.len(),
         http_ssl_verify: network.http.proxy.ssl_verify,

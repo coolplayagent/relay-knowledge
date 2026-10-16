@@ -119,7 +119,8 @@ async fn aggregate_sqlite_diagnostics(
 struct SqliteDiagnosticsAggregate {
     journal_modes: BTreeSet<String>,
     wal_size_bytes: Option<u64>,
-    last_maintenance_at_ms: Option<u64>,
+    // Outer None means no databases observed; inner None means missing history.
+    last_maintenance_at_ms: Option<Option<u64>>,
     maintenance_errors: Vec<String>,
 }
 
@@ -141,9 +142,12 @@ impl SqliteDiagnosticsAggregate {
             (Some(left), Some(right)) => Some(left.saturating_add(right)),
             _ => None,
         };
-        self.last_maintenance_at_ms = self
-            .last_maintenance_at_ms
-            .max(diagnostics.last_maintenance_at_ms);
+        self.last_maintenance_at_ms = Some(match self.last_maintenance_at_ms {
+            None => diagnostics.last_maintenance_at_ms,
+            Some(previous) => previous
+                .zip(diagnostics.last_maintenance_at_ms)
+                .map(|(a, b)| a.min(b)),
+        });
         if let Some(error) = diagnostics.last_maintenance_error {
             self.maintenance_errors
                 .push(format!("{}: {error}", label.as_ref()));
@@ -152,6 +156,7 @@ impl SqliteDiagnosticsAggregate {
 
     fn push_error(&mut self, label: impl AsRef<str>, error: StorageError) {
         self.wal_size_bytes = None;
+        self.last_maintenance_at_ms = Some(None);
         self.maintenance_errors
             .push(format!("{}: {error}", label.as_ref()));
     }
@@ -168,7 +173,7 @@ impl SqliteDiagnosticsAggregate {
                 _ => "mixed".to_owned(),
             },
             wal_size_bytes: self.wal_size_bytes,
-            last_maintenance_at_ms: self.last_maintenance_at_ms,
+            last_maintenance_at_ms: self.last_maintenance_at_ms.flatten(),
             last_maintenance_error: (!self.maintenance_errors.is_empty())
                 .then(|| self.maintenance_errors.join("; ")),
         }

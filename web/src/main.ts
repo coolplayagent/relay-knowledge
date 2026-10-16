@@ -203,7 +203,7 @@ function pageContent(
     case "indexes":
       return indexesSection(health.indexes, health.metadata.graph_version);
     case "runtime":
-      return runtimeSection(status, service);
+      return runtimeSection(status, health, service);
     case "settings":
       return settingsSection(status, health, service, {
         rerender: rerenderFromState,
@@ -747,12 +747,15 @@ function tableState(state: IndexStatus["state"]): HTMLTableCellElement {
 
 function runtimeSection(
   status: ProjectStatusResponse,
+  health: HealthResponse,
   service: ServiceStatusResponse | null
 ): HTMLElement {
   const section = sectionShell("runtime", "Runtime");
   const list = element("dl", "runtime-list");
   list.append(
     runtimeItem("HTTP bind", status.runtime.http_bind),
+    runtimeItem("Health snapshot budget", health.runtime.health_storage_budget_ms === undefined
+      ? "Not reported" : `${health.runtime.health_storage_budget_ms} ms`),
     runtimeItem("Data", status.runtime.data_dir),
     runtimeItem("State", status.runtime.state_dir),
     runtimeItem("Cache", status.runtime.cache_dir),
@@ -771,6 +774,21 @@ function runtimeSection(
     );
   }
   section.append(list);
+  const proxyWarning = health.runtime.http_proxy_warning ?? status.runtime.http_proxy_warning;
+  if (proxyWarning) {
+    section.append(textElement("p", "warning-message", proxyWarning));
+  }
+  if (health.degraded_reason) {
+    section.append(textElement("p", "warning-message", health.degraded_reason));
+  }
+  if (health.storage_recommendations?.length) {
+    section.append(textElement("h3", undefined, "Storage maintenance"));
+    const advice = document.createElement("ul");
+    for (const recommendation of health.storage_recommendations) {
+      advice.append(textElement("li", undefined, recommendation));
+    }
+    section.append(advice);
+  }
 
   return section;
 }

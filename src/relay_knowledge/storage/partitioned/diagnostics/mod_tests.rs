@@ -94,7 +94,7 @@ fn aggregate_reports_mixed_journals_saturating_wal_and_labeled_errors() {
     let result = aggregate.finish();
     assert_eq!(result.journal_mode, "mixed");
     assert_eq!(result.wal_size_bytes, None);
-    assert_eq!(result.last_maintenance_at_ms, Some(12));
+    assert_eq!(result.last_maintenance_at_ms, None);
     assert!(
         result
             .last_maintenance_error
@@ -114,6 +114,30 @@ fn diagnostics(
         last_maintenance_at_ms,
         last_maintenance_error: None,
     }
+}
+
+#[test]
+fn maintenance_summary_preserves_oldest_and_missing_history_in_any_order() {
+    for times in [[Some(10), Some(12)], [Some(12), Some(10)]] {
+        let mut aggregate = SqliteDiagnosticsAggregate::new();
+        for time in times {
+            aggregate.push("database", diagnostics("wal", Some(0), time));
+        }
+        assert_eq!(aggregate.finish().last_maintenance_at_ms, Some(10));
+    }
+    for times in [[None, Some(12)], [Some(12), None]] {
+        let mut aggregate = SqliteDiagnosticsAggregate::new();
+        for time in times {
+            aggregate.push("database", diagnostics("wal", Some(0), time));
+        }
+        assert_eq!(aggregate.finish().last_maintenance_at_ms, None);
+    }
+    assert_eq!(
+        SqliteDiagnosticsAggregate::new()
+            .finish()
+            .last_maintenance_at_ms,
+        None
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

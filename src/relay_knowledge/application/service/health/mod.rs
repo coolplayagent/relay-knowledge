@@ -39,13 +39,17 @@ impl RelayKnowledgeService {
         match tokio::time::timeout(
             self.runtime
                 .storage
-                .health_budget_for_request(self.runtime.network.current().http.request_timeout),
-            self.health_storage_report(&store),
+                .health_budget_for_request(self.runtime.network.request_timeout_floor()),
+            async {
+                let report = self.health_storage_report(&store).await?;
+                Ok(self
+                    .health_from_storage_report(context.clone(), report)
+                    .await)
+            },
         )
         .await
         {
-            Ok(Ok(report)) => {
-                let response = self.health_from_storage_report(context, report).await;
+            Ok(Ok(response)) => {
                 *self.health_cache.write().await = Some(response.clone());
                 Ok(response)
             }
@@ -76,7 +80,7 @@ impl RelayKnowledgeService {
         match tokio::time::timeout(
             self.runtime
                 .storage
-                .health_budget_for_request(self.runtime.network.current().http.request_timeout),
+                .health_budget_for_request(self.runtime.network.request_timeout_floor()),
             self.storage_free_health(context.clone()),
         )
         .await
@@ -93,7 +97,7 @@ impl RelayKnowledgeService {
             .storage_topology_diagnostics_with_budget(
                 self.runtime
                     .storage
-                    .health_budget_for_request(self.runtime.network.current().http.request_timeout),
+                    .health_budget_for_request(self.runtime.network.request_timeout_floor()),
             )
             .await;
         let degraded_reason = storage.degraded_reason.clone();
@@ -134,7 +138,7 @@ impl RelayKnowledgeService {
                 let storage = self
                     .storage_topology_diagnostics_with_budget(
                         self.runtime.storage.health_budget_for_request(
-                            self.runtime.network.current().http.request_timeout,
+                            self.runtime.network.request_timeout_floor(),
                         ),
                     )
                     .await;
@@ -157,7 +161,7 @@ impl RelayKnowledgeService {
             .storage_topology_diagnostics_with_budget(
                 self.runtime
                     .storage
-                    .health_budget_for_request(self.runtime.network.current().http.request_timeout),
+                    .health_budget_for_request(self.runtime.network.request_timeout_floor()),
             )
             .await;
 
@@ -360,6 +364,12 @@ fn storage_recommendations(
             .is_some_and(|at| now_ms.saturating_sub(at) >= MAINTENANCE_AGE_MS)
     {
         advice.push(format!("SQLite maintenance is overdue or failed; run {PROJECT_NAME} service doctor --format json and check the managed service maintenance logs."));
+    }
+    if sqlite.last_maintenance_at_ms.is_none()
+        && !sqlite.journal_mode.is_empty()
+        && sqlite.journal_mode != "memory"
+    {
+        advice.push(format!("SQLite maintenance history is missing for at least one database; run {PROJECT_NAME} service doctor --format json and inspect maintenance logs before scheduling a checkpoint."));
     }
     if unavailable {
         advice.push(format!("Storage snapshot unavailable; inspect WAL size and maintenance history (cached values may be stale), run {PROJECT_NAME} service doctor --format json, and consider RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS (1..30000). If WAL pressure or overdue maintenance is confirmed, schedule a checkpoint in a maintenance window. A timeout alone does not establish a WAL problem."));

@@ -122,6 +122,12 @@ async fn health_returns_storage_busy_before_a_short_http_deadline() {
         .refresh_network_from_environment(&environment)
         .await
         .unwrap();
+    let mut refreshed = environment;
+    refreshed.network.http_request_timeout_ms = Some(5000);
+    service
+        .refresh_network_from_environment(&refreshed)
+        .await
+        .unwrap();
     let response = tokio::time::timeout(
         Duration::from_millis(200),
         service.health(RequestContext::for_interface(InterfaceKind::Web)),
@@ -132,6 +138,7 @@ async fn health_returns_storage_busy_before_a_short_http_deadline() {
     assert!(!response.healthy);
     assert!(response.metadata.stale);
     assert_eq!(response.runtime.health_storage_budget_ms, 100);
+    assert_eq!(response.runtime.http_request_timeout_ms, 5000);
     assert!(
         response
             .degraded_reason
