@@ -141,7 +141,8 @@ ACL checks; LocalSystem legacy/custom trees receive bounded reparse checks.
 The result never authorizes another request or writable open. Missing shards
 remain labeled errors and are never created. Cancellation terminates an active
 security child or stops before the next shard; only one SQLite reader is open
-at a time. The 500 ms health path instead
+at a time. The bounded health path (500ms by default, configurable through
+`RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS`) instead
 reads the retained control pool and cached shard handles, preserving aggregate WAL,
 maintenance diagnostics and repository totals for warm shards. If any active shard
 has no cached handle, health returns stale, unhealthy `storage_cold` diagnostics
@@ -633,3 +634,9 @@ they do not automatically revive an already terminal record. No database edits
 or concurrent old/new workers are needed for upgrade or rollback.
 
 Queue admission must recognize canonical incremental-clone checkpoint tokens as fenced-task residue even after terminal task audit rows have been pruned. Such tokens are written only through the durable publication fence; they cannot become direct-writer authority merely because their task ended. Admission scans at most the 64-scope cap plus one overflow sentinel, leaves scope capacity and retention unchanged, and still rejects genuine direct checkpoints or malformed tokens. Recovery tests cover successors queued both before and after permanent failure.
+
+The proxy compatibility and health-budget fix changes neither runtime directories nor schema. After upgrade, `host:port` proxies are normalized and invalid proxies fall back to direct connections with an `invalid_proxy` warning; services requiring a proxy must correct that warning before resuming outbound work. Service managers can inject `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS=5000` (range 1–30000ms, default 500ms); restart the managed service and verify the effective status/health value. Before rollback, use full HTTP(S) proxy URLs; older binaries retain the fixed 500ms budget and do not expose the new warning/advice fields. Health maintenance advice is read-only. Schedule checkpoints in a maintenance window and never delete WAL files to bypass health timeouts. See [advanced configuration](../01-user-guide/12-advanced-configuration.md).
+
+Hot-refreshing the HTTP timeout does not raise the current process health-response ceiling because existing listeners may retain an older value. Restart the managed service when increasing that ceiling so listeners and runtime agree. The health budget includes profile loading after the snapshot.
+
+A hung health-profile filesystem read retains the sole reader slot; later probes report pending/stale state. Restore the mount/filesystem and use the service manager to restart stuck process resources. Upgrade and rollback do not migrate profile files or caches.

@@ -53,6 +53,8 @@ Canvas requests use `/api/web/graph/canvas?kind=knowledge|code|mixed&scope=<scop
 
 The Software page first reads the bounded indexed-repository list, then requests `statements` and `conflicts` in parallel for the selected repository at its pinned commit. The relationship canvas merges occurrences by stable `entity_key`; selecting a node or statement exposes occurrence, source scope, evidence, assertion, resolution, confidence, and extractor details. Tables retain conflicting, superseded, rejected, unresolved, ambiguous, and external statements plus shape diagnostics. The page also exposes ontology and projection-schema versions, freshness, provenance completeness, source coverage, and conflict count. It never scans source or invents missing facts in the browser. Each slice uses a limit from 1 through 500.
 
+The Runtime diagnostics panel displays the effective health budget, redacted proxy warnings, degradation reasons such as `storage_busy`, and read-only storage maintenance advice. Partitioned maintenance uses the oldest record and reports missing history; the panel does not execute checkpoints.
+
 ## 6.4 Operation Execution
 
 The Web Operations panel covers typed command/request preview and same-origin execution for:

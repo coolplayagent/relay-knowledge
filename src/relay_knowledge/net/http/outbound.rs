@@ -19,6 +19,8 @@ pub fn outbound_json_client_with_policy(
     connect_timeout: Option<Duration>,
 ) -> Result<reqwest::Client, OutboundClientError> {
     let mut builder = reqwest::Client::builder()
+        // The env boundary has already selected, normalized, or rejected the proxy.
+        .no_proxy()
         .timeout(config.request_timeout)
         .danger_accept_invalid_certs(!ssl_verify.unwrap_or(config.proxy.ssl_verify));
     if let Some(timeout) = connect_timeout {

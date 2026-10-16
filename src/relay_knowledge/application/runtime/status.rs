@@ -45,6 +45,12 @@ pub(in crate::application) fn runtime_status_with_model_profiles(
         http_graceful_shutdown_timeout_ms: duration_millis(network.http.graceful_shutdown_timeout),
         http_max_request_body_bytes: network.http.max_request_body_bytes,
         http_proxy_configured: network.http.proxy.is_proxy_configured(),
+        http_proxy_warning: network.http.proxy.warning.map(str::to_owned),
+        health_storage_budget_ms: duration_millis(
+            runtime
+                .storage
+                .health_budget_for_request(runtime.network.request_timeout_floor()),
+        ),
         http_no_proxy_rules: network.http.proxy.no_proxy_rules.len(),
         http_ssl_verify: network.http.proxy.ssl_verify,
         qos_max_connections: network.qos.max_connections,

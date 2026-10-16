@@ -21,6 +21,8 @@ export type RuntimeStatus = {
   http_graceful_shutdown_timeout_ms: number;
   http_max_request_body_bytes: number;
   http_proxy_configured: boolean;
+  http_proxy_warning?: string;
+  health_storage_budget_ms?: number;
   http_no_proxy_rules: number;
   http_ssl_verify: boolean;
   qos_max_connections: number;
@@ -280,6 +282,8 @@ export type IndexRefreshDiagnostics = {
 export type HealthResponse = {
   metadata: ApiMetadata;
   healthy: boolean;
+  degraded_reason?: string;
+  storage_recommendations?: string[];
   graph: {
     graph_version: number;
     entity_count: number;

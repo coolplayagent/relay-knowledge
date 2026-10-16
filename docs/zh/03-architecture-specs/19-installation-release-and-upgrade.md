@@ -132,7 +132,7 @@ Windows UT 还覆盖伪造 SystemRoot、模块/profiler 环境和只读校验不
 超过任一限制都明确失败。每个分片首次打开还会在现有 blocking worker 中通过有界异步
 子进程检查具体路径、父目录和 sidecar，由独立的 `catalog::store_access` 模块负责，
 缓存句柄不重复启动校验，安全检查期间不持有共享 cache 锁。同步分片入口先以 open-or-create 策略校验 control 路径，再创建目录、打开 SQLite 和迁移 schema。新建分片诊断连接前
-在完整图谱诊断中统一批量校验数据树。500 毫秒健康检查改用保留的 control 连接池及已校验分片句柄，
+在完整图谱诊断中统一批量校验数据树。有界健康检查（默认 500ms，可由 `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` 配置）改用保留的 control 连接池及已校验分片句柄，
 为已打开的分片保留 WAL 汇总、维护状态和仓库统计，不在每次轮询时扫描全树。
 任何 active 分片尚无缓存句柄时，健康检查返回 stale、unhealthy 的 `storage_cold` 状态，
 不启动 ACL 校验、可写打开或完整图谱诊断回退。业务请求负责校验和打开冷分片，
@@ -471,3 +471,9 @@ dead letter。旧二进制可能把永久超限报告为 `qos_rejected`，消耗
 已终结记录不会自动复活。升级或回滚不需要直接修改数据库，也不应并发运行新旧 worker。
 
 队列准入必须通过规范化 incremental-clone checkpoint token 识别带 fence 的任务残留，即使终态任务审计已被有界清理。这类 token 只能在 durable publication fence 下写入，不能因为所属任务结束就变成直接 writer 的权限依据。准入最多扫描 64 个 scope 加一个溢出哨兵，保留 scope 容量与 retention 约束；真实 direct checkpoint 和畸形 token 仍须阻止抢占。恢复回归同时覆盖永久失败之前与之后提交后继任务。
+
+代理兼容与 health 预算修复不改变数据目录或 schema。升级后 `host:port` 代理自动规范化，非法代理以 `invalid_proxy` warning 回退直连；要求强制代理的服务须修正 warning 后再恢复出站工作。服务管理器可注入 `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS=5000`（1–30000ms，默认 500ms），修改后重启托管服务并核对 `status`/`health` 的生效值。回滚前将代理写为完整 HTTP(S) URL，旧版本仍使用固定 500ms 且不识别新 warning/建议字段。health 的维护建议为只读诊断；checkpoint 应安排在维护窗口，禁止删除 WAL 以规避健康超时。详见[高级配置](../01-user-guide/12-advanced-configuration.md)。
+
+热刷新 HTTP timeout 不会放宽当前进程的健康响应上限，因为已有监听器仍可能保留旧值；需要更长健康预算时重启托管服务以同步监听器和 runtime。该预算包含快照后的 profile 读取。
+
+健康诊断 profile worker 在文件系统挂起时保留唯一读取槽，后续探测提示 pending/stale。先恢复挂载或文件系统，再由服务管理器重启以恢复卡住的进程资源；升级/回滚不迁移 profile 文件或缓存。

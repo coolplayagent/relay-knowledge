@@ -49,6 +49,8 @@ target/debug/relay-knowledge health --format json
 target/debug/relay-knowledge help --format json
 ```
 
+代理支持 `host:port`；非法代理会在诊断中提示并回退直连。大库健康快照可通过 `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` 调整有界等待，详见[高级配置与维护诊断](docs/zh/01-user-guide/12-advanced-configuration.md#125-网络与-qos)。
+
 ## Installing Releases
 
 Version 1.1.21 fixes permanent index-task failures, bounds large impact queries

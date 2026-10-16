@@ -108,6 +108,12 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
 
         page.get_by_role("link", name="Runtime").click()
         expect(page.get_by_text("127.0.0.1:9900")).to_be_visible()
+        expect(page.get_by_text("Health snapshot budget")).to_be_visible()
+        expect(page.get_by_text("5000 ms", exact=True)).to_be_visible()
+        expect(page.get_by_text("invalid_proxy: ignored invalid environment proxy; using direct connections", exact=True)).to_be_visible()
+        expect(page.get_by_text("storage_busy: health snapshot timed out", exact=True)).to_be_visible()
+        expect(page.get_by_role("heading", name="Storage maintenance")).to_be_visible()
+        expect(page.get_by_text("Check WAL size and schedule a checkpoint during a maintenance window.", exact=True)).to_be_visible()
 
         page.get_by_role("link", name="Settings").click()
         expect(page.get_by_role("heading", name="Settings")).to_be_visible()
@@ -577,6 +583,8 @@ RUNTIME = {
     "http_graceful_shutdown_timeout_ms": 10000,
     "http_max_request_body_bytes": 1048576,
     "http_proxy_configured": False,
+    "http_proxy_warning": "invalid_proxy: ignored invalid environment proxy; using direct connections",
+    "health_storage_budget_ms": 5000,
     "http_no_proxy_rules": 0,
     "http_ssl_verify": True,
     "qos_max_connections": 1024,
@@ -745,6 +753,8 @@ HEALTH_RESPONSE = {
         "stale": True,
     },
     "healthy": False,
+    "degraded_reason": "storage_busy: health snapshot timed out",
+    "storage_recommendations": ["Check WAL size and schedule a checkpoint during a maintenance window."],
     "graph": {
         "graph_version": 7,
         "entity_count": 3,

@@ -68,20 +68,63 @@ fn rejects_ephemeral_ports() {
 }
 
 #[test]
-fn rejects_proxy_urls_without_supported_scheme_or_host() {
+fn normalizes_proxy_authorities_and_preserves_http_urls() {
+    for (input, expected) in [
+        ("proxy.internal:8080", "http://proxy.internal:8080"),
+        (" 127.0.0.1:80 ", "http://127.0.0.1:80"),
+        ("[::1]:8080", "http://[::1]:8080"),
+        (
+            "user:password@proxy.internal:3128",
+            "http://user:password@proxy.internal:3128",
+        ),
+        ("https://proxy.internal:8443", "https://proxy.internal:8443"),
+    ] {
+        let config =
+            HttpProxyConfig::new(Some(input.into()), vec!["localhost".into()], true).unwrap();
+        assert_eq!(config.proxy.as_deref(), Some(expected));
+        assert!(config.warning.is_none());
+        assert!(reqwest::Proxy::all(config.proxy.unwrap()).is_ok());
+    }
+}
+
+#[test]
+fn invalid_environment_proxy_degrades_without_exposing_credentials() {
     for proxy in [
         "socks5://proxy.internal:1080",
         "http://:8080",
-        "https://user@:443",
+        "https://secret@:443",
+        "http://",
+        "http:///proxy",
+        "proxy.internal",
+        "proxy.internal:invalid",
+        "proxy.internal:65536",
+        "http://proxy:0",
+        "http://user:secret@[broken",
+        "http://proxy/path",
+        "http://proxy?query",
+        "http://proxy#fragment",
+        "http://proxy host:8080",
+        "",
+        "http://@proxy",
+        "http:\\proxy",
     ] {
-        let overrides = NetworkEnvOverrides {
-            proxy: Some(proxy.to_owned()),
+        assert_eq!(
+            HttpProxyConfig::new(Some(proxy.into()), Vec::new(), true).unwrap_err(),
+            HttpConfigError::InvalidProxyUrl
+        );
+        let config = HttpConfig::from_overrides(&NetworkEnvOverrides {
+            proxy: Some(proxy.into()),
+            no_proxy: Some("localhost".into()),
             ..NetworkEnvOverrides::default()
-        };
-
-        let error = HttpConfig::from_overrides(&overrides).expect_err("invalid proxy should fail");
-
-        assert_eq!(error, HttpConfigError::InvalidProxyUrl);
+        })
+        .unwrap();
+        assert!(!config.proxy.is_proxy_configured());
+        let warning = config.proxy.warning.unwrap();
+        assert!(warning.starts_with("invalid_proxy:"));
+        assert!(!warning.contains("secret"));
+        assert_eq!(config.proxy.no_proxy_rules, ["localhost"]);
+        assert!(config.proxy.ssl_verify);
+        assert!(outbound_json_client(&config).is_ok());
     }
 }
 

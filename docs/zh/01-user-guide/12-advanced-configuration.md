@@ -127,7 +127,27 @@ RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS
 RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
 ```
 
-代理和证书验证继承 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 和 `SSL_VERIFY`。业务模块不直接读取进程环境。
+代理按 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 的顺序选取（各自同时支持小写形式），并继承 `NO_PROXY` 和 `SSL_VERIFY`。`host:port`、IPv4 和 `[IPv6]:port` 自动补齐 `http://`；已有 HTTP(S) URL 保留。非法代理（例如 `http://`、非法端口或不支持的 scheme）会被忽略并回退直连，TLS 验证策略保持不变。`status`/`health` 的 `runtime.http_proxy_warning` 和 `setup doctor` 的 `http_proxy` warning 提供不含原始地址或凭据的 `invalid_proxy` 诊断。本地命令仍可启动；出站请求使用已解析策略，不会再次从环境读取被忽略的代理。需要强制代理的部署应在诊断出现该 warning 时修正配置。业务模块不直接读取进程环境。
+
+`RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` 控制健康存储快照预算，默认 500ms，允许 1–30000ms。大库可先设为 5000；`runtime.health_storage_budget_ms` 返回生效值。它覆盖快照及 topology 读取，包括 legacy fallback；初次数据库打开和 schema 初始化仍属于启动流程。超时仍返回 `healthy=false`、`metadata.stale=true` 和 `storage_busy`，SQLite 诊断查询会随请求取消释放读连接，不扩大 SQLite busy timeout。
+
+健康预算同时覆盖成功快照后的 model profile 读取和响应组装。热刷新后采用该 network runtime 历次配置中最短的 HTTP request timeout，保护仍沿用旧配置的监听器；放宽该上限需重启托管服务。分片 `last_maintenance_at_ms` 返回所有数据库中最旧的维护时间，任一记录缺失或读取失败则为空并给出检查建议。Web 的 Runtime 页面展示代理 warning、生效预算、降级原因和维护建议。
+
+健康诊断的 profile 读取由服务及其克隆共享的单读取 worker 管理，不排队。响应超时后，准入令牌仍由 worker 持有，直到底层文件读取真正结束；后续探测返回缓存（或未检查状态），并在 `runtime.model_profiles.error` 标记读取进行中及缓存可能过期。文件恢复后 worker 更新缓存并释放准入；持续挂起时应检查挂载/文件系统，再通过服务管理器重启，不能靠重复健康探测启动更多读取。
+
+有效预算取配置值与 `HTTP request timeout - min(100ms, request timeout / 2)` 的较小值，网络配置热刷新后同样生效，为降级 JSON 留出时间。缓存降级复用 model profile summary，无缓存时标记模型配置未检查，均不读取文件；目录发现和 control/shard totals 也通过可取消的 SQLite 读入口。setup doctor 的代理 warning 不阻断 `configuration_ready`。
+
+```powershell
+$env:HTTPS_PROXY = "proxy.example:8080"
+$env:RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS = "5000"
+relay-knowledge health --format json
+```
+
+```bash
+RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS=5000 relay-knowledge health --format json
+```
+
+`health.storage_recommendations` 会对已观察到的至少 256MiB WAL、超过七天的维护记录或维护失败提供 checkpoint/服务排查建议。无快照或超时时只建议检查，不能把超时归因于 WAL；缓存数据仍标记 stale。可先运行 `relay-knowledge service doctor --format json` 并检查托管服务维护日志，再安排维护窗口进行 WAL checkpoint；健康检查本身不执行 checkpoint 或删除 WAL。连接器应分别读取 `runtime.http_proxy_warning`（配置降级）和 `degraded_reason` 的 `storage_busy`/`storage_cold`（存储暂不可用），避免将两者合并为配置加载失败。
 
 版本提示也使用 `net::http`，并将结果缓存到 runtime cache:
 

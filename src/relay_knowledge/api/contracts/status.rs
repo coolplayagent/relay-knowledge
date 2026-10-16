@@ -21,6 +21,10 @@ pub struct RuntimeStatus {
     pub http_graceful_shutdown_timeout_ms: u64,
     pub http_max_request_body_bytes: u64,
     pub http_proxy_configured: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_proxy_warning: Option<String>,
+    #[serde(default)]
+    pub health_storage_budget_ms: u64,
     pub http_no_proxy_rules: usize,
     pub http_ssl_verify: bool,
     pub qos_max_connections: usize,

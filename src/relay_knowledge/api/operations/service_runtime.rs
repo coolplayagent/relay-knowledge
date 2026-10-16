@@ -104,6 +104,9 @@ pub struct ServiceRecoveryReport {
 pub struct HealthResponse {
     pub metadata: ApiMetadata,
     pub healthy: bool,
+    /// Read-only operational advice; a timeout does not prove WAL pressure.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub storage_recommendations: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
     pub storage: StorageTopologyDiagnostics,

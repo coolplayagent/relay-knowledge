@@ -164,6 +164,13 @@ fn setup_doctor(service: &RelayKnowledgeService, context: RequestContext) -> Set
             status.runtime.qos_max_queue_depth
         ),
     });
+    if let Some(warning) = &status.runtime.http_proxy_warning {
+        checks.push(SetupCheck {
+            name: "http_proxy",
+            state: "warning",
+            message: warning.clone(),
+        });
+    }
     let retrieval_backends_ready = status.runtime.embedding_dimension > 0
         && !status.runtime.semantic_backend_mode.is_empty()
         && !status.runtime.vector_backend_mode.is_empty();
@@ -235,7 +242,9 @@ fn setup_doctor(service: &RelayKnowledgeService, context: RequestContext) -> Set
         ),
     });
 
-    let configuration_ready = checks.iter().all(|check| check.state == "ok");
+    let configuration_ready = checks
+        .iter()
+        .all(|check| matches!(check.state, "ok" | "warning"));
 
     actions.push(SetupAction {
         command: "relay-knowledge health --format json",

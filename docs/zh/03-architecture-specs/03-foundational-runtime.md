@@ -69,6 +69,16 @@ CLI、Web 和 service mode 共享同一组 application services。启动顺序�
 
 `status`、`health`、`service doctor`、Web diagnostics 和 MCP resources 读取同一份 runtime snapshot。诊断必须说明配置来源、脱敏值、目录、服务状态、QoS budget、index freshness 和 degraded reason。
 
+`net::http` 规范化 Windows 风格 `host:port` 代理，非法环境代理以脱敏 warning 回退直连；outbound client 禁止再次隐式读取环境代理。`env` 捕获 `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS`，`application::runtime::storage` 校验 1–30000ms（默认 500ms）；health owner 统一使用该预算并投影维护建议。SQLite store 的诊断读 worker 在 future 取消后通过 progress handler 中断 SQL，并在释放连接前清除 handler。配置、取消、慢快照、缓存降级和本地 CLI 可用性由直接 owner UT 与 CLI integration 回归保护。
+
+健康响应组装（含 profile 文件读取）与成功存储快照共用同一截止时间。`NetworkRuntime` 保存历次已发布 request timeout 的最小值，刷新不得使健康预算超过旧监听器的 deadline；重启创建新 runtime 后才可提高上限。分片维护诊断按最旧时间汇总，缺失或读取失败不会被其他分片的较新记录覆盖。
+
+`application::service::health::profiles` 独占健康 profile 读取准入与摘要缓存。每个服务实例（所有克隆共享）最多一个进行中的读取，无排队任务；worker 持有令牌直至实际读取完成，不能在请求 timeout 时提前释放。正在读取时只返回带显式 stale/pending 说明的缓存或未检查状态。该边界没有后台轮询。Unix FIFO 回归测试以 RAII 持有写端，并在关闭前删除路径，确保慢速 ASan 调度或断言失败也不会遗留等待写端的阻塞读取；重复探测断言继续验证准入和恢复行为。
+
+Windows CI 另外运行代理与本地诊断的二进制集成用例，覆盖 Windows 子进程环境传递及直连降级。
+
+健康存储预算会按当前 HTTP timeout 缩短，为响应保留最多 100ms（短 timeout 使用一半）。分片健康查询的目录、totals 和 SQLite 诊断均使用有界、可取消且不排队的读准入；目录最多接纳 1,024 个活跃分片。降级缓存不读取 profile 文件，使用已缓存 summary 或明确未检查状态。
+
 ## 7. 验收标准
 
 - 仓库内只有 `env` 读取环境变量，只有 `paths` 构造运行时路径，只有 `net` 创建网络能力。

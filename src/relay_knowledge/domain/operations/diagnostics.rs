@@ -52,6 +52,7 @@ pub struct SqliteStorageDiagnostics {
     pub journal_mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wal_size_bytes: Option<u64>,
+    /// For partitions, the oldest maintenance time; absent if any history is unknown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_maintenance_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -69,6 +69,16 @@ Any entry point that bypasses this order is an architecture defect.
 
 `status`, `health`, `service doctor`, Web diagnostics, and MCP resources read the same runtime snapshot. Diagnostics explain configuration sources, redacted values, directories, service state, QoS budgets, index freshness, and degraded reasons.
 
+`net::http` normalizes Windows-style `host:port` proxies and falls back to direct connections with a redacted warning for invalid environment proxies; outbound clients cannot implicitly read environment proxies again. `env` captures `RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS`, and `application::runtime::storage` validates 1–30000ms (default 500ms). The health owner applies that budget and projects maintenance advice. SQLite diagnostic read workers interrupt SQL through a progress handler when the future is cancelled and remove the handler before releasing the connection. Direct owner unit tests and CLI integration tests cover configuration, cancellation, slow snapshots, cached degradation, and local command availability.
+
+Health response assembly, including profile-file reads, shares the storage snapshot deadline. `NetworkRuntime` retains the minimum request timeout across issued configurations so refresh cannot extend diagnostics beyond an older listener deadline; a new runtime after restart can raise that ceiling. Partitioned maintenance diagnostics preserve the oldest time and never mask missing history or read failures with a newer shard timestamp.
+
+`application::service::health::profiles` owns health-profile admission and summary caching. A service and all its clones allow one in-flight read and no queued work. The worker retains its permit until the actual read finishes, including after request timeout. Busy probes return cached or uninspected state with explicit pending/stale diagnostics. This boundary has no background polling loop. The Unix FIFO regression fixture retains its writer through RAII and unlinks the path before closing it, so slow ASan scheduling or assertion unwinding cannot strand a blocking read waiting for a writer; repeated probes still verify admission and recovery.
+
+Windows CI also runs the proxy and local-diagnostics binary integration cases to cover native child-process environment handling and direct fallback.
+
+Health storage budgets shrink against the current HTTP timeout, reserving up to 100ms for response assembly (half the timeout for short deadlines). Partitioned health catalog, totals, and SQLite diagnostic reads all use bounded, cancellable admission without queueing; the catalog admits at most 1,024 active shards. Degraded fallback never reads profile files: it uses the cached summary or an explicit uninspected state.
+
 ## 7. Acceptance Criteria
 
 - Only `env` reads environment variables, only `paths` constructs runtime paths, and only `net` creates network capabilities.

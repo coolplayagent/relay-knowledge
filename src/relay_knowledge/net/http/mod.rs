@@ -143,6 +143,8 @@ pub struct HttpProxyConfig {
     pub proxy: Option<String>,
     pub no_proxy_rules: Vec<String>,
     pub ssl_verify: bool,
+    /// Credential-free warning when an invalid environment proxy was ignored.
+    pub warning: Option<&'static str>,
 }
 
 impl HttpProxyConfig {
@@ -152,9 +154,7 @@ impl HttpProxyConfig {
         no_proxy_rules: Vec<String>,
         ssl_verify: bool,
     ) -> Result<Self, HttpConfigError> {
-        if let Some(proxy_url) = proxy.as_deref() {
-            validate_proxy_url(proxy_url)?;
-        }
+        let proxy = proxy.as_deref().map(normalize_proxy_url).transpose()?;
 
         for rule in &no_proxy_rules {
             if rule.trim().is_empty() {
@@ -166,16 +166,28 @@ impl HttpProxyConfig {
             proxy,
             no_proxy_rules,
             ssl_verify,
+            warning: None,
         })
     }
 
     /// Applies proxy, no-proxy, and TLS verification environment overrides.
     pub fn from_overrides(overrides: &NetworkEnvOverrides) -> Result<Self, HttpConfigError> {
-        Self::new(
-            overrides.proxy.clone(),
-            parse_no_proxy_rules(overrides.no_proxy.as_deref())?,
-            overrides.ssl_verify.unwrap_or(DEFAULT_SSL_VERIFY),
-        )
+        let no_proxy_rules = parse_no_proxy_rules(overrides.no_proxy.as_deref())?;
+        let ssl_verify = overrides.ssl_verify.unwrap_or(DEFAULT_SSL_VERIFY);
+        match Self::new(overrides.proxy.clone(), no_proxy_rules.clone(), ssl_verify) {
+            Ok(config) => Ok(config),
+            Err(HttpConfigError::InvalidProxyUrl) => {
+                let warning = "invalid_proxy: ignored invalid HTTP_PROXY/HTTPS_PROXY/ALL_PROXY; using direct connections; configure an HTTP(S) URL or host:port";
+                tracing::warn!(code = "invalid_proxy", "{warning}");
+                Ok(Self {
+                    proxy: None,
+                    no_proxy_rules,
+                    ssl_verify,
+                    warning: Some(warning),
+                })
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Returns whether outbound HTTP should use a proxy.
@@ -270,7 +282,7 @@ impl fmt::Display for HttpConfigError {
             ),
             Self::InvalidProxyUrl => write!(
                 formatter,
-                "proxy must use http:// or https:// and include a host"
+                "proxy must be an HTTP(S) URL or host:port with a valid host and port"
             ),
             Self::EmptyNoProxyRule => write!(formatter, "no-proxy entries must not be empty"),
         }
@@ -576,32 +588,38 @@ impl AsyncWrite for QosTcpStream {
     }
 }
 
-fn validate_proxy_url(value: &str) -> Result<(), HttpConfigError> {
-    let Some((scheme, remainder)) = value.split_once("://") else {
-        return Err(HttpConfigError::InvalidProxyUrl);
-    };
-
-    if !matches!(scheme, "http" | "https") {
+fn normalize_proxy_url(value: &str) -> Result<String, HttpConfigError> {
+    let value = value.trim();
+    if value.is_empty() || value.contains(char::is_whitespace) || value.contains('\\') {
         return Err(HttpConfigError::InvalidProxyUrl);
     }
-
-    let authority = remainder.split('/').next().unwrap_or_default();
-    if authority.is_empty() || authority.starts_with('@') {
-        return Err(HttpConfigError::InvalidProxyUrl);
-    }
-    let host_port = authority
-        .rsplit_once('@')
-        .map_or(authority, |(_, host)| host);
-    let host = if let Some(remainder) = host_port.strip_prefix('[') {
-        remainder.split_once(']').map_or("", |(host, _)| host)
+    let candidate = if value.contains("://") {
+        value.to_owned()
     } else {
-        host_port.split(':').next().unwrap_or_default()
+        // Only authority-shaped host:port input gets the Windows proxy shorthand.
+        let port = value.rsplit_once(':').map(|(_, port)| port);
+        if !port.is_some_and(|port| port.parse::<u16>().is_ok_and(|port| port > 0)) {
+            return Err(HttpConfigError::InvalidProxyUrl);
+        }
+        format!("http://{value}")
     };
-    if host.is_empty() {
+    let (_, authority) = candidate
+        .split_once("://")
+        .ok_or(HttpConfigError::InvalidProxyUrl)?;
+    if authority.is_empty() || authority.starts_with(['/', '@']) {
         return Err(HttpConfigError::InvalidProxyUrl);
     }
-
-    Ok(())
+    let url = url::Url::parse(&candidate).map_err(|_| HttpConfigError::InvalidProxyUrl)?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || url.port() == Some(0)
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(HttpConfigError::InvalidProxyUrl);
+    }
+    Ok(candidate)
 }
 
 fn parse_no_proxy_rules(value: Option<&str>) -> Result<Vec<String>, HttpConfigError> {

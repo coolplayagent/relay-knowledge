@@ -91,9 +91,11 @@ curl http://localhost:8791/api/service/status
 
 核心健康检查 API（参见 `src/relay_knowledge/application/service/health/mod.rs`）：
 
-- 底层存储健康快照必须在 **500ms 内**完成（`HEALTH_STORAGE_BUDGET`）
+- 底层存储健康快照默认预算为 **500ms**；`RELAY_KNOWLEDGE_HEALTH_STORAGE_BUDGET_MS` 可配置 1–30000ms。预算包含成功快照后的 profile 读取和响应组装，并在 network runtime 历次已发布 HTTP request timeout 的最小值之前预留 `min(100ms, request_timeout / 2)`，`runtime.health_storage_budget_ms` 暴露生效值；热刷新不能放宽旧监听器的时限，需重启托管服务。分片维护时间取最旧记录，任一缺失或读取失败均保留未知状态；Web Runtime 面板显示警告与维护建议。profile worker 单槽且无排队，超时不释放仍在读取的槽位；重复探测使用带 pending/stale 说明的缓存或未检查状态，文件恢复后自动释放，持续挂起需排查文件系统并重启托管服务。
 - 超时则返回缓存的健康状态（`degraded_cached_health`），标记 `healthy: false`
-- 存储 busy 时同样返回降级缓存结果
+- 存储 busy 时同样返回降级缓存结果。降级路径不读取模型配置文件：已缓存时复用其 model profile summary，否则明确报告未检查。分片目录、control/shard totals 与 SQLite 诊断读取均采用可取消且不排队的读准入；health 不打开冷分片。
+- `storage_recommendations` 对大 WAL、过期或失败维护给出只读建议；只有在确认压力后才安排 checkpoint，不由 health 自动执行。
+- `runtime.http_proxy_warning` 表示代理配置被忽略后使用直连，区别于 `storage_busy`/`storage_cold`；setup doctor 的 warning 不使 `configuration_ready` 变为 false。
 - `healthy: true` 的条件：无 `degraded_reason` 且所有已启用索引的版本不低于当前 graph_version
 
 ```bash
@@ -267,7 +269,7 @@ histogram_quantile(0.99, rate(relay_agent_protocol_request_duration_ms_bucket[5m
 curl -fsS http://127.0.0.1:8791/mcp/metrics
 ```
 
-直接快照包含图版本、索引刷新队列/死信、QoS 在途/排队数与累计计数、MCP 冷启动采样以及按索引类型标注的 stale 状态。实际指标名以响应中的 `relay_knowledge_*` 为准。
+共享请求 deadline 下，健康存储预算会预留响应组装时间；慢存储通过 `relay://service/health` 返回 `storage_busy` JSON，`/mcp/metrics` 仍可返回有界降级快照。独立的协议 deadline 更短时，资源读取和 metrics 仍执行超时及 QoS 释放。回归测试同时保护这两条路径。直接快照包含图版本、索引刷新队列/死信、QoS 在途/排队数与累计计数、MCP 冷启动采样以及按索引类型标注的 stale 状态。实际指标名以响应中的 `relay_knowledge_*` 为准。
 
 `/mcp/metrics` 是运行时快照，不代替 OTLP 的分布式 trace 和带标签协议指标。需要将 OTLP metrics 暴露给 Prometheus 时，可在 Collector 中配置 exporter：
 

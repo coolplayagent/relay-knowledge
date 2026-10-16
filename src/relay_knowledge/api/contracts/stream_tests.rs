@@ -27,6 +27,8 @@ fn project_status_event_only_attaches_payload_to_item() {
             http_graceful_shutdown_timeout_ms: 10000,
             http_max_request_body_bytes: 1024,
             http_proxy_configured: false,
+            http_proxy_warning: None,
+            health_storage_budget_ms: 500,
             http_no_proxy_rules: 0,
             http_ssl_verify: true,
             qos_max_connections: 1,

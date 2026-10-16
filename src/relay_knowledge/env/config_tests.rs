@@ -329,3 +329,28 @@ fn empty_sqlite_data_directory_reports_environment_error() {
         assert_eq!(error.kind, EnvErrorKind::EmptyValue);
     }
 }
+
+#[test]
+fn invalid_proxy_environment_values_reach_the_nonfatal_http_policy() {
+    for platform in [PlatformKind::Unix, PlatformKind::Windows] {
+        for value in ["", " ", "http://", "proxy.example:8080"] {
+            let config = EnvironmentConfig::from_pairs(platform, [(HTTPS_PROXY, value)]).unwrap();
+            assert!(config.network.proxy.is_some());
+            let remote =
+                RemoteCliEnvironmentConfig::from_pairs(platform, [(HTTPS_PROXY, value)]).unwrap();
+            assert_eq!(config.network, remote.network);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_proxy_environment_is_preserved_as_invalid_optional_input() {
+    use std::os::unix::ffi::OsStringExt;
+    let config = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [(OsString::from(HTTPS_PROXY), OsString::from_vec(vec![0xff]))],
+    )
+    .unwrap();
+    assert_eq!(config.network.proxy.as_deref(), Some(""));
+}

@@ -2,7 +2,7 @@ mod implementations;
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, TryLockError},
+    sync::{Arc, Mutex},
     time::Instant,
 };
 
@@ -205,37 +205,27 @@ impl SqliteGraphStore {
         })
     }
 
-    pub(super) fn try_run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
+    pub(in crate::storage) fn try_run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
     {
-        if let Some(read_pool) = &self.read_pool {
-            let connections = read_pool.connections();
-            return Box::pin(async move {
-                tokio::task::spawn_blocking(move || {
-                    let mut guard = try_lock_any_read_connection(&connections)?;
-
-                    operation(&mut guard)
-                })
-                .await?
-            });
-        }
-
-        let connection = Arc::clone(&self.connection);
+        let connections = self.read_pool.as_ref().map_or_else(
+            || vec![Arc::clone(&self.connection)],
+            |pool| pool.connections(),
+        );
         Box::pin(async move {
+            // Dropping a timed-out health future cancels queued and active SQLite work.
+            let (request_alive, _receiver) = tokio::sync::oneshot::channel::<()>();
             tokio::task::spawn_blocking(move || {
-                let mut guard = match connection.try_lock() {
-                    Ok(guard) => guard,
-                    Err(TryLockError::Poisoned(_)) => return Err(StorageError::LockPoisoned),
-                    Err(TryLockError::WouldBlock) => {
-                        return Err(StorageError::Busy(
-                            "sqlite write connection is currently occupied".to_owned(),
-                        ));
-                    }
-                };
-
-                operation(&mut guard)
+                if request_alive.is_closed() {
+                    return Err(StorageError::Busy("health read cancelled".to_owned()));
+                }
+                let mut guard = try_lock_any_read_connection(&connections)?;
+                guard.progress_handler(1000, Some(move || request_alive.is_closed()));
+                let result = operation(&mut guard);
+                guard.progress_handler(0, None::<fn() -> bool>);
+                result
             })
             .await?
         })
@@ -254,6 +244,16 @@ impl SqliteGraphStore {
                 &repository_id,
                 source_scope.as_deref(),
             )
+        })
+    }
+
+    /// Reads health totals with nonblocking admission and request cancellation.
+    pub(in crate::storage) fn health_repository_totals(
+        &self,
+        excluded_repository_ids: Vec<String>,
+    ) -> StorageFuture<'_, crate::domain::CodeRepositoryTotals> {
+        self.try_run_read(move |connection| {
+            code::repository_totals_excluding(connection, &excluded_repository_ids)
         })
     }
 

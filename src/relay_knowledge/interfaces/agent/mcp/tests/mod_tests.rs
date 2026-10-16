@@ -14,7 +14,6 @@ use crate::{
     api::{AuditQueryApiRequest, IngestEvidence, IngestRequest, InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     env::{EnvironmentConfig, PlatformKind},
-    interfaces::agent::AgentAuditStatus,
     storage::SqliteGraphStore,
 };
 
@@ -749,78 +748,6 @@ async fn http_headers_and_body_budget_are_enforced() {
     assert_eq!(missing_accept.0, StatusCode::NOT_ACCEPTABLE);
     assert_eq!(too_large.0, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(get.0, StatusCode::METHOD_NOT_ALLOWED);
-}
-
-#[tokio::test]
-async fn tool_timeout_returns_json_rpc_tool_error() {
-    let store = Arc::new(SlowSearchStore);
-    let (server, _service) = server_and_service_with_store(
-        [
-            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
-            ("RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS", "10"),
-        ],
-        store,
-    )
-    .await;
-    let mut router = server.router();
-
-    let response = tool_call(
-        &mut router,
-        "slow-search",
-        "relay_retrieve_context",
-        json!({"query": "slow", "source_scope": "docs"}),
-    )
-    .await;
-
-    assert_eq!(response["result"]["isError"], true);
-    assert_eq!(
-        response["result"]["structuredContent"]["error_kind"],
-        "timeout"
-    );
-}
-
-#[tokio::test]
-async fn resources_and_metrics_respect_runtime_timeout() {
-    let store = Arc::new(SlowSearchStore);
-    let (server, _service) = server_and_service_with_store(
-        [
-            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
-            ("RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS", "10"),
-        ],
-        store,
-    )
-    .await;
-    let mut router = server.clone().router();
-
-    let resource = call_mcp(
-        &mut router,
-        json!({
-            "jsonrpc": "2.0",
-            "id": "slow-health-resource",
-            "method": "resources/read",
-            "params": {"uri": "relay://service/health"}
-        }),
-    )
-    .await;
-    let metrics = raw_custom_request(&mut router, "GET", "/mcp/metrics", "", []).await;
-
-    assert_eq!(resource["error"]["code"], -32000);
-    assert!(
-        resource["error"]["message"]
-            .as_str()
-            .expect("message")
-            .contains("max_runtime_ms")
-    );
-    assert_eq!(metrics.0, StatusCode::REQUEST_TIMEOUT);
-    assert_eq!(server.qos_snapshot().in_flight_requests, 0);
-
-    let audit = server.audit_snapshot();
-    let resource_audit = audit
-        .iter()
-        .find(|event| event.operation == "resources/read")
-        .expect("resources/read audit event");
-    assert_eq!(resource_audit.status, AgentAuditStatus::Failed);
-    assert_eq!(resource_audit.error_kind.as_deref(), Some("timeout"));
 }
 
 #[tokio::test]

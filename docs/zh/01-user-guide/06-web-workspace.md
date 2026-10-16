@@ -53,6 +53,8 @@ Graph 页面提供三个只读画布:
 
 Software 页面先读取有界的已索引仓库列表，再针对选中仓库和其固定 commit 并行请求 `statements` 与 `conflicts`。关系画布以稳定 `entity_key` 合并同一实体，点击节点或 statement 可查看 occurrence、source scope、evidence、assertion、resolution、confidence 和 extractor；下方表格保留 conflicting、superseded、rejected、unresolved、ambiguous、external statement 与 shape diagnostics。页面同时展示 ontology/projection schema 版本、freshness、provenance completeness、source coverage 和 conflict count，不在浏览器中扫描源码或推断缺失事实。单次每个切片的 limit 为 1-500。
 
+Runtime 诊断面板显示实际健康预算、脱敏代理警告、`storage_busy` 等降级原因及只读存储维护建议。分片维护时间取最旧记录，缺失记录会提示检查维护历史；面板不会自动执行 checkpoint。
+
 ## 6.4 操作执行
 
 Web Operations 面板覆盖这些 typed command/request preview 和同源执行:

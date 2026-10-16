@@ -284,3 +284,51 @@ fn unique_database_path() -> std::path::PathBuf {
             std::process::id()
         ))
 }
+
+#[tokio::test]
+async fn cancelled_health_read_interrupts_sqlite_and_releases_the_connection() {
+    for file_backed in [false, true] {
+        let path = unique_database_path();
+        let store = if file_backed {
+            SqliteGraphStore::open(&path).unwrap()
+        } else {
+            SqliteGraphStore::open_in_memory().unwrap()
+        };
+        let reader = store.clone();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (finished, completion) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            reader.try_run_read(move |connection| {
+                started.send(()).unwrap();
+                let result = connection.query_row(
+                    "WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n",
+                    [], |row| row.get::<_, i64>(0),
+                );
+                let interrupted = matches!(result, Err(rusqlite::Error::SqliteFailure(error, _)) if error.code == rusqlite::ErrorCode::OperationInterrupted);
+                let _ = finished.send(interrupted);
+                Ok(())
+            }).await
+        });
+        tokio::time::timeout(Duration::from_secs(5), ready)
+            .await
+            .unwrap()
+            .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), completion)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        // A subsequent query must not inherit the cancelled progress callback.
+        let sum = store.run_read(|connection| {
+            Ok(connection.query_row("WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<10000) SELECT sum(x) FROM n", [], |row| row.get::<_, i64>(0))?)
+        }).await.unwrap();
+        assert_eq!(sum, 50_005_000);
+        drop(store);
+        if file_backed {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
